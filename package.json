@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && env -u ELECTRON_RUN_AS_NODE ARGUS_LAUNCHER_DEV=1 electron .\"",
     "build": "vite build",
-    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "start": "env -u ELECTRON_RUN_AS_NODE node scripts/start-macos-app.cjs",
+    "start:electron": "env -u ELECTRON_RUN_AS_NODE electron .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
