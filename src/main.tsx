@@ -23,6 +23,8 @@ const defaultState: CloudState = {
   shared_bookmarks: [],
 };
 
+let sharedBookmarksColumnAvailable = true;
+
 function initials(value: string) {
   return value
       .split(/\s+/)
@@ -114,6 +116,12 @@ function browserStartUrl(profile: ArgusProfile, bookmarks: SharedBookmark[]) {
   return startUrl;
 }
 
+function isMissingColumnError(error: {message?: string; code?: string} | null) {
+  return Boolean(error?.message?.includes('shared_bookmarks') ||
+      error?.code === '42703' ||
+      error?.code === 'PGRST204');
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
@@ -147,11 +155,21 @@ function App() {
     if (!userId) {
       return;
     }
-    const {data, error} = await supabase
+    let {data, error}: {data: any; error: any} = await supabase
         .from('argus_cloud_state')
         .select('profiles,proxies,shared_extensions,shared_bookmarks')
         .eq('user_id', userId)
         .maybeSingle();
+    if (isMissingColumnError(error)) {
+      sharedBookmarksColumnAvailable = false;
+      const fallback = await supabase
+          .from('argus_cloud_state')
+          .select('profiles,proxies,shared_extensions')
+          .eq('user_id', userId)
+          .maybeSingle();
+      data = fallback.data;
+      error = fallback.error;
+    }
     if (error) {
       setMessage(error.message);
       return;
@@ -181,16 +199,27 @@ function App() {
     if (!userId) {
       return;
     }
-    const {error} = await supabase
+    const payload: Record<string, unknown> = {
+      user_id: userId,
+      profiles: nextState.profiles,
+      proxies: nextState.proxies,
+      shared_extensions: nextState.shared_extensions,
+      updated_at: new Date().toISOString(),
+    };
+    if (sharedBookmarksColumnAvailable) {
+      payload.shared_bookmarks = nextState.shared_bookmarks;
+    }
+    let {error} = await supabase
         .from('argus_cloud_state')
-        .upsert({
-          user_id: userId,
-          profiles: nextState.profiles,
-          proxies: nextState.proxies,
-          shared_extensions: nextState.shared_extensions,
-          shared_bookmarks: nextState.shared_bookmarks,
-          updated_at: new Date().toISOString(),
-        }, {onConflict: 'user_id'});
+        .upsert(payload, {onConflict: 'user_id'});
+    if (isMissingColumnError(error)) {
+      sharedBookmarksColumnAvailable = false;
+      delete payload.shared_bookmarks;
+      const fallback = await supabase
+          .from('argus_cloud_state')
+          .upsert(payload, {onConflict: 'user_id'});
+      error = fallback.error;
+    }
     if (error) {
       setMessage(error.message);
     }
