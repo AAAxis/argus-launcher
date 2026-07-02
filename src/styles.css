@@ -591,10 +591,10 @@ textarea {
   display: grid;
   gap: 18px;
   max-height: calc(100vh - 56px);
-  max-width: 860px;
+  max-width: 980px;
   overflow: auto;
   padding: 22px;
-  width: min(860px, calc(100vw - 56px));
+  width: min(980px, calc(100vw - 56px));
 }
 
 .profile-modal header,
@@ -630,6 +630,10 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.form-section.wide {
+  grid-column: 1 / -1;
+}
+
 .field span {
   color: #6e6a63;
   font-size: 12px;
@@ -653,6 +657,39 @@ textarea {
   margin: 0;
   min-height: 140px;
   padding: 12px;
+}
+
+.field.compact input {
+  max-width: 160px;
+}
+
+.proxy-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.form-section {
+  background: #fff;
+  border: 1px solid #ded8cc;
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.form-section h3 {
+  font-size: 16px;
+  margin: 0 0 4px;
+}
+
+.form-section p {
+  color: #6e6a63;
+  margin: 0;
+}
+
+.form-section > div:first-child {
+  grid-column: 1 / -1;
 }
 
 .color-row {

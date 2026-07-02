@@ -27,9 +27,24 @@ type ProfileDraft = {
   color: string;
   folder_id: string;
   proxy_id: string;
+  proxy_search: string;
   tags: string;
   start_url: string;
   command_line_switches: string;
+  fingerprint_os: string;
+  fingerprint_browser_version: string;
+  fingerprint_user_agent: string;
+  fingerprint_language: string;
+  fingerprint_timezone: string;
+  fingerprint_geolocation: string;
+  fingerprint_webrtc: string;
+  fingerprint_canvas: string;
+  fingerprint_webgl: string;
+  fingerprint_webgl_vendor: string;
+  fingerprint_webgl_renderer: string;
+  fingerprint_screen: string;
+  fingerprint_cpu_cores: string;
+  fingerprint_memory_gb: string;
 };
 
 type ProxyDraft = {
@@ -131,6 +146,13 @@ const defaultState: CloudState = {
 
 const profileStatuses = ['Ready', 'Active', 'Warmup', 'Ban', 'Review'];
 const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
+const osPresets = ['macOS', 'Windows', 'Linux', 'Android'];
+const browserVersionPresets = ['Auto', 'Chrome 126', 'Chrome 125', 'Chrome 124'];
+const languagePresets = ['en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;q=0.8'];
+const timezonePresets = ['Auto from proxy', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Asia/Jerusalem'];
+const webRtcModes = ['Proxy only', 'Disabled', 'Real', 'Custom'];
+const noiseModes = ['Real', 'Noise', 'Block'];
+const screenPresets = ['Auto', '1920x1080', '1440x900', '1366x768', '1536x864'];
 
 let sharedBookmarksColumnAvailable = true;
 
@@ -238,13 +260,29 @@ function newProfileDraft(): ProfileDraft {
     color: profileColors[1],
     folder_id: '',
     proxy_id: '',
+    proxy_search: '',
     tags: '',
     start_url: '',
     command_line_switches: '',
+    fingerprint_os: 'macOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_user_agent: '',
+    fingerprint_language: languagePresets[0],
+    fingerprint_timezone: 'Auto from proxy',
+    fingerprint_geolocation: 'Ask',
+    fingerprint_webrtc: 'Proxy only',
+    fingerprint_canvas: 'Noise',
+    fingerprint_webgl: 'Noise',
+    fingerprint_webgl_vendor: '',
+    fingerprint_webgl_renderer: '',
+    fingerprint_screen: 'Auto',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
   };
 }
 
 function draftFromProfile(profile: ArgusProfile): ProfileDraft {
+  const fingerprint = profile.fingerprint || {};
   return {
     id: profile.id,
     name: profile.name,
@@ -252,9 +290,24 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     color: profile.color || profileColors[1],
     folder_id: profile.folder_id || '',
     proxy_id: profile.proxy_id || '',
+    proxy_search: '',
     tags: profile.tags?.join(', ') || '',
     start_url: profile.start_url || '',
     command_line_switches: profile.command_line_switches || '',
+    fingerprint_os: fingerprint.os || 'macOS',
+    fingerprint_browser_version: fingerprint.browser_version || 'Auto',
+    fingerprint_user_agent: fingerprint.user_agent || '',
+    fingerprint_language: fingerprint.language || languagePresets[0],
+    fingerprint_timezone: fingerprint.timezone || 'Auto from proxy',
+    fingerprint_geolocation: fingerprint.geolocation || 'Ask',
+    fingerprint_webrtc: fingerprint.webrtc || 'Proxy only',
+    fingerprint_canvas: fingerprint.canvas || 'Noise',
+    fingerprint_webgl: fingerprint.webgl || 'Noise',
+    fingerprint_webgl_vendor: fingerprint.webgl_vendor || '',
+    fingerprint_webgl_renderer: fingerprint.webgl_renderer || '',
+    fingerprint_screen: fingerprint.screen || 'Auto',
+    fingerprint_cpu_cores: fingerprint.cpu_cores ? String(fingerprint.cpu_cores) : '8',
+    fingerprint_memory_gb: fingerprint.memory_gb ? String(fingerprint.memory_gb) : '8',
   };
 }
 
@@ -262,6 +315,11 @@ function tagsFromDraft(value: string) {
   return value.split(',')
       .map((tag) => tag.trim())
       .filter(Boolean);
+}
+
+function numberOrNull(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function newProxyDraft(): ProxyDraft {
@@ -567,6 +625,22 @@ function App() {
       tags: tagsFromDraft(profileDraft.tags),
       start_url: profileDraft.start_url.trim() || null,
       command_line_switches: profileDraft.command_line_switches.trim() || null,
+      fingerprint: {
+        os: profileDraft.fingerprint_os,
+        browser_version: profileDraft.fingerprint_browser_version,
+        user_agent: profileDraft.fingerprint_user_agent.trim(),
+        language: profileDraft.fingerprint_language,
+        timezone: profileDraft.fingerprint_timezone,
+        geolocation: profileDraft.fingerprint_geolocation,
+        webrtc: profileDraft.fingerprint_webrtc,
+        canvas: profileDraft.fingerprint_canvas,
+        webgl: profileDraft.fingerprint_webgl,
+        webgl_vendor: profileDraft.fingerprint_webgl_vendor.trim(),
+        webgl_renderer: profileDraft.fingerprint_webgl_renderer.trim(),
+        screen: profileDraft.fingerprint_screen,
+        cpu_cores: numberOrNull(profileDraft.fingerprint_cpu_cores),
+        memory_gb: numberOrNull(profileDraft.fingerprint_memory_gb),
+      },
       created_at: profileDraft.id ?
         cloudState.profiles.find((item) => item.id === profileDraft.id)?.created_at :
         new Date().toISOString(),
@@ -598,6 +672,19 @@ function App() {
     setSelectedId(profiles[0]?.id || null);
     setProfileDraft(null);
     setMessage(`${profile.name} deleted`);
+  }
+
+  function filteredProfileProxies() {
+    if (!profileDraft?.proxy_search.trim()) {
+      return cloudState.proxies;
+    }
+    const query = profileDraft.proxy_search.trim().toLowerCase();
+    return cloudState.proxies.filter((proxy) =>
+      [proxy.name, proxy.host, proxy.type, String(proxy.port), proxy.username]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(query));
   }
 
   function openNewProxy() {
@@ -1048,15 +1135,24 @@ function App() {
               </label>
               <label className="field">
                 <span>Proxy</span>
-                <select
-                  value={profileDraft.proxy_id}
-                  onChange={(event) => setProfileDraft({...profileDraft, proxy_id: event.target.value})}
-                >
-                  <option value="">Direct connection</option>
-                  {cloudState.proxies.map((proxy) => (
-                    <option value={proxy.id} key={proxy.id}>{proxy.name || `${proxy.host}:${proxy.port}`}</option>
-                  ))}
-                </select>
+                <div className="proxy-picker">
+                  <input
+                    placeholder="Search proxy by name, host, port"
+                    value={profileDraft.proxy_search}
+                    onChange={(event) => setProfileDraft({...profileDraft, proxy_search: event.target.value})}
+                  />
+                  <select
+                    value={profileDraft.proxy_id}
+                    onChange={(event) => setProfileDraft({...profileDraft, proxy_id: event.target.value})}
+                  >
+                    <option value="">Direct connection</option>
+                    {filteredProfileProxies().map((proxy) => (
+                      <option value={proxy.id} key={proxy.id}>
+                        {proxy.name || `${proxy.host}:${proxy.port}`} · {proxy.type || 'http'} · {proxy.host}:{proxy.port}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </label>
               <label className="field">
                 <span>Folder</span>
@@ -1101,6 +1197,133 @@ function App() {
                   onChange={(event) => setProfileDraft({...profileDraft, start_url: event.target.value})}
                 />
               </label>
+              <section className="form-section wide">
+                <div>
+                  <h3>Fingerprint</h3>
+                  <p>Profile-level browser identity settings stored with cloud data.</p>
+                </div>
+                <label className="field">
+                  <span>Operating system</span>
+                  <select
+                    value={profileDraft.fingerprint_os}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_os: event.target.value})}
+                  >
+                    {osPresets.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Browser version</span>
+                  <select
+                    value={profileDraft.fingerprint_browser_version}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_browser_version: event.target.value})}
+                  >
+                    {browserVersionPresets.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field wide">
+                  <span>User agent</span>
+                  <input
+                    placeholder="Auto when empty"
+                    value={profileDraft.fingerprint_user_agent}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_user_agent: event.target.value})}
+                  />
+                </label>
+                <label className="field">
+                  <span>Language</span>
+                  <input
+                    list="language-presets"
+                    value={profileDraft.fingerprint_language}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_language: event.target.value})}
+                  />
+                </label>
+                <label className="field">
+                  <span>Timezone</span>
+                  <input
+                    list="timezone-presets"
+                    value={profileDraft.fingerprint_timezone}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_timezone: event.target.value})}
+                  />
+                </label>
+                <label className="field">
+                  <span>Geolocation</span>
+                  <select
+                    value={profileDraft.fingerprint_geolocation}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_geolocation: event.target.value})}
+                  >
+                    <option>Ask</option>
+                    <option>Block</option>
+                    <option>Auto from proxy</option>
+                    <option>Custom</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>WebRTC</span>
+                  <select
+                    value={profileDraft.fingerprint_webrtc}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webrtc: event.target.value})}
+                  >
+                    {webRtcModes.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Canvas</span>
+                  <select
+                    value={profileDraft.fingerprint_canvas}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_canvas: event.target.value})}
+                  >
+                    {noiseModes.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>WebGL</span>
+                  <select
+                    value={profileDraft.fingerprint_webgl}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webgl: event.target.value})}
+                  >
+                    {noiseModes.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>WebGL vendor</span>
+                  <input
+                    placeholder="Auto"
+                    value={profileDraft.fingerprint_webgl_vendor}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webgl_vendor: event.target.value})}
+                  />
+                </label>
+                <label className="field">
+                  <span>WebGL renderer</span>
+                  <input
+                    placeholder="Auto"
+                    value={profileDraft.fingerprint_webgl_renderer}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webgl_renderer: event.target.value})}
+                  />
+                </label>
+                <label className="field">
+                  <span>Screen</span>
+                  <input
+                    list="screen-presets"
+                    value={profileDraft.fingerprint_screen}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_screen: event.target.value})}
+                  />
+                </label>
+                <label className="field compact">
+                  <span>CPU cores</span>
+                  <input
+                    inputMode="numeric"
+                    value={profileDraft.fingerprint_cpu_cores}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_cpu_cores: event.target.value.replace(/[^\d]/g, '')})}
+                  />
+                </label>
+                <label className="field compact">
+                  <span>Memory GB</span>
+                  <input
+                    inputMode="numeric"
+                    value={profileDraft.fingerprint_memory_gb}
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_memory_gb: event.target.value.replace(/[^\d]/g, '')})}
+                  />
+                </label>
+              </section>
               <label className="field wide">
                 <span>Command line switches</span>
                 <textarea
@@ -1113,6 +1336,15 @@ function App() {
 
             <datalist id="profile-statuses">
               {profileStatuses.map((status) => <option value={status} key={status} />)}
+            </datalist>
+            <datalist id="language-presets">
+              {languagePresets.map((item) => <option value={item} key={item} />)}
+            </datalist>
+            <datalist id="timezone-presets">
+              {timezonePresets.map((item) => <option value={item} key={item} />)}
+            </datalist>
+            <datalist id="screen-presets">
+              {screenPresets.map((item) => <option value={item} key={item} />)}
             </datalist>
 
             <footer className="modal-actions">

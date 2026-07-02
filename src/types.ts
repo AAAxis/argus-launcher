@@ -8,6 +8,22 @@ export type ArgusProfile = {
   proxy_id?: string | null;
   start_url?: string | null;
   command_line_switches?: string | null;
+  fingerprint?: {
+    os?: string;
+    browser_version?: string;
+    user_agent?: string;
+    language?: string;
+    timezone?: string;
+    geolocation?: string;
+    webrtc?: string;
+    canvas?: string;
+    webgl?: string;
+    webgl_vendor?: string;
+    webgl_renderer?: string;
+    screen?: string;
+    cpu_cores?: number | null;
+    memory_gb?: number | null;
+  };
   created_at?: string;
 };
 
