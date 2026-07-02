@@ -8,12 +8,89 @@ import './styles.css';
 
 type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api';
 
+type ApiEndpoint = {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  path: string;
+  label: string;
+  body?: string;
+};
+
+type ApiGroup = {
+  title: string;
+  endpoints: ApiEndpoint[];
+};
+
 const tabs: Array<{id: TabId; label: string}> = [
   {id: 'profiles', label: 'Profiles'},
   {id: 'proxies', label: 'Proxies'},
   {id: 'bookmarks', label: 'Bookmarks'},
   {id: 'extensions', label: 'Extensions'},
   {id: 'api', label: 'API'},
+];
+
+const API_BASE_URL = 'http://127.0.0.1:3001';
+const API_GROUPS: ApiGroup[] = [
+  {
+    title: 'Profiles',
+    endpoints: [
+      {method: 'GET', path: '/v1/profiles', label: 'List profiles'},
+      {
+        method: 'POST',
+        path: '/v1/profiles',
+        label: 'Create profile',
+        body: '{ "name": "Profile 1", "proxyId": "proxy_id" }',
+      },
+      {
+        method: 'PATCH',
+        path: '/v1/profiles/{id}',
+        label: 'Update status, tags, folder, or proxy',
+        body: '{ "status": "Ready", "tags": ["warmup"] }',
+      },
+      {method: 'DELETE', path: '/v1/profiles/{id}', label: 'Delete profile'},
+      {method: 'POST', path: '/v1/profiles/{id}/launch', label: 'Launch anonymous browser session'},
+      {method: 'POST', path: '/v1/profiles/{id}/close', label: 'Close browser session'},
+    ],
+  },
+  {
+    title: 'Proxies',
+    endpoints: [
+      {method: 'GET', path: '/v1/proxies', label: 'List proxies'},
+      {
+        method: 'POST',
+        path: '/v1/proxies',
+        label: 'Add proxy',
+        body: '{ "name": "US proxy", "type": "socks5", "host": "1.2.3.4", "port": 1080 }',
+      },
+      {method: 'POST', path: '/v1/proxies/{id}/check', label: 'Check egress IP'},
+      {method: 'DELETE', path: '/v1/proxies/{id}', label: 'Remove proxy'},
+    ],
+  },
+  {
+    title: 'Shared data',
+    endpoints: [
+      {method: 'GET', path: '/v1/shared/bookmarks', label: 'List shared bookmarks'},
+      {
+        method: 'POST',
+        path: '/v1/shared/bookmarks',
+        label: 'Create or update bookmark',
+        body: '{ "title": "Argys", "url": "https://www.browserargus.com/" }',
+      },
+      {method: 'DELETE', path: '/v1/shared/bookmarks', label: 'Remove bookmark by URL'},
+      {method: 'GET', path: '/v1/shared/extensions', label: 'List shared extensions'},
+      {
+        method: 'POST',
+        path: '/v1/shared/extensions',
+        label: 'Register unpacked extension path',
+        body: '{ "path": "/Users/name/extension" }',
+      },
+      {
+        method: 'DELETE',
+        path: '/v1/shared/extensions',
+        label: 'Remove extension by path',
+        body: '{ "path": "/Users/name/extension" }',
+      },
+    ],
+  },
 ];
 
 const defaultState: CloudState = {
@@ -130,6 +207,8 @@ function App() {
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
+  const [apiToken, setApiToken] = useState('argys_api_token');
+  const [copiedEndpoint, setCopiedEndpoint] = useState('');
 
   const selectedProfile = useMemo(
       () => cloudState.profiles.find((profile) => profile.id === selectedId) || null,
@@ -140,6 +219,7 @@ function App() {
     void supabase?.auth.getUser().then(({data}) => {
       if (data.user?.email) {
         setSignedInEmail(data.user.email);
+        setApiToken(tokenForEmail(data.user.email));
         void loadCloudState();
       }
     });
@@ -236,6 +316,7 @@ function App() {
       return;
     }
     setSignedInEmail(data.user.email || email);
+    setApiToken(tokenForEmail(data.user.email || email));
     setPassword('');
     await loadCloudState();
   }
@@ -243,8 +324,42 @@ function App() {
   async function signOut() {
     await supabase?.auth.signOut();
     setSignedInEmail('');
+    setApiToken('argys_api_token');
     setCloudState(defaultState);
     setSelectedId(null);
+  }
+
+  function tokenForEmail(value: string) {
+    let hash = 0x811c9dc5;
+    const normalized = value.trim().toLowerCase();
+    for (let i = 0; i < normalized.length; i++) {
+      hash ^= normalized.charCodeAt(i);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) +
+          (hash << 24);
+    }
+    return `argys_${normalized.replace(/[^a-z0-9]/g, '_')}_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
+  function authHeader() {
+    return `Authorization: Bearer ${apiToken || 'argys_api_token'}`;
+  }
+
+  function curlFor(endpoint: ApiEndpoint) {
+    const lines = [
+      `curl -X ${endpoint.method} "${API_BASE_URL}${endpoint.path}"`,
+      `  -H "${authHeader()}"`,
+      '  -H "Content-Type: application/json"',
+    ];
+    if (endpoint.body) {
+      lines.push(`  -d '${endpoint.body}'`);
+    }
+    return lines.join(' \\\n');
+  }
+
+  async function copyCurl(endpoint: ApiEndpoint) {
+    await navigator.clipboard.writeText(curlFor(endpoint));
+    setCopiedEndpoint(`${endpoint.method} ${endpoint.path}`);
+    window.setTimeout(() => setCopiedEndpoint(''), 1800);
   }
 
   function proxyFor(profile: ArgusProfile) {
@@ -430,13 +545,51 @@ function App() {
 
   function renderApiTab() {
     return (
-      <section className="panel api-panel">
-        <h2>Local API</h2>
-        <p>Argys Anty owns the cloud account and automation surface. Browser sessions stay anonymous.</p>
-        <code>GET /v1/profiles</code>
-        <code>POST /v1/profiles/{'{id}'}/launch</code>
-        <code>GET /v1/shared/bookmarks</code>
-        <code>GET /v1/shared/extensions</code>
+      <section className="api-panel">
+        <section className="api-summary">
+          <div className="summary-item">
+            <span>Base URL</span>
+            <code>{API_BASE_URL}</code>
+          </div>
+          <label className="summary-item token-field">
+            <span>Bearer token</span>
+            <input value={apiToken} spellCheck={false} onChange={(event) => setApiToken(event.target.value)} />
+          </label>
+          <div className="summary-item">
+            <span>Account</span>
+            <code>{signedInEmail}</code>
+          </div>
+          <div className="summary-item wide">
+            <span>Header</span>
+            <code>{authHeader()}</code>
+          </div>
+        </section>
+
+        <section className="api-note">
+          <Shield size={18} />
+          <span>Argys API tokens are generated per signed-in email for local automation and cloud-backed profile data. Browser sessions stay anonymous.</span>
+        </section>
+
+        <div className="api-groups">
+          {API_GROUPS.map((group) => (
+            <section className="api-group" key={group.title}>
+              <h2>{group.title}</h2>
+              {group.endpoints.map((endpoint) => (
+                <article className="endpoint" key={`${endpoint.method}-${endpoint.path}`}>
+                  <div className="endpoint-head">
+                    <span className={`method ${endpoint.method.toLowerCase()}`}>{endpoint.method}</span>
+                    <code className="path">{endpoint.path}</code>
+                    <span className="endpoint-label">{endpoint.label}</span>
+                    <button className="copy-button" onClick={() => copyCurl(endpoint)}>Copy curl</button>
+                  </div>
+                  {endpoint.body && <pre>{endpoint.body}</pre>}
+                </article>
+              ))}
+            </section>
+          ))}
+        </div>
+
+        {copiedEndpoint && <div className="toast">Copied {copiedEndpoint}</div>}
       </section>
     );
   }

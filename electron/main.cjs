@@ -1,9 +1,19 @@
-const {app, BrowserWindow, ipcMain} = require('electron');
+const {app, BrowserWindow, ipcMain, nativeImage} = require('electron');
 const {spawn} = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
 app.setName('Argys Anty');
+
+function appIconPath() {
+  const candidates = [
+    path.join(__dirname, '../assets/app.icns'),
+    '/Applications/Argys Browser.app/Contents/Resources/app.icns',
+    '/Applications/Argus.app/Contents/Resources/app.icns',
+    path.join(app.getPath('home'), 'argus-browser/out/Release-dmg/Argus.app/Contents/Resources/app.icns'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+}
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -40,12 +50,17 @@ function browserAppCandidates(preferredAppPath) {
 }
 
 function createWindow() {
+  const icon = appIconPath();
+  if (process.platform === 'darwin' && icon) {
+    app.dock?.setIcon(nativeImage.createFromPath(icon));
+  }
   const win = new BrowserWindow({
     title: 'Argys Anty',
     width: 1180,
     height: 760,
     minWidth: 980,
     minHeight: 620,
+    icon: icon || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
