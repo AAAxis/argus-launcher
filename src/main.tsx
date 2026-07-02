@@ -25,6 +25,14 @@ function profileDataDir(profileId: string) {
   return `${navigator.platform.includes('Mac') ? '/Users/dima/Library/Application Support/Argys Browser/Profiles' : 'ArgysProfiles'}/${profileId}`;
 }
 
+function browserStartUrl(profile: ArgusProfile) {
+  const startUrl = profile.start_url?.trim();
+  if (!startUrl || startUrl === 'about:blank' || startUrl.startsWith('chrome://argus')) {
+    return 'chrome://argus-newtab';
+  }
+  return startUrl;
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
@@ -143,7 +151,7 @@ function App() {
         proxy: proxyFor(profile),
         extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
         commandLineSwitches: profile.command_line_switches || '',
-        startUrl: profile.start_url || 'chrome://argus-newtab',
+        startUrl: browserStartUrl(profile),
       });
       setMessage(result.ok ?
         `Started browser pid ${result.pid} from ${result.appPath || 'browser app'}` :
