@@ -6,6 +6,16 @@ import {supabase} from './supabase';
 import type {ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
 
+type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api';
+
+const tabs: Array<{id: TabId; label: string}> = [
+  {id: 'profiles', label: 'Profiles'},
+  {id: 'proxies', label: 'Proxies'},
+  {id: 'bookmarks', label: 'Bookmarks'},
+  {id: 'extensions', label: 'Extensions'},
+  {id: 'api', label: 'API'},
+];
+
 const defaultState: CloudState = {
   profiles: [],
   proxies: [],
@@ -111,7 +121,7 @@ function App() {
   const [message, setMessage] = useState('');
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [browserPath, setBrowserPath] = useState('');
+  const [activeTab, setActiveTab] = useState<TabId>('profiles');
 
   const selectedProfile = useMemo(
       () => cloudState.profiles.find((profile) => profile.id === selectedId) || null,
@@ -119,7 +129,6 @@ function App() {
   );
 
   useEffect(() => {
-    void native?.getBrowserPath().then(setBrowserPath);
     void supabase?.auth.getUser().then(({data}) => {
       if (data.user?.email) {
         setSignedInEmail(data.user.email);
@@ -265,58 +274,9 @@ function App() {
     });
   }
 
-  if (!signedInEmail) {
+  function renderProfilesTab() {
     return (
-      <main className="login-shell">
-        <section className="login-panel">
-          <Shield size={34} />
-          <h1>Sign in to Argys Anty</h1>
-          <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
-          <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
-          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
-          <button onClick={signIn}>Sign in</button>
-          {message && <span className="message">{message}</span>}
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">Argys Anty</div>
-        <nav>
-          <button className="active">Profiles</button>
-          <button>Proxies</button>
-          <button>Bookmarks</button>
-          <button>Extensions</button>
-          <button>API</button>
-        </nav>
-        <div className="account">
-          <span>{initials(signedInEmail)}</span>
-          <strong>{signedInEmail}</strong>
-          <button onClick={signOut}>Sign out</button>
-        </div>
-      </aside>
-
-      <section className="content">
-        <header className="topbar">
-          <div>
-            <h1>All profiles</h1>
-            <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
-          </div>
-          <div className="actions">
-            <button className="ghost" onClick={loadCloudState}><RefreshCw size={18} /> Refresh</button>
-            <button><Plus size={18} /> Profile</button>
-          </div>
-        </header>
-
-        <div className="browser-path">
-          <label>Argys Browser app</label>
-          <input value={browserPath} onChange={(event) => setBrowserPath(event.target.value)} />
-          <button onClick={() => native?.setBrowserPath(browserPath)}>Save</button>
-        </div>
-
+      <>
         <section className="table-wrap">
           <table>
             <thead>
@@ -379,19 +339,146 @@ function App() {
             />
           </div>
           <div className="panel">
-            <div className="panel-title">
-              <h2>Shared extensions</h2>
-              <button onClick={addExtension}><Plus size={16} /> Add</button>
-            </div>
-            {cloudState.shared_extensions.map((extension) => (
-              <div className="extension-row" key={extension.path}>
-                <span>{extension.name || extension.path}</span>
-                <small>{extension.path}</small>
-                <button onClick={() => removeExtension(extension.path)}><Trash2 size={16} /></button>
-              </div>
-            ))}
+            <h2>Anonymous home</h2>
+            <p>Argys Browser launches with a launcher-provided home page. No sign-in route is opened in the browser process.</p>
           </div>
         </section>
+      </>
+    );
+  }
+
+  function renderProxiesTab() {
+    return (
+      <section className="card-grid">
+        {cloudState.proxies.map((proxy) => (
+          <article className="data-card" key={proxy.id}>
+            <div>
+              <h2>{proxy.name || proxy.host}</h2>
+              <p>{proxy.type || 'http'} · {proxy.host}:{proxy.port}</p>
+            </div>
+            <span>{proxy.username ? 'Auth' : 'Open'}</span>
+          </article>
+        ))}
+        {cloudState.proxies.length === 0 && <p className="empty-state">No proxies loaded.</p>}
+      </section>
+    );
+  }
+
+  function renderBookmarksTab() {
+    return (
+      <section className="card-grid">
+        {cloudState.shared_bookmarks.map((bookmark) => (
+          <a className="data-card link-card" href={normalizeBookmarkUrl(bookmark.url)} key={`${bookmark.title}-${bookmark.url}`}>
+            <div>
+              <h2>{bookmark.title || bookmark.url}</h2>
+              <p>{normalizeBookmarkUrl(bookmark.url)}</p>
+            </div>
+          </a>
+        ))}
+        {cloudState.shared_bookmarks.length === 0 && <p className="empty-state">No shared bookmarks loaded.</p>}
+      </section>
+    );
+  }
+
+  function renderExtensionsTab() {
+    return (
+      <section className="panel">
+        <div className="panel-title">
+          <h2>Shared extensions</h2>
+          <button onClick={addExtension}><Plus size={16} /> Add</button>
+        </div>
+        {cloudState.shared_extensions.map((extension) => (
+          <div className="extension-row" key={extension.path}>
+            <span>{extension.name || extension.path}</span>
+            <small>{extension.path}</small>
+            <button onClick={() => removeExtension(extension.path)}><Trash2 size={16} /></button>
+          </div>
+        ))}
+        {cloudState.shared_extensions.length === 0 && <p className="empty-state">No shared extensions loaded.</p>}
+      </section>
+    );
+  }
+
+  function renderApiTab() {
+    return (
+      <section className="panel api-panel">
+        <h2>Local API</h2>
+        <p>Argys Anty owns the cloud account and automation surface. Browser sessions stay anonymous.</p>
+        <code>GET /v1/profiles</code>
+        <code>POST /v1/profiles/{'{id}'}/launch</code>
+        <code>GET /v1/shared/bookmarks</code>
+        <code>GET /v1/shared/extensions</code>
+      </section>
+    );
+  }
+
+  function renderActiveTab() {
+    switch (activeTab) {
+      case 'proxies':
+        return renderProxiesTab();
+      case 'bookmarks':
+        return renderBookmarksTab();
+      case 'extensions':
+        return renderExtensionsTab();
+      case 'api':
+        return renderApiTab();
+      case 'profiles':
+      default:
+        return renderProfilesTab();
+    }
+  }
+
+  if (!signedInEmail) {
+    return (
+      <main className="login-shell">
+        <section className="login-panel">
+          <Shield size={34} />
+          <h1>Sign in to Argys Anty</h1>
+          <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
+          <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
+          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
+          <button onClick={signIn}>Sign in</button>
+          {message && <span className="message">{message}</span>}
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">Argys Anty</div>
+        <nav>
+          {tabs.map((tab) => (
+            <button
+              className={activeTab === tab.id ? 'active' : ''}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+        <div className="account">
+          <span>{initials(signedInEmail)}</span>
+          <strong>{signedInEmail}</strong>
+          <button onClick={signOut}>Sign out</button>
+        </div>
+      </aside>
+
+      <section className="content">
+        <header className="topbar">
+          <div>
+            <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
+            <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
+          </div>
+          <div className="actions">
+            <button className="ghost" onClick={loadCloudState}><RefreshCw size={18} /> Refresh</button>
+            <button><Plus size={18} /> Profile</button>
+          </div>
+        </header>
+
+        {renderActiveTab()}
 
         {message && <footer className="status">{message}</footer>}
       </section>

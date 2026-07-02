@@ -25,8 +25,6 @@ type ArgusNative = {
     launcherAppPath?: string;
     error?: string;
   }>;
-  getBrowserPath(): Promise<string>;
-  setBrowserPath(browserAppPath: string): Promise<string>;
 };
 
 declare global {

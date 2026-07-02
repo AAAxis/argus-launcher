@@ -55,7 +55,6 @@ button.ghost {
 }
 
 .login-panel input,
-.browser-path input,
 select,
 textarea {
   background: white;
@@ -147,13 +146,12 @@ nav button.active {
 .content {
   display: grid;
   gap: 20px;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   padding: 32px;
 }
 
 .topbar,
 .actions,
-.browser-path,
 .panel-title {
   align-items: center;
   display: flex;
@@ -162,22 +160,6 @@ nav button.active {
 
 .topbar {
   justify-content: space-between;
-}
-
-.browser-path {
-  background: white;
-  border: 1px solid #ded8cc;
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.browser-path label {
-  color: #6e6a63;
-  font-weight: 700;
-}
-
-.browser-path input {
-  flex: 1;
 }
 
 .table-wrap,
@@ -224,6 +206,70 @@ tr.selected {
   display: grid;
   gap: 20px;
   grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+}
+
+.card-grid {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.data-card {
+  align-items: center;
+  background: white;
+  border: 1px solid #ded8cc;
+  border-radius: 10px;
+  color: #1e1d1a;
+  display: flex;
+  justify-content: space-between;
+  min-height: 112px;
+  padding: 18px;
+  text-decoration: none;
+}
+
+.data-card h2 {
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.data-card p {
+  color: #6e6a63;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-card span {
+  background: #f0ede7;
+  border-radius: 999px;
+  color: #6e6a63;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.link-card:hover {
+  border-color: #171613;
+}
+
+.empty-state {
+  color: #6e6a63;
+  margin: 0;
+}
+
+.api-panel {
+  align-content: start;
+  display: grid;
+  gap: 12px;
+}
+
+.api-panel code {
+  background: #f0ede7;
+  border: 1px solid #ded8cc;
+  border-radius: 8px;
+  display: block;
+  padding: 12px;
 }
 
 .panel {
