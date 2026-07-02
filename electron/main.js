@@ -1,17 +1,33 @@
 import {app, BrowserWindow, ipcMain} from 'electron';
-import Store from 'electron-store';
 import {spawn} from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const store = new Store({
-  defaults: {
-    browserAppPath:
-      process.env.ARGUS_BROWSER_APP || '/Applications/Argus Browser.app',
-  },
-});
+function settingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function readSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeSettings(settings) {
+  fs.mkdirSync(path.dirname(settingsPath()), {recursive: true});
+  fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+}
+
+function browserAppPath() {
+  return readSettings().browserAppPath ||
+    process.env.ARGUS_BROWSER_APP ||
+    '/Applications/Argus Browser.app';
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -67,7 +83,7 @@ function proxyArgs(proxy) {
 }
 
 ipcMain.handle('argus:launch-profile', async (_event, payload) => {
-  const executable = appExecutable(store.get('browserAppPath'));
+  const executable = appExecutable(browserAppPath());
   const extensionPaths = payload.extensionPaths || [];
   const args = [
     '--argus-profile-launch',
@@ -89,11 +105,11 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
 });
 
 ipcMain.handle('argus:get-browser-path', async () => {
-  return store.get('browserAppPath');
+  return browserAppPath();
 });
 
 ipcMain.handle('argus:set-browser-path', async (_event, browserAppPath) => {
-  store.set('browserAppPath', browserAppPath);
+  writeSettings({...readSettings(), browserAppPath});
   return browserAppPath;
 });
 
