@@ -1,10 +1,7 @@
-import {app, BrowserWindow, ipcMain} from 'electron';
-import {spawn} from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import {fileURLToPath} from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const {app, BrowserWindow, ipcMain} = require('electron');
+const {spawn} = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -108,9 +105,9 @@ ipcMain.handle('argus:get-browser-path', async () => {
   return browserAppPath();
 });
 
-ipcMain.handle('argus:set-browser-path', async (_event, browserAppPath) => {
-  writeSettings({...readSettings(), browserAppPath});
-  return browserAppPath;
+ipcMain.handle('argus:set-browser-path', async (_event, nextBrowserAppPath) => {
+  writeSettings({...readSettings(), browserAppPath: nextBrowserAppPath});
+  return nextBrowserAppPath;
 });
 
 app.whenReady().then(createWindow);
