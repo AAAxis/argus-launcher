@@ -1,0 +1,279 @@
+:root {
+  color: #1e1d1a;
+  background: #fbfaf8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  align-items: center;
+  background: #171613;
+  border: 0;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+button.ghost {
+  background: white;
+  border: 1px solid #ded8cc;
+  color: #1e1d1a;
+}
+
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.login-panel {
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+  text-align: center;
+  width: min(420px, calc(100vw - 40px));
+}
+
+.login-panel input,
+.browser-path input,
+select,
+textarea {
+  background: white;
+  border: 1px solid #ded8cc;
+  border-radius: 8px;
+  color: #1e1d1a;
+  min-height: 42px;
+  padding: 0 14px;
+}
+
+.login-panel h1,
+.topbar h1 {
+  margin: 0;
+}
+
+.login-panel p,
+.topbar p,
+.panel p {
+  color: #6e6a63;
+  margin: 0;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #f0ede7;
+  border-right: 1px solid #ded8cc;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 18px;
+}
+
+.brand {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 28px;
+}
+
+nav {
+  display: grid;
+  gap: 8px;
+}
+
+nav button {
+  background: transparent;
+  color: #6e6a63;
+  justify-content: flex-start;
+}
+
+nav button.active {
+  background: #e6e1d8;
+  color: #1e1d1a;
+}
+
+.account {
+  border-top: 1px solid #ded8cc;
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+.account span,
+.avatar {
+  align-items: center;
+  border-radius: 999px;
+  color: white;
+  display: inline-flex;
+  font-weight: 800;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.account span {
+  background: #171613;
+}
+
+.account strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  display: grid;
+  gap: 20px;
+  grid-template-rows: auto auto auto 1fr auto;
+  padding: 32px;
+}
+
+.topbar,
+.actions,
+.browser-path,
+.panel-title {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.topbar {
+  justify-content: space-between;
+}
+
+.browser-path {
+  background: white;
+  border: 1px solid #ded8cc;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.browser-path label {
+  color: #6e6a63;
+  font-weight: 700;
+}
+
+.browser-path input {
+  flex: 1;
+}
+
+.table-wrap,
+.panel {
+  background: white;
+  border: 1px solid #ded8cc;
+  border-radius: 10px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #ece6da;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+th {
+  color: #6e6a63;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+td:first-child {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  font-weight: 800;
+}
+
+tr.selected {
+  background: #f8f4ed;
+}
+
+.launch {
+  min-height: 36px;
+}
+
+.split {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+}
+
+.panel-title {
+  justify-content: space-between;
+}
+
+textarea {
+  margin-top: 14px;
+  min-height: 130px;
+  padding: 12px 14px;
+  resize: vertical;
+  width: 100%;
+}
+
+.extension-row {
+  border-top: 1px solid #ece6da;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr auto;
+  padding: 12px 0;
+}
+
+.extension-row span {
+  font-weight: 800;
+}
+
+.extension-row small {
+  color: #6e6a63;
+  grid-column: 1;
+}
+
+.extension-row button {
+  align-self: center;
+  background: transparent;
+  color: #d53c32;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.message,
+.status {
+  color: #6e6a63;
+}
