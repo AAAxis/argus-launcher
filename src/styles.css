@@ -287,6 +287,12 @@ td:last-child {
   padding: 7px 10px;
 }
 
+.data-card-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .link-card:hover {
   border-color: #171613;
 }

@@ -32,6 +32,23 @@ type ProfileDraft = {
   command_line_switches: string;
 };
 
+type ProxyDraft = {
+  id?: string;
+  name: string;
+  type: 'http' | 'socks5';
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+};
+
+type BookmarkDraft = {
+  originalUrl?: string;
+  title: string;
+  url: string;
+  icon: string;
+};
+
 const tabs: Array<{id: TabId; label: string}> = [
   {id: 'profiles', label: 'Profiles'},
   {id: 'proxies', label: 'Proxies'},
@@ -247,6 +264,46 @@ function tagsFromDraft(value: string) {
       .filter(Boolean);
 }
 
+function newProxyDraft(): ProxyDraft {
+  return {
+    name: '',
+    type: 'socks5',
+    host: '',
+    port: '',
+    username: '',
+    password: '',
+  };
+}
+
+function draftFromProxy(proxy: ArgusProxy): ProxyDraft {
+  return {
+    id: proxy.id,
+    name: proxy.name || '',
+    type: proxy.type || 'http',
+    host: proxy.host,
+    port: String(proxy.port || ''),
+    username: proxy.username || '',
+    password: proxy.password || '',
+  };
+}
+
+function newBookmarkDraft(): BookmarkDraft {
+  return {
+    title: '',
+    url: '',
+    icon: '',
+  };
+}
+
+function draftFromBookmark(bookmark: SharedBookmark): BookmarkDraft {
+  return {
+    originalUrl: bookmark.url,
+    title: bookmark.title || '',
+    url: bookmark.url || '',
+    icon: bookmark.icon || '',
+  };
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
@@ -258,6 +315,8 @@ function App() {
   const [apiToken, setApiToken] = useState('argys_api_token');
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
+  const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
+  const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
 
   const selectedProfile = useMemo(
       () => cloudState.profiles.find((profile) => profile.id === selectedId) || null,
@@ -506,6 +565,110 @@ function App() {
     setMessage(`${profile.name} deleted`);
   }
 
+  function openNewProxy() {
+    setActiveTab('proxies');
+    setProxyDraft(newProxyDraft());
+  }
+
+  function openEditProxy(proxy: ArgusProxy) {
+    setProxyDraft(draftFromProxy(proxy));
+  }
+
+  async function saveProxyDraft() {
+    if (!proxyDraft) {
+      return;
+    }
+    const host = proxyDraft.host.trim();
+    const port = Number(proxyDraft.port);
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+      setMessage('Proxy host and valid port are required');
+      return;
+    }
+    const proxy: ArgusProxy = {
+      id: proxyDraft.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+      name: proxyDraft.name.trim() || `${host}:${port}`,
+      type: proxyDraft.type,
+      host,
+      port,
+      username: proxyDraft.username.trim() || undefined,
+      password: proxyDraft.password || undefined,
+    };
+    const proxies = proxyDraft.id ?
+      cloudState.proxies.map((item) => item.id === proxy.id ? proxy : item) :
+      [...cloudState.proxies, proxy];
+    await saveCloudState({...cloudState, proxies});
+    setProxyDraft(null);
+    setMessage(`${proxy.name} saved`);
+  }
+
+  async function deleteProxyDraft() {
+    if (!proxyDraft?.id) {
+      setProxyDraft(null);
+      return;
+    }
+    const proxy = cloudState.proxies.find((item) => item.id === proxyDraft.id);
+    if (!proxy) {
+      setProxyDraft(null);
+      return;
+    }
+    if (!window.confirm(`Delete ${proxy.name || proxy.host}?`)) {
+      return;
+    }
+    const proxies = cloudState.proxies.filter((item) => item.id !== proxy.id);
+    const profiles = cloudState.profiles.map((profile) =>
+      profile.proxy_id === proxy.id ? {...profile, proxy_id: null} : profile);
+    await saveCloudState({...cloudState, proxies, profiles});
+    setProxyDraft(null);
+    setMessage(`${proxy.name || proxy.host} deleted`);
+  }
+
+  function openNewBookmark() {
+    setActiveTab('bookmarks');
+    setBookmarkDraft(newBookmarkDraft());
+  }
+
+  function openEditBookmark(bookmark: SharedBookmark) {
+    setBookmarkDraft(draftFromBookmark(bookmark));
+  }
+
+  async function saveBookmarkDraft() {
+    if (!bookmarkDraft) {
+      return;
+    }
+    const url = normalizeBookmarkUrl(bookmarkDraft.url);
+    if (!url) {
+      setMessage('Bookmark URL is required');
+      return;
+    }
+    const bookmark: SharedBookmark = {
+      title: bookmarkDraft.title.trim() || url,
+      url,
+      icon: bookmarkDraft.icon.trim() || undefined,
+    };
+    const bookmarks = cloudState.shared_bookmarks.filter(
+        (item) => item.url !== (bookmarkDraft.originalUrl || bookmark.url));
+    await saveCloudState({
+      ...cloudState,
+      shared_bookmarks: [...bookmarks, bookmark],
+    });
+    setBookmarkDraft(null);
+    setMessage(`${bookmark.title} saved`);
+  }
+
+  async function deleteBookmarkDraft() {
+    if (!bookmarkDraft?.originalUrl) {
+      setBookmarkDraft(null);
+      return;
+    }
+    await saveCloudState({
+      ...cloudState,
+      shared_bookmarks: cloudState.shared_bookmarks.filter(
+          (bookmark) => bookmark.url !== bookmarkDraft.originalUrl),
+    });
+    setBookmarkDraft(null);
+    setMessage('Bookmark deleted');
+  }
+
   async function addExtension() {
     const path = window.prompt('Unpacked extension folder path');
     if (!path?.trim()) {
@@ -616,7 +779,12 @@ function App() {
               <h2>{proxy.name || proxy.host}</h2>
               <p>{proxy.type || 'http'} · {proxy.host}:{proxy.port}</p>
             </div>
-            <span>{proxy.username ? 'Auth' : 'Open'}</span>
+            <div className="data-card-actions">
+              <span>{proxy.username ? 'Auth' : 'Open'}</span>
+              <button className="icon-button" aria-label={`Edit ${proxy.name || proxy.host}`} onClick={() => openEditProxy(proxy)}>
+                <Pencil size={16} />
+              </button>
+            </div>
           </article>
         ))}
         {cloudState.proxies.length === 0 && <p className="empty-state">No proxies loaded.</p>}
@@ -628,12 +796,18 @@ function App() {
     return (
       <section className="card-grid">
         {cloudState.shared_bookmarks.map((bookmark) => (
-          <a className="data-card link-card" href={normalizeBookmarkUrl(bookmark.url)} key={`${bookmark.title}-${bookmark.url}`}>
+          <article className="data-card" key={`${bookmark.title}-${bookmark.url}`}>
             <div>
               <h2>{bookmark.title || bookmark.url}</h2>
               <p>{normalizeBookmarkUrl(bookmark.url)}</p>
             </div>
-          </a>
+            <div className="data-card-actions">
+              <button className="ghost" onClick={() => window.open(normalizeBookmarkUrl(bookmark.url), '_blank')}>Open</button>
+              <button className="icon-button" aria-label={`Edit ${bookmark.title || bookmark.url}`} onClick={() => openEditBookmark(bookmark)}>
+                <Pencil size={16} />
+              </button>
+            </div>
+          </article>
         ))}
         {cloudState.shared_bookmarks.length === 0 && <p className="empty-state">No shared bookmarks loaded.</p>}
       </section>
@@ -726,6 +900,22 @@ function App() {
     }
   }
 
+  function renderTopAction() {
+    switch (activeTab) {
+      case 'profiles':
+        return <button onClick={openNewProfile}><Plus size={18} /> Profile</button>;
+      case 'proxies':
+        return <button onClick={openNewProxy}><Plus size={18} /> Proxy</button>;
+      case 'bookmarks':
+        return <button onClick={openNewBookmark}><Plus size={18} /> Bookmark</button>;
+      case 'extensions':
+        return <button onClick={addExtension}><Plus size={18} /> Extension</button>;
+      case 'api':
+      default:
+        return null;
+    }
+  }
+
   if (!signedInEmail) {
     return (
       <main className="login-shell">
@@ -773,7 +963,7 @@ function App() {
             <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
           </div>
           <div className="actions">
-            <button onClick={openNewProfile}><Plus size={18} /> Profile</button>
+            {renderTopAction()}
           </div>
         </header>
 
@@ -885,6 +1075,134 @@ function App() {
               )}
               <button className="ghost" onClick={() => setProfileDraft(null)}>Cancel</button>
               <button onClick={saveProfileDraft}>{profileDraft.id ? 'Save changes' : 'Create profile'}</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {proxyDraft && (
+        <div className="modal-backdrop" onMouseDown={() => setProxyDraft(null)}>
+          <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h2>{proxyDraft.id ? 'Edit proxy' : 'Add proxy'}</h2>
+                <p>Proxy settings are stored in Argys Anty and assigned to profiles on launch.</p>
+              </div>
+              <button className="icon-button" aria-label="Close" onClick={() => setProxyDraft(null)}><X size={18} /></button>
+            </header>
+
+            <div className="profile-form">
+              <label className="field wide">
+                <span>Name</span>
+                <input
+                  autoFocus
+                  placeholder="US socks proxy"
+                  value={proxyDraft.name}
+                  onChange={(event) => setProxyDraft({...proxyDraft, name: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Type</span>
+                <select
+                  value={proxyDraft.type}
+                  onChange={(event) => setProxyDraft({...proxyDraft, type: event.target.value as ProxyDraft['type']})}
+                >
+                  <option value="socks5">SOCKS5</option>
+                  <option value="http">HTTP</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Host</span>
+                <input
+                  placeholder="1.2.3.4"
+                  value={proxyDraft.host}
+                  onChange={(event) => setProxyDraft({...proxyDraft, host: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Port</span>
+                <input
+                  inputMode="numeric"
+                  placeholder="1080"
+                  value={proxyDraft.port}
+                  onChange={(event) => setProxyDraft({...proxyDraft, port: event.target.value.replace(/[^\d]/g, '')})}
+                />
+              </label>
+              <label className="field">
+                <span>Username</span>
+                <input
+                  placeholder="Optional"
+                  value={proxyDraft.username}
+                  onChange={(event) => setProxyDraft({...proxyDraft, username: event.target.value})}
+                />
+              </label>
+              <label className="field wide">
+                <span>Password</span>
+                <input
+                  placeholder="Optional"
+                  type="password"
+                  value={proxyDraft.password}
+                  onChange={(event) => setProxyDraft({...proxyDraft, password: event.target.value})}
+                />
+              </label>
+            </div>
+
+            <footer className="modal-actions">
+              {proxyDraft.id && (
+                <button className="danger ghost" onClick={deleteProxyDraft}><Trash2 size={16} /> Delete</button>
+              )}
+              <button className="ghost" onClick={() => setProxyDraft(null)}>Cancel</button>
+              <button onClick={saveProxyDraft}>{proxyDraft.id ? 'Save changes' : 'Add proxy'}</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {bookmarkDraft && (
+        <div className="modal-backdrop" onMouseDown={() => setBookmarkDraft(null)}>
+          <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h2>{bookmarkDraft.originalUrl ? 'Edit bookmark' : 'Add bookmark'}</h2>
+                <p>Shared bookmarks are injected into each anonymous browser home page.</p>
+              </div>
+              <button className="icon-button" aria-label="Close" onClick={() => setBookmarkDraft(null)}><X size={18} /></button>
+            </header>
+
+            <div className="profile-form">
+              <label className="field wide">
+                <span>Name</span>
+                <input
+                  autoFocus
+                  placeholder="Facebook"
+                  value={bookmarkDraft.title}
+                  onChange={(event) => setBookmarkDraft({...bookmarkDraft, title: event.target.value})}
+                />
+              </label>
+              <label className="field wide">
+                <span>URL</span>
+                <input
+                  placeholder="https://www.facebook.com/"
+                  value={bookmarkDraft.url}
+                  onChange={(event) => setBookmarkDraft({...bookmarkDraft, url: event.target.value})}
+                />
+              </label>
+              <label className="field wide">
+                <span>Icon URL</span>
+                <input
+                  placeholder="Optional favicon URL"
+                  value={bookmarkDraft.icon}
+                  onChange={(event) => setBookmarkDraft({...bookmarkDraft, icon: event.target.value})}
+                />
+              </label>
+            </div>
+
+            <footer className="modal-actions">
+              {bookmarkDraft.originalUrl && (
+                <button className="danger ghost" onClick={deleteBookmarkDraft}><Trash2 size={16} /> Delete</button>
+              )}
+              <button className="ghost" onClick={() => setBookmarkDraft(null)}>Cancel</button>
+              <button onClick={saveBookmarkDraft}>{bookmarkDraft.originalUrl ? 'Save changes' : 'Add bookmark'}</button>
             </footer>
           </section>
         </div>
