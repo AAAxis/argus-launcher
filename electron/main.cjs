@@ -110,6 +110,17 @@ function proxyArgs(proxy) {
   return args;
 }
 
+function fallbackHomeUrl(profileName) {
+  const safeName = String(profileName || 'Profile')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${safeName}</title>
+<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf8;color:#1d1c18;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{text-align:center}h1{font-size:36px;margin:0 0 10px}p{color:#716b62;font-size:17px}</style>
+</head><body><main><h1>${safeName}</h1><p>Anonymous Argys Browser session</p></main></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
 ipcMain.handle('argus:launch-profile', async (_event, payload) => {
   const resolved = resolveBrowserExecutable();
   if (!resolved) {
@@ -129,7 +140,7 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
     ...proxyArgs(payload.proxy),
     ...extensionPaths.map((extensionPath) => `--load-extension=${extensionPath}`),
     ...splitSwitches(payload.commandLineSwitches),
-    payload.startUrl || 'chrome://argus-newtab',
+    payload.startUrl || fallbackHomeUrl(payload.name),
   ];
 
   try {

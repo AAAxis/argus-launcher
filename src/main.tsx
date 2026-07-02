@@ -3,13 +3,14 @@ import {createRoot} from 'react-dom/client';
 import {Plus, Play, RefreshCw, Shield, Trash2} from 'lucide-react';
 import {native} from './native';
 import {supabase} from './supabase';
-import type {ArgusProfile, ArgusProxy, CloudState, SharedExtension} from './types';
+import type {ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
 
 const defaultState: CloudState = {
   profiles: [],
   proxies: [],
   shared_extensions: [],
+  shared_bookmarks: [],
 };
 
 function initials(value: string) {
@@ -25,10 +26,80 @@ function profileDataDir(profileId: string) {
   return `${navigator.platform.includes('Mac') ? '/Users/dima/Library/Application Support/Argys Browser/Profiles' : 'ArgysProfiles'}/${profileId}`;
 }
 
-function browserStartUrl(profile: ArgusProfile) {
+function escapeHtml(value: string) {
+  return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+}
+
+function normalizeBookmarkUrl(url: string) {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return '';
+  }
+  return /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function anonymousHomePage(profile: ArgusProfile, bookmarks: SharedBookmark[]) {
+  const safeName = escapeHtml(profile.name || 'Profile');
+  const bookmarkItems = bookmarks
+      .map((bookmark) => {
+        const url = normalizeBookmarkUrl(bookmark.url);
+        if (!url) {
+          return '';
+        }
+        const title = escapeHtml(bookmark.title || url);
+        const safeUrl = escapeHtml(url);
+        const initial = escapeHtml((bookmark.title || url).trim()[0]?.toUpperCase() || 'A');
+        return `<a class="bookmark" href="${safeUrl}">
+          <span>${initial}</span>
+          <strong>${title}</strong>
+          <small>${safeUrl}</small>
+        </a>`;
+      })
+      .join('');
+  const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${safeName}</title>
+<style>
+body{margin:0;background:#fbfaf8;color:#1d1c18;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{min-height:100vh;padding:56px;box-sizing:border-box}
+header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e4ddd1;padding-bottom:24px}
+h1{font-size:34px;margin:0 0 8px;font-weight:850}
+p{margin:0;color:#716b62;font-size:17px}
+.badge{border:1px solid #ded6c8;border-radius:999px;padding:10px 16px;background:#fff;font-weight:750}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:34px}
+.bookmark{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center;text-decoration:none;color:inherit;background:#fff;border:1px solid #e4ddd1;border-radius:12px;padding:16px;min-height:82px}
+.bookmark:hover{border-color:#171613}
+.bookmark span{width:44px;height:44px;border-radius:12px;background:#171613;color:#fff;display:grid;place-items:center;font-weight:850}
+.bookmark strong{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bookmark small{grid-column:2;color:#716b62;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{margin-top:34px;color:#716b62}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div><h1>${safeName}</h1><p>Anonymous Argys Browser session</p></div>
+<div class="badge">Anti-detect mode on</div>
+</header>
+${bookmarkItems ? `<section class="grid">${bookmarkItems}</section>` : '<p class="empty">No shared bookmarks yet.</p>'}
+</main>
+</body>
+</html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function browserStartUrl(profile: ArgusProfile, bookmarks: SharedBookmark[]) {
   const startUrl = profile.start_url?.trim();
-  if (!startUrl || startUrl === 'about:blank' || startUrl.startsWith('chrome://argus')) {
-    return 'chrome://argus-newtab';
+  if (!startUrl || startUrl === 'about:blank' || startUrl.startsWith('chrome://')) {
+    return anonymousHomePage(profile, bookmarks);
   }
   return startUrl;
 }
@@ -69,7 +140,7 @@ function App() {
     }
     const {data, error} = await supabase
         .from('argus_cloud_state')
-        .select('profiles,proxies,shared_extensions')
+        .select('profiles,proxies,shared_extensions,shared_bookmarks')
         .eq('user_id', userId)
         .maybeSingle();
     if (error) {
@@ -81,6 +152,9 @@ function App() {
       proxies: Array.isArray(data?.proxies) ? data.proxies : [],
       shared_extensions: Array.isArray(data?.shared_extensions) ?
         data.shared_extensions :
+        [],
+      shared_bookmarks: Array.isArray(data?.shared_bookmarks) ?
+        data.shared_bookmarks :
         [],
     };
     setCloudState(nextState);
@@ -105,6 +179,7 @@ function App() {
           profiles: nextState.profiles,
           proxies: nextState.proxies,
           shared_extensions: nextState.shared_extensions,
+          shared_bookmarks: nextState.shared_bookmarks,
           updated_at: new Date().toISOString(),
         }, {onConflict: 'user_id'});
     if (error) {
@@ -151,7 +226,7 @@ function App() {
         proxy: proxyFor(profile),
         extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
         commandLineSwitches: profile.command_line_switches || '',
-        startUrl: browserStartUrl(profile),
+        startUrl: browserStartUrl(profile, cloudState.shared_bookmarks),
       });
       setMessage(result.ok ?
         `Started browser pid ${result.pid} from ${result.appPath || 'browser app'}` :

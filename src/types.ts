@@ -27,8 +27,15 @@ export type SharedExtension = {
   name?: string;
 };
 
+export type SharedBookmark = {
+  title: string;
+  url: string;
+  icon?: string;
+};
+
 export type CloudState = {
   profiles: ArgusProfile[];
   proxies: ArgusProxy[];
   shared_extensions: SharedExtension[];
+  shared_bookmarks: SharedBookmark[];
 };
