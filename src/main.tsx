@@ -304,11 +304,23 @@ function draftFromBookmark(bookmark: SharedBookmark): BookmarkDraft {
   };
 }
 
+function LoadingState({label, detail}: {label: string; detail: string}) {
+  return (
+    <section className="loading-state">
+      <div className="spinner" aria-hidden="true" />
+      <h1>{label}</h1>
+      <p>{detail}</p>
+    </section>
+  );
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
   const [message, setMessage] = useState('');
+  const [appBooting, setAppBooting] = useState(true);
+  const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
@@ -324,57 +336,80 @@ function App() {
   );
 
   useEffect(() => {
-    void supabase?.auth.getUser().then(({data}) => {
-      if (data.user?.email) {
-        setSignedInEmail(data.user.email);
-        setApiToken(tokenForEmail(data.user.email));
-        void loadCloudState();
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!supabase) {
+          return;
+        }
+        const {data} = await supabase.auth.getUser();
+        if (cancelled) {
+          return;
+        }
+        if (data.user?.email) {
+          setSignedInEmail(data.user.email);
+          setApiToken(tokenForEmail(data.user.email));
+          await loadCloudState();
+        }
+      } finally {
+        if (!cancelled) {
+          setAppBooting(false);
+        }
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function loadCloudState() {
+    setCloudLoading(true);
     if (!supabase) {
       setMessage('Supabase env is missing in .env');
+      setCloudLoading(false);
       return;
     }
-    const {data: userData} = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) {
-      return;
-    }
-    let {data, error}: {data: any; error: any} = await supabase
-        .from('argus_cloud_state')
-        .select('profiles,proxies,shared_extensions,shared_bookmarks')
-        .eq('user_id', userId)
-        .maybeSingle();
-    if (isMissingColumnError(error)) {
-      sharedBookmarksColumnAvailable = false;
-      const fallback = await supabase
+    try {
+      const {data: userData} = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId) {
+        return;
+      }
+      let {data, error}: {data: any; error: any} = await supabase
           .from('argus_cloud_state')
-          .select('profiles,proxies,shared_extensions')
+          .select('profiles,proxies,shared_extensions,shared_bookmarks')
           .eq('user_id', userId)
           .maybeSingle();
-      data = fallback.data;
-      error = fallback.error;
+      if (isMissingColumnError(error)) {
+        sharedBookmarksColumnAvailable = false;
+        const fallback = await supabase
+            .from('argus_cloud_state')
+            .select('profiles,proxies,shared_extensions')
+            .eq('user_id', userId)
+            .maybeSingle();
+        data = fallback.data;
+        error = fallback.error;
+      }
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+      const nextState = {
+        profiles: Array.isArray(data?.profiles) ? data.profiles : [],
+        proxies: Array.isArray(data?.proxies) ? data.proxies : [],
+        shared_extensions: Array.isArray(data?.shared_extensions) ?
+          data.shared_extensions :
+          [],
+        shared_bookmarks: Array.isArray(data?.shared_bookmarks) ?
+          data.shared_bookmarks :
+          [],
+      };
+      setCloudState(nextState);
+      setSelectedId(nextState.profiles[0]?.id || null);
+      setMessage(`Loaded ${nextState.profiles.length} profiles`);
+    } finally {
+      setCloudLoading(false);
     }
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-    const nextState = {
-      profiles: Array.isArray(data?.profiles) ? data.profiles : [],
-      proxies: Array.isArray(data?.proxies) ? data.proxies : [],
-      shared_extensions: Array.isArray(data?.shared_extensions) ?
-        data.shared_extensions :
-        [],
-      shared_bookmarks: Array.isArray(data?.shared_bookmarks) ?
-        data.shared_bookmarks :
-        [],
-    };
-    setCloudState(nextState);
-    setSelectedId(nextState.profiles[0]?.id || null);
-    setMessage(`Loaded ${nextState.profiles.length} profiles`);
   }
 
   async function saveCloudState(nextState: CloudState) {
@@ -885,6 +920,9 @@ function App() {
   }
 
   function renderActiveTab() {
+    if (cloudLoading) {
+      return <LoadingState label="Loading cloud data" detail="Profiles, proxies, bookmarks, and extensions are syncing." />;
+    }
     switch (activeTab) {
       case 'proxies':
         return renderProxiesTab();
@@ -914,6 +952,14 @@ function App() {
       default:
         return null;
     }
+  }
+
+  if (appBooting) {
+    return (
+      <main className="login-shell">
+        <LoadingState label="Starting Argys Anty" detail="Checking cloud session and loading workspace." />
+      </main>
+    );
   }
 
   if (!signedInEmail) {
