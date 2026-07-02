@@ -1,18 +1,18 @@
-# Argus Launcher
+# Argys Anty
 
-Standalone manager app for Argus cloud data.
+Standalone manager app for Argys cloud data.
 
 This app owns:
 
 - Supabase login/session
 - cloud-backed profiles, proxies, folders, statuses, bookmarks, shared extensions
 - API tokens for each signed-in email
-- launching Argus Browser with an anonymous runtime payload
+- launching Argys Browser with an anonymous runtime payload
 
-This app does not embed Chromium browser UI. It only starts Argus Browser as a
+This app does not embed Chromium browser UI. It only starts Argys Browser as a
 separate process.
 
-Argus Browser owns:
+Argys Browser owns:
 
 - profile runtime
 - proxy application
@@ -20,4 +20,4 @@ Argus Browser owns:
 - fingerprint flags
 - cookies for the launched profile only
 
-Argus Browser must not own Supabase login or cloud state.
+Argys Browser must not own Supabase login or cloud state.

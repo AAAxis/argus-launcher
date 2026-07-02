@@ -3,6 +3,8 @@ const {spawn} = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
+app.setName('Argys Anty');
+
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
 }
@@ -23,12 +25,12 @@ function writeSettings(settings) {
 function browserAppPath() {
   return readSettings().browserAppPath ||
     process.env.ARGUS_BROWSER_APP ||
-    '/Applications/Argus Browser.app';
+    '/Applications/Argys Browser.app';
 }
 
 function createWindow() {
   const win = new BrowserWindow({
-    title: 'Argus Launcher',
+    title: 'Argys Anty',
     width: 1180,
     height: 760,
     minWidth: 980,
@@ -51,7 +53,15 @@ function createWindow() {
 
 function appExecutable(appPath) {
   if (appPath.endsWith('.app')) {
-    return path.join(appPath, 'Contents/MacOS/Argus');
+    const macosDir = path.join(appPath, 'Contents/MacOS');
+    const candidates = [
+      path.join(macosDir, 'Argys Browser'),
+      path.join(macosDir, 'Argys'),
+      path.join(macosDir, 'Argus'),
+      path.join(macosDir, path.basename(appPath, '.app')),
+    ];
+    return candidates.find((candidate) => fs.existsSync(candidate)) ||
+      candidates[0];
   }
   return appPath;
 }

@@ -1,8 +1,8 @@
 # Process Boundary
 
-Argus is two apps.
+Argys is two apps.
 
-## Argus Launcher
+## Argys Anty
 
 Launcher is the control plane. It talks to Supabase and stores cloud-backed
 manager data:
@@ -16,15 +16,15 @@ manager data:
 - per-profile command line switches
 - API tokens
 
-Launcher starts browser sessions by spawning Argus Browser with explicit runtime
+Argys Anty starts browser sessions by spawning Argys Browser with explicit runtime
 arguments. It never opens the dashboard inside a browser tab.
 
-## Argus Browser
+## Argys Browser
 
 Browser is the anonymous data plane. It receives one profile launch payload and
 opens a browser session.
 
-Browser does not sign in to Supabase. Browser does not show the launcher table.
+Browser does not sign in to Supabase. Browser does not show the Argys Anty table.
 Browser does not manage cloud profiles.
 
 ## Launch Contract

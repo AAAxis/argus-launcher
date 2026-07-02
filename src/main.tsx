@@ -22,7 +22,7 @@ function initials(value: string) {
 }
 
 function profileDataDir(profileId: string) {
-  return `${navigator.platform.includes('Mac') ? '/Users/dima/Library/Application Support/Argus Browser/Profiles' : 'ArgusProfiles'}/${profileId}`;
+  return `${navigator.platform.includes('Mac') ? '/Users/dima/Library/Application Support/Argys Browser/Profiles' : 'ArgysProfiles'}/${profileId}`;
 }
 
 function App() {
@@ -181,7 +181,7 @@ function App() {
       <main className="login-shell">
         <section className="login-panel">
           <Shield size={34} />
-          <h1>Sign in to Argus Launcher</h1>
+          <h1>Sign in to Argys Anty</h1>
           <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
           <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
           <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
@@ -195,7 +195,7 @@ function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand">Argus Launcher</div>
+        <div className="brand">Argys Anty</div>
         <nav>
           <button className="active">Profiles</button>
           <button>Proxies</button>
@@ -214,7 +214,7 @@ function App() {
         <header className="topbar">
           <div>
             <h1>All profiles</h1>
-            <p>Launcher owns cloud data. Browser starts as a separate anonymous process.</p>
+            <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
           </div>
           <div className="actions">
             <button className="ghost" onClick={loadCloudState}><RefreshCw size={18} /> Refresh</button>
@@ -223,7 +223,7 @@ function App() {
         </header>
 
         <div className="browser-path">
-          <label>Argus Browser app</label>
+          <label>Argys Browser app</label>
           <input value={browserPath} onChange={(event) => setBrowserPath(event.target.value)} />
           <button onClick={() => native?.setBrowserPath(browserPath)}>Save</button>
         </div>
