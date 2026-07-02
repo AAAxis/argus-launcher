@@ -116,9 +116,16 @@ nav button.active {
 .account {
   border-top: 1px solid #ded8cc;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin-top: auto;
   padding-top: 18px;
+}
+
+.account-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 38px minmax(0, 1fr);
 }
 
 .account span,
@@ -138,9 +145,15 @@ nav button.active {
 }
 
 .account strong {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account button {
+  justify-content: center;
+  width: 100%;
 }
 
 .content {

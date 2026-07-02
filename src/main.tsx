@@ -489,8 +489,10 @@ function App() {
           ))}
         </nav>
         <div className="account">
-          <span>{initials(signedInEmail)}</span>
-          <strong>{signedInEmail}</strong>
+          <div className="account-row">
+            <span>{initials(signedInEmail)}</span>
+            <strong>{signedInEmail}</strong>
+          </div>
           <button onClick={signOut}>Sign out</button>
         </div>
       </aside>
