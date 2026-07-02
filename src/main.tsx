@@ -664,13 +664,17 @@ function App() {
       setProfileDraft(null);
       return;
     }
+    await deleteProfile(profile);
+    setProfileDraft(null);
+  }
+
+  async function deleteProfile(profile: ArgusProfile) {
     if (!window.confirm(`Delete ${profile.name}?`)) {
       return;
     }
     const profiles = cloudState.profiles.filter((item) => item.id !== profile.id);
     await saveCloudState({...cloudState, profiles});
     setSelectedId(profiles[0]?.id || null);
-    setProfileDraft(null);
     setMessage(`${profile.name} deleted`);
   }
 
@@ -862,6 +866,10 @@ function App() {
                         event.stopPropagation();
                         openEditProfile(profile);
                       }}><Pencil size={16} /></button>
+                      <button className="icon-button danger-icon" aria-label={`Delete ${profile.name}`} onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteProfile(profile);
+                      }}><Trash2 size={16} /></button>
                     </td>
                   </tr>
                 );

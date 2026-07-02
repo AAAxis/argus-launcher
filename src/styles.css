@@ -268,6 +268,15 @@ td:last-child {
   color: #171613;
 }
 
+.danger-icon {
+  color: #d53c32;
+}
+
+.danger-icon:hover {
+  background: #fff1ef;
+  color: #b92f27;
+}
+
 .split {
   display: grid;
   gap: 20px;
