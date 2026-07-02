@@ -229,7 +229,7 @@ function App() {
         startUrl: browserStartUrl(profile, cloudState.shared_bookmarks),
       });
       setMessage(result.ok ?
-        `Started browser pid ${result.pid} from ${result.appPath || 'browser app'}` :
+        `Opened ${result.launcherAppPath || 'profile app'}` :
         result.error || 'Launch failed');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));

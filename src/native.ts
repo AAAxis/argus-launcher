@@ -22,6 +22,7 @@ type ArgusNative = {
     ok: boolean;
     pid?: number;
     appPath?: string;
+    launcherAppPath?: string;
     error?: string;
   }>;
   getBrowserPath(): Promise<string>;

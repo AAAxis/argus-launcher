@@ -121,6 +121,100 @@ function fallbackHomeUrl(profileName) {
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function xmlEscape(value) {
+  return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+}
+
+function bundleSafeId(value) {
+  return String(value || 'profile')
+      .toLowerCase()
+      .replace(/[^a-z0-9.-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'profile';
+}
+
+function fileSafeName(value) {
+  return String(value || 'Profile')
+      .replace(/[/:]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim() || 'Profile';
+}
+
+function profileLaunchersRoot() {
+  return path.join(app.getPath('home'), 'Applications', 'Argys Profiles');
+}
+
+function profileLauncherPath(payload) {
+  return path.join(profileLaunchersRoot(), `${fileSafeName(payload.name)}.app`);
+}
+
+function copyBrowserIcon(browserAppPath, resourcesDir) {
+  const candidates = [
+    path.join(browserAppPath, 'Contents/Resources/app.icns'),
+    '/Applications/Argys Browser.app/Contents/Resources/app.icns',
+    '/Applications/Argus.app/Contents/Resources/app.icns',
+  ];
+  const iconPath = candidates.find((candidate) => fs.existsSync(candidate));
+  if (iconPath) {
+    fs.copyFileSync(iconPath, path.join(resourcesDir, 'app.icns'));
+  }
+}
+
+function writeProfileLauncherApp(payload, resolved, args) {
+  const appPath = profileLauncherPath(payload);
+  const contentsDir = path.join(appPath, 'Contents');
+  const macosDir = path.join(contentsDir, 'MacOS');
+  const resourcesDir = path.join(contentsDir, 'Resources');
+  fs.mkdirSync(macosDir, {recursive: true});
+  fs.mkdirSync(resourcesDir, {recursive: true});
+
+  const displayName = fileSafeName(payload.name);
+  const bundleId = `com.argys.browser.profile.${bundleSafeId(payload.id || displayName)}`;
+  const executableName = 'ArgysProfileLauncher';
+  const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>${xmlEscape(displayName)}</string>
+<key>CFBundleDisplayName</key><string>${xmlEscape(displayName)}</string>
+<key>CFBundleIdentifier</key><string>${xmlEscape(bundleId)}</string>
+<key>CFBundleExecutable</key><string>${executableName}</string>
+<key>CFBundleIconFile</key><string>app</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>13.0</string>
+</dict></plist>
+`;
+  fs.writeFileSync(path.join(contentsDir, 'Info.plist'), infoPlist);
+  fs.writeFileSync(path.join(contentsDir, 'PkgInfo'), 'APPL????');
+  copyBrowserIcon(resolved.appPath, resourcesDir);
+
+  const logPath = `/tmp/argys-profile-${bundleSafeId(payload.id || displayName)}.log`;
+  const launchArgs = args.map(shellQuote).join(' ');
+  const script = `#!/bin/zsh
+set -e
+ARGYS_BROWSER_BIN=${shellQuote(resolved.executable)}
+PROFILE_MARKER=${shellQuote(`argus-profile-id=${payload.id || ''}`)}
+"$ARGYS_BROWSER_BIN" ${launchArgs} >${shellQuote(logPath)} 2>&1 &
+sleep 3
+while pgrep -f "$PROFILE_MARKER" >/dev/null 2>&1; do
+  sleep 5
+done
+`;
+  const executablePath = path.join(macosDir, executableName);
+  fs.writeFileSync(executablePath, script, {mode: 0o755});
+  fs.chmodSync(executablePath, 0o755);
+  return appPath;
+}
+
 ipcMain.handle('argus:launch-profile', async (_event, payload) => {
   const resolved = resolveBrowserExecutable();
   if (!resolved) {
@@ -144,12 +238,18 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
   ];
 
   try {
-    const child = spawn(executable, args, {
+    const profileAppPath = writeProfileLauncherApp(payload, resolved, args);
+    const child = spawn('/usr/bin/open', ['-n', profileAppPath], {
       detached: true,
       stdio: 'ignore',
     });
     child.unref();
-    return {ok: true, pid: child.pid || 0, appPath: resolved.appPath};
+    return {
+      ok: true,
+      pid: child.pid || 0,
+      appPath: resolved.appPath,
+      launcherAppPath: profileAppPath,
+    };
   } catch (error) {
     return {
       ok: false,
