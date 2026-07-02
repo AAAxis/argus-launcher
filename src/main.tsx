@@ -1,6 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Plus, Play, Shield, Trash2} from 'lucide-react';
+import {Pencil, Plus, Play, Shield, Trash2, X} from 'lucide-react';
 import {native} from './native';
 import {supabase} from './supabase';
 import type {ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
@@ -18,6 +18,18 @@ type ApiEndpoint = {
 type ApiGroup = {
   title: string;
   endpoints: ApiEndpoint[];
+};
+
+type ProfileDraft = {
+  id?: string;
+  name: string;
+  status: string;
+  color: string;
+  folder_id: string;
+  proxy_id: string;
+  tags: string;
+  start_url: string;
+  command_line_switches: string;
 };
 
 const tabs: Array<{id: TabId; label: string}> = [
@@ -99,6 +111,9 @@ const defaultState: CloudState = {
   shared_extensions: [],
   shared_bookmarks: [],
 };
+
+const profileStatuses = ['Ready', 'Active', 'Warmup', 'Ban', 'Review'];
+const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
 
 let sharedBookmarksColumnAvailable = true;
 
@@ -199,6 +214,39 @@ function isMissingColumnError(error: {message?: string; code?: string} | null) {
       error?.code === 'PGRST204');
 }
 
+function newProfileDraft(): ProfileDraft {
+  return {
+    name: `Profile ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`,
+    status: 'Ready',
+    color: profileColors[1],
+    folder_id: '',
+    proxy_id: '',
+    tags: '',
+    start_url: '',
+    command_line_switches: '',
+  };
+}
+
+function draftFromProfile(profile: ArgusProfile): ProfileDraft {
+  return {
+    id: profile.id,
+    name: profile.name,
+    status: profile.status || 'Ready',
+    color: profile.color || profileColors[1],
+    folder_id: profile.folder_id || '',
+    proxy_id: profile.proxy_id || '',
+    tags: profile.tags?.join(', ') || '',
+    start_url: profile.start_url || '',
+    command_line_switches: profile.command_line_switches || '',
+  };
+}
+
+function tagsFromDraft(value: string) {
+  return value.split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
@@ -209,6 +257,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
   const [apiToken, setApiToken] = useState('argys_api_token');
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
 
   const selectedProfile = useMemo(
       () => cloudState.profiles.find((profile) => profile.id === selectedId) || null,
@@ -395,6 +444,68 @@ function App() {
     await saveCloudState({...cloudState, profiles});
   }
 
+  function openNewProfile() {
+    setActiveTab('profiles');
+    setProfileDraft(newProfileDraft());
+  }
+
+  function openEditProfile(profile: ArgusProfile) {
+    setSelectedId(profile.id);
+    setProfileDraft(draftFromProfile(profile));
+  }
+
+  async function saveProfileDraft() {
+    if (!profileDraft) {
+      return;
+    }
+    const name = profileDraft.name.trim();
+    if (!name) {
+      setMessage('Profile name is required');
+      return;
+    }
+    const profile: ArgusProfile = {
+      id: profileDraft.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+      name,
+      status: profileDraft.status.trim() || 'Ready',
+      color: profileDraft.color || profileColors[1],
+      folder_id: profileDraft.folder_id.trim() || null,
+      proxy_id: profileDraft.proxy_id || null,
+      tags: tagsFromDraft(profileDraft.tags),
+      start_url: profileDraft.start_url.trim() || null,
+      command_line_switches: profileDraft.command_line_switches.trim() || null,
+      created_at: profileDraft.id ?
+        cloudState.profiles.find((item) => item.id === profileDraft.id)?.created_at :
+        new Date().toISOString(),
+    };
+    const profiles = profileDraft.id ?
+      cloudState.profiles.map((item) => item.id === profile.id ? profile : item) :
+      [...cloudState.profiles, profile];
+    await saveCloudState({...cloudState, profiles});
+    setSelectedId(profile.id);
+    setProfileDraft(null);
+    setMessage(`${profile.name} saved`);
+  }
+
+  async function deleteProfileDraft() {
+    if (!profileDraft?.id) {
+      setProfileDraft(null);
+      return;
+    }
+    const profile = cloudState.profiles.find((item) => item.id === profileDraft.id);
+    if (!profile) {
+      setProfileDraft(null);
+      return;
+    }
+    if (!window.confirm(`Delete ${profile.name}?`)) {
+      return;
+    }
+    const profiles = cloudState.profiles.filter((item) => item.id !== profile.id);
+    await saveCloudState({...cloudState, profiles});
+    setSelectedId(profiles[0]?.id || null);
+    setProfileDraft(null);
+    setMessage(`${profile.name} deleted`);
+  }
+
   async function addExtension() {
     const path = window.prompt('Unpacked extension folder path');
     if (!path?.trim()) {
@@ -445,12 +556,13 @@ function App() {
                       {profile.name}
                     </td>
                     <td>
-                      <select value={profile.status || 'Ready'} onChange={(event) => updateProfile(profile, {status: event.target.value})}>
-                        <option>Ready</option>
-                        <option>Active</option>
-                        <option>Warmup</option>
-                        <option>Ban</option>
-                        <option>Review</option>
+                      <select
+                        value={profile.status || 'Ready'}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => updateProfile(profile, {status: event.target.value})}
+                      >
+                        {profileStatuses.map((status) => <option key={status}>{status}</option>)}
+                        {!profileStatuses.includes(profile.status || '') && profile.status && <option>{profile.status}</option>}
                       </select>
                     </td>
                     <td>{profile.created_at?.slice(0, 10) || '-'}</td>
@@ -461,6 +573,10 @@ function App() {
                         event.stopPropagation();
                         void launch(profile);
                       }}><Play size={16} /> Launch</button>
+                      <button className="icon-button" aria-label={`Edit ${profile.name}`} onClick={(event) => {
+                        event.stopPropagation();
+                        openEditProfile(profile);
+                      }}><Pencil size={16} /></button>
                     </td>
                   </tr>
                 );
@@ -657,7 +773,7 @@ function App() {
             <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
           </div>
           <div className="actions">
-            <button><Plus size={18} /> Profile</button>
+            <button onClick={openNewProfile}><Plus size={18} /> Profile</button>
           </div>
         </header>
 
@@ -665,6 +781,114 @@ function App() {
 
         {message && <footer className="status">{message}</footer>}
       </section>
+
+      {profileDraft && (
+        <div className="modal-backdrop" onMouseDown={() => setProfileDraft(null)}>
+          <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h2>{profileDraft.id ? 'Edit profile' : 'Create profile'}</h2>
+                <p>Cloud-backed profile settings used when Argys Browser launches anonymously.</p>
+              </div>
+              <button className="icon-button" aria-label="Close" onClick={() => setProfileDraft(null)}><X size={18} /></button>
+            </header>
+
+            <div className="profile-form">
+              <label className="field wide">
+                <span>Name</span>
+                <input
+                  autoFocus
+                  value={profileDraft.name}
+                  onChange={(event) => setProfileDraft({...profileDraft, name: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Status</span>
+                <input
+                  list="profile-statuses"
+                  value={profileDraft.status}
+                  onChange={(event) => setProfileDraft({...profileDraft, status: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Proxy</span>
+                <select
+                  value={profileDraft.proxy_id}
+                  onChange={(event) => setProfileDraft({...profileDraft, proxy_id: event.target.value})}
+                >
+                  <option value="">Direct connection</option>
+                  {cloudState.proxies.map((proxy) => (
+                    <option value={proxy.id} key={proxy.id}>{proxy.name || `${proxy.host}:${proxy.port}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Folder</span>
+                <input
+                  placeholder="All profiles"
+                  value={profileDraft.folder_id}
+                  onChange={(event) => setProfileDraft({...profileDraft, folder_id: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Color</span>
+                <div className="color-row">
+                  {profileColors.map((color) => (
+                    <button
+                      className={profileDraft.color === color ? 'swatch active' : 'swatch'}
+                      key={color}
+                      style={{background: color}}
+                      type="button"
+                      onClick={() => setProfileDraft({...profileDraft, color})}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={profileDraft.color}
+                    onChange={(event) => setProfileDraft({...profileDraft, color: event.target.value})}
+                  />
+                </div>
+              </label>
+              <label className="field wide">
+                <span>Tags</span>
+                <input
+                  placeholder="warmup, facebook-cookies"
+                  value={profileDraft.tags}
+                  onChange={(event) => setProfileDraft({...profileDraft, tags: event.target.value})}
+                />
+              </label>
+              <label className="field wide">
+                <span>Start page</span>
+                <input
+                  placeholder="Leave empty for shared bookmarks home"
+                  value={profileDraft.start_url}
+                  onChange={(event) => setProfileDraft({...profileDraft, start_url: event.target.value})}
+                />
+              </label>
+              <label className="field wide">
+                <span>Command line switches</span>
+                <textarea
+                  placeholder="--disable-features=ExampleFeature&#10;--lang=en-US"
+                  value={profileDraft.command_line_switches}
+                  onChange={(event) => setProfileDraft({...profileDraft, command_line_switches: event.target.value})}
+                />
+              </label>
+            </div>
+
+            <datalist id="profile-statuses">
+              {profileStatuses.map((status) => <option value={status} key={status} />)}
+            </datalist>
+
+            <footer className="modal-actions">
+              {profileDraft.id && (
+                <button className="danger ghost" onClick={deleteProfileDraft}><Trash2 size={16} /> Delete</button>
+              )}
+              <button className="ghost" onClick={() => setProfileDraft(null)}>Cancel</button>
+              <button onClick={saveProfileDraft}>{profileDraft.id ? 'Save changes' : 'Create profile'}</button>
+            </footer>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

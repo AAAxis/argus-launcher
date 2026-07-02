@@ -40,6 +40,10 @@ button.ghost {
   color: #1e1d1a;
 }
 
+button.danger {
+  color: #d53c32;
+}
+
 .login-shell {
   display: grid;
   min-height: 100vh;
@@ -213,6 +217,27 @@ tr.selected {
 
 .launch {
   min-height: 36px;
+}
+
+td:last-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.icon-button {
+  background: transparent;
+  border: 0;
+  color: #6e6a63;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0;
+  width: 36px;
+}
+
+.icon-button:hover {
+  background: #f0ede7;
+  color: #171613;
 }
 
 .split {
@@ -511,4 +536,122 @@ textarea {
 .message,
 .status {
   color: #6e6a63;
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgba(23, 22, 19, 0.34);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 28px;
+  position: fixed;
+  z-index: 50;
+}
+
+.profile-modal {
+  background: #fbfaf8;
+  border: 1px solid #ded8cc;
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(23, 22, 19, 0.28);
+  display: grid;
+  gap: 18px;
+  max-height: calc(100vh - 56px);
+  max-width: 860px;
+  overflow: auto;
+  padding: 22px;
+  width: min(860px, calc(100vw - 56px));
+}
+
+.profile-modal header,
+.modal-actions {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.profile-modal h2 {
+  font-size: 24px;
+  margin: 0 0 4px;
+}
+
+.profile-modal p {
+  color: #6e6a63;
+  margin: 0;
+}
+
+.profile-form {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.field span {
+  color: #6e6a63;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.field input,
+.field select,
+.field textarea {
+  background: #fff;
+  border: 1px solid #ded8cc;
+  border-radius: 8px;
+  color: #1e1d1a;
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.field textarea {
+  margin: 0;
+  min-height: 140px;
+  padding: 12px;
+}
+
+.color-row {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
+.swatch {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  min-height: 28px;
+  padding: 0;
+  width: 28px;
+}
+
+.swatch.active {
+  border-color: #171613;
+  box-shadow: 0 0 0 2px #fbfaf8 inset;
+}
+
+.color-row input[type="color"] {
+  min-height: 32px;
+  padding: 2px;
+  width: 42px;
+}
+
+.modal-actions {
+  border-top: 1px solid #ded8cc;
+  justify-content: flex-end;
+  padding-top: 16px;
+}
+
+.modal-actions .danger {
+  margin-right: auto;
 }
