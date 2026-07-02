@@ -1,6 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Plus, Play, RefreshCw, Shield, Trash2} from 'lucide-react';
+import {Plus, Play, Shield, Trash2} from 'lucide-react';
 import {native} from './native';
 import {supabase} from './supabase';
 import type {ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
@@ -657,7 +657,6 @@ function App() {
             <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
           </div>
           <div className="actions">
-            <button className="ghost" onClick={loadCloudState}><RefreshCw size={18} /> Refresh</button>
             <button><Plus size={18} /> Profile</button>
           </div>
         </header>
