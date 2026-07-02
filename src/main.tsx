@@ -3,7 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {Pencil, Plus, Play, Shield, Trash2, X} from 'lucide-react';
 import {native} from './native';
 import {supabase} from './supabase';
-import type {ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
+import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
 
 type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api';
@@ -28,6 +28,7 @@ type ProfileDraft = {
   folder_id: string;
   proxy_id: string;
   proxy_search: string;
+  proxy_link: string;
   tags: string;
   start_url: string;
   command_line_switches: string;
@@ -45,6 +46,7 @@ type ProfileDraft = {
   fingerprint_screen: string;
   fingerprint_cpu_cores: string;
   fingerprint_memory_gb: string;
+  fingerprint_rotate: boolean;
 };
 
 type ProxyDraft = {
@@ -139,6 +141,7 @@ const API_GROUPS: ApiGroup[] = [
 
 const defaultState: CloudState = {
   profiles: [],
+  folders: [],
   proxies: [],
   shared_extensions: [],
   shared_bookmarks: [],
@@ -153,8 +156,15 @@ const timezonePresets = ['Auto from proxy', 'America/New_York', 'America/Los_Ang
 const webRtcModes = ['Proxy only', 'Disabled', 'Real', 'Custom'];
 const noiseModes = ['Real', 'Noise', 'Block'];
 const screenPresets = ['Auto', '1920x1080', '1440x900', '1366x768', '1536x864'];
+const webglVendors = ['Google Inc.', 'Apple Inc.', 'Intel Inc.', 'NVIDIA Corporation'];
+const webglRenderers = [
+  'ANGLE (Apple, Apple M2, OpenGL 4.1)',
+  'ANGLE (Intel, Intel Iris OpenGL Engine, OpenGL 4.1)',
+  'ANGLE (NVIDIA, NVIDIA GeForce, OpenGL 4.1)',
+];
 
 let sharedBookmarksColumnAvailable = true;
+let foldersColumnAvailable = true;
 
 function initials(value: string) {
   return value
@@ -249,6 +259,7 @@ function browserStartUrl(profile: ArgusProfile, bookmarks: SharedBookmark[]) {
 
 function isMissingColumnError(error: {message?: string; code?: string} | null) {
   return Boolean(error?.message?.includes('shared_bookmarks') ||
+      error?.message?.includes('folders') ||
       error?.code === '42703' ||
       error?.code === 'PGRST204');
 }
@@ -261,6 +272,7 @@ function newProfileDraft(): ProfileDraft {
     folder_id: '',
     proxy_id: '',
     proxy_search: '',
+    proxy_link: '',
     tags: '',
     start_url: '',
     command_line_switches: '',
@@ -278,6 +290,7 @@ function newProfileDraft(): ProfileDraft {
     fingerprint_screen: 'Auto',
     fingerprint_cpu_cores: '8',
     fingerprint_memory_gb: '8',
+    fingerprint_rotate: true,
   };
 }
 
@@ -291,6 +304,7 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     folder_id: profile.folder_id || '',
     proxy_id: profile.proxy_id || '',
     proxy_search: '',
+    proxy_link: '',
     tags: profile.tags?.join(', ') || '',
     start_url: profile.start_url || '',
     command_line_switches: profile.command_line_switches || '',
@@ -308,6 +322,7 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     fingerprint_screen: fingerprint.screen || 'Auto',
     fingerprint_cpu_cores: fingerprint.cpu_cores ? String(fingerprint.cpu_cores) : '8',
     fingerprint_memory_gb: fingerprint.memory_gb ? String(fingerprint.memory_gb) : '8',
+    fingerprint_rotate: Boolean(fingerprint.rotate_on_launch),
   };
 }
 
@@ -320,6 +335,108 @@ function tagsFromDraft(value: string) {
 function numberOrNull(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function randomChoice<T>(items: T[]) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function randomFingerprintPatch(): Partial<ProfileDraft> {
+  const os = randomChoice(osPresets);
+  const screen = randomChoice(screenPresets.filter((item) => item !== 'Auto'));
+  const browserVersion = randomChoice(browserVersionPresets.filter((item) => item !== 'Auto'));
+  return {
+    fingerprint_os: os,
+    fingerprint_browser_version: browserVersion,
+    fingerprint_language: randomChoice(languagePresets),
+    fingerprint_timezone: randomChoice(timezonePresets),
+    fingerprint_geolocation: randomChoice(['Ask', 'Block', 'Auto from proxy']),
+    fingerprint_webrtc: randomChoice(webRtcModes),
+    fingerprint_canvas: randomChoice(noiseModes),
+    fingerprint_webgl: randomChoice(noiseModes),
+    fingerprint_webgl_vendor: randomChoice(webglVendors),
+    fingerprint_webgl_renderer: randomChoice(webglRenderers),
+    fingerprint_screen: screen,
+    fingerprint_cpu_cores: String(randomChoice([4, 6, 8, 10, 12])),
+    fingerprint_memory_gb: String(randomChoice([4, 8, 12, 16, 32])),
+    fingerprint_user_agent: '',
+  };
+}
+
+function parseProxyLink(value: string): Omit<ArgusProxy, 'id' | 'name'> | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `socks5://${trimmed}`;
+    const url = new URL(withProtocol);
+    const type = url.protocol.startsWith('http') ? 'http' : 'socks5';
+    const port = Number(url.port);
+    if (!url.hostname || !Number.isInteger(port) || port < 1 || port > 65535) {
+      return null;
+    }
+    return {
+      type,
+      host: url.hostname,
+      port,
+      username: decodeURIComponent(url.username || '') || undefined,
+      password: decodeURIComponent(url.password || '') || undefined,
+    };
+  } catch {
+    const parts = trimmed.split(':').map((part) => part.trim());
+    if (parts.length >= 2) {
+      const port = Number(parts[1]);
+      if (parts[0] && Number.isInteger(port) && port > 0 && port < 65536) {
+        return {
+          type: 'socks5',
+          host: parts[0],
+          port,
+          username: parts[2] || undefined,
+          password: parts[3] || undefined,
+        };
+      }
+    }
+    return null;
+  }
+}
+
+function fingerprintFromDraftPatch(patch: Partial<ProfileDraft>): NonNullable<ArgusProfile['fingerprint']> {
+  return {
+    os: patch.fingerprint_os,
+    browser_version: patch.fingerprint_browser_version,
+    user_agent: patch.fingerprint_user_agent,
+    language: patch.fingerprint_language,
+    timezone: patch.fingerprint_timezone,
+    geolocation: patch.fingerprint_geolocation,
+    webrtc: patch.fingerprint_webrtc,
+    canvas: patch.fingerprint_canvas,
+    webgl: patch.fingerprint_webgl,
+    webgl_vendor: patch.fingerprint_webgl_vendor,
+    webgl_renderer: patch.fingerprint_webgl_renderer,
+    screen: patch.fingerprint_screen,
+    cpu_cores: numberOrNull(patch.fingerprint_cpu_cores || ''),
+    memory_gb: numberOrNull(patch.fingerprint_memory_gb || ''),
+    rotate_on_launch: true,
+  };
+}
+
+function fingerprintSwitches(profile: ArgusProfile) {
+  const fingerprint = profile.fingerprint;
+  if (!fingerprint) {
+    return '';
+  }
+  const switches = [];
+  if (fingerprint.user_agent) {
+    switches.push(`--user-agent=${fingerprint.user_agent}`);
+  }
+  if (fingerprint.language) {
+    switches.push(`--lang=${fingerprint.language.split(',')[0]}`);
+  }
+  if (fingerprint.screen && fingerprint.screen !== 'Auto') {
+    switches.push(`--window-size=${fingerprint.screen}`);
+  }
+  return switches.join('\n');
 }
 
 function newProxyDraft(): ProxyDraft {
@@ -381,6 +498,7 @@ function App() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState('');
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
   const [apiToken, setApiToken] = useState('argys_api_token');
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
@@ -435,11 +553,16 @@ function App() {
       }
       let {data, error}: {data: any; error: any} = await supabase
           .from('argus_cloud_state')
-          .select('profiles,proxies,shared_extensions,shared_bookmarks')
+          .select('profiles,folders,proxies,shared_extensions,shared_bookmarks')
           .eq('user_id', userId)
           .maybeSingle();
       if (isMissingColumnError(error)) {
-        sharedBookmarksColumnAvailable = false;
+        if (error?.message?.includes('shared_bookmarks')) {
+          sharedBookmarksColumnAvailable = false;
+        }
+        if (error?.message?.includes('folders')) {
+          foldersColumnAvailable = false;
+        }
         const fallback = await supabase
             .from('argus_cloud_state')
             .select('profiles,proxies,shared_extensions')
@@ -454,6 +577,7 @@ function App() {
       }
       const nextState = {
         profiles: Array.isArray(data?.profiles) ? data.profiles : [],
+        folders: Array.isArray(data?.folders) ? data.folders : [],
         proxies: Array.isArray(data?.proxies) ? data.proxies : [],
         shared_extensions: Array.isArray(data?.shared_extensions) ?
           data.shared_extensions :
@@ -487,6 +611,9 @@ function App() {
       shared_extensions: nextState.shared_extensions,
       updated_at: new Date().toISOString(),
     };
+    if (foldersColumnAvailable) {
+      payload.folders = nextState.folders;
+    }
     if (sharedBookmarksColumnAvailable) {
       payload.shared_bookmarks = nextState.shared_bookmarks;
     }
@@ -494,8 +621,14 @@ function App() {
         .from('argus_cloud_state')
         .upsert(payload, {onConflict: 'user_id'});
     if (isMissingColumnError(error)) {
-      sharedBookmarksColumnAvailable = false;
-      delete payload.shared_bookmarks;
+      if (error?.message?.includes('shared_bookmarks')) {
+        sharedBookmarksColumnAvailable = false;
+        delete payload.shared_bookmarks;
+      }
+      if (error?.message?.includes('folders')) {
+        foldersColumnAvailable = false;
+        delete payload.folders;
+      }
       const fallback = await supabase
           .from('argus_cloud_state')
           .upsert(payload, {onConflict: 'user_id'});
@@ -528,6 +661,7 @@ function App() {
     setApiToken('argys_api_token');
     setCloudState(defaultState);
     setSelectedId(null);
+    setSelectedFolderId('');
   }
 
   function tokenForEmail(value: string) {
@@ -567,20 +701,42 @@ function App() {
     return cloudState.proxies.find((proxy) => proxy.id === profile.proxy_id) || null;
   }
 
+  function folderFor(profile: ArgusProfile) {
+    return cloudState.folders.find((folder) => folder.id === profile.folder_id) || null;
+  }
+
+  function visibleProfiles() {
+    return selectedFolderId ?
+      cloudState.profiles.filter((profile) => profile.folder_id === selectedFolderId) :
+      cloudState.profiles;
+  }
+
   async function launch(profile: ArgusProfile) {
     if (!native) {
       setMessage('Native launcher bridge is not available');
       return;
     }
     try {
+      let launchProfile = profile;
+      if (profile.fingerprint?.rotate_on_launch) {
+        const rotated = fingerprintFromDraftPatch(randomFingerprintPatch());
+        launchProfile = {...profile, fingerprint: {...profile.fingerprint, ...rotated, rotate_on_launch: true}};
+        const profiles = cloudState.profiles.map((item) =>
+          item.id === profile.id ? launchProfile : item);
+        await saveCloudState({...cloudState, profiles});
+      }
+      const commandLineSwitches = [
+        launchProfile.command_line_switches || '',
+        fingerprintSwitches(launchProfile),
+      ].filter(Boolean).join('\n');
       const result = await native.launchProfile({
-        id: profile.id,
-        name: profile.name,
-        userDataDir: profileDataDir(profile.id),
-        proxy: proxyFor(profile),
+        id: launchProfile.id,
+        name: launchProfile.name,
+        userDataDir: profileDataDir(launchProfile.id),
+        proxy: proxyFor(launchProfile),
         extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
-        commandLineSwitches: profile.command_line_switches || '',
-        startUrl: browserStartUrl(profile, cloudState.shared_bookmarks),
+        commandLineSwitches,
+        startUrl: browserStartUrl(launchProfile, cloudState.shared_bookmarks),
       });
       setMessage(result.ok ?
         `Opened ${result.launcherAppPath || 'profile app'}` :
@@ -604,6 +760,44 @@ function App() {
   function openEditProfile(profile: ArgusProfile) {
     setSelectedId(profile.id);
     setProfileDraft(draftFromProfile(profile));
+  }
+
+  async function createFolder() {
+    const name = window.prompt('Folder name');
+    if (!name?.trim()) {
+      return;
+    }
+    const folder: ArgusFolder = {
+      id: globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+      name: name.trim(),
+      created_at: new Date().toISOString(),
+    };
+    await saveCloudState({...cloudState, folders: [...cloudState.folders, folder]});
+    setSelectedFolderId(folder.id);
+    setMessage(`${folder.name} folder created`);
+  }
+
+  async function renameFolder(folder: ArgusFolder) {
+    const name = window.prompt('Folder name', folder.name);
+    if (!name?.trim()) {
+      return;
+    }
+    const folders = cloudState.folders.map((item) =>
+      item.id === folder.id ? {...item, name: name.trim()} : item);
+    await saveCloudState({...cloudState, folders});
+    setMessage(`${name.trim()} folder saved`);
+  }
+
+  async function deleteFolder(folder: ArgusFolder) {
+    if (!window.confirm(`Delete folder ${folder.name}? Profiles will move to All profiles.`)) {
+      return;
+    }
+    const folders = cloudState.folders.filter((item) => item.id !== folder.id);
+    const profiles = cloudState.profiles.map((profile) =>
+      profile.folder_id === folder.id ? {...profile, folder_id: null} : profile);
+    await saveCloudState({...cloudState, folders, profiles});
+    setSelectedFolderId('');
+    setMessage(`${folder.name} folder deleted`);
   }
 
   async function saveProfileDraft() {
@@ -640,6 +834,7 @@ function App() {
         screen: profileDraft.fingerprint_screen,
         cpu_cores: numberOrNull(profileDraft.fingerprint_cpu_cores),
         memory_gb: numberOrNull(profileDraft.fingerprint_memory_gb),
+        rotate_on_launch: profileDraft.fingerprint_rotate,
       },
       created_at: profileDraft.id ?
         cloudState.profiles.find((item) => item.id === profileDraft.id)?.created_at :
@@ -689,6 +884,30 @@ function App() {
           .join(' ')
           .toLowerCase()
           .includes(query));
+  }
+
+  async function createProxyFromProfileLink() {
+    if (!profileDraft) {
+      return;
+    }
+    const parsed = parseProxyLink(profileDraft.proxy_link);
+    if (!parsed) {
+      setMessage('Proxy link is invalid. Use socks5://user:pass@host:port or host:port:user:pass');
+      return;
+    }
+    const proxy: ArgusProxy = {
+      id: globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+      name: `${parsed.host}:${parsed.port}`,
+      ...parsed,
+    };
+    await saveCloudState({...cloudState, proxies: [...cloudState.proxies, proxy]});
+    setProfileDraft({
+      ...profileDraft,
+      proxy_id: proxy.id,
+      proxy_link: '',
+      proxy_search: proxy.host,
+    });
+    setMessage(`${proxy.name} proxy created and assigned`);
   }
 
   function openNewProxy() {
@@ -821,6 +1040,26 @@ function App() {
   function renderProfilesTab() {
     return (
       <>
+        <section className="folder-bar">
+          <button
+            className={selectedFolderId ? 'ghost' : ''}
+            onClick={() => setSelectedFolderId('')}
+          >
+            All profiles
+          </button>
+          {cloudState.folders.map((folder) => (
+            <div className={selectedFolderId === folder.id ? 'folder-chip active' : 'folder-chip'} key={folder.id}>
+              <button onClick={() => setSelectedFolderId(folder.id)}>{folder.name}</button>
+              <button className="icon-button" aria-label={`Rename ${folder.name}`} onClick={() => renameFolder(folder)}>
+                <Pencil size={14} />
+              </button>
+              <button className="icon-button danger-icon" aria-label={`Delete ${folder.name}`} onClick={() => deleteFolder(folder)}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
+        </section>
         <section className="table-wrap">
           <table>
             <thead>
@@ -828,14 +1067,16 @@ function App() {
                 <th>Name</th>
                 <th>Status</th>
                 <th>Created</th>
+                <th>Folder</th>
                 <th>Proxy</th>
                 <th>Tags</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {cloudState.profiles.map((profile) => {
+              {visibleProfiles().map((profile) => {
                 const proxy = proxyFor(profile);
+                const folder = folderFor(profile);
                 return (
                   <tr key={profile.id} className={profile.id === selectedId ? 'selected' : ''} onClick={() => setSelectedId(profile.id)}>
                     <td>
@@ -855,6 +1096,7 @@ function App() {
                       </select>
                     </td>
                     <td>{profile.created_at?.slice(0, 10) || '-'}</td>
+                    <td>{folder?.name || 'All profiles'}</td>
                     <td>{proxy ? `${proxy.host}:${proxy.port}` : 'Direct'}</td>
                     <td>{profile.tags?.join(', ') || '-'}</td>
                     <td>
@@ -874,6 +1116,13 @@ function App() {
                   </tr>
                 );
               })}
+              {visibleProfiles().length === 0 && (
+                <tr>
+                  <td colSpan={7}>
+                    <span className="empty-state">No profiles in this folder.</span>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </section>
@@ -1160,15 +1409,27 @@ function App() {
                       </option>
                     ))}
                   </select>
+                  <div className="inline-action">
+                    <input
+                      placeholder="socks5://user:pass@host:port"
+                      value={profileDraft.proxy_link}
+                      onChange={(event) => setProfileDraft({...profileDraft, proxy_link: event.target.value})}
+                    />
+                    <button type="button" onClick={createProxyFromProfileLink}>Create</button>
+                  </div>
                 </div>
               </label>
               <label className="field">
                 <span>Folder</span>
-                <input
-                  placeholder="All profiles"
+                <select
                   value={profileDraft.folder_id}
                   onChange={(event) => setProfileDraft({...profileDraft, folder_id: event.target.value})}
-                />
+                >
+                  <option value="">All profiles</option>
+                  {cloudState.folders.map((folder) => (
+                    <option value={folder.id} key={folder.id}>{folder.name}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>Color</span>
@@ -1209,6 +1470,13 @@ function App() {
                 <div>
                   <h3>Fingerprint</h3>
                   <p>Profile-level browser identity settings stored with cloud data.</p>
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+                  >
+                    Rotate fingerprint
+                  </button>
                 </div>
                 <label className="field">
                   <span>Operating system</span>
@@ -1330,6 +1598,14 @@ function App() {
                     value={profileDraft.fingerprint_memory_gb}
                     onChange={(event) => setProfileDraft({...profileDraft, fingerprint_memory_gb: event.target.value.replace(/[^\d]/g, '')})}
                   />
+                </label>
+                <label className="check-field wide">
+                  <input
+                    checked={profileDraft.fingerprint_rotate}
+                    type="checkbox"
+                    onChange={(event) => setProfileDraft({...profileDraft, fingerprint_rotate: event.target.checked})}
+                  />
+                  <span>Rotate fingerprint on each browser launch</span>
                 </label>
               </section>
               <label className="field wide">

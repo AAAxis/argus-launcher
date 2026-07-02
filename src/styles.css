@@ -214,6 +214,37 @@ nav button.active {
   border-radius: 10px;
 }
 
+.folder-bar {
+  align-items: center;
+  background: white;
+  border: 1px solid #ded8cc;
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+}
+
+.folder-chip {
+  align-items: center;
+  background: #f0ede7;
+  border-radius: 9px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.folder-chip.active {
+  box-shadow: 0 0 0 2px #171613 inset;
+}
+
+.folder-chip > button:first-child {
+  background: transparent;
+  color: #1e1d1a;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
@@ -677,6 +708,12 @@ textarea {
   gap: 8px;
 }
 
+.inline-action {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .form-section {
   background: #fff;
   border: 1px solid #ded8cc;
@@ -698,7 +735,15 @@ textarea {
 }
 
 .form-section > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 12px;
   grid-column: 1 / -1;
+  justify-content: space-between;
+}
+
+.form-section > div:first-child p {
+  flex: 1;
 }
 
 .color-row {
@@ -734,4 +779,20 @@ textarea {
 
 .modal-actions .danger {
   margin-right: auto;
+}
+
+.check-field {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.check-field input {
+  height: 18px;
+  width: 18px;
+}
+
+.check-field span {
+  color: #1e1d1a;
+  font-weight: 800;
 }

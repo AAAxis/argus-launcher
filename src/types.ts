@@ -23,7 +23,14 @@ export type ArgusProfile = {
     screen?: string;
     cpu_cores?: number | null;
     memory_gb?: number | null;
+    rotate_on_launch?: boolean;
   };
+  created_at?: string;
+};
+
+export type ArgusFolder = {
+  id: string;
+  name: string;
   created_at?: string;
 };
 
@@ -51,6 +58,7 @@ export type SharedBookmark = {
 
 export type CloudState = {
   profiles: ArgusProfile[];
+  folders: ArgusFolder[];
   proxies: ArgusProxy[];
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];
