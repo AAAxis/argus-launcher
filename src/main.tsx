@@ -149,7 +149,7 @@ const defaultState: CloudState = {
 
 const profileStatuses = ['Ready', 'Active', 'Warmup', 'Ban', 'Review'];
 const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
-const osPresets = ['macOS', 'Windows', 'Linux', 'Android'];
+const osPresets = ['Windows 10', 'Windows 11', 'macOS', 'Ubuntu'];
 const browserVersionPresets = ['Auto', 'Chrome 126', 'Chrome 125', 'Chrome 124'];
 const languagePresets = ['en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;q=0.8'];
 const timezonePresets = ['Auto from proxy', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Asia/Jerusalem'];
@@ -276,7 +276,7 @@ function newProfileDraft(): ProfileDraft {
     tags: '',
     start_url: '',
     command_line_switches: '',
-    fingerprint_os: 'macOS',
+    fingerprint_os: 'Windows 11',
     fingerprint_browser_version: 'Auto',
     fingerprint_user_agent: '',
     fingerprint_language: languagePresets[0],
@@ -308,7 +308,7 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     tags: profile.tags?.join(', ') || '',
     start_url: profile.start_url || '',
     command_line_switches: profile.command_line_switches || '',
-    fingerprint_os: fingerprint.os || 'macOS',
+    fingerprint_os: normalizeOsPreset(fingerprint.os),
     fingerprint_browser_version: fingerprint.browser_version || 'Auto',
     fingerprint_user_agent: fingerprint.user_agent || '',
     fingerprint_language: fingerprint.language || languagePresets[0],
@@ -335,6 +335,16 @@ function tagsFromDraft(value: string) {
 function numberOrNull(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeOsPreset(value?: string) {
+  if (value === 'Windows') {
+    return 'Windows 11';
+  }
+  if (value === 'Linux' || value === 'Android') {
+    return 'Ubuntu';
+  }
+  return value && osPresets.includes(value) ? value : 'macOS';
 }
 
 function randomChoice<T>(items: T[]) {
@@ -427,6 +437,9 @@ function fingerprintSwitches(profile: ArgusProfile) {
     return '';
   }
   const switches = [];
+  if (fingerprint.os) {
+    switches.push(`--argys-fingerprint-os=${fingerprint.os}`);
+  }
   if (fingerprint.user_agent) {
     switches.push(`--user-agent=${fingerprint.user_agent}`);
   }
