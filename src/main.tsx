@@ -135,16 +135,22 @@ function App() {
       setMessage('Native launcher bridge is not available');
       return;
     }
-    const result = await native.launchProfile({
-      id: profile.id,
-      name: profile.name,
-      userDataDir: profileDataDir(profile.id),
-      proxy: proxyFor(profile),
-      extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
-      commandLineSwitches: profile.command_line_switches || '',
-      startUrl: profile.start_url || 'chrome://argus-newtab',
-    });
-    setMessage(result.ok ? `Started browser pid ${result.pid}` : 'Launch failed');
+    try {
+      const result = await native.launchProfile({
+        id: profile.id,
+        name: profile.name,
+        userDataDir: profileDataDir(profile.id),
+        proxy: proxyFor(profile),
+        extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
+        commandLineSwitches: profile.command_line_switches || '',
+        startUrl: profile.start_url || 'chrome://argus-newtab',
+      });
+      setMessage(result.ok ?
+        `Started browser pid ${result.pid} from ${result.appPath || 'browser app'}` :
+        result.error || 'Launch failed');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function updateProfile(profile: ArgusProfile, patch: Partial<ArgusProfile>) {

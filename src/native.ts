@@ -18,7 +18,12 @@ export type LaunchProfilePayload = {
 };
 
 type ArgusNative = {
-  launchProfile(payload: LaunchProfilePayload): Promise<{ok: boolean; pid: number}>;
+  launchProfile(payload: LaunchProfilePayload): Promise<{
+    ok: boolean;
+    pid?: number;
+    appPath?: string;
+    error?: string;
+  }>;
   getBrowserPath(): Promise<string>;
   setBrowserPath(browserAppPath: string): Promise<string>;
 };

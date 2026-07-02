@@ -28,6 +28,17 @@ function browserAppPath() {
     '/Applications/Argys Browser.app';
 }
 
+function browserAppCandidates(preferredAppPath) {
+  const candidates = [
+    preferredAppPath,
+    '/Applications/Argys Browser.app',
+    '/Applications/Argus.app',
+    path.join(app.getPath('home'), 'Desktop/Argus.app'),
+    path.join(app.getPath('home'), 'argus-browser/out/Release-dmg/Argus.app'),
+  ];
+  return [...new Set(candidates.filter(Boolean))];
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     title: 'Argys Anty',
@@ -66,6 +77,16 @@ function appExecutable(appPath) {
   return appPath;
 }
 
+function resolveBrowserExecutable() {
+  for (const appPath of browserAppCandidates(browserAppPath())) {
+    const executable = appExecutable(appPath);
+    if (fs.existsSync(executable)) {
+      return {appPath, executable};
+    }
+  }
+  return null;
+}
+
 function splitSwitches(raw) {
   if (!raw) {
     return [];
@@ -90,7 +111,15 @@ function proxyArgs(proxy) {
 }
 
 ipcMain.handle('argus:launch-profile', async (_event, payload) => {
-  const executable = appExecutable(browserAppPath());
+  const resolved = resolveBrowserExecutable();
+  if (!resolved) {
+    return {
+      ok: false,
+      error:
+        'Argys Browser is not installed. Set the browser app path or install /Applications/Argys Browser.app.',
+    };
+  }
+  const executable = resolved.executable;
   const extensionPaths = payload.extensionPaths || [];
   const args = [
     '--argus-profile-launch',
@@ -103,12 +132,19 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
     payload.startUrl || 'chrome://argus-newtab',
   ];
 
-  const child = spawn(executable, args, {
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
-  return {ok: true, pid: child.pid || 0};
+  try {
+    const child = spawn(executable, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return {ok: true, pid: child.pid || 0, appPath: resolved.appPath};
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 ipcMain.handle('argus:get-browser-path', async () => {
