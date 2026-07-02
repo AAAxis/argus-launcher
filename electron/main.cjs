@@ -42,7 +42,7 @@ function createWindow() {
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
-  if (!app.isPackaged) {
+  if (process.env.ARGUS_LAUNCHER_DEV === '1') {
     void win.loadURL(devUrl);
   } else {
     void win.loadFile(path.join(__dirname, '../dist/index.html'));
