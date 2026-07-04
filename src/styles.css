@@ -995,6 +995,23 @@ textarea {
   width: min(520px, calc(100vw - 56px));
 }
 
+.error-modal {
+  border-color: var(--danger);
+}
+
+.error-modal h2 {
+  color: var(--danger);
+}
+
+.error-detail {
+  background: var(--danger-bg);
+  border-radius: 8px;
+  color: var(--ink);
+  line-height: 1.5;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+}
+
 .profile-modal.fingerprint-modal {
   max-width: 920px;
   width: min(920px, calc(100vw - 56px));

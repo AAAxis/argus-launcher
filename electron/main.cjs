@@ -109,6 +109,10 @@ function browserAppCandidates(preferredAppPath) {
   const candidates = [
     preferredAppPath,
     '/Applications/Argys Browser.app',
+    // The DMG's staged bundle is named "Argus.app" (matches its internal
+    // CFBundleName), so a drag-to-Applications install lands here instead of
+    // the "Argys Browser" name the launcher defaulted to.
+    '/Applications/Argus.app',
   ];
   return [...new Set(candidates.filter(Boolean))];
 }

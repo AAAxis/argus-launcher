@@ -772,6 +772,7 @@ function App() {
   const [password, setPassword] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
   const [message, setMessage] = useState('');
+  const [errorDialog, setErrorDialog] = useState<{title: string; detail: string} | null>(null);
   const [appBooting, setAppBooting] = useState(true);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
@@ -1155,15 +1156,24 @@ function App() {
       ].filter(Boolean).join('\n');
       const selectedProxy = proxyFor(launchProfile);
       if (!selectedProxy?.host || !selectedProxy.port) {
-        setMessage(`Proxy for ${launchProfile.name} is invalid. Fix host and port before launch.`);
+        setErrorDialog({
+          title: 'Launch blocked',
+          detail: `Proxy for ${launchProfile.name} is invalid. Fix host and port before launch.`,
+        });
         return;
       }
       if (!selectedProxy.checked_at) {
-        setMessage(`Proxy for ${launchProfile.name} is still checking. Launch is blocked until proxy check succeeds.`);
+        setErrorDialog({
+          title: 'Launch blocked',
+          detail: `Proxy for ${launchProfile.name} is still checking. Launch is blocked until proxy check succeeds.`,
+        });
         return;
       }
       if (selectedProxy.check_error) {
-        setMessage(`Proxy for ${launchProfile.name} failed check: ${selectedProxy.check_error}`);
+        setErrorDialog({
+          title: 'Launch blocked',
+          detail: `Proxy for ${launchProfile.name} failed its last check: ${selectedProxy.check_error}`,
+        });
         return;
       }
       const result = await native.launchProfile({
@@ -1179,11 +1189,16 @@ function App() {
         homeHtml: anonymousHomeHtml(launchProfile, cloudState.shared_bookmarks),
         cookieImportPath: launchProfile.cookie_import_path || null,
       });
-      setMessage(result.ok ?
-        `Opened ${result.launcherAppPath || 'profile app'}` :
-        result.error || 'Launch failed');
+      if (result.ok) {
+        setMessage(`Opened ${result.launcherAppPath || 'profile app'}`);
+      } else {
+        setErrorDialog({title: `Couldn't launch ${launchProfile.name}`, detail: result.error || 'Launch failed for an unknown reason.'});
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      setErrorDialog({
+        title: `Couldn't launch ${profile.name}`,
+        detail: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -3168,6 +3183,24 @@ function App() {
               )}
               <button className="ghost" onClick={() => setBookmarkDraft(null)}>Cancel</button>
               <button onClick={saveBookmarkDraft}>{bookmarkDraft.originalUrl ? 'Save changes' : 'Add bookmark'}</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {errorDialog && (
+        <div className="modal-backdrop" onMouseDown={() => setErrorDialog(null)}>
+          <section className="profile-modal small-modal error-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h2>{errorDialog.title}</h2>
+              </div>
+              <button className="icon-button" aria-label="Close" onClick={() => setErrorDialog(null)}><X size={18} /></button>
+            </header>
+            <p className="error-detail">{errorDialog.detail}</p>
+            <footer className="modal-actions">
+              <button className="ghost" onClick={() => navigator.clipboard.writeText(errorDialog.detail)}>Copy error</button>
+              <button onClick={() => setErrorDialog(null)}>Close</button>
             </footer>
           </section>
         </div>
