@@ -356,66 +356,80 @@ function proxyUrl(proxy) {
   return `${scheme}://${proxy.host}:${proxy.port}`;
 }
 
-function checkProxy(proxy) {
-  if (!proxy?.host || !proxy.port) {
-    return {ok: false, error: 'Proxy host and port are required'};
-  }
-  const started = Date.now();
-  const endpoints = [
-    'http://ip-api.com/json/',
-    'https://ipapi.co/json/',
-    'https://ipinfo.io/json',
-  ];
-  const errors = [];
-
-  for (const endpoint of endpoints) {
+// Runs one curl attempt against `endpoint` through the proxy and resolves to a
+// normalized result -- never rejects, so Promise.allSettled/race logic upstream
+// doesn't need try/catch around each attempt.
+function checkProxyEndpoint(proxy, endpoint) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
     const args = [
       '--silent',
       '--show-error',
       '--location',
-      '--max-time',
-      '20',
-      '--proxy',
-      proxyUrl(proxy),
+      // Separate connect-timeout from total max-time: a proxy that's simply
+      // dead/unreachable fails fast (6s) instead of waiting out the full
+      // budget every other slow-but-alive endpoint gets (10s).
+      '--connect-timeout', '6',
+      '--max-time', '10',
+      '--proxy', proxyUrl(proxy),
     ];
     if (proxy.username || proxy.password) {
       args.push('--proxy-user', `${proxy.username || ''}:${proxy.password || ''}`);
     }
     args.push(endpoint);
-    const result = spawnSync('/usr/bin/curl', args, {
-      encoding: 'utf8',
-      maxBuffer: 1024 * 1024,
+    const child = spawn('/usr/bin/curl', args);
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => {
+      resolve({ok: false, endpoint, error: error.message});
     });
-    const pingMs = Date.now() - started;
-    if (result.status !== 0) {
-      errors.push((result.stderr || result.stdout || `Proxy check failed at ${endpoint}`).trim());
-      continue;
-    }
-    try {
-      const data = JSON.parse(result.stdout);
-      if (data.error || data.status === 'fail') {
-        errors.push(data.reason || data.message || `Proxy lookup failed at ${endpoint}`);
-        continue;
+    child.on('close', (code) => {
+      const pingMs = Date.now() - startedAt;
+      if (code !== 0) {
+        resolve({ok: false, endpoint, error: (stderr || stdout || `curl exited ${code}`).trim()});
+        return;
       }
-      const country = data.country_name || data.countryName || data.country;
-      const countryCode = data.country_code || data.countryCode ||
-        (typeof data.country === 'string' && data.country.length === 2 ? data.country : undefined);
-      return {
-        ok: true,
-        ip: data.ip || data.query,
-        country,
-        countryCode,
-        pingMs,
-      };
-    } catch {
-      errors.push(`Proxy check returned invalid JSON at ${endpoint}`);
-    }
-  }
+      try {
+        const data = JSON.parse(stdout);
+        if (data.error || data.status === 'fail') {
+          resolve({ok: false, endpoint, error: data.reason || data.message || `Lookup failed at ${endpoint}`});
+          return;
+        }
+        const country = data.country_name || data.countryName || data.country;
+        const countryCode = data.country_code || data.countryCode ||
+          (typeof data.country === 'string' && data.country.length === 2 ? data.country : undefined);
+        resolve({ok: true, endpoint, ip: data.ip || data.query, country, countryCode, pingMs});
+      } catch {
+        resolve({ok: false, endpoint, error: `Invalid response from ${endpoint}`});
+      }
+    });
+  });
+}
 
+async function checkProxy(proxy) {
+  if (!proxy?.host || !proxy.port) {
+    return {ok: false, error: 'Proxy host and port are required'};
+  }
+  const started = Date.now();
+  // Queried concurrently (not one-by-one) so a single slow/rate-limited/
+  // blocked geolocation service doesn't stall or fail the whole check --
+  // the fastest successful response wins.
+  const endpoints = [
+    'https://ipapi.co/json/',
+    'https://ipinfo.io/json',
+    'http://ip-api.com/json/',
+  ];
+  const results = await Promise.all(endpoints.map((endpoint) => checkProxyEndpoint(proxy, endpoint)));
+  const success = results.find((result) => result.ok);
+  if (success) {
+    return {ok: true, ip: success.ip, country: success.country, countryCode: success.countryCode, pingMs: success.pingMs};
+  }
   return {
     ok: false,
     pingMs: Date.now() - started,
-    error: errors.filter(Boolean).join(' · ') || 'Proxy check failed',
+    error: results.map((result) => result.error).filter(Boolean).join(' · ') || 'Proxy check failed',
   };
 }
 

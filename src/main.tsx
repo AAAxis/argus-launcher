@@ -781,6 +781,7 @@ function App() {
   const [profileStatusFilter, setProfileStatusFilter] = useState('');
   const [profilePageSize, setProfilePageSize] = useState(25);
   const [profilePage, setProfilePage] = useState(0);
+  const [proxySearch, setProxySearch] = useState('');
   const [proxyPageSize, setProxyPageSize] = useState(25);
   const [proxyPage, setProxyPage] = useState(0);
   const [importFile, setImportFile] = useState<{path: string; rows: Record<string, string>[]} | null>(null);
@@ -1119,6 +1120,19 @@ function App() {
     return byStatus.filter((profile) =>
       profile.name?.toLowerCase().includes(query) ||
       profile.tags?.some((tag) => tag.toLowerCase().includes(query)));
+  }
+
+  function visibleProxies() {
+    const query = proxySearch.trim().toLowerCase();
+    if (!query) {
+      return cloudState.proxies;
+    }
+    return cloudState.proxies.filter((proxy) =>
+      [proxy.name, proxy.host, proxy.country, proxy.country_code, proxy.type]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(query));
   }
 
   async function launch(profile: ArgusProfile) {
@@ -1763,11 +1777,13 @@ function App() {
     });
   }
 
-  function toggleSelectAllProxies() {
-    setSelectedProxyIds((current) =>
-      current.size === cloudState.proxies.length ?
-        new Set() :
-        new Set(cloudState.proxies.map((proxy) => proxy.id)));
+  function toggleSelectAllProxies(list: ArgusProxy[]) {
+    setSelectedProxyIds((current) => {
+      const allChecked = list.length > 0 && list.every((proxy) => current.has(proxy.id));
+      const next = new Set(current);
+      list.forEach((proxy) => (allChecked ? next.delete(proxy.id) : next.add(proxy.id)));
+      return next;
+    });
   }
 
   async function deleteSelectedProxies() {
@@ -2208,35 +2224,44 @@ function App() {
   }
 
   function renderProxiesTab() {
-    const allSelected = cloudState.proxies.length > 0 &&
-      cloudState.proxies.every((proxy) => selectedProxyIds.has(proxy.id));
+    const visible = visibleProxies();
+    const allSelected = visible.length > 0 &&
+      visible.every((proxy) => selectedProxyIds.has(proxy.id));
     const {items: pageProxies, page: clampedProxyPage, totalPages: proxyTotalPages, total: proxyTotal} =
-      paginate(cloudState.proxies, proxyPage, proxyPageSize);
+      paginate(visible, proxyPage, proxyPageSize);
     return (
       <>
-        {cloudState.proxies.length > 0 && (
-          <section className="selection-toolbar">
+        <section className="table-toolbar">
+          {cloudState.proxies.length > 0 && (
             <label className="check-field">
-              <input type="checkbox" checked={allSelected} onChange={toggleSelectAllProxies} />
+              <input type="checkbox" checked={allSelected} onChange={() => toggleSelectAllProxies(visible)} />
               <span>{selectedProxyIds.size > 0 ? `${selectedProxyIds.size} selected` : 'Select all'}</span>
             </label>
+          )}
+          <input
+            type="text"
+            value={proxySearch}
+            onChange={(event) => setProxySearch(event.target.value)}
+            placeholder="Search proxies by name, host, or country"
+          />
+          {visible.length > 0 && (
+            <button className="ghost" onClick={() => exportProxiesToCsv(visible)}>
+              <Download size={16} /> Export all
+            </button>
+          )}
+        </section>
+        {selectedProxyIds.size > 0 && (
+          <section className="selection-toolbar">
             <div className="selection-toolbar-actions">
-              {selectedProxyIds.size > 0 && (
-                <button
-                  className="ghost"
-                  onClick={() => exportProxiesToCsv(cloudState.proxies.filter((proxy) => selectedProxyIds.has(proxy.id)))}
-                >
-                  <Download size={16} /> Export selected
-                </button>
-              )}
-              <button className="ghost" onClick={() => exportProxiesToCsv(cloudState.proxies)}>
-                <Download size={16} /> Export all
+              <button
+                className="ghost"
+                onClick={() => exportProxiesToCsv(cloudState.proxies.filter((proxy) => selectedProxyIds.has(proxy.id)))}
+              >
+                <Download size={16} /> Export selected
               </button>
-              {selectedProxyIds.size > 0 && (
-                <button className="danger ghost" onClick={deleteSelectedProxies}>
-                  <Trash2 size={16} /> Delete selected
-                </button>
-              )}
+              <button className="danger ghost" onClick={deleteSelectedProxies}>
+                <Trash2 size={16} /> Delete selected
+              </button>
             </div>
           </section>
         )}
@@ -2275,7 +2300,11 @@ function App() {
               </div>
             </article>
           ))}
-          {cloudState.proxies.length === 0 && <p className="empty-state">No proxies loaded.</p>}
+          {pageProxies.length === 0 && (
+            <p className="empty-state">
+              {proxySearch.trim() ? 'No proxies match your search.' : 'No proxies loaded.'}
+            </p>
+          )}
         </section>
         <PaginationBar
           page={clampedProxyPage}
