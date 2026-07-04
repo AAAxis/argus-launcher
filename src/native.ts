@@ -46,6 +46,13 @@ type ArgusNative = {
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
   selectExtensionFolder?(): Promise<string | null>;
   selectCookieFile?(): Promise<CookieFileSelection | null>;
+  selectCookieFolder?(): Promise<string | null>;
+  matchCookieFiles?(
+    folderPath: string,
+    profileNames: string[],
+  ): Promise<Record<string, CookieFileSelection | null>>;
+  saveTextFile?(defaultName: string, content: string): Promise<string | null>;
+  selectImportCsv?(): Promise<{path: string; content: string} | null>;
 };
 
 declare global {

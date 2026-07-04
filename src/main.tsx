@@ -1,12 +1,12 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Pencil, Plus, Play, Shield, Trash2, X} from 'lucide-react';
+import {Cookie, Download, Pencil, Plus, Play, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
 import {supabase} from './supabase';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
 
-type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api';
+type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api' | 'import';
 
 type ApiEndpoint = {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -83,6 +83,7 @@ const tabs: Array<{id: TabId; label: string}> = [
   {id: 'bookmarks', label: 'Bookmarks'},
   {id: 'extensions', label: 'Extensions'},
   {id: 'api', label: 'API'},
+  {id: 'import', label: 'Import'},
 ];
 
 const API_BASE_URL = 'http://127.0.0.1:39217';
@@ -414,6 +415,115 @@ function numberOrNull(value: string) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+type ImportResult = {
+  created: number;
+  updated: number;
+  proxiesCreated: number;
+  proxiesReused: number;
+  foldersCreated: number;
+  skipped: Array<{name: string; reason: string}>;
+};
+
+// Minimal RFC 4180 CSV parser: handles quoted fields, embedded commas/newlines,
+// and doubled "" quote-escaping, which the profile inventory export relies on
+// (user-agent strings, HTML notes, cookie-name lists all contain commas).
+function parseCsv(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let field = '';
+  let row: string[] = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') {
+        i++;
+      }
+      row.push(field);
+      field = '';
+      rows.push(row);
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  const nonEmptyRows = rows.filter((r) => r.some((cell) => cell.trim() !== ''));
+  if (!nonEmptyRows.length) {
+    return [];
+  }
+  const [header, ...body] = nonEmptyRows;
+  return body.map((cells) => {
+    const record: Record<string, string> = {};
+    header.forEach((key, index) => {
+      record[key.trim()] = cells[index] ?? '';
+    });
+    return record;
+  });
+}
+
+// Parses the "<type>://<host>:<port>:<username>:<password>" connection string
+// the browser/inventory tooling embeds in proxy_name (see argus-browser's CSV
+// fix-up), e.g. "socks5://45.192.39.37:63947:Evd8sDYf:pr1Ywfsh".
+function parseProxyConnectionString(raw: string): {
+  type: 'http' | 'socks5';
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+} | null {
+  const match = /^(http|socks5):\/\/([^:]+):(\d+):([^:]*):(.*)$/.exec(raw.trim());
+  if (!match) {
+    return null;
+  }
+  const [, type, host, port, username, password] = match;
+  return {type: type as 'http' | 'socks5', host, port: Number(port), username, password};
+}
+
+function proxyDedupeKey(type: string, host: string, port: number, username: string) {
+  return [type, host, port, username].join('|').toLowerCase();
+}
+
+function csvEscape(value: string) {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+const pageSizeOptions = [25, 50, 100];
+
+// Clamps the requested page into range so a shrinking list (filter/delete)
+// never leaves the view stuck on a now-empty trailing page.
+function paginate<T>(list: T[], page: number, pageSize: number) {
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const start = clampedPage * pageSize;
+  return {
+    items: list.slice(start, start + pageSize),
+    page: clampedPage,
+    totalPages,
+    total: list.length,
+  };
+}
+
 function normalizeOsPreset(value?: string) {
   if (value === 'Windows') {
     return 'Windows 11';
@@ -629,6 +739,34 @@ function LoadingState({label, detail}: {label: string; detail: string}) {
   );
 }
 
+function PaginationBar({page, totalPages, total, pageSize, onPage, onPageSize}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  onPage: (page: number) => void;
+  onPageSize: (size: number) => void;
+}) {
+  if (total === 0) {
+    return null;
+  }
+  const start = page * pageSize + 1;
+  const end = Math.min(total, (page + 1) * pageSize);
+  return (
+    <section className="pagination-bar">
+      <span className="pagination-range">{start}-{end} of {total}</span>
+      <div className="pagination-controls">
+        <select value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}>
+          {pageSizeOptions.map((size) => <option key={size} value={size}>{size} / page</option>)}
+        </select>
+        <button className="ghost" disabled={page <= 0} onClick={() => onPage(page - 1)}>Prev</button>
+        <span className="pagination-page">Page {page + 1} of {totalPages}</span>
+        <button className="ghost" disabled={page >= totalPages - 1} onClick={() => onPage(page + 1)}>Next</button>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
@@ -639,6 +777,15 @@ function App() {
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
+  const [profileSearch, setProfileSearch] = useState('');
+  const [profileStatusFilter, setProfileStatusFilter] = useState('');
+  const [profilePageSize, setProfilePageSize] = useState(25);
+  const [profilePage, setProfilePage] = useState(0);
+  const [proxyPageSize, setProxyPageSize] = useState(25);
+  const [proxyPage, setProxyPage] = useState(0);
+  const [importFile, setImportFile] = useState<{path: string; rows: Record<string, string>[]} | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
   const [apiToken, setApiToken] = useState('argys_api_token');
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
@@ -650,6 +797,8 @@ function App() {
   const [fingerprintEditorOpen, setFingerprintEditorOpen] = useState(false);
   const [proxyPickerFocused, setProxyPickerFocused] = useState(false);
   const [checkingProxyId, setCheckingProxyId] = useState('');
+  const [selectedProxyIds, setSelectedProxyIds] = useState<Set<string>>(new Set());
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
   const proxyChecksInFlight = useRef(new Set<string>());
   const proxyChecksAttempted = useRef(new Set<string>());
 
@@ -829,7 +978,9 @@ function App() {
       if (repaired > 0 || mergedBookmarks.changed) {
         await saveCloudState(repairedState);
       }
-      setMessage(`Loaded ${repairedState.profiles.length} profiles${repaired ? ` · repaired ${repaired} proxy assignments` : ''}${mergedBookmarks.changed ? ' · added social bookmarks' : ''}`);
+      if (repaired > 0 || mergedBookmarks.changed) {
+        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}`);
+      }
     } finally {
       setCloudLoading(false);
     }
@@ -954,9 +1105,20 @@ function App() {
   }
 
   function visibleProfiles() {
-    return selectedFolderId ?
+    const inFolder = selectedFolderId ?
       cloudState.profiles.filter((profile) => profile.folder_id === selectedFolderId) :
       cloudState.profiles;
+    const byStatus = profileStatusFilter ?
+      inFolder.filter((profile) =>
+        (profile.status || 'Ready').toLowerCase() === profileStatusFilter.toLowerCase()) :
+      inFolder;
+    const query = profileSearch.trim().toLowerCase();
+    if (!query) {
+      return byStatus;
+    }
+    return byStatus.filter((profile) =>
+      profile.name?.toLowerCase().includes(query) ||
+      profile.tags?.some((tag) => tag.toLowerCase().includes(query)));
   }
 
   async function launch(profile: ArgusProfile) {
@@ -1175,6 +1337,153 @@ function App() {
     await saveCloudState({...cloudState, profiles});
     setSelectedId(profiles[0]?.id || null);
     setMessage(`${profile.name} deleted`);
+  }
+
+  async function pickImportCsv() {
+    if (!native?.selectImportCsv) {
+      setMessage('Native CSV picker is not available. Restart Argys Anty and try again.');
+      return;
+    }
+    const result = await native.selectImportCsv();
+    if (!result) {
+      return;
+    }
+    const rows = parseCsv(result.content);
+    setImportResult(null);
+    setImportFile({path: result.path, rows});
+  }
+
+  async function runImport() {
+    if (!importFile || !importFile.rows.length) {
+      return;
+    }
+    setImporting(true);
+    try {
+      const profiles = [...cloudState.profiles];
+      const proxies = [...cloudState.proxies];
+      const folders = [...cloudState.folders];
+      const proxyIndexByKey = new Map<string, number>();
+      proxies.forEach((proxy, index) => {
+        proxyIndexByKey.set(proxyDedupeKey(proxy.type || 'http', proxy.host, proxy.port, proxy.username || ''), index);
+      });
+      const folderIdByCsvValue = new Map<string, string>();
+      folders.forEach((folder) => {
+        const match = /^Imported (.+)$/.exec(folder.name);
+        if (match) {
+          folderIdByCsvValue.set(match[1], folder.id);
+        }
+      });
+
+      let created = 0;
+      let updated = 0;
+      let proxiesCreated = 0;
+      let proxiesReused = 0;
+      let foldersCreated = 0;
+      const skipped: Array<{name: string; reason: string}> = [];
+
+      for (const row of importFile.rows) {
+        const name = (row.name || '').trim();
+        if (!name) {
+          skipped.push({name: row.profile_id || '(unnamed)', reason: 'Missing name'});
+          continue;
+        }
+
+        let proxyId: string | null = null;
+        const parsedProxy = parseProxyConnectionString(row.proxy_name || '');
+        if (parsedProxy) {
+          const key = proxyDedupeKey(parsedProxy.type, parsedProxy.host, parsedProxy.port, parsedProxy.username);
+          const existingIndex = proxyIndexByKey.get(key);
+          if (existingIndex !== undefined) {
+            proxyId = proxies[existingIndex].id;
+            proxiesReused++;
+          } else {
+            const proxy: ArgusProxy = {
+              id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${proxies.length}`,
+              name: row.proxy_id ? `${name} proxy` : `${parsedProxy.host}:${parsedProxy.port}`,
+              type: parsedProxy.type,
+              host: parsedProxy.host,
+              port: parsedProxy.port,
+              username: parsedProxy.username || undefined,
+              password: parsedProxy.password || undefined,
+            };
+            proxies.push(proxy);
+            proxyIndexByKey.set(key, proxies.length - 1);
+            proxyId = proxy.id;
+            proxiesCreated++;
+          }
+        } else {
+          skipped.push({name, reason: `Could not parse proxy from "${row.proxy_name || row.proxy_host || 'unknown'}"`});
+        }
+
+        let folderId: string | null = null;
+        const csvFolder = (row.folder || '').trim();
+        if (csvFolder) {
+          const existingFolderId = folderIdByCsvValue.get(csvFolder);
+          if (existingFolderId) {
+            folderId = existingFolderId;
+          } else {
+            const folder: ArgusFolder = {
+              id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${folders.length}`,
+              name: `Imported ${csvFolder}`,
+              created_at: new Date().toISOString(),
+            };
+            folders.push(folder);
+            folderIdByCsvValue.set(csvFolder, folder.id);
+            folderId = folder.id;
+            foldersCreated++;
+          }
+        }
+
+        const importId = (row.profile_id || '').trim() ||
+          globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+        const existingProfileIndex = profiles.findIndex((item) => item.id === importId);
+        const createdAt = Date.parse(row.created_at || '') ?
+          new Date(row.created_at).toISOString() :
+          new Date().toISOString();
+        const profile: ArgusProfile = {
+          id: importId,
+          name,
+          status: row.status_name?.trim() || 'Ready',
+          color: existingProfileIndex >= 0 ? profiles[existingProfileIndex].color : profileColors[1],
+          folder_id: folderId,
+          proxy_id: proxyId,
+          tags: tagsFromDraft(row.tags || ''),
+          start_url: null,
+          cookie_import_path: null,
+          cookie_import_count: null,
+          command_line_switches: null,
+          fingerprint: existingProfileIndex >= 0 ? profiles[existingProfileIndex].fingerprint : {
+            os: 'Windows 11',
+            browser_version: 'Auto',
+            language: languagePresets[0],
+            timezone: 'Auto from proxy',
+            geolocation: 'Ask',
+            webrtc: 'Proxy only',
+            canvas: 'Noise',
+            webgl: 'Noise',
+            screen: 'Auto',
+            cpu_cores: 8,
+            memory_gb: 8,
+            rotate_on_launch: true,
+          },
+          created_at: existingProfileIndex >= 0 ? profiles[existingProfileIndex].created_at : createdAt,
+        };
+        if (existingProfileIndex >= 0) {
+          profiles[existingProfileIndex] = profile;
+          updated++;
+        } else {
+          profiles.push(profile);
+          created++;
+        }
+      }
+
+      await saveCloudState({...cloudState, profiles, proxies, folders});
+      setImportResult({created, updated, proxiesCreated, proxiesReused, foldersCreated, skipped});
+      setMessage(`Imported ${created} new, updated ${updated} profiles`);
+      setImportFile(null);
+    } finally {
+      setImporting(false);
+    }
   }
 
   function filteredProfileProxies() {
@@ -1442,6 +1751,181 @@ function App() {
     setMessage(`${proxy.name || proxy.host} deleted`);
   }
 
+  function toggleProxySelected(proxyId: string) {
+    setSelectedProxyIds((current) => {
+      const next = new Set(current);
+      if (next.has(proxyId)) {
+        next.delete(proxyId);
+      } else {
+        next.add(proxyId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllProxies() {
+    setSelectedProxyIds((current) =>
+      current.size === cloudState.proxies.length ?
+        new Set() :
+        new Set(cloudState.proxies.map((proxy) => proxy.id)));
+  }
+
+  async function deleteSelectedProxies() {
+    if (!selectedProxyIds.size) {
+      return;
+    }
+    const count = selectedProxyIds.size;
+    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'proxy' : 'proxies'}? Profiles using them will fall back to no proxy.`)) {
+      return;
+    }
+    const proxies = cloudState.proxies.filter((item) => !selectedProxyIds.has(item.id));
+    const profiles = cloudState.profiles.map((profile) =>
+      profile.proxy_id && selectedProxyIds.has(profile.proxy_id) ?
+        {...profile, proxy_id: null} :
+        profile);
+    await saveCloudState({...cloudState, proxies, profiles});
+    setMessage(`${count} ${count === 1 ? 'proxy' : 'proxies'} deleted`);
+    setSelectedProxyIds(new Set());
+  }
+
+  async function exportProxiesToCsv(list: ArgusProxy[]) {
+    if (!list.length) {
+      return;
+    }
+    if (!native?.saveTextFile) {
+      setMessage('Native file export is not available. Restart Argys Anty and try again.');
+      return;
+    }
+    const header = ['name', 'type', 'host', 'port', 'username', 'password', 'country', 'country_code'];
+    const lines = [header.join(',')];
+    for (const proxy of list) {
+      lines.push(header.map((key) => csvEscape(String((proxy as unknown as Record<string, unknown>)[key] ?? ''))).join(','));
+    }
+    const csv = lines.join('\n');
+    const savedPath = await native.saveTextFile(`argys-proxies-${Date.now()}.csv`, csv);
+    if (savedPath) {
+      setMessage(`Exported ${list.length} ${list.length === 1 ? 'proxy' : 'proxies'} to ${savedPath.split('/').pop()}`);
+    }
+  }
+
+  function toggleProfileSelected(profileId: string) {
+    setSelectedProfileIds((current) => {
+      const next = new Set(current);
+      if (next.has(profileId)) {
+        next.delete(profileId);
+      } else {
+        next.add(profileId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllProfiles(list: ArgusProfile[]) {
+    setSelectedProfileIds((current) => {
+      const allChecked = list.length > 0 && list.every((profile) => current.has(profile.id));
+      const next = new Set(current);
+      list.forEach((profile) => (allChecked ? next.delete(profile.id) : next.add(profile.id)));
+      return next;
+    });
+  }
+
+  async function deleteSelectedProfiles() {
+    if (!selectedProfileIds.size) {
+      return;
+    }
+    const count = selectedProfileIds.size;
+    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'profile' : 'profiles'}?`)) {
+      return;
+    }
+    const profiles = cloudState.profiles.filter((item) => !selectedProfileIds.has(item.id));
+    await saveCloudState({...cloudState, profiles});
+    setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} deleted`);
+    if (selectedId && selectedProfileIds.has(selectedId)) {
+      setSelectedId(profiles[0]?.id || null);
+    }
+    setSelectedProfileIds(new Set());
+  }
+
+  async function exportProfilesToCsv(list: ArgusProfile[]) {
+    if (!list.length) {
+      return;
+    }
+    if (!native?.saveTextFile) {
+      setMessage('Native file export is not available. Restart Argys Anty and try again.');
+      return;
+    }
+    const header = [
+      'name', 'status', 'folder', 'proxy', 'tags', 'start_url', 'created_at',
+      'os', 'browser_version', 'user_agent', 'language', 'timezone',
+    ];
+    const lines = [header.join(',')];
+    for (const profile of list) {
+      const proxy = proxyFor(profile);
+      const folder = folderFor(profile);
+      const row: Record<string, string> = {
+        name: profile.name || '',
+        status: profile.status || '',
+        folder: folder?.name || '',
+        proxy: proxy ? `${proxy.type || 'http'}://${proxy.host}:${proxy.port}` : '',
+        tags: profile.tags?.join('; ') || '',
+        start_url: profile.start_url || '',
+        created_at: profile.created_at || '',
+        os: profile.fingerprint?.os || '',
+        browser_version: profile.fingerprint?.browser_version || '',
+        user_agent: profile.fingerprint?.user_agent || '',
+        language: profile.fingerprint?.language || '',
+        timezone: profile.fingerprint?.timezone || '',
+      };
+      lines.push(header.map((key) => csvEscape(row[key] ?? '')).join(','));
+    }
+    const csv = lines.join('\n');
+    const savedPath = await native.saveTextFile(`argys-profiles-${Date.now()}.csv`, csv);
+    if (savedPath) {
+      setMessage(`Exported ${list.length} ${list.length === 1 ? 'profile' : 'profiles'} to ${savedPath.split('/').pop()}`);
+    }
+  }
+
+  async function assignSelectedProfilesToFolder(folderId: string) {
+    if (!selectedProfileIds.size) {
+      return;
+    }
+    const nextFolderId = folderId || null;
+    const profiles = cloudState.profiles.map((profile) =>
+      selectedProfileIds.has(profile.id) ? {...profile, folder_id: nextFolderId} : profile);
+    await saveCloudState({...cloudState, profiles});
+    const folderName = nextFolderId ?
+      cloudState.folders.find((folder) => folder.id === nextFolderId)?.name :
+      'All profiles';
+    setMessage(`${selectedProfileIds.size} ${selectedProfileIds.size === 1 ? 'profile' : 'profiles'} moved to ${folderName || 'All profiles'}`);
+  }
+
+  async function importCookiesForSelectedProfiles() {
+    if (!selectedProfileIds.size) {
+      return;
+    }
+    if (!native?.selectCookieFolder || !native?.matchCookieFiles) {
+      setMessage('Native cookie import is not available. Restart Argys Anty and try again.');
+      return;
+    }
+    const folderPath = await native.selectCookieFolder();
+    if (!folderPath) {
+      return;
+    }
+    const selected = cloudState.profiles.filter((profile) => selectedProfileIds.has(profile.id));
+    const matches = await native.matchCookieFiles(folderPath, selected.map((profile) => profile.name));
+    let matched = 0;
+    const profiles = cloudState.profiles.map((profile) => {
+      const match = selectedProfileIds.has(profile.id) ? matches[profile.name] : undefined;
+      if (!match) {
+        return profile;
+      }
+      matched += 1;
+      return {...profile, cookie_import_path: match.path, cookie_import_count: match.count};
+    });
+    await saveCloudState({...cloudState, profiles});
+    setMessage(`Matched cookies for ${matched} of ${selected.length} selected profiles`);
+  }
+
   function openNewBookmark() {
     setActiveTab('bookmarks');
     setBookmarkDraft(newBookmarkDraft());
@@ -1545,6 +2029,11 @@ function App() {
   }
 
   function renderProfilesTab() {
+    const visible = visibleProfiles();
+    const allVisibleSelected = visible.length > 0 &&
+      visible.every((profile) => selectedProfileIds.has(profile.id));
+    const {items: pageProfiles, page: clampedProfilePage, totalPages: profileTotalPages, total: profileTotal} =
+      paginate(visible, profilePage, profilePageSize);
     return (
       <>
         <section className="folder-bar">
@@ -1567,10 +2056,69 @@ function App() {
           ))}
           <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
         </section>
+        <section className="table-toolbar">
+          {visible.length > 0 && (
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={() => toggleSelectAllProfiles(visible)}
+              />
+              <span>{selectedProfileIds.size > 0 ? `${selectedProfileIds.size} selected` : 'Select all'}</span>
+            </label>
+          )}
+          <input
+            type="text"
+            value={profileSearch}
+            onChange={(event) => setProfileSearch(event.target.value)}
+            placeholder="Search profiles by name or tag"
+          />
+          <select
+            value={profileStatusFilter}
+            onChange={(event) => setProfileStatusFilter(event.target.value)}
+          >
+            <option value="">All statuses</option>
+            {profileStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+          </select>
+          {visible.length > 0 && (
+            <button className="ghost" onClick={() => exportProfilesToCsv(visible)}>
+              <Download size={16} /> Export all
+            </button>
+          )}
+        </section>
+        {selectedProfileIds.size > 0 && (
+          <section className="selection-toolbar">
+            <div className="selection-toolbar-actions">
+              <select
+                value=""
+                onChange={(event) => void assignSelectedProfilesToFolder(event.target.value)}
+              >
+                <option value="" disabled>Assign to folder…</option>
+                <option value="">All profiles</option>
+                {cloudState.folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>{folder.name}</option>
+                ))}
+              </select>
+              <button className="ghost" onClick={importCookiesForSelectedProfiles}>
+                <Cookie size={16} /> Import cookies
+              </button>
+              <button
+                className="ghost"
+                onClick={() => exportProfilesToCsv(cloudState.profiles.filter((profile) => selectedProfileIds.has(profile.id)))}
+              >
+                <Download size={16} /> Export selected
+              </button>
+              <button className="danger ghost" onClick={deleteSelectedProfiles}>
+                <Trash2 size={16} /> Delete selected
+              </button>
+            </div>
+          </section>
+        )}
         <section className="table-wrap">
           <table>
             <thead>
               <tr>
+                <th />
                 <th>Name</th>
                 <th>Status</th>
                 <th>Created</th>
@@ -1581,12 +2129,23 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {visibleProfiles().map((profile) => {
+              {pageProfiles.map((profile) => {
                 const proxy = proxyFor(profile);
                 const folder = folderFor(profile);
+                const rowClass = [
+                  profile.id === selectedId ? 'selected' : '',
+                  selectedProfileIds.has(profile.id) ? 'row-checked' : '',
+                ].filter(Boolean).join(' ');
                 return (
-                  <tr key={profile.id} className={profile.id === selectedId ? 'selected' : ''} onClick={() => setSelectedId(profile.id)}>
-                    <td>
+                  <tr key={profile.id} className={rowClass} onClick={() => setSelectedId(profile.id)}>
+                    <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedProfileIds.has(profile.id)}
+                        onChange={() => toggleProfileSelected(profile.id)}
+                      />
+                    </td>
+                    <td className="name-cell">
                       <span className="avatar" style={{background: profile.color || '#2563eb'}}>
                         {initials(profile.name)}
                       </span>
@@ -1622,52 +2181,111 @@ function App() {
                   </tr>
                 );
               })}
-              {visibleProfiles().length === 0 && (
+              {pageProfiles.length === 0 && (
                 <tr>
-                  <td colSpan={7}>
-                    <span className="empty-state">No profiles in this folder.</span>
+                  <td colSpan={8}>
+                    <span className="empty-state">
+                      {profileSearch.trim() || profileStatusFilter ?
+                        'No profiles match your search/filter.' :
+                        'No profiles in this folder.'}
+                    </span>
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </section>
+        <PaginationBar
+          page={clampedProfilePage}
+          totalPages={profileTotalPages}
+          total={profileTotal}
+          pageSize={profilePageSize}
+          onPage={setProfilePage}
+          onPageSize={(size) => { setProfilePageSize(size); setProfilePage(0); }}
+        />
       </>
     );
   }
 
   function renderProxiesTab() {
+    const allSelected = cloudState.proxies.length > 0 &&
+      cloudState.proxies.every((proxy) => selectedProxyIds.has(proxy.id));
+    const {items: pageProxies, page: clampedProxyPage, totalPages: proxyTotalPages, total: proxyTotal} =
+      paginate(cloudState.proxies, proxyPage, proxyPageSize);
     return (
-      <section className="card-grid">
-        {cloudState.proxies.map((proxy) => (
-          <article className="data-card" key={proxy.id}>
-            <div className="proxy-card-main">
-              <div className="proxy-title-row">
-                <span className="proxy-flag" title={proxy.country || proxy.country_code || 'Unchecked'}>
-                  {countryFlag(proxy.country_code)}
-                </span>
-                <h2>{proxy.name || proxy.host}</h2>
-              </div>
-              <p>{proxy.type || 'http'} · {proxy.host}:{proxy.port}</p>
-              <p>
-                {proxy.checked_at ? (
-                  proxy.check_error ?
-                    `Check failed · ${proxy.check_error}` :
-                    `${proxy.country || proxy.country_code || 'Unknown'} · ${proxy.egress_ip || 'No IP'} · ${proxy.ping_ms || 0}ms cached`
-                ) : 'Country not checked'}
-              </p>
-            </div>
-            <div className="data-card-actions">
-              <span>{proxy.username ? 'Auth' : 'Open'}</span>
-              {checkingProxyId === proxy.id && <span className="proxy-status">Checking...</span>}
-              <button className="icon-button" aria-label={`Edit ${proxy.name || proxy.host}`} onClick={() => openEditProxy(proxy)}>
-                <Pencil size={16} />
+      <>
+        {cloudState.proxies.length > 0 && (
+          <section className="selection-toolbar">
+            <label className="check-field">
+              <input type="checkbox" checked={allSelected} onChange={toggleSelectAllProxies} />
+              <span>{selectedProxyIds.size > 0 ? `${selectedProxyIds.size} selected` : 'Select all'}</span>
+            </label>
+            <div className="selection-toolbar-actions">
+              {selectedProxyIds.size > 0 && (
+                <button
+                  className="ghost"
+                  onClick={() => exportProxiesToCsv(cloudState.proxies.filter((proxy) => selectedProxyIds.has(proxy.id)))}
+                >
+                  <Download size={16} /> Export selected
+                </button>
+              )}
+              <button className="ghost" onClick={() => exportProxiesToCsv(cloudState.proxies)}>
+                <Download size={16} /> Export all
               </button>
+              {selectedProxyIds.size > 0 && (
+                <button className="danger ghost" onClick={deleteSelectedProxies}>
+                  <Trash2 size={16} /> Delete selected
+                </button>
+              )}
             </div>
-          </article>
-        ))}
-        {cloudState.proxies.length === 0 && <p className="empty-state">No proxies loaded.</p>}
-      </section>
+          </section>
+        )}
+        <section className="card-grid">
+          {pageProxies.map((proxy) => (
+            <article className={selectedProxyIds.has(proxy.id) ? 'data-card proxy-card selected' : 'data-card proxy-card'} key={proxy.id}>
+              <label className="card-select" onClick={(event) => event.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selectedProxyIds.has(proxy.id)}
+                  onChange={() => toggleProxySelected(proxy.id)}
+                />
+              </label>
+              <div className="proxy-card-main">
+                <div className="proxy-title-row">
+                  <span className="proxy-flag" title={proxy.country || proxy.country_code || 'Unchecked'}>
+                    {countryFlag(proxy.country_code)}
+                  </span>
+                  <h2>{proxy.name || proxy.host}</h2>
+                </div>
+                <p>{proxy.type || 'http'} · {proxy.host}:{proxy.port}</p>
+                <p>
+                  {proxy.checked_at ? (
+                    proxy.check_error ?
+                      `Check failed · ${proxy.check_error}` :
+                      `${proxy.country || proxy.country_code || 'Unknown'} · ${proxy.egress_ip || 'No IP'} · ${proxy.ping_ms || 0}ms cached`
+                  ) : 'Country not checked'}
+                </p>
+              </div>
+              <div className="data-card-actions">
+                <span>{proxy.username ? 'Auth' : 'Open'}</span>
+                {checkingProxyId === proxy.id && <span className="proxy-status">Checking...</span>}
+                <button className="icon-button" aria-label={`Edit ${proxy.name || proxy.host}`} onClick={() => openEditProxy(proxy)}>
+                  <Pencil size={16} />
+                </button>
+              </div>
+            </article>
+          ))}
+          {cloudState.proxies.length === 0 && <p className="empty-state">No proxies loaded.</p>}
+        </section>
+        <PaginationBar
+          page={clampedProxyPage}
+          totalPages={proxyTotalPages}
+          total={proxyTotal}
+          pageSize={proxyPageSize}
+          onPage={setProxyPage}
+          onPageSize={(size) => { setProxyPageSize(size); setProxyPage(0); }}
+        />
+      </>
     );
   }
 
@@ -1763,6 +2381,70 @@ function App() {
     );
   }
 
+  function renderImportTab() {
+    return (
+      <section className="panel import-panel">
+        <div className="panel-title">
+          <h2>Mass import profiles</h2>
+        </div>
+        <p>
+          Import profiles in bulk from a Dolphin-style inventory CSV (the same format exported by
+          the profiles-cookie-inventory tooling). Each row's proxy_name must carry the
+          <code>type://host:port:username:password</code> connection string; proxies are matched
+          and reused by host/port/username, and re-importing the same CSV updates existing profiles
+          (matched by profile_id) instead of duplicating them.
+        </p>
+        <div className="import-actions">
+          <button className="ghost" onClick={pickImportCsv}><Upload size={18} /> Choose CSV file</button>
+          {importFile && (
+            <span className="import-file-label">
+              {importFile.path.split('/').pop()} — {importFile.rows.length} row{importFile.rows.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+        {importFile && (
+          <button onClick={runImport} disabled={importing}>
+            {importing ? 'Importing…' : `Import ${importFile.rows.length} profile${importFile.rows.length === 1 ? '' : 's'}`}
+          </button>
+        )}
+        {importResult && (
+          <div className="import-summary">
+            <div className="summary-item">
+              <span>Profiles created</span>
+              <strong>{importResult.created}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Profiles updated</span>
+              <strong>{importResult.updated}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Proxies created</span>
+              <strong>{importResult.proxiesCreated}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Proxies reused</span>
+              <strong>{importResult.proxiesReused}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Folders created</span>
+              <strong>{importResult.foldersCreated}</strong>
+            </div>
+            {importResult.skipped.length > 0 && (
+              <div className="summary-item wide">
+                <span>Skipped ({importResult.skipped.length})</span>
+                <div className="summary-lines">
+                  {importResult.skipped.map((item, index) => (
+                    <i key={index}>{item.name}: {item.reason}</i>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   function renderActiveTab() {
     if (cloudLoading) {
       return <LoadingState label="Loading cloud data" detail="Profiles, proxies, bookmarks, and extensions are syncing." />;
@@ -1776,6 +2458,8 @@ function App() {
         return renderExtensionsTab();
       case 'api':
         return renderApiTab();
+      case 'import':
+        return renderImportTab();
       case 'profiles':
       default:
         return renderProfilesTab();
@@ -1793,6 +2477,7 @@ function App() {
       case 'extensions':
         return <button onClick={addExtension}><Plus size={18} /> Extension</button>;
       case 'api':
+      case 'import':
       default:
         return null;
     }

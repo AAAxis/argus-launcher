@@ -625,7 +625,11 @@ done
   return appPath;
 }
 
-ipcMain.handle('argus:launch-profile', async (_event, payload) => {
+// Shared by the normal launch-profile handler and the Facebook-login-fetch
+// automation: builds the launcher args/app and spawns the browser. `extraArgs`
+// lets the automation path append --remote-debugging-port for CDP without
+// exposing it on ordinary launches.
+function spawnProfile(payload, extraArgs = []) {
   const resolved = resolveBrowserExecutable();
   if (!resolved) {
     return {
@@ -634,7 +638,6 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
         'Argys Browser is not installed. Set the browser app path or install /Applications/Argys Browser.app.',
     };
   }
-  const executable = resolved.executable;
   const extensionPaths = [
     builtInCookieExtensionPath(),
     ...(payload.extensionPaths || []),
@@ -673,6 +676,7 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
     ...(uniqueExtensionPaths.length ? [`--load-extension=${uniqueExtensionPaths.join(',')}`] : []),
     ...switches,
     ...(!hasLangSwitch && language ? [`--lang=${language}`] : []),
+    ...extraArgs,
     launchUrl,
   ];
 
@@ -695,6 +699,10 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+ipcMain.handle('argus:launch-profile', async (_event, payload) => {
+  return spawnProfile(payload);
 });
 
 ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
@@ -727,6 +735,76 @@ ipcMain.handle('argus:select-cookie-file', async () => {
   const filePath = result.filePaths[0];
   const cookies = parseCookieFile(filePath);
   return {path: filePath, count: cookies.length};
+});
+
+ipcMain.handle('argus:select-cookie-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select folder with cookie files',
+    properties: ['openDirectory'],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle('argus:match-cookie-files', async (_event, {folderPath, profileNames}) => {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(folderPath, {withFileTypes: true})
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name);
+  } catch {
+    return {};
+  }
+  const matches = {};
+  for (const name of profileNames) {
+    const needle = name.trim().toLowerCase();
+    const fileName = needle ?
+      entries.find((entry) => entry.toLowerCase().includes(needle)) :
+      undefined;
+    if (!fileName) {
+      matches[name] = null;
+      continue;
+    }
+    const filePath = path.join(folderPath, fileName);
+    try {
+      const cookies = parseCookieFile(filePath);
+      matches[name] = {path: filePath, count: cookies.length};
+    } catch {
+      matches[name] = null;
+    }
+  }
+  return matches;
+});
+
+ipcMain.handle('argus:save-text-file', async (_event, {defaultName, content}) => {
+  const result = await dialog.showSaveDialog({
+    title: 'Export',
+    defaultPath: defaultName,
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  fs.writeFileSync(result.filePath, content, 'utf8');
+  return result.filePath;
+});
+
+ipcMain.handle('argus:select-import-csv', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select profile inventory CSV',
+    properties: ['openFile'],
+    filters: [
+      {name: 'CSV files', extensions: ['csv']},
+      {name: 'All files', extensions: ['*']},
+    ],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+  const filePath = result.filePaths[0];
+  const content = fs.readFileSync(filePath, 'utf8');
+  return {path: filePath, content};
 });
 
 ipcMain.handle('argus:get-browser-path', async () => {
