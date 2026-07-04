@@ -1,0 +1,96 @@
+async function currentTab() {
+  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  return tab || null;
+}
+
+function downloadJson(filename, payload) {
+  const json = JSON.stringify(payload, null, 2);
+  const url = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+  return chrome.downloads.download({url, filename, saveAs: true});
+}
+
+function domainFromUrl(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+async function exportCurrentSiteCookies() {
+  const tab = await currentTab();
+  const domain = tab?.url ? domainFromUrl(tab.url) : '';
+  if (!domain) {
+    return {count: 0};
+  }
+  const cookies = await chrome.cookies.getAll({domain});
+  const safeName = domain.replace(/[^a-z0-9.-]+/gi, '-');
+  await downloadJson(`argys-cookies-${safeName}.json`, {
+    exportedAt: new Date().toISOString(),
+    scope: 'current-site',
+    domain,
+    cookies,
+  });
+  return {count: cookies.length};
+}
+
+function cookieUrl(cookie) {
+  if (cookie.url) {
+    return cookie.url;
+  }
+  const domain = String(cookie.domain || '').replace(/^\./, '');
+  const path = cookie.path || '/';
+  return `${cookie.secure ? 'https' : 'http'}://${domain}${path}`;
+}
+
+async function importCookies(cookies) {
+  let imported = 0;
+  for (const cookie of cookies) {
+    try {
+      const details = {
+        url: cookieUrl(cookie),
+        name: String(cookie.name || ''),
+        value: String(cookie.value ?? ''),
+        path: cookie.path || '/',
+        secure: Boolean(cookie.secure),
+        httpOnly: Boolean(cookie.httpOnly || cookie.http_only),
+        sameSite: cookie.sameSite || cookie.same_site || 'lax',
+      };
+      if (cookie.domain) {
+        details.domain = cookie.domain;
+      }
+      const expirationDate = Number(cookie.expirationDate || cookie.expiration_date || cookie.expires);
+      if (Number.isFinite(expirationDate) && expirationDate > 0) {
+        details.expirationDate = expirationDate > 10000000000 ?
+          Math.floor(expirationDate / 1000) :
+          expirationDate;
+      }
+      if (!details.name || !details.url) {
+        continue;
+      }
+      await chrome.cookies.set(details);
+      imported++;
+    } catch (error) {
+      console.warn('Argys cookie import failed', cookie?.domain, cookie?.name, error);
+    }
+  }
+  return {count: imported};
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  void (async () => {
+    if (message?.type === 'export-current-site-cookies') {
+      sendResponse(await exportCurrentSiteCookies());
+      return;
+    }
+    if (message?.type === 'import-cookies') {
+      const cookies = Array.isArray(message.cookies) ? message.cookies :
+        Array.isArray(message.cookies?.cookies) ? message.cookies.cookies :
+          [];
+      sendResponse(await importCookies(cookies));
+      return;
+    }
+    sendResponse({count: 0});
+  })();
+  return true;
+});

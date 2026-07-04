@@ -7,6 +7,8 @@ export type ArgusProfile = {
   folder_id?: string | null;
   proxy_id?: string | null;
   start_url?: string | null;
+  cookie_import_path?: string | null;
+  cookie_import_count?: number | null;
   command_line_switches?: string | null;
   fingerprint?: {
     os?: string;
@@ -42,6 +44,12 @@ export type ArgusProxy = {
   port: number;
   username?: string;
   password?: string;
+  country?: string;
+  country_code?: string;
+  egress_ip?: string;
+  ping_ms?: number;
+  checked_at?: string;
+  check_error?: string;
 };
 
 export type SharedExtension = {
@@ -62,4 +70,5 @@ export type CloudState = {
   proxies: ArgusProxy[];
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];
+  custom_statuses: string[];
 };

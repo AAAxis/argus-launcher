@@ -14,7 +14,25 @@ export type LaunchProfilePayload = {
   proxy?: ProxyConfig | null;
   extensionPaths?: string[];
   commandLineSwitches?: string;
+  fingerprintTimezone?: string | null;
+  fingerprintLanguage?: string | null;
   startUrl?: string;
+  homeHtml?: string;
+  cookieImportPath?: string | null;
+};
+
+export type CookieFileSelection = {
+  path: string;
+  count: number;
+};
+
+export type ProxyCheckResult = {
+  ok: boolean;
+  ip?: string;
+  country?: string;
+  countryCode?: string;
+  pingMs?: number;
+  error?: string;
 };
 
 type ArgusNative = {
@@ -25,6 +43,9 @@ type ArgusNative = {
     launcherAppPath?: string;
     error?: string;
   }>;
+  checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
+  selectExtensionFolder?(): Promise<string | null>;
+  selectCookieFile?(): Promise<CookieFileSelection | null>;
 };
 
 declare global {

@@ -2,6 +2,9 @@
 
 Standalone manager app for Argys cloud data.
 
+Agent handoff notes live in `AGENTS.md`. Read that file before changing,
+building, or running the app.
+
 This app owns:
 
 - Supabase login/session

@@ -58,6 +58,10 @@ button.danger {
   width: min(420px, calc(100vw - 40px));
 }
 
+.login-panel svg {
+  justify-self: center;
+}
+
 .login-panel input,
 select,
 textarea {
@@ -112,7 +116,7 @@ textarea {
 .app-shell {
   display: grid;
   grid-template-columns: 260px 1fr;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .sidebar {
@@ -120,6 +124,8 @@ textarea {
   border-right: 1px solid #ded8cc;
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
   padding: 28px 18px;
 }
 
@@ -192,6 +198,8 @@ nav button.active {
   display: grid;
   gap: 20px;
   grid-template-rows: auto auto 1fr auto;
+  height: 100vh;
+  overflow-y: auto;
   padding: 32px;
 }
 
@@ -359,6 +367,38 @@ td:last-child {
   align-items: center;
   display: flex;
   gap: 8px;
+}
+
+.proxy-card-main {
+  min-width: 0;
+}
+
+.proxy-title-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.proxy-title-row h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-card .proxy-flag {
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+  font-size: 26px;
+  line-height: 1;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .link-card:hover {
@@ -631,10 +671,24 @@ textarea {
   display: grid;
   gap: 18px;
   max-height: calc(100vh - 56px);
-  max-width: 980px;
+  max-width: 1380px;
   overflow: auto;
   padding: 22px;
-  width: min(980px, calc(100vw - 56px));
+  width: min(1380px, calc(100vw - 56px));
+}
+
+.profile-modal.small-modal {
+  max-width: 520px;
+  width: min(520px, calc(100vw - 56px));
+}
+
+.profile-modal.fingerprint-modal {
+  max-width: 920px;
+  width: min(920px, calc(100vw - 56px));
+}
+
+.nested-backdrop {
+  z-index: 70;
 }
 
 .profile-modal header,
@@ -659,6 +713,105 @@ textarea {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-editor-layout {
+  align-items: start;
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+}
+
+.profile-editor-layout.single {
+  grid-template-columns: minmax(0, 760px);
+}
+
+.profile-editor-main {
+  align-content: start;
+}
+
+.profile-summary {
+  background: #fff;
+  border: 1px solid #eee8dc;
+  border-radius: 12px;
+  display: grid;
+  gap: 18px;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+  padding: 24px;
+  position: sticky;
+  top: 0;
+}
+
+.summary-heading {
+  align-items: center;
+  border-bottom: 1px solid #e8e1d7;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.summary-heading h3 {
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.summary-heading button {
+  color: #2563eb;
+  font-size: 12px;
+  min-height: 34px;
+  text-transform: uppercase;
+}
+
+.summary-list {
+  display: grid;
+  gap: 16px;
+}
+
+.summary-row {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 116px minmax(0, 1fr);
+}
+
+.summary-row strong {
+  color: #1e1d1a;
+  font-weight: 850;
+}
+
+.summary-row span {
+  color: #787169;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.summary-tags em {
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  color: #2563eb;
+  font-size: 12px;
+  font-style: normal;
+  padding: 2px 8px;
+}
+
+.summary-lines {
+  display: grid;
+  gap: 5px;
+}
+
+.summary-lines i {
+  color: #787169;
+  font-style: normal;
+  overflow-wrap: anywhere;
 }
 
 .field {
@@ -714,6 +867,16 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.select-action {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.select-action button {
+  min-height: 42px;
+}
+
 .form-section {
   background: #fff;
   border: 1px solid #ded8cc;
@@ -722,6 +885,50 @@ textarea {
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 14px;
+}
+
+.fingerprint-card {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.fingerprint-card > div:first-child {
+  grid-column: auto;
+}
+
+.fingerprint-section {
+  border: 0;
+  padding: 0;
+}
+
+.compact-section {
+  gap: 12px;
+}
+
+.file-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+}
+
+.file-row > span {
+  color: #716b62;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+  .profile-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-summary {
+    max-height: none;
+    position: static;
+  }
 }
 
 .form-section h3 {
