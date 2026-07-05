@@ -158,6 +158,7 @@ function managedBrowserAppPath() {
   ] : process.platform === 'win32' ? [
     path.join(root, 'Argys Browser.exe'),
     path.join(root, 'Argus.exe'),
+    path.join(root, 'chrome.exe'),
   ] : [
     path.join(root, 'argys-browser'),
   ];
@@ -171,7 +172,7 @@ function managedBrowserAppPath() {
   }
   if (process.platform === 'win32') {
     return findFirstMatching(root, (entryPath, entry) =>
-      entry.isFile() && /arg(us|ys).*browser.*\.exe$/i.test(entry.name));
+      entry.isFile() && /^(arg(us|ys).*browser|chrome)\.exe$/i.test(entry.name));
   }
   return findFirstMatching(root, (entryPath, entry) =>
     entry.isFile() && /arg(us|ys).*browser/i.test(entry.name) && fs.existsSync(entryPath));
