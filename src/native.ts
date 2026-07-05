@@ -78,6 +78,18 @@ export type UpdateState = {
   provider: 'github' | 'generic' | 'disabled';
 };
 
+export type ResourceState = {
+  browserStatus: 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'error';
+  browserVersion: string;
+  browserPath: string;
+  progress: {
+    percent: number;
+    transferred: number;
+    total: number;
+  } | null;
+  error: string | null;
+};
+
 type ArgusNative = {
   launchProfile(payload: LaunchProfilePayload): Promise<{
     ok: boolean;
@@ -96,6 +108,9 @@ type ArgusNative = {
   downloadUpdate?(): Promise<UpdateState>;
   installUpdate?(): Promise<{ok: boolean; error?: string}>;
   onUpdateState?(callback: (state: UpdateState) => void): () => void;
+  getResourceStatus?(): Promise<ResourceState>;
+  downloadBrowserResource?(): Promise<ResourceState>;
+  onResourceState?(callback: (state: ResourceState) => void): () => void;
   selectExtensionFolder?(): Promise<string | null>;
   zipExtensionFolder?(folderPath: string): Promise<{ok: boolean; base64?: string; error?: string}>;
   selectCookieFile?(): Promise<CookieFileSelection | null>;

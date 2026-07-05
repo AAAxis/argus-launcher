@@ -113,11 +113,58 @@ function writeSettings(settings) {
 function browserAppPath() {
   return readSettings().browserAppPath ||
     process.env.ARGUS_BROWSER_APP ||
+    managedBrowserAppPath() ||
+    bundledBrowserAppPath() ||
     '/Applications/Argys Browser.app';
+}
+
+function managedBrowserRoot() {
+  return path.join(app.getPath('userData'), 'Browser');
+}
+
+function managedBrowserAppPath() {
+  const root = managedBrowserRoot();
+  const candidates = process.platform === 'darwin' ? [
+    path.join(root, 'Argys Browser.app'),
+    path.join(root, 'Argus.app'),
+  ] : process.platform === 'win32' ? [
+    path.join(root, 'Argys Browser.exe'),
+    path.join(root, 'Argus.exe'),
+  ] : [
+    path.join(root, 'argys-browser'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(appExecutable(candidate))) || '';
+}
+
+function bundledBrowserRoot() {
+  return app.isPackaged ?
+    path.join(process.resourcesPath, 'browser') :
+    path.join(__dirname, '../bundled-browser');
+}
+
+function bundledBrowserAppPath() {
+  const root = bundledBrowserRoot();
+  const candidates = process.platform === 'darwin' ? [
+    path.join(root, 'mac', 'Argys Browser.app'),
+    path.join(root, 'mac', 'Argus.app'),
+    path.join(root, 'Argys Browser.app'),
+    path.join(root, 'Argus.app'),
+  ] : process.platform === 'win32' ? [
+    path.join(root, 'win', 'Argys Browser.exe'),
+    path.join(root, 'win', 'Argus.exe'),
+    path.join(root, 'Argys Browser.exe'),
+    path.join(root, 'Argus.exe'),
+  ] : [
+    path.join(root, 'linux', 'argys-browser'),
+    path.join(root, 'argys-browser'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(appExecutable(candidate))) || '';
 }
 
 function browserAppCandidates(preferredAppPath) {
   const candidates = [
+    managedBrowserAppPath(),
+    bundledBrowserAppPath(),
     preferredAppPath,
     '/Applications/Argys Browser.app',
     // The DMG's staged bundle is named "Argus.app" (matches its internal
@@ -131,9 +178,11 @@ function browserAppCandidates(preferredAppPath) {
 let mainWindow = null;
 
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const RESOURCE_BASE_URL = (process.env.ARGUS_RESOURCE_BASE_URL ||
+  'https://pub-a6c0e96f900b4b698762591fddd497aa.r2.dev/resources').replace(/\/$/, '');
 const allowUpdaterInDev = process.env.ARGUS_FORCE_UPDATER === '1';
-const updateProvider = process.env.ARGUS_UPDATE_FEED_URL ? 'generic' :
-  app.isPackaged || allowUpdaterInDev ? 'github' :
+const updateProvider = app.isPackaged || allowUpdaterInDev || process.env.ARGUS_UPDATE_FEED_URL ?
+  'generic' :
   'disabled';
 const updateState = {
   status: app.isPackaged || allowUpdaterInDev ? 'idle' : 'disabled',
@@ -141,6 +190,13 @@ const updateState = {
   updateInfo: null,
   progress: null,
   downloaded: false,
+  error: null,
+};
+const resourceState = {
+  browserStatus: 'idle',
+  browserVersion: '',
+  browserPath: managedBrowserAppPath(),
+  progress: null,
   error: null,
 };
 
@@ -198,6 +254,165 @@ function broadcastUpdateState() {
     win.webContents.send('argus:update-state', snapshot);
   }
   return snapshot;
+}
+
+function publicResourceState() {
+  return {
+    ...resourceState,
+    browserPath: managedBrowserAppPath() || bundledBrowserAppPath() || '',
+  };
+}
+
+function broadcastResourceState() {
+  const snapshot = publicResourceState();
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('argus:resource-state', snapshot);
+  }
+  return snapshot;
+}
+
+function browserResourceKey() {
+  const platform = process.platform === 'darwin' ? 'mac' :
+    process.platform === 'win32' ? 'win' :
+    'linux';
+  return `${platform}-${process.arch}`;
+}
+
+function browserResourceManifestUrl() {
+  return `${RESOURCE_BASE_URL}/browser/latest-${browserResourceKey()}.json`;
+}
+
+function downloadJson(url) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    https.get(url, {headers: {'User-Agent': 'ArgysAnty/1.0'}}, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+        return;
+      }
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        raw += chunk;
+      });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(raw));
+        } catch (error) {
+          reject(error);
+        }
+      });
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+function downloadFile(url, destinationPath) {
+  return new Promise((resolve, reject) => {
+    ensureDirectoryPath(path.dirname(destinationPath));
+    const file = fs.createWriteStream(destinationPath);
+    const request = https.get(url, {headers: {'User-Agent': 'ArgysAnty/1.0'}}, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        file.close(() => fs.rmSync(destinationPath, {force: true}));
+        resolve(downloadFile(new URL(res.headers.location, url).toString(), destinationPath));
+        return;
+      }
+      if (res.statusCode !== 200) {
+        file.close(() => fs.rmSync(destinationPath, {force: true}));
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+        return;
+      }
+      const total = Number(res.headers['content-length']) || 0;
+      let transferred = 0;
+      res.on('data', (chunk) => {
+        transferred += chunk.length;
+        resourceState.progress = {
+          percent: total ? Math.round((transferred / total) * 1000) / 10 : 0,
+          transferred,
+          total,
+        };
+        broadcastResourceState();
+      });
+      res.pipe(file);
+      file.on('finish', () => file.close(resolve));
+      res.on('error', reject);
+    });
+    request.on('error', reject);
+    file.on('error', reject);
+  });
+}
+
+function fileSha512Base64(filePath) {
+  return crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
+}
+
+function extractBrowserArchive(archivePath, destinationDir) {
+  fs.rmSync(destinationDir, {recursive: true, force: true});
+  ensureDirectoryPath(destinationDir);
+  if (process.platform === 'darwin') {
+    const result = spawnSync('/usr/bin/ditto', ['-x', '-k', archivePath, destinationDir], {encoding: 'utf8'});
+    if (result.status !== 0) {
+      throw new Error(result.stderr || result.stdout || `ditto exited ${result.status}`);
+    }
+    return;
+  }
+  if (process.platform === 'win32') {
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile',
+      '-Command',
+      `Expand-Archive -LiteralPath ${JSON.stringify(archivePath)} -DestinationPath ${JSON.stringify(destinationDir)} -Force`,
+    ], {encoding: 'utf8'});
+    if (result.status !== 0) {
+      throw new Error(result.stderr || result.stdout || `Expand-Archive exited ${result.status}`);
+    }
+    return;
+  }
+  unzipBufferTo(fs.readFileSync(archivePath), destinationDir);
+}
+
+async function ensureBrowserResource({manual = false} = {}) {
+  if (resolveBrowserExecutable()) {
+    resourceState.browserStatus = 'ready';
+    resourceState.browserPath = browserAppPath();
+    resourceState.error = null;
+    resourceState.progress = null;
+    return broadcastResourceState();
+  }
+  if (resourceState.browserStatus === 'downloading') {
+    return publicResourceState();
+  }
+  try {
+    resourceState.browserStatus = 'checking';
+    resourceState.error = null;
+    resourceState.progress = null;
+    broadcastResourceState();
+    const manifest = await downloadJson(browserResourceManifestUrl());
+    const archiveUrl = new URL(manifest.url, browserResourceManifestUrl()).toString();
+    const archivePath = path.join(app.getPath('temp'), `argys-browser-${browserResourceKey()}-${Date.now()}.zip`);
+    resourceState.browserStatus = 'downloading';
+    resourceState.browserVersion = manifest.version || '';
+    broadcastResourceState();
+    await downloadFile(archiveUrl, archivePath);
+    if (manifest.sha512 && fileSha512Base64(archivePath) !== manifest.sha512) {
+      throw new Error('Downloaded browser archive checksum does not match manifest.');
+    }
+    resourceState.browserStatus = 'installing';
+    broadcastResourceState();
+    extractBrowserArchive(archivePath, managedBrowserRoot());
+    fs.rmSync(archivePath, {force: true});
+    if (!managedBrowserAppPath()) {
+      throw new Error(`Downloaded browser did not contain a supported app for ${browserResourceKey()}.`);
+    }
+    resourceState.browserStatus = 'ready';
+    resourceState.browserPath = managedBrowserAppPath();
+    resourceState.progress = null;
+    resourceState.error = null;
+  } catch (error) {
+    resourceState.browserStatus = manual ? 'error' : 'idle';
+    resourceState.error = errorDetail(error);
+  }
+  return broadcastResourceState();
 }
 
 async function checkForUpdates({manual = false} = {}) {
@@ -1171,10 +1386,17 @@ async function spawnProfile(payload, extraArgs = []) {
 async function spawnProfileUnchecked(payload, extraArgs = []) {
   const resolved = resolveBrowserExecutable();
   if (!resolved) {
+    if (['checking', 'downloading', 'installing'].includes(resourceState.browserStatus)) {
+      return {
+        ok: false,
+        error: 'Argys Browser is still downloading. Try again when the additional resources finish installing.',
+      };
+    }
     return {
       ok: false,
       error:
-        'Argys Browser is not installed. Set the browser app path or install /Applications/Argys Browser.app.',
+        resourceState.error ||
+        'Argys Browser is not installed and no downloadable browser resource is available yet.',
     };
   }
   const extensionPaths = [
@@ -1269,6 +1491,14 @@ ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
 
 ipcMain.handle('argus:update-status', async () => {
   return publicUpdateState();
+});
+
+ipcMain.handle('argus:resource-status', async () => {
+  return publicResourceState();
+});
+
+ipcMain.handle('argus:download-browser-resource', async () => {
+  return ensureBrowserResource({manual: true});
 });
 
 ipcMain.handle('argus:check-for-updates', async () => {
@@ -1497,6 +1727,7 @@ function startAutomationApiServer() {
 app.whenReady().then(() => {
   configureAutoUpdater();
   createWindow();
+  void ensureBrowserResource({manual: false});
 });
 app.whenReady().then(startAutomationApiServer);
 

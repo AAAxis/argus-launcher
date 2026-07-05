@@ -1,6 +1,6 @@
 {
   "name": "argys-anty",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
@@ -48,6 +48,15 @@
       "extensions/**/*",
       "assets/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bundled-browser",
+        "to": "browser",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "mac": {
       "category": "public.app-category.productivity",

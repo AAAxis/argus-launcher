@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
-import type {UpdateState} from './native';
+import type {ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
@@ -1000,6 +1000,7 @@ function App() {
   const [profileDeleteRequest, setProfileDeleteRequest] = useState<{profileIds: string[]; label: string; exclusiveProxyIds: string[]} | null>(null);
   const [profileDeleteRemoveProxy, setProfileDeleteRemoveProxy] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [resourceState, setResourceState] = useState<ResourceState | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
@@ -1060,6 +1061,33 @@ function App() {
       unsubscribe?.();
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void native?.getResourceStatus?.().then((state) => {
+      if (!cancelled) {
+        setResourceState(state);
+      }
+    });
+    const unsubscribe = native?.onResourceState?.((state) => {
+      setResourceState(state);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (resourceState?.browserStatus === 'downloading') {
+      const percent = resourceState.progress?.percent ? ` ${resourceState.progress.percent}%` : '';
+      setMessage(`Downloading Argus Browser${percent}`);
+    } else if (resourceState?.browserStatus === 'installing') {
+      setMessage('Installing Argus Browser');
+    } else if (resourceState?.browserStatus === 'error') {
+      setMessage(resourceState.error || 'Failed to download Argus Browser');
+    }
+  }, [resourceState]);
 
   useEffect(() => {
     if (cloudLoading || !signedInEmail || !native?.checkProxy) {
