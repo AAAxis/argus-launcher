@@ -706,13 +706,26 @@ function bundledExtensionPaths(payload) {
 }
 
 function materializeBundledExtension(payload, name, sourceDir) {
-  if (!payload?.userDataDir || !isLoadableExtensionDir(sourceDir)) {
+  if (!payload?.userDataDir) {
+    return '';
+  }
+  if (!isLoadableExtensionDir(sourceDir)) {
+    console.warn(
+        `Skipping bundled extension "${name}": source folder is missing or has no valid ` +
+        `manifest.json (${sourceDir}). Profile launch will continue without it.`);
     return '';
   }
   const extensionDir = path.join(payload.userDataDir, 'ArgysBundled', name);
   fs.rmSync(extensionDir, {recursive: true, force: true});
   copyDirectoryContents(sourceDir, extensionDir);
-  return isLoadableExtensionDir(extensionDir) ? extensionDir : '';
+  if (!isLoadableExtensionDir(extensionDir)) {
+    console.warn(
+        `Skipping bundled extension "${name}": copy to ${extensionDir} did not produce a ` +
+        `readable manifest.json. Profile launch will continue without it.`);
+    fs.rmSync(extensionDir, {recursive: true, force: true});
+    return '';
+  }
+  return extensionDir;
 }
 
 const FREE_PROXY_SOURCE_PATH = '/Users/dima/Documents/GitHub/chrome-proxy';
@@ -858,10 +871,26 @@ function ensureDirectoryPath(dirPath) {
   fs.mkdirSync(dirPath, {recursive: true});
 }
 
+// Chrome's own "Manifest file is missing or unreadable" error covers both a
+// missing manifest.json AND one that exists but fails to parse (truncated by
+// an interrupted copy, 0 bytes, invalid JSON, etc). Checking existence alone
+// (the old behavior here) let a corrupt-but-present manifest.json through
+// every guard in this file and straight into --load-extension, where Chrome
+// would only then discover it can't be read. Actually parsing it here is what
+// lets us catch that case ourselves and skip the extension instead.
+function readExtensionManifest(candidatePath) {
+  try {
+    const raw = fs.readFileSync(path.join(candidatePath, 'manifest.json'), 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 function isLoadableExtensionDir(candidatePath) {
   return Boolean(candidatePath) &&
     isDirectory(candidatePath) &&
-    fs.existsSync(path.join(candidatePath, 'manifest.json'));
+    readExtensionManifest(candidatePath) !== null;
 }
 
 function copyDirectoryContents(sourceDir, destDir) {
@@ -1051,11 +1080,21 @@ function parseCookieFile(filePath) {
 function writeProfileCookieManagerExtension(payload) {
   const sourceDir = cookieManagerSourcePath();
   if (!isLoadableExtensionDir(sourceDir)) {
+    console.warn(
+        `Skipping Cookie Manager extension: source folder is missing or has no valid ` +
+        `manifest.json (${sourceDir}). Profile launch will continue without it.`);
     return '';
   }
   const extensionDir = path.join(payload.userDataDir, 'ArgysCookieManager');
   fs.rmSync(extensionDir, {recursive: true, force: true});
   copyDirectoryContents(sourceDir, extensionDir);
+  if (!isLoadableExtensionDir(extensionDir)) {
+    console.warn(
+        `Skipping Cookie Manager extension: copy to ${extensionDir} did not produce a ` +
+        `readable manifest.json. Profile launch will continue without it.`);
+    fs.rmSync(extensionDir, {recursive: true, force: true});
+    return '';
+  }
   // Lets the popup show which profile it's attached to (Argys Browser windows
   // are otherwise unlabeled from the extension's point of view).
   fs.writeFileSync(path.join(extensionDir, 'profile-meta.json'), JSON.stringify({
