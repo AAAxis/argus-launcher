@@ -142,9 +142,26 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           AWS_EC2_METADATA_DISABLED: true
+          CSC_LINK: ${{ secrets.CSC_LINK }}
         run: |
           set -euo pipefail
-          aws s3 cp release-artifacts "s3://${R2_BUCKET}/" \
-            --recursive \
+          aws s3 cp release-artifacts/latest.yml "s3://${R2_BUCKET}/latest.yml" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "public, max-age=60"
+          for file in release-artifacts/Argys-Anty-*-win-x64.exe*; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+          done
+          if [ -n "${CSC_LINK}" ]; then
+            aws s3 cp release-artifacts/latest-mac.yml "s3://${R2_BUCKET}/latest-mac.yml" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+            for file in release-artifacts/Argys-Anty-*-mac-arm64.*; do
+              aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
+                --endpoint-url "${R2_ENDPOINT}" \
+                --cache-control "public, max-age=60"
+            done
+          else
+            echo "CSC_LINK is not set; skipping mac updater upload to avoid unsigned ShipIt updates."
+          fi
