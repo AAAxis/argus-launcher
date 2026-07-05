@@ -111,8 +111,16 @@ function writeSettings(settings) {
 }
 
 function browserAppPath() {
-  return readSettings().browserAppPath ||
-    process.env.ARGUS_BROWSER_APP ||
+  const storedBrowserAppPath = readSettings().browserAppPath || process.env.ARGUS_BROWSER_APP || '';
+  if (process.platform === 'win32') {
+    // Windows should prefer the rebuilt managed browser resource over any
+    // stale saved browser path so older Argus builds do not keep overriding
+    // the current anonymous browser package forever.
+    return managedBrowserAppPath() ||
+      bundledBrowserAppPath() ||
+      storedBrowserAppPath;
+  }
+  return storedBrowserAppPath ||
     managedBrowserAppPath() ||
     bundledBrowserAppPath() ||
     '/Applications/Argys Browser.app';
@@ -411,6 +419,32 @@ function fileSha512Base64(filePath) {
   return crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
 }
 
+// Marks which manifest version is currently installed under managedBrowserRoot()
+// -- resolveBrowserExecutable() alone can only tell us *some* browser exists
+// there, never whether it's the version currently published, so a stale
+// managed install from months ago would otherwise be treated as "ready"
+// forever and never get replaced.
+function managedBrowserVersionPath() {
+  return path.join(managedBrowserRoot(), '.argus-browser-version');
+}
+
+function readManagedBrowserVersion() {
+  try {
+    return fs.readFileSync(managedBrowserVersionPath(), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function writeManagedBrowserVersion(version) {
+  try {
+    fs.writeFileSync(managedBrowserVersionPath(), String(version || ''));
+  } catch {
+    // Best effort -- a missing/unwritable marker just means the next check
+    // re-verifies against the manifest instead of trusting a cached version.
+  }
+}
+
 function extractBrowserArchive(archivePath, destinationDir) {
   fs.rmSync(destinationDir, {recursive: true, force: true});
   ensureDirectoryPath(destinationDir);
@@ -436,15 +470,24 @@ function extractBrowserArchive(archivePath, destinationDir) {
 }
 
 async function ensureBrowserResource({manual = false} = {}) {
-  if (resolveBrowserExecutable()) {
+  if (['checking', 'downloading', 'installing'].includes(resourceState.browserStatus)) {
+    return publicResourceState();
+  }
+  const resolved = resolveBrowserExecutable();
+  const managedPath = managedBrowserAppPath();
+  const usingManaged = Boolean(resolved && managedPath && resolved.appPath === managedPath);
+  // A bundled browser (shipped inside this launcher release) or an explicit
+  // env/settings override isn't something this function downloads, so trust
+  // it as-is with no manifest round-trip. Only the auto-downloaded "managed"
+  // copy needs a version check, since it's the one that can otherwise go
+  // stale forever: resolveBrowserExecutable() only proves *something* is
+  // installed there, never that it's still the currently-published version.
+  if (resolved && !usingManaged) {
     resourceState.browserStatus = 'ready';
-    resourceState.browserPath = browserAppPath();
+    resourceState.browserPath = resolved.appPath;
     resourceState.error = null;
     resourceState.progress = null;
     return broadcastResourceState();
-  }
-  if (['checking', 'downloading', 'installing'].includes(resourceState.browserStatus)) {
-    return publicResourceState();
   }
   try {
     resourceState.browserStatus = 'checking';
@@ -452,6 +495,15 @@ async function ensureBrowserResource({manual = false} = {}) {
     resourceState.progress = null;
     broadcastResourceState();
     const manifest = await downloadJson(browserResourceManifestUrl());
+    if (usingManaged && readManagedBrowserVersion() === String(manifest.version || '')) {
+      // Already installed and matches the latest published version -- nothing to do.
+      resourceState.browserStatus = 'ready';
+      resourceState.browserPath = resolved.appPath;
+      resourceState.browserVersion = manifest.version || '';
+      resourceState.error = null;
+      resourceState.progress = null;
+      return broadcastResourceState();
+    }
     const archiveUrl = new URL(manifest.url, browserResourceManifestUrl()).toString();
     const archivePath = path.join(app.getPath('temp'), `argys-browser-${browserResourceKey()}-${Date.now()}.zip`);
     resourceState.browserStatus = 'downloading';
@@ -469,11 +521,22 @@ async function ensureBrowserResource({manual = false} = {}) {
     if (!installedBrowserPath) {
       throw new Error(`Downloaded browser did not contain a supported app for ${browserResourceKey()}.`);
     }
+    writeManagedBrowserVersion(manifest.version || '');
     resourceState.browserStatus = 'ready';
     resourceState.browserPath = installedBrowserPath;
     resourceState.progress = null;
     resourceState.error = null;
   } catch (error) {
+    if (resolved) {
+      // Refresh check failed (e.g. offline) but a previously-installed
+      // browser still resolves -- launch must keep working without network,
+      // so fall back to what's already on disk instead of erroring out.
+      resourceState.browserStatus = 'ready';
+      resourceState.browserPath = resolved.appPath;
+      resourceState.error = null;
+      resourceState.progress = null;
+      return broadcastResourceState();
+    }
     resourceState.browserStatus = manual ? 'error' : 'idle';
     resourceState.error = errorDetail(error);
   }
@@ -1559,6 +1622,9 @@ async function spawnProfile(payload, extraArgs = []) {
 
 async function spawnProfileUnchecked(payload, extraArgs = []) {
   const resolved = resolveBrowserExecutable();
+  console.log(
+      `Launching profile "${payload.name}" (${payload.id}): resolved browser ` +
+      `path = ${resolved ? resolved.executable : '(none found)'}`);
   if (!resolved) {
     if (['checking', 'downloading', 'installing'].includes(resourceState.browserStatus)) {
       return {
@@ -1636,13 +1702,15 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
     launchUrl,
   ];
 
-  if (payload.proxy?.host) {
-    console.log(
-        `Launching profile "${payload.name}" (${payload.id}) with assigned proxy ` +
-        `${payload.proxy.type || 'http'}://${payload.proxy.host}:${payload.proxy.port}` +
-        (payload.proxy.username ? ' (authenticated)' : '') + '. Launch args: ' +
-        JSON.stringify(args.map((arg) => arg.replace(/^(--argus-proxy-pass=).*/, '$1<redacted>'))));
-  }
+  const proxySummary = payload.proxy?.host ?
+    `${payload.proxy.type || 'http'}://${payload.proxy.host}:${payload.proxy.port}` +
+    (payload.proxy.username ? ' (authenticated)' : '') :
+    '(none)';
+  console.log(
+      `Launching profile "${payload.name}" (${payload.id}): ` +
+      `proxy=${proxySummary}, extensions=${JSON.stringify(uniqueExtensionPaths)}. ` +
+      'Launch args: ' +
+      JSON.stringify(args.map((arg) => arg.replace(/^(--argus-proxy-pass=).*/, '$1<redacted>'))));
 
   if (process.platform === 'darwin') {
     // On macOS we still need a per-profile wrapper bundle so the Dock/Cmd+Tab
