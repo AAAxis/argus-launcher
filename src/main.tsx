@@ -993,6 +993,7 @@ function App() {
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
   const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
+  const [proxyDraftSource, setProxyDraftSource] = useState<'profile' | null>(null);
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
   const [folderDraft, setFolderDraft] = useState<FolderDraft | null>(null);
   const [statusDraft, setStatusDraft] = useState<StatusDraft | null>(null);
@@ -2081,37 +2082,46 @@ function App() {
     ] as const;
   }
 
-  async function createProxyFromProfileLink() {
+  function createProxyFromProfileLink() {
     if (!profileDraft) {
       return;
     }
-    const parsed = parseProxyLink(profileDraft.proxy_link);
+    const value = profileDraft.proxy_link.trim();
+    if (!value) {
+      setProxyDraftSource('profile');
+      setProxyDraft(newProxyDraft());
+      return;
+    }
+    const parsed = parseProxyLink(value);
     if (!parsed) {
       setMessage('Proxy link is invalid. Use http://user:pass@host:port, socks5://user:pass@host:port, or http:host:port:user:pass');
       return;
     }
-    const proxy: ArgusProxy = {
-      id: globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
-      name: `${parsed.host}:${parsed.port}`,
-      ...parsed,
-    };
-    await saveCloudState({...cloudState, proxies: [...cloudState.proxies, proxy]});
-    setProfileDraft({
-      ...profileDraft,
-      proxy_id: proxy.id,
-      proxy_link: '',
-      proxy_search: '',
+    setProxyDraftSource('profile');
+    setProxyDraft({
+      name: '',
+      type: parsed.type || 'http',
+      host: parsed.host,
+      port: String(parsed.port),
+      username: parsed.username || '',
+      password: parsed.password || '',
     });
-    setMessage(`${proxy.name} proxy created and assigned`);
   }
 
   function openNewProxy() {
     setActiveTab('proxies');
+    setProxyDraftSource(null);
     setProxyDraft(newProxyDraft());
   }
 
   function openEditProxy(proxy: ArgusProxy) {
+    setProxyDraftSource(null);
     setProxyDraft(draftFromProxy(proxy));
+  }
+
+  function closeProxyDraft() {
+    setProxyDraft(null);
+    setProxyDraftSource(null);
   }
 
   async function saveProxyDraft() {
@@ -2152,8 +2162,18 @@ function App() {
       cloudState.proxies.map((item) => item.id === proxy.id ? proxy : item) :
       [...cloudState.proxies, proxy];
     await saveCloudState({...cloudState, proxies});
-    setProxyDraft(null);
-    setMessage(`${proxy.name} saved`);
+    if (!proxyDraft.id && proxyDraftSource === 'profile') {
+      setProfileDraft((current) => current ? {
+        ...current,
+        proxy_id: proxy.id,
+        proxy_link: '',
+        proxy_search: '',
+      } : current);
+    }
+    closeProxyDraft();
+    setMessage(!proxyDraft.id && proxyDraftSource === 'profile' ?
+      `${proxy.name} proxy created and assigned` :
+      `${proxy.name} saved`);
   }
 
   async function checkProxyOnce(proxy: ArgusProxy) {
@@ -2188,12 +2208,12 @@ function App() {
 
   function deleteProxyDraft() {
     if (!proxyDraft?.id) {
-      setProxyDraft(null);
+      closeProxyDraft();
       return;
     }
     const proxy = cloudState.proxies.find((item) => item.id === proxyDraft.id);
     if (!proxy) {
-      setProxyDraft(null);
+      closeProxyDraft();
       return;
     }
     requestDeleteProxies([proxy.id], proxy.name || proxy.host);
@@ -3562,7 +3582,7 @@ function App() {
                         value={profileDraft.proxy_link}
                         onChange={(event) => setProfileDraft({...profileDraft, proxy_link: event.target.value})}
                       />
-                      <button type="button" onClick={createProxyFromProfileLink}>Create</button>
+                      <button type="button" onClick={createProxyFromProfileLink}>Create new proxy</button>
                     </div>
                   </div>
                 </label>
@@ -3824,14 +3844,16 @@ function App() {
       )}
 
       {proxyDraft && (
-        <div className="modal-backdrop" onMouseDown={() => setProxyDraft(null)}>
+        <div className="modal-backdrop" onMouseDown={closeProxyDraft}>
           <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div>
-                <h2>{proxyDraft.id ? 'Edit proxy' : 'Add proxy'}</h2>
-                <p>Proxy settings are stored in Argys Anty and assigned to profiles on launch.</p>
+                <h2>{proxyDraft.id ? 'Edit proxy' : proxyDraftSource === 'profile' ? 'Name your proxy' : 'Add proxy'}</h2>
+                <p>{proxyDraftSource === 'profile' ?
+                  'Create a proxy and assign it to this profile.' :
+                  'Proxy settings are stored in Argys Anty and assigned to profiles on launch.'}</p>
               </div>
-              <button className="icon-button" aria-label="Close" onClick={() => setProxyDraft(null)}><X size={18} /></button>
+              <button className="icon-button" aria-label="Close" onClick={closeProxyDraft}><X size={18} /></button>
             </header>
 
             <div className="profile-form">
@@ -3894,8 +3916,10 @@ function App() {
               {proxyDraft.id && (
                 <button className="danger ghost" onClick={deleteProxyDraft}><Trash2 size={16} /> Delete</button>
               )}
-              <button className="ghost" onClick={() => setProxyDraft(null)}>Cancel</button>
-              <button onClick={saveProxyDraft}>{proxyDraft.id ? 'Save changes' : 'Add proxy'}</button>
+              <button className="ghost" onClick={closeProxyDraft}>Cancel</button>
+              <button onClick={saveProxyDraft}>
+                {proxyDraft.id ? 'Save changes' : proxyDraftSource === 'profile' ? 'Create and assign' : 'Add proxy'}
+              </button>
             </footer>
           </section>
         </div>
