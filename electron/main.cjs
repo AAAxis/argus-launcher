@@ -1140,6 +1140,59 @@ function proxyArgs(proxy) {
   return args;
 }
 
+// The current Argus Browser build does not actually consume any of the
+// --argus-proxy-* switches above -- nothing in argus-browser's command-line
+// handling reads them, so on Windows (running the current rebuilt browser)
+// an assigned proxy silently launches direct every time. What the browser
+// *does* read on startup is its own per-profile "argus.profile_data" pref
+// (ArgusProfileService::InitializeAsync in argus_profile_service.cc), which
+// it also writes itself when a proxy is connected from its in-browser UI, and
+// which it auto-reconnects to on every subsequent launch. Writing that same
+// pref block directly into the profile's Preferences file before spawn --
+// the same technique writeProfileStartupPrefs already uses for homepage/
+// session-restore prefs -- is what actually wires an assigned proxy in.
+// Chromium's JsonPrefStore treats dots in a registered pref name as nested
+// object paths, so the on-disk shape is {"argus": {"profile_data": {...}}},
+// not a flat "argus.profile_data" key.
+function writeProfileProxyAssignment(userDataDir, proxy) {
+  if (!userDataDir) {
+    return;
+  }
+  const defaultDir = path.join(userDataDir, 'Default');
+  ensureDirectoryPath(defaultDir);
+  const prefsPath = path.join(defaultDir, 'Preferences');
+  let prefs = {};
+  try {
+    prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+  } catch {
+    prefs = {};
+  }
+  const profileData = {...(prefs.argus?.profile_data || {})};
+  if (proxy?.host && proxy.port) {
+    const transport = proxy.type === 'socks5' ? 'socks5' : 'http';
+    profileData.assigned_proxy_id = proxy.id || `${proxy.host}:${proxy.port}`;
+    profileData.proxy_host = proxy.host;
+    profileData.proxy_port = transport === 'socks5' ? Number(proxy.port) : 0;
+    profileData.proxy_http_port = transport === 'http' ? Number(proxy.port) : 0;
+    profileData.proxy_username = proxy.username || '';
+    profileData.proxy_password = proxy.password || '';
+    profileData.proxy_transport = transport;
+  } else {
+    // No proxy assigned this launch -- explicitly clear any assignment left
+    // over from a previous launch of this same profile directory, otherwise
+    // the browser's own auto-reconnect would keep dialing a stale proxy
+    // forever even after the user switches this profile to direct/free-proxy.
+    profileData.assigned_proxy_id = '';
+    profileData.proxy_host = '';
+    profileData.proxy_port = 0;
+    profileData.proxy_http_port = 0;
+    profileData.proxy_username = '';
+    profileData.proxy_password = '';
+  }
+  prefs.argus = {...(prefs.argus || {}), profile_data: profileData};
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+}
+
 function base64UrlEncode(text) {
   return Buffer.from(text, 'utf8').toString('base64')
       .replace(/\+/g, '-')
@@ -1535,6 +1588,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   clearSessionRestore(payload.userDataDir);
   const launchUrl = payload.startUrl || writeHomeFile(payload);
   writeProfileStartupPrefs(payload.userDataDir, launchUrl);
+  writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
   const cookieManagerPath = writeProfileCookieManagerExtension(payload);
   if (cookieManagerPath) {
     extensionPaths.push(cookieManagerPath);
@@ -1581,6 +1635,14 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
     ...extraArgs,
     launchUrl,
   ];
+
+  if (payload.proxy?.host) {
+    console.log(
+        `Launching profile "${payload.name}" (${payload.id}) with assigned proxy ` +
+        `${payload.proxy.type || 'http'}://${payload.proxy.host}:${payload.proxy.port}` +
+        (payload.proxy.username ? ' (authenticated)' : '') + '. Launch args: ' +
+        JSON.stringify(args.map((arg) => arg.replace(/^(--argus-proxy-pass=).*/, '$1<redacted>'))));
+  }
 
   if (process.platform === 'darwin') {
     // On macOS we still need a per-profile wrapper bundle so the Dock/Cmd+Tab
