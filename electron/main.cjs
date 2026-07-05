@@ -342,6 +342,10 @@ function browserResourceManifestUrl() {
   return `${RESOURCE_BASE_URL}/browser/latest-${browserResourceKey()}.json`;
 }
 
+function parseJsonWithBom(raw) {
+  return JSON.parse(raw.replace(/^\uFEFF/, ''));
+}
+
 function downloadJson(url) {
   return new Promise((resolve, reject) => {
     let raw = '';
@@ -357,7 +361,7 @@ function downloadJson(url) {
       });
       res.on('end', () => {
         try {
-          resolve(JSON.parse(raw));
+          resolve(parseJsonWithBom(raw));
         } catch (error) {
           reject(error);
         }
