@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('argusNative', {
     ipcRenderer.on('argus:resource-state', listener);
     return () => ipcRenderer.removeListener('argus:resource-state', listener);
   },
+  getApiStatus: () => ipcRenderer.invoke('argus:api-status'),
+  onApiState: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:api-state', listener);
+    return () => ipcRenderer.removeListener('argus:api-state', listener);
+  },
   selectExtensionFolder: () => ipcRenderer.invoke('argus:select-extension-folder'),
   zipExtensionFolder: (folderPath) => ipcRenderer.invoke('argus:zip-extension-folder', folderPath),
   selectCookieFile: () => ipcRenderer.invoke('argus:select-cookie-file'),

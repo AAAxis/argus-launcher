@@ -122,6 +122,34 @@ function managedBrowserRoot() {
   return path.join(app.getPath('userData'), 'Browser');
 }
 
+function findFirstMatching(root, predicate, maxDepth = 4) {
+  if (!root || maxDepth < 0 || !fs.existsSync(root)) {
+    return '';
+  }
+  let entries = [];
+  try {
+    entries = fs.readdirSync(root, {withFileTypes: true});
+  } catch {
+    return '';
+  }
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (predicate(entryPath, entry)) {
+      return entryPath;
+    }
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.endsWith('.app')) {
+      continue;
+    }
+    const found = findFirstMatching(path.join(root, entry.name), predicate, maxDepth - 1);
+    if (found) {
+      return found;
+    }
+  }
+  return '';
+}
+
 function managedBrowserAppPath() {
   const root = managedBrowserRoot();
   const candidates = process.platform === 'darwin' ? [
@@ -133,7 +161,20 @@ function managedBrowserAppPath() {
   ] : [
     path.join(root, 'argys-browser'),
   ];
-  return candidates.find((candidate) => fs.existsSync(appExecutable(candidate))) || '';
+  const directMatch = candidates.find((candidate) => fs.existsSync(appExecutable(candidate)));
+  if (directMatch) {
+    return directMatch;
+  }
+  if (process.platform === 'darwin') {
+    return findFirstMatching(root, (entryPath, entry) =>
+      entry.isDirectory() && entry.name.endsWith('.app') && fs.existsSync(appExecutable(entryPath)));
+  }
+  if (process.platform === 'win32') {
+    return findFirstMatching(root, (entryPath, entry) =>
+      entry.isFile() && /arg(us|ys).*browser.*\.exe$/i.test(entry.name));
+  }
+  return findFirstMatching(root, (entryPath, entry) =>
+    entry.isFile() && /arg(us|ys).*browser/i.test(entry.name) && fs.existsSync(entryPath));
 }
 
 function bundledBrowserRoot() {
@@ -197,6 +238,12 @@ const resourceState = {
   browserVersion: '',
   browserPath: managedBrowserAppPath(),
   progress: null,
+  error: null,
+};
+const apiState = {
+  status: 'starting',
+  port: 39219,
+  url: 'http://127.0.0.1:39219',
   error: null,
 };
 
@@ -267,6 +314,18 @@ function broadcastResourceState() {
   const snapshot = publicResourceState();
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('argus:resource-state', snapshot);
+  }
+  return snapshot;
+}
+
+function publicApiState() {
+  return {...apiState};
+}
+
+function broadcastApiState() {
+  const snapshot = publicApiState();
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('argus:api-state', snapshot);
   }
   return snapshot;
 }
@@ -379,7 +438,7 @@ async function ensureBrowserResource({manual = false} = {}) {
     resourceState.progress = null;
     return broadcastResourceState();
   }
-  if (resourceState.browserStatus === 'downloading') {
+  if (['checking', 'downloading', 'installing'].includes(resourceState.browserStatus)) {
     return publicResourceState();
   }
   try {
@@ -401,11 +460,12 @@ async function ensureBrowserResource({manual = false} = {}) {
     broadcastResourceState();
     extractBrowserArchive(archivePath, managedBrowserRoot());
     fs.rmSync(archivePath, {force: true});
-    if (!managedBrowserAppPath()) {
+    const installedBrowserPath = managedBrowserAppPath();
+    if (!installedBrowserPath) {
       throw new Error(`Downloaded browser did not contain a supported app for ${browserResourceKey()}.`);
     }
     resourceState.browserStatus = 'ready';
-    resourceState.browserPath = managedBrowserAppPath();
+    resourceState.browserPath = installedBrowserPath;
     resourceState.progress = null;
     resourceState.error = null;
   } catch (error) {
@@ -563,6 +623,8 @@ function createWindow() {
   }
   win.webContents.once('did-finish-load', () => {
     broadcastUpdateState();
+    broadcastResourceState();
+    broadcastApiState();
   });
 }
 
@@ -1501,6 +1563,10 @@ ipcMain.handle('argus:download-browser-resource', async () => {
   return ensureBrowserResource({manual: true});
 });
 
+ipcMain.handle('argus:api-status', async () => {
+  return publicApiState();
+});
+
 ipcMain.handle('argus:check-for-updates', async () => {
   return checkForUpdates({manual: true});
 });
@@ -1672,6 +1738,9 @@ function sendJson(res, statusCode, body) {
 }
 
 function startAutomationApiServer() {
+  apiState.status = 'starting';
+  apiState.error = null;
+  broadcastApiState();
   const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
@@ -1680,6 +1749,10 @@ function startAutomationApiServer() {
         'Access-Control-Allow-Headers': 'Content-Type',
       });
       res.end();
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/health') {
+      sendJson(res, 200, {status: true, service: 'argys-anty-api'});
       return;
     }
     if (req.method !== 'POST' || req.url !== '/v1/cookies/bulk-match') {
@@ -1718,8 +1791,15 @@ function startAutomationApiServer() {
       });
     });
   });
-  server.listen(AUTOMATION_API_PORT, '127.0.0.1');
+  server.listen(AUTOMATION_API_PORT, '127.0.0.1', () => {
+    apiState.status = 'ready';
+    apiState.error = null;
+    broadcastApiState();
+  });
   server.on('error', (error) => {
+    apiState.status = 'error';
+    apiState.error = error.message;
+    broadcastApiState();
     console.log('[automation-api] failed to start:', error.message);
   });
 }

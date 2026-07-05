@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
-import type {ResourceState, UpdateState} from './native';
+import type {ApiState, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
@@ -88,7 +88,7 @@ const tabs: Array<{id: TabId; label: string}> = [
   {id: 'import', label: 'Import'},
 ];
 
-const API_BASE_URL = 'http://127.0.0.1:39217';
+const API_BASE_URL = 'http://127.0.0.1:39219';
 const SHARED_EXTENSIONS_BUCKET = 'global';
 const API_GROUPS: ApiGroup[] = [
   {
@@ -892,12 +892,18 @@ function draftFromBookmark(bookmark: SharedBookmark): BookmarkDraft {
   };
 }
 
-function LoadingState({label, detail}: {label: string; detail: string}) {
+function LoadingState({label, detail, failed = false, onRetry}: {
+  label: string;
+  detail: string;
+  failed?: boolean;
+  onRetry?: () => void;
+}) {
   return (
     <section className="loading-state">
-      <div className="spinner" aria-hidden="true" />
+      {!failed && <div className="spinner" aria-hidden="true" />}
       <h1>{label}</h1>
       <p>{detail}</p>
+      {failed && onRetry && <button type="button" onClick={onRetry}>Retry</button>}
     </section>
   );
 }
@@ -1001,6 +1007,7 @@ function App() {
   const [profileDeleteRemoveProxy, setProfileDeleteRemoveProxy] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [resourceState, setResourceState] = useState<ResourceState | null>(null);
+  const [apiState, setApiState] = useState<ApiState | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
@@ -1084,10 +1091,31 @@ function App() {
       setMessage(`Downloading Argus Browser${percent}`);
     } else if (resourceState?.browserStatus === 'installing') {
       setMessage('Installing Argus Browser');
+    } else if (resourceState?.browserStatus === 'ready') {
+      setMessage((current) =>
+        current.startsWith('Downloading Argus Browser') || current === 'Installing Argus Browser' ?
+          '' :
+          current);
     } else if (resourceState?.browserStatus === 'error') {
       setMessage(resourceState.error || 'Failed to download Argus Browser');
     }
   }, [resourceState]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void native?.getApiStatus?.().then((state) => {
+      if (!cancelled) {
+        setApiState(state);
+      }
+    });
+    const unsubscribe = native?.onApiState?.((state) => {
+      setApiState(state);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (cloudLoading || !signedInEmail || !native?.checkProxy) {
@@ -3351,10 +3379,37 @@ function App() {
     );
   }
 
-  if (appBooting) {
+  const browserReady = resourceState?.browserStatus === 'ready';
+  const browserFailed = resourceState?.browserStatus === 'error';
+  const apiReady = apiState?.status === 'ready';
+  const apiFailed = apiState?.status === 'error';
+  const startupFailed = browserFailed || apiFailed;
+  const startupBlocked = appBooting || !browserReady || !apiReady;
+  const startupDetail = appBooting ?
+    'Checking cloud session and loading workspace.' :
+    browserFailed ?
+      resourceState?.error || 'Argus Browser resource failed to install.' :
+      apiFailed ?
+        apiState?.error || 'Local API failed to start.' :
+        !browserReady ?
+          resourceState?.browserStatus === 'downloading' ?
+            `Downloading Argus Browser ${resourceState.progress?.percent || 0}%` :
+            resourceState?.browserStatus === 'installing' ?
+              'Installing Argus Browser.' :
+              'Checking Argus Browser resource.' :
+          !apiReady ?
+            'Starting local API.' :
+            'Ready.';
+
+  if (startupBlocked) {
     return (
       <main className="login-shell">
-        <LoadingState label="Starting Argys Anty" detail="Checking cloud session and loading workspace." />
+        <LoadingState
+          label={startupFailed ? 'Argys Anty is not ready' : 'Preparing Argys Anty'}
+          detail={startupDetail}
+          failed={startupFailed}
+          onRetry={browserFailed ? () => void native?.downloadBrowserResource?.().then(setResourceState) : undefined}
+        />
       </main>
     );
   }

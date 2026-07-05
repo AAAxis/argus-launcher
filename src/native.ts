@@ -90,6 +90,13 @@ export type ResourceState = {
   error: string | null;
 };
 
+export type ApiState = {
+  status: 'starting' | 'ready' | 'error';
+  port: number;
+  url: string;
+  error: string | null;
+};
+
 type ArgusNative = {
   launchProfile(payload: LaunchProfilePayload): Promise<{
     ok: boolean;
@@ -111,6 +118,8 @@ type ArgusNative = {
   getResourceStatus?(): Promise<ResourceState>;
   downloadBrowserResource?(): Promise<ResourceState>;
   onResourceState?(callback: (state: ResourceState) => void): () => void;
+  getApiStatus?(): Promise<ApiState>;
+  onApiState?(callback: (state: ApiState) => void): () => void;
   selectExtensionFolder?(): Promise<string | null>;
   zipExtensionFolder?(folderPath: string): Promise<{ok: boolean; base64?: string; error?: string}>;
   selectCookieFile?(): Promise<CookieFileSelection | null>;
