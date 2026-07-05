@@ -1431,6 +1431,21 @@ done
   return appPath;
 }
 
+function spawnProfileBrowserDirectly(resolved, args, timezone) {
+  const env = {...process.env};
+  if (timezone) {
+    env.TZ = timezone;
+  }
+  const child = spawn(resolved.executable, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: process.platform === 'win32',
+    env,
+  });
+  child.unref();
+  return child;
+}
+
 // Shared by the normal launch-profile handler and the Facebook-login-fetch
 // automation: builds the launcher args/app and spawns the browser. `extraArgs`
 // lets the automation path append --remote-debugging-port for CDP without
@@ -1524,23 +1539,32 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
     launchUrl,
   ];
 
-  // Launched through a per-profile wrapper .app (not spawned directly):
-  // the Dock/Cmd+Tab name comes from the running app's bundle, never from
-  // a window title or command-line args, so showing the profile's real
-  // name there requires its own tiny bundle. `open -n` always starts a new
-  // instance even though every wrapper shares the same underlying browser
-  // binary.
-  const profileAppPath = writeProfileLauncherApp(payload, resolved, args, timezone);
-  const child = spawn('/usr/bin/open', ['-n', profileAppPath], {
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
+  if (process.platform === 'darwin') {
+    // On macOS we still need a per-profile wrapper bundle so the Dock/Cmd+Tab
+    // identity matches the profile name instead of the shared browser binary.
+    const profileAppPath = writeProfileLauncherApp(payload, resolved, args, timezone);
+    const child = spawn('/usr/bin/open', ['-n', profileAppPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return {
+      ok: true,
+      pid: child.pid || 0,
+      appPath: resolved.appPath,
+      launcherAppPath: profileAppPath,
+    };
+  }
+
+  // Windows and Linux launch the browser executable directly. They do not
+  // support the macOS bundle/Open flow, so spawning the resolved executable is
+  // the correct platform-specific path.
+  const child = spawnProfileBrowserDirectly(resolved, args, timezone);
   return {
     ok: true,
     pid: child.pid || 0,
     appPath: resolved.appPath,
-    launcherAppPath: profileAppPath,
+    launcherAppPath: null,
   };
 }
 
