@@ -34,6 +34,17 @@ async function exportCurrentSiteCookies() {
   return {count: cookies.length};
 }
 
+async function exportAllCookies() {
+  // No domain filter: every cookie in this profile, across every site.
+  const cookies = await chrome.cookies.getAll({});
+  await downloadJson('argys-cookies-all.json', {
+    exportedAt: new Date().toISOString(),
+    scope: 'all',
+    cookies,
+  });
+  return {count: cookies.length};
+}
+
 function cookieUrl(cookie) {
   if (cookie.url) {
     return cookie.url;
@@ -83,6 +94,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(await exportCurrentSiteCookies());
       return;
     }
+    if (message?.type === 'export-all-cookies') {
+      sendResponse(await exportAllCookies());
+      return;
+    }
     if (message?.type === 'import-cookies') {
       const cookies = Array.isArray(message.cookies) ? message.cookies :
         Array.isArray(message.cookies?.cookies) ? message.cookies.cookies :
@@ -94,3 +109,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   })();
   return true;
 });
+
+// ---- Per-profile auto-seed on first launch ---------------------------------
+// electron/main.cjs bundles a `seed-cookies.json` alongside this extension's
+// files only when the profile has a cookie file assigned (Edit > "Select
+// cookies file", or the bulk "Import cookies" / bulk-match API). Runs once:
+// imports it through the same importCookies() the popup's manual import
+// uses, then remembers it's done so later launches don't re-seed.
+const SEED_IMPORTED_KEY = 'argysSeedCookiesImported';
+
+async function importSeedCookiesIfPresent() {
+  const state = await chrome.storage.local.get(SEED_IMPORTED_KEY);
+  if (state[SEED_IMPORTED_KEY]) {
+    return;
+  }
+  let payload;
+  try {
+    const response = await fetch(chrome.runtime.getURL('seed-cookies.json'));
+    if (!response.ok) {
+      return;
+    }
+    payload = await response.json();
+  } catch (error) {
+    // No seed-cookies.json bundled for this profile -- nothing to seed.
+    return;
+  }
+  const cookies = Array.isArray(payload) ? payload :
+    Array.isArray(payload?.cookies) ? payload.cookies : [];
+  const result = await importCookies(cookies);
+  await chrome.storage.local.set({
+    [SEED_IMPORTED_KEY]: true,
+    seededAt: Date.now(),
+    seededCount: result.count,
+  });
+}
+
+chrome.runtime.onInstalled.addListener(() => void importSeedCookiesIfPresent());
+chrome.runtime.onStartup.addListener(() => void importSeedCookiesIfPresent());
+void importSeedCookiesIfPresent();

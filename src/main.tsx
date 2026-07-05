@@ -3,7 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {Cookie, Download, Pencil, Plus, Play, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
 import {supabase} from './supabase';
-import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension} from './types';
+import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
 
 type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api' | 'import';
@@ -27,6 +27,7 @@ type ProfileDraft = {
   color: string;
   folder_id: string;
   proxy_id: string;
+  proxy_mode: ProxyMode;
   proxy_search: string;
   proxy_link: string;
   tags: string;
@@ -161,6 +162,15 @@ const defaultState: CloudState = {
 };
 
 const baseProfileStatuses = ['Ready', 'Active', 'Warmup', 'Ban', 'Review'];
+// Sentinel folder_id used to view Trash in the profiles folder bar; never
+// written to a profile's actual folder_id.
+const TRASH_FOLDER_ID = '__trash__';
+const TRASH_RETENTION_DAYS = 30;
+
+function daysUntilPurge(deletedAt: string): number {
+  const purgeAt = Date.parse(deletedAt) + TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000)));
+}
 const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
 const osPresets = ['Windows 10', 'Windows 11', 'macOS', 'Ubuntu'];
 const browserVersionPresets = ['Auto', 'Chrome 126', 'Chrome 125', 'Chrome 124'];
@@ -341,6 +351,7 @@ function newProfileDraft(): ProfileDraft {
     color: profileColors[1],
     folder_id: '',
     proxy_id: '',
+    proxy_mode: 'assigned',
     proxy_search: '',
     proxy_link: '',
     tags: '',
@@ -375,6 +386,7 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     color: profile.color || profileColors[1],
     folder_id: profile.folder_id || '',
     proxy_id: profile.proxy_id || '',
+    proxy_mode: profile.proxy_mode || 'assigned',
     proxy_search: '',
     proxy_link: '',
     tags: profile.tags?.join(', ') || '',
@@ -664,7 +676,7 @@ function fingerprintFromDraftPatch(patch: Partial<ProfileDraft>): NonNullable<Ar
     screen: patch.fingerprint_screen,
     cpu_cores: numberOrNull(patch.fingerprint_cpu_cores || ''),
     memory_gb: numberOrNull(patch.fingerprint_memory_gb || ''),
-    rotate_on_launch: true,
+    rotate_on_launch: Boolean(patch.fingerprint_rotate),
   };
 }
 
@@ -687,6 +699,145 @@ function fingerprintSwitches(profile: ArgusProfile) {
     switches.push(`--window-size=${fingerprint.screen}`);
   }
   return switches.join('\n');
+}
+
+// Maps the profile-edit UI's os preset to argus::Fingerprint's `preset` and
+// `platform` keys -- mirrors the renderer's own platformMap in
+// chrome/renderer/argus/argus_fingerprint_injector.cc so navigator.platform
+// agrees with the preset the browser applies.
+function fingerprintPresetFor(os?: string): string | undefined {
+  if (!os) {
+    return undefined;
+  }
+  if (os.startsWith('Windows')) {
+    return 'windows';
+  }
+  if (os === 'macOS') {
+    return 'macos';
+  }
+  if (os === 'Ubuntu') {
+    return 'linux';
+  }
+  return undefined;
+}
+
+function fingerprintPlatformFor(preset?: string): string | undefined {
+  if (preset === 'windows') {
+    return 'Win32';
+  }
+  if (preset === 'macos') {
+    return 'MacIntel';
+  }
+  if (preset === 'linux') {
+    return 'Linux x86_64';
+  }
+  return undefined;
+}
+
+// UI webrtc preset -> argus::Fingerprint.webrtc_mode ("real"|"noise"|"off").
+// "Proxy only" and "Custom" both resolve to "noise", which is what makes
+// ArgusManager::OnBrowserCreated disable non-proxied UDP -- there's no UI
+// concept mapping onto a literal "manual" WebRTC mode today.
+function fingerprintWebrtcModeFor(value?: string): string | undefined {
+  switch (value) {
+    case 'Real':
+      return 'real';
+    case 'Disabled':
+      return 'off';
+    case 'Proxy only':
+    case 'Custom':
+      return 'noise';
+    default:
+      return undefined;
+  }
+}
+
+// UI canvas/webgl noise preset -> argus::Fingerprint's canvas_mode/webgl_mode
+// ("real"|"noise"|"off"). "Block" maps to "off" (the closest the browser's
+// spoof-mode vocabulary has to fully suppressing the surface).
+function fingerprintNoiseModeFor(value?: string): string | undefined {
+  switch (value) {
+    case 'Real':
+      return 'real';
+    case 'Noise':
+      return 'noise';
+    case 'Block':
+      return 'off';
+    default:
+      return undefined;
+  }
+}
+
+// UI geolocation preset -> argus::Fingerprint.geolocation_mode
+// ("real"|"off"|"manual"). "manual" needs latitude/longitude, which
+// electron/main.cjs fills in from the assigned proxy's country (reusing its
+// existing COUNTRY_DEFAULTS resolution) if this profile didn't set explicit
+// coordinates elsewhere.
+function fingerprintGeolocationModeFor(value?: string): string | undefined {
+  switch (value) {
+    case 'Ask':
+      return 'real';
+    case 'Block':
+      return 'off';
+    case 'Auto from proxy':
+      return 'manual';
+    default:
+      return undefined;
+  }
+}
+
+// Deterministic per-profile uint32: canvas/audio noise (argus_fingerprint_
+// injector.cc's noiseAt()) is seeded by this, so a profile's noise is stable
+// across relaunches unless the user opted into rotate_on_launch.
+function stableSeedFor(profileId: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < profileId.length; i++) {
+    hash ^= profileId.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return hash >>> 0;
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0x100000000) >>> 0;
+}
+
+// Builds the full fingerprint payload the browser applies, keyed exactly like
+// argus::Fingerprint's JSON dict (see chrome/browser/argus/argus_fingerprint.cc
+// ToDict/FromDict). Fields the browser should resolve from the assigned
+// proxy's country (timezone/languages when left on "Auto from proxy", and
+// latitude/longitude for "manual" geolocation) are left undefined here --
+// electron/main.cjs fills those in immediately before serializing, reusing
+// its existing COUNTRY_DEFAULTS-based resolution so that logic isn't
+// duplicated between the renderer and the main process.
+function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
+  const fingerprint = profile.fingerprint || {};
+  const preset = fingerprintPresetFor(fingerprint.os);
+  const explicitTimezone = fingerprint.timezone && fingerprint.timezone !== 'Auto from proxy' ?
+    fingerprint.timezone :
+    undefined;
+  const explicitLanguages = fingerprint.language ?
+    fingerprint.language.split(',').map((part) => part.split(';')[0].trim()).filter(Boolean) :
+    undefined;
+  const rotate = Boolean(fingerprint.rotate_on_launch);
+  return {
+    platform: fingerprintPlatformFor(preset),
+    ua_string: fingerprint.user_agent || undefined,
+    preset,
+    seed: rotate ? randomSeed() : stableSeedFor(profile.id),
+    webrtc_mode: fingerprintWebrtcModeFor(fingerprint.webrtc),
+    canvas_mode: fingerprintNoiseModeFor(fingerprint.canvas),
+    webgl_mode: fingerprintNoiseModeFor(fingerprint.webgl),
+    webgl_vendor: fingerprint.webgl_vendor || undefined,
+    webgl_renderer: fingerprint.webgl_renderer || undefined,
+    timezone: explicitTimezone,
+    languages: explicitLanguages,
+    geolocation_mode: fingerprintGeolocationModeFor(fingerprint.geolocation),
+    cpu_cores: numberOrNull(String(fingerprint.cpu_cores ?? '')) || undefined,
+    memory_gb: numberOrNull(String(fingerprint.memory_gb ?? '')) || undefined,
+    screen: fingerprint.screen && fingerprint.screen !== 'Auto' ? fingerprint.screen : undefined,
+    rotate_on_launch: rotate,
+  };
 }
 
 function newProxyDraft(): ProxyDraft {
@@ -780,9 +931,11 @@ function App() {
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [profileSearch, setProfileSearch] = useState('');
   const [profileStatusFilter, setProfileStatusFilter] = useState('');
+  const [profileProxyFilter, setProfileProxyFilter] = useState<'' | 'assigned' | 'unassigned'>('');
   const [profilePageSize, setProfilePageSize] = useState(25);
   const [profilePage, setProfilePage] = useState(0);
   const [proxySearch, setProxySearch] = useState('');
+  const [proxyAssignedFilter, setProxyAssignedFilter] = useState<'' | 'assigned' | 'unassigned'>('');
   const [proxyPageSize, setProxyPageSize] = useState(25);
   const [proxyPage, setProxyPage] = useState(0);
   const [importFile, setImportFile] = useState<{path: string; rows: Record<string, string>[]} | null>(null);
@@ -801,6 +954,10 @@ function App() {
   const [checkingProxyId, setCheckingProxyId] = useState('');
   const [selectedProxyIds, setSelectedProxyIds] = useState<Set<string>>(new Set());
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
+  const [proxyDeleteRequest, setProxyDeleteRequest] = useState<{proxyIds: string[]; label: string; affectedProfiles: number} | null>(null);
+  const [proxyDeleteAck, setProxyDeleteAck] = useState(false);
+  const [profileDeleteRequest, setProfileDeleteRequest] = useState<{profileIds: string[]; label: string; exclusiveProxyIds: string[]} | null>(null);
+  const [profileDeleteRemoveProxy, setProfileDeleteRemoveProxy] = useState(false);
   const proxyChecksInFlight = useRef(new Set<string>());
   const proxyChecksAttempted = useRef(new Set<string>());
 
@@ -911,6 +1068,26 @@ function App() {
     };
   }, [cloudLoading, signedInEmail, cloudState.proxies]);
 
+  // Local automation API listener: POST http://127.0.0.1:39219/v1/cookies/
+  // bulk-match (electron/main.cjs) forwards requests here so they run against
+  // the signed-in cloud state via the same matching logic the "Import
+  // cookies" button uses, then reports the result back for the HTTP response.
+  useEffect(() => {
+    const onRequest = native?.onBulkMatchCookiesRequest;
+    const sendResult = native?.sendBulkMatchCookiesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, folderPath, profileIds}) => {
+      try {
+        const result = await matchCookiesToProfiles(folderPath, profileIds);
+        sendResult(requestId, result);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
   async function loadCloudState() {
     setCloudLoading(true);
     if (!supabase) {
@@ -975,13 +1152,14 @@ function App() {
         custom_statuses: customStatuses,
       };
       const {state: repairedState, repaired} = repairProxyAssignments(nextState);
-      setCloudState(repairedState);
-      setSelectedId(repairedState.profiles[0]?.id || null);
-      if (repaired > 0 || mergedBookmarks.changed) {
-        await saveCloudState(repairedState);
+      const {state: purgedState, purged} = purgeExpiredTrash(repairedState);
+      setCloudState(purgedState);
+      setSelectedId(purgedState.profiles.find((profile) => !profile.deleted_at)?.id || null);
+      if (repaired > 0 || mergedBookmarks.changed || purged > 0) {
+        await saveCloudState(purgedState);
       }
-      if (repaired > 0 || mergedBookmarks.changed) {
-        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}`);
+      if (repaired > 0 || mergedBookmarks.changed || purged > 0) {
+        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}`);
       }
     } finally {
       setCloudLoading(false);
@@ -1107,28 +1285,42 @@ function App() {
   }
 
   function visibleProfiles() {
-    const inFolder = selectedFolderId ?
-      cloudState.profiles.filter((profile) => profile.folder_id === selectedFolderId) :
-      cloudState.profiles;
+    const inTrash = selectedFolderId === TRASH_FOLDER_ID;
+    const notTrashed = cloudState.profiles.filter((profile) => Boolean(profile.deleted_at) === inTrash);
+    const inFolder = selectedFolderId && !inTrash ?
+      notTrashed.filter((profile) => profile.folder_id === selectedFolderId) :
+      notTrashed;
     const byStatus = profileStatusFilter ?
       inFolder.filter((profile) =>
         (profile.status || 'Ready').toLowerCase() === profileStatusFilter.toLowerCase()) :
       inFolder;
+    const byProxy = profileProxyFilter ?
+      byStatus.filter((profile) =>
+        Boolean(proxyFor(profile)) === (profileProxyFilter === 'assigned')) :
+      byStatus;
     const query = profileSearch.trim().toLowerCase();
     if (!query) {
-      return byStatus;
+      return byProxy;
     }
-    return byStatus.filter((profile) =>
+    return byProxy.filter((profile) =>
       profile.name?.toLowerCase().includes(query) ||
       profile.tags?.some((tag) => tag.toLowerCase().includes(query)));
   }
 
+  function isProxyAssigned(proxy: ArgusProxy) {
+    return cloudState.profiles.some((profile) =>
+      !profile.deleted_at && comparable(profile.proxy_id) === comparable(proxy.id));
+  }
+
   function visibleProxies() {
+    const byAssignment = proxyAssignedFilter ?
+      cloudState.proxies.filter((proxy) => isProxyAssigned(proxy) === (proxyAssignedFilter === 'assigned')) :
+      cloudState.proxies;
     const query = proxySearch.trim().toLowerCase();
     if (!query) {
-      return cloudState.proxies;
+      return byAssignment;
     }
-    return cloudState.proxies.filter((proxy) =>
+    return byAssignment.filter((proxy) =>
       [proxy.name, proxy.host, proxy.country, proxy.country_code, proxy.type]
           .filter(Boolean)
           .join(' ')
@@ -1154,43 +1346,47 @@ function App() {
         launchProfile.command_line_switches || '',
         fingerprintSwitches(launchProfile),
       ].filter(Boolean).join('\n');
-      const selectedProxy = proxyFor(launchProfile);
-      if (!selectedProxy?.host || !selectedProxy.port) {
-        setErrorDialog({
-          title: 'Launch blocked',
-          detail: `Proxy for ${launchProfile.name} is invalid. Fix host and port before launch.`,
-        });
-        return;
-      }
-      if (!selectedProxy.checked_at) {
-        setErrorDialog({
-          title: 'Launch blocked',
-          detail: `Proxy for ${launchProfile.name} is still checking. Launch is blocked until proxy check succeeds.`,
-        });
-        return;
-      }
-      if (selectedProxy.check_error) {
-        setErrorDialog({
-          title: 'Launch blocked',
-          detail: `Proxy for ${launchProfile.name} failed its last check: ${selectedProxy.check_error}`,
-        });
-        return;
+      const proxyMode = launchProfile.proxy_mode || 'assigned';
+      let selectedProxy: ArgusProxy | null = null;
+      if (proxyMode === 'assigned') {
+        selectedProxy = proxyFor(launchProfile);
+        if (!selectedProxy?.host || !selectedProxy.port) {
+          setErrorDialog({
+            title: 'Launch blocked',
+            detail: `Proxy for ${launchProfile.name} is invalid. Fix host and port before launch.`,
+          });
+          return;
+        }
+        if (!selectedProxy.checked_at) {
+          setErrorDialog({
+            title: 'Launch blocked',
+            detail: `Proxy for ${launchProfile.name} is still checking. Launch is blocked until proxy check succeeds.`,
+          });
+          return;
+        }
+        if (selectedProxy.check_error) {
+          setErrorDialog({
+            title: 'Launch blocked',
+            detail: `Proxy for ${launchProfile.name} failed its last check: ${selectedProxy.check_error}`,
+          });
+          return;
+        }
       }
       const result = await native.launchProfile({
         id: launchProfile.id,
         name: launchProfile.name,
         userDataDir: profileDataDir(launchProfile.id),
         proxy: selectedProxy,
+        useFreeProxy: proxyMode === 'free_proxy',
         extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
         commandLineSwitches,
-        fingerprintTimezone: launchProfile.fingerprint?.timezone || null,
-        fingerprintLanguage: launchProfile.fingerprint?.language || null,
+        runtimeFingerprint: buildRuntimeFingerprint(launchProfile),
         startUrl: browserStartUrl(launchProfile),
         homeHtml: anonymousHomeHtml(launchProfile, cloudState.shared_bookmarks),
         cookieImportPath: launchProfile.cookie_import_path || null,
       });
       if (result.ok) {
-        setMessage(`Opened ${result.launcherAppPath || 'profile app'}`);
+        setMessage(`Launched ${launchProfile.name}`);
       } else {
         setErrorDialog({title: `Couldn't launch ${launchProfile.name}`, detail: result.error || 'Launch failed for an unknown reason.'});
       }
@@ -1296,8 +1492,9 @@ function App() {
       setMessage('Profile name is required');
       return;
     }
-    if (!profileDraft.proxy_id || !cloudState.proxies.some((proxy) => proxy.id === profileDraft.proxy_id)) {
-      setMessage('Proxy is required. Direct connection is disabled.');
+    if (profileDraft.proxy_mode === 'assigned' &&
+        (!profileDraft.proxy_id || !cloudState.proxies.some((proxy) => proxy.id === profileDraft.proxy_id))) {
+      setMessage('Proxy is required, or pick Direct / Free Proxy instead.');
       return;
     }
     const profile: ArgusProfile = {
@@ -1306,7 +1503,8 @@ function App() {
       status: profileDraft.status.trim() || 'Ready',
       color: profileDraft.color || profileColors[1],
       folder_id: profileDraft.folder_id.trim() || null,
-      proxy_id: profileDraft.proxy_id || null,
+      proxy_id: profileDraft.proxy_mode === 'assigned' ? (profileDraft.proxy_id || null) : null,
+      proxy_mode: profileDraft.proxy_mode,
       tags: tagsFromDraft(profileDraft.tags),
       start_url: profileDraft.start_url.trim() || null,
       cookie_import_path: profileDraft.cookie_import_path.trim() || null,
@@ -1344,7 +1542,7 @@ function App() {
     setMessage(`${profile.name} saved`);
   }
 
-  async function deleteProfileDraft() {
+  function deleteProfileDraft() {
     if (!profileDraft?.id) {
       setProfileDraft(null);
       return;
@@ -1354,18 +1552,104 @@ function App() {
       setProfileDraft(null);
       return;
     }
-    await deleteProfile(profile);
-    setProfileDraft(null);
+    deleteProfile(profile);
   }
 
-  async function deleteProfile(profile: ArgusProfile) {
-    if (!window.confirm(`Delete ${profile.name}?`)) {
+  function deleteProfile(profile: ArgusProfile) {
+    requestDeleteProfiles([profile.id], profile.name);
+  }
+
+  // A proxy is offered for "also delete" only when every profile assigned to
+  // it is in the set being deleted -- otherwise removing it would silently
+  // break a surviving profile's launch.
+  function exclusiveProxyIdsFor(profileIds: string[]): string[] {
+    const deletingIds = new Set(profileIds);
+    const assigned = new Set(
+      cloudState.profiles
+          .filter((profile) => deletingIds.has(profile.id) && profile.proxy_id)
+          .map((profile) => profile.proxy_id as string));
+    return [...assigned].filter((proxyId) =>
+      !cloudState.profiles.some((profile) =>
+        !deletingIds.has(profile.id) && profile.proxy_id === proxyId));
+  }
+
+  function requestDeleteProfiles(profileIds: string[], label: string) {
+    setProfileDeleteRemoveProxy(false);
+    setProfileDeleteRequest({profileIds, label, exclusiveProxyIds: exclusiveProxyIdsFor(profileIds)});
+  }
+
+  async function confirmDeleteProfiles() {
+    if (!profileDeleteRequest) {
+      return;
+    }
+    const {profileIds, label, exclusiveProxyIds} = profileDeleteRequest;
+    const deletedAt = new Date().toISOString();
+    const profiles = cloudState.profiles.map((item) =>
+      profileIds.includes(item.id) ? {...item, deleted_at: deletedAt} : item);
+    const proxies = profileDeleteRemoveProxy ?
+      cloudState.proxies.filter((proxy) => !exclusiveProxyIds.includes(proxy.id)) :
+      cloudState.proxies;
+    await saveCloudState({...cloudState, profiles, proxies});
+    if (selectedId && profileIds.includes(selectedId)) {
+      setSelectedId(profiles.find((item) => !item.deleted_at)?.id || null);
+    }
+    setSelectedProfileIds(new Set());
+    setProfileDraft(null);
+    setMessage(`${label} moved to Trash${profileDeleteRemoveProxy && exclusiveProxyIds.length ? ' with its proxy deleted' : ''}`);
+    setProfileDeleteRequest(null);
+    setProfileDeleteRemoveProxy(false);
+  }
+
+  async function restoreProfile(profile: ArgusProfile) {
+    const profiles = cloudState.profiles.map((item) =>
+      item.id === profile.id ? {...item, deleted_at: null} : item);
+    await saveCloudState({...cloudState, profiles});
+    setMessage(`${profile.name} restored`);
+  }
+
+  async function permanentlyDeleteProfile(profile: ArgusProfile) {
+    if (!window.confirm(`Permanently delete ${profile.name}? This cannot be undone.`)) {
       return;
     }
     const profiles = cloudState.profiles.filter((item) => item.id !== profile.id);
     await saveCloudState({...cloudState, profiles});
-    setSelectedId(profiles[0]?.id || null);
-    setMessage(`${profile.name} deleted`);
+    setMessage(`${profile.name} permanently deleted`);
+  }
+
+  async function restoreSelectedProfiles() {
+    if (!selectedProfileIds.size) {
+      return;
+    }
+    const count = selectedProfileIds.size;
+    const profiles = cloudState.profiles.map((item) =>
+      selectedProfileIds.has(item.id) ? {...item, deleted_at: null} : item);
+    await saveCloudState({...cloudState, profiles});
+    setSelectedProfileIds(new Set());
+    setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} restored`);
+  }
+
+  async function permanentlyDeleteSelectedProfiles() {
+    if (!selectedProfileIds.size) {
+      return;
+    }
+    const count = selectedProfileIds.size;
+    if (!window.confirm(`Permanently delete ${count} selected ${count === 1 ? 'profile' : 'profiles'}? This cannot be undone.`)) {
+      return;
+    }
+    const profiles = cloudState.profiles.filter((item) => !selectedProfileIds.has(item.id));
+    await saveCloudState({...cloudState, profiles});
+    setSelectedProfileIds(new Set());
+    setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} permanently deleted`);
+  }
+
+  // Auto-purge: profiles trashed more than TRASH_RETENTION_DAYS ago are
+  // permanently removed. Called once after cloud state loads (see
+  // loadCloudState), matching the existing proxy-assignment-repair pattern.
+  function purgeExpiredTrash(state: CloudState): {state: CloudState; purged: number} {
+    const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const profiles = state.profiles.filter((profile) =>
+      !profile.deleted_at || Date.parse(profile.deleted_at) > cutoff);
+    return {state: {...state, profiles}, purged: state.profiles.length - profiles.length};
   }
 
   async function pickImportCsv() {
@@ -1759,7 +2043,7 @@ function App() {
     }
   }
 
-  async function deleteProxyDraft() {
+  function deleteProxyDraft() {
     if (!proxyDraft?.id) {
       setProxyDraft(null);
       return;
@@ -1769,15 +2053,7 @@ function App() {
       setProxyDraft(null);
       return;
     }
-    if (!window.confirm(`Delete ${proxy.name || proxy.host}?`)) {
-      return;
-    }
-    const proxies = cloudState.proxies.filter((item) => item.id !== proxy.id);
-    const profiles = cloudState.profiles.map((profile) =>
-      profile.proxy_id === proxy.id ? {...profile, proxy_id: null} : profile);
-    await saveCloudState({...cloudState, proxies, profiles});
-    setProxyDraft(null);
-    setMessage(`${proxy.name || proxy.host} deleted`);
+    requestDeleteProxies([proxy.id], proxy.name || proxy.host);
   }
 
   function toggleProxySelected(proxyId: string) {
@@ -1801,22 +2077,37 @@ function App() {
     });
   }
 
-  async function deleteSelectedProxies() {
+  function deleteSelectedProxies() {
     if (!selectedProxyIds.size) {
       return;
     }
     const count = selectedProxyIds.size;
-    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'proxy' : 'proxies'}? Profiles using them will fall back to no proxy.`)) {
+    requestDeleteProxies([...selectedProxyIds], `${count} selected ${count === 1 ? 'proxy' : 'proxies'}`);
+  }
+
+  function requestDeleteProxies(proxyIds: string[], label: string) {
+    const affectedProfiles = cloudState.profiles.filter((profile) =>
+      profile.proxy_id && proxyIds.includes(profile.proxy_id)).length;
+    setProxyDeleteAck(false);
+    setProxyDeleteRequest({proxyIds, label, affectedProfiles});
+  }
+
+  async function confirmDeleteProxies() {
+    if (!proxyDeleteRequest) {
       return;
     }
-    const proxies = cloudState.proxies.filter((item) => !selectedProxyIds.has(item.id));
+    const {proxyIds, label} = proxyDeleteRequest;
+    const proxies = cloudState.proxies.filter((item) => !proxyIds.includes(item.id));
     const profiles = cloudState.profiles.map((profile) =>
-      profile.proxy_id && selectedProxyIds.has(profile.proxy_id) ?
+      profile.proxy_id && proxyIds.includes(profile.proxy_id) ?
         {...profile, proxy_id: null} :
         profile);
     await saveCloudState({...cloudState, proxies, profiles});
-    setMessage(`${count} ${count === 1 ? 'proxy' : 'proxies'} deleted`);
+    setMessage(`${label} deleted`);
     setSelectedProxyIds(new Set());
+    setProxyDraft(null);
+    setProxyDeleteRequest(null);
+    setProxyDeleteAck(false);
   }
 
   async function exportProxiesToCsv(list: ArgusProxy[]) {
@@ -1860,21 +2151,12 @@ function App() {
     });
   }
 
-  async function deleteSelectedProfiles() {
+  function deleteSelectedProfiles() {
     if (!selectedProfileIds.size) {
       return;
     }
     const count = selectedProfileIds.size;
-    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'profile' : 'profiles'}?`)) {
-      return;
-    }
-    const profiles = cloudState.profiles.filter((item) => !selectedProfileIds.has(item.id));
-    await saveCloudState({...cloudState, profiles});
-    setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} deleted`);
-    if (selectedId && selectedProfileIds.has(selectedId)) {
-      setSelectedId(profiles[0]?.id || null);
-    }
-    setSelectedProfileIds(new Set());
+    requestDeleteProfiles([...selectedProfileIds], `${count} selected ${count === 1 ? 'profile' : 'profiles'}`);
   }
 
   async function exportProfilesToCsv(list: ArgusProfile[]) {
@@ -1930,6 +2212,33 @@ function App() {
     setMessage(`${selectedProfileIds.size} ${selectedProfileIds.size === 1 ? 'profile' : 'profiles'} moved to ${folderName || 'All profiles'}`);
   }
 
+  // Shared by the "Import cookies" button (folder picked via native dialog,
+  // targetProfileIds = the checked selection) and the local automation API
+  // (POST /v1/cookies/bulk-match, targetProfileIds = null meaning "every
+  // profile"). Matches by name against files in `folderPath`, same as the
+  // Dolphin-export naming convention (dolphin-anty-cookies-<Name>-<id>.txt).
+  async function matchCookiesToProfiles(
+      folderPath: string, targetProfileIds: string[] | null): Promise<{matched: number; total: number}> {
+    if (!native?.matchCookieFiles) {
+      throw new Error('Native cookie import is not available. Restart Argys Anty and try again.');
+    }
+    const targetIds = targetProfileIds ? new Set(targetProfileIds) : null;
+    const isTarget = (profile: ArgusProfile) => !profile.deleted_at && (!targetIds || targetIds.has(profile.id));
+    const selected = cloudState.profiles.filter(isTarget);
+    const matches = await native.matchCookieFiles(folderPath, selected.map((profile) => profile.name));
+    let matched = 0;
+    const profiles = cloudState.profiles.map((profile) => {
+      const match = isTarget(profile) ? matches[profile.name] : undefined;
+      if (!match) {
+        return profile;
+      }
+      matched += 1;
+      return {...profile, cookie_import_path: match.path, cookie_import_count: match.count};
+    });
+    await saveCloudState({...cloudState, profiles});
+    return {matched, total: selected.length};
+  }
+
   async function importCookiesForSelectedProfiles() {
     if (!selectedProfileIds.size) {
       return;
@@ -1942,19 +2251,8 @@ function App() {
     if (!folderPath) {
       return;
     }
-    const selected = cloudState.profiles.filter((profile) => selectedProfileIds.has(profile.id));
-    const matches = await native.matchCookieFiles(folderPath, selected.map((profile) => profile.name));
-    let matched = 0;
-    const profiles = cloudState.profiles.map((profile) => {
-      const match = selectedProfileIds.has(profile.id) ? matches[profile.name] : undefined;
-      if (!match) {
-        return profile;
-      }
-      matched += 1;
-      return {...profile, cookie_import_path: match.path, cookie_import_count: match.count};
-    });
-    await saveCloudState({...cloudState, profiles});
-    setMessage(`Matched cookies for ${matched} of ${selected.length} selected profiles`);
+    const {matched, total} = await matchCookiesToProfiles(folderPath, [...selectedProfileIds]);
+    setMessage(`Matched cookies for ${matched} of ${total} selected profiles`);
   }
 
   function openNewBookmark() {
@@ -2061,6 +2359,8 @@ function App() {
 
   function renderProfilesTab() {
     const visible = visibleProfiles();
+    const inTrash = selectedFolderId === TRASH_FOLDER_ID;
+    const trashedCount = cloudState.profiles.filter((profile) => profile.deleted_at).length;
     const allVisibleSelected = visible.length > 0 &&
       visible.every((profile) => selectedProfileIds.has(profile.id));
     const {items: pageProfiles, page: clampedProfilePage, totalPages: profileTotalPages, total: profileTotal} =
@@ -2086,6 +2386,12 @@ function App() {
             </div>
           ))}
           <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
+          <button
+            className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
+            onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
+          >
+            <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
+          </button>
         </section>
         <section className="table-toolbar">
           {visible.length > 0 && (
@@ -2111,13 +2417,31 @@ function App() {
             <option value="">All statuses</option>
             {profileStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
           </select>
+          <select
+            value={profileProxyFilter}
+            onChange={(event) => setProfileProxyFilter(event.target.value as '' | 'assigned' | 'unassigned')}
+          >
+            <option value="">Any proxy</option>
+            <option value="assigned">Proxy assigned</option>
+            <option value="unassigned">No proxy assigned</option>
+          </select>
           {visible.length > 0 && (
             <button className="ghost" onClick={() => exportProfilesToCsv(visible)}>
               <Download size={16} /> Export all
             </button>
           )}
         </section>
-        {selectedProfileIds.size > 0 && (
+        {selectedProfileIds.size > 0 && inTrash && (
+          <section className="selection-toolbar">
+            <div className="selection-toolbar-actions">
+              <button className="ghost" onClick={restoreSelectedProfiles}>Restore selected</button>
+              <button className="danger ghost" onClick={permanentlyDeleteSelectedProfiles}>
+                <Trash2 size={16} /> Delete forever
+              </button>
+            </div>
+          </section>
+        )}
+        {selectedProfileIds.size > 0 && !inTrash && (
           <section className="selection-toolbar">
             <div className="selection-toolbar-actions">
               <select
@@ -2192,22 +2516,41 @@ function App() {
                       </select>
                     </td>
                     <td>{profile.created_at?.slice(0, 10) || '-'}</td>
-                    <td>{folder?.name || 'All profiles'}</td>
+                    <td>
+                      {profile.deleted_at ?
+                        `${daysUntilPurge(profile.deleted_at)}d left in Trash` :
+                        (folder?.name || 'All profiles')}
+                    </td>
                     <td>{proxy ? `${proxy.host}:${proxy.port}` : 'Direct'}</td>
                     <td>{profile.tags?.join(', ') || '-'}</td>
                     <td>
-                      <button className="launch" onClick={(event) => {
-                        event.stopPropagation();
-                        void launch(profile);
-                      }}><Play size={16} /> Launch</button>
-                      <button className="icon-button" aria-label={`Edit ${profile.name}`} onClick={(event) => {
-                        event.stopPropagation();
-                        openEditProfile(profile);
-                      }}><Pencil size={16} /></button>
-                      <button className="icon-button danger-icon" aria-label={`Delete ${profile.name}`} onClick={(event) => {
-                        event.stopPropagation();
-                        void deleteProfile(profile);
-                      }}><Trash2 size={16} /></button>
+                      {profile.deleted_at ? (
+                        <>
+                          <button className="ghost" onClick={(event) => {
+                            event.stopPropagation();
+                            void restoreProfile(profile);
+                          }}>Restore</button>
+                          <button className="icon-button danger-icon" aria-label={`Permanently delete ${profile.name}`} onClick={(event) => {
+                            event.stopPropagation();
+                            void permanentlyDeleteProfile(profile);
+                          }}><Trash2 size={16} /></button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="launch" onClick={(event) => {
+                            event.stopPropagation();
+                            void launch(profile);
+                          }}><Play size={16} /> Launch</button>
+                          <button className="icon-button" aria-label={`Edit ${profile.name}`} onClick={(event) => {
+                            event.stopPropagation();
+                            openEditProfile(profile);
+                          }}><Pencil size={16} /></button>
+                          <button className="icon-button danger-icon" aria-label={`Delete ${profile.name}`} onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteProfile(profile);
+                          }}><Trash2 size={16} /></button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );
@@ -2218,7 +2561,7 @@ function App() {
                     <span className="empty-state">
                       {profileSearch.trim() || profileStatusFilter ?
                         'No profiles match your search/filter.' :
-                        'No profiles in this folder.'}
+                        inTrash ? 'Trash is empty.' : 'No profiles in this folder.'}
                     </span>
                   </td>
                 </tr>
@@ -2259,6 +2602,14 @@ function App() {
             onChange={(event) => setProxySearch(event.target.value)}
             placeholder="Search proxies by name, host, or country"
           />
+          <select
+            value={proxyAssignedFilter}
+            onChange={(event) => setProxyAssignedFilter(event.target.value as '' | 'assigned' | 'unassigned')}
+          >
+            <option value="">All proxies</option>
+            <option value="assigned">Assigned to a profile</option>
+            <option value="unassigned">Not assigned</option>
+          </select>
           {visible.length > 0 && (
             <button className="ghost" onClick={() => exportProxiesToCsv(visible)}>
               <Download size={16} /> Export all
@@ -2304,6 +2655,11 @@ function App() {
                       `Check failed · ${proxy.check_error}` :
                       `${proxy.country || proxy.country_code || 'Unknown'} · ${proxy.egress_ip || 'No IP'} · ${proxy.ping_ms || 0}ms cached`
                   ) : 'Country not checked'}
+                </p>
+                <p>
+                  <span className={isProxyAssigned(proxy) ? 'proxy-badge assigned' : 'proxy-badge unassigned'}>
+                    {isProxyAssigned(proxy) ? 'Assigned' : 'Not assigned'}
+                  </span>
                 </p>
               </div>
               <div className="data-card-actions">
@@ -2778,32 +3134,66 @@ function App() {
                   </button>
                 </div>
               </label>
-              <label className="field">
-                <span>Proxy</span>
-                <div className="proxy-picker">
-                  <input
-                    list="profile-proxy-options"
-                    placeholder="Search and select proxy"
-                    value={profileProxyValue()}
-                    onFocus={focusProfileProxyPicker}
-                    onChange={(event) => updateProfileProxyValue(event.target.value)}
-                    onBlur={commitProfileProxyValue}
-                  />
-                  <datalist id="profile-proxy-options">
-                    {filteredProfileProxies().map((proxy) => (
-                      <option value={proxyOptionLabel(proxy)} key={proxy.id} />
-                    ))}
-                  </datalist>
-                  <div className="inline-action">
-                    <input
-                      placeholder="http://user:pass@host:port or socks5://..."
-                      value={profileDraft.proxy_link}
-                      onChange={(event) => setProfileDraft({...profileDraft, proxy_link: event.target.value})}
-                    />
-                    <button type="button" onClick={createProxyFromProfileLink}>Create</button>
-                  </div>
+              <label className="field wide">
+                <span>Proxy mode</span>
+                <div className="segmented">
+                  <button
+                    type="button"
+                    className={profileDraft.proxy_mode === 'assigned' ? 'active' : ''}
+                    onClick={() => setProfileDraft({...profileDraft, proxy_mode: 'assigned'})}
+                  >
+                    Assigned proxy
+                  </button>
+                  <button
+                    type="button"
+                    className={profileDraft.proxy_mode === 'direct' ? 'active' : ''}
+                    onClick={() => setProfileDraft({...profileDraft, proxy_mode: 'direct'})}
+                  >
+                    Direct
+                  </button>
+                  <button
+                    type="button"
+                    className={profileDraft.proxy_mode === 'free_proxy' ? 'active' : ''}
+                    onClick={() => setProfileDraft({...profileDraft, proxy_mode: 'free_proxy'})}
+                  >
+                    Free Proxy
+                  </button>
                 </div>
+                {profileDraft.proxy_mode === 'direct' && (
+                  <p className="field-hint">No proxy, no fallback extension. Traffic goes out directly.</p>
+                )}
+                {profileDraft.proxy_mode === 'free_proxy' && (
+                  <p className="field-hint">Uses the bundled FoxyWall Proxy extension instead of an assigned proxy.</p>
+                )}
               </label>
+              {profileDraft.proxy_mode === 'assigned' && (
+                <label className="field">
+                  <span>Proxy</span>
+                  <div className="proxy-picker">
+                    <input
+                      list="profile-proxy-options"
+                      placeholder="Search and select proxy"
+                      value={profileProxyValue()}
+                      onFocus={focusProfileProxyPicker}
+                      onChange={(event) => updateProfileProxyValue(event.target.value)}
+                      onBlur={commitProfileProxyValue}
+                    />
+                    <datalist id="profile-proxy-options">
+                      {filteredProfileProxies().map((proxy) => (
+                        <option value={proxyOptionLabel(proxy)} key={proxy.id} />
+                      ))}
+                    </datalist>
+                    <div className="inline-action">
+                      <input
+                        placeholder="http://user:pass@host:port or socks5://..."
+                        value={profileDraft.proxy_link}
+                        onChange={(event) => setProfileDraft({...profileDraft, proxy_link: event.target.value})}
+                      />
+                      <button type="button" onClick={createProxyFromProfileLink}>Create</button>
+                    </div>
+                  </div>
+                </label>
+              )}
               <label className="field">
                 <span>Folder</span>
                 <select
@@ -3183,6 +3573,114 @@ function App() {
               )}
               <button className="ghost" onClick={() => setBookmarkDraft(null)}>Cancel</button>
               <button onClick={saveBookmarkDraft}>{bookmarkDraft.originalUrl ? 'Save changes' : 'Add bookmark'}</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {proxyDeleteRequest && (
+        <div className="modal-backdrop" onMouseDown={() => {
+          setProxyDeleteRequest(null);
+          setProxyDeleteAck(false);
+        }}>
+          <section className="profile-modal small-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h2>Delete {proxyDeleteRequest.label}?</h2>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => {
+                  setProxyDeleteRequest(null);
+                  setProxyDeleteAck(false);
+                }}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p className="error-detail">
+              {proxyDeleteRequest.affectedProfiles > 0 ?
+                `This will permanently remove ${proxyDeleteRequest.proxyIds.length === 1 ? 'this proxy' : 'these proxies'} and unassign ${proxyDeleteRequest.affectedProfiles === 1 ? 'it' : 'them'} from ${proxyDeleteRequest.affectedProfiles} ${proxyDeleteRequest.affectedProfiles === 1 ? 'profile' : 'profiles'}. Those profiles will be blocked from launching until a new proxy is assigned.` :
+                `This will permanently remove ${proxyDeleteRequest.proxyIds.length === 1 ? 'this proxy' : 'these proxies'}. No profile is currently assigned to it.`}
+            </p>
+            <label className="checkbox-confirm">
+              <input
+                type="checkbox"
+                checked={proxyDeleteAck}
+                onChange={(event) => setProxyDeleteAck(event.target.checked)}
+              />
+              <span>I understand this cannot be undone.</span>
+            </label>
+            <footer className="modal-actions">
+              <button
+                className="ghost"
+                onClick={() => {
+                  setProxyDeleteRequest(null);
+                  setProxyDeleteAck(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button className="danger" onClick={confirmDeleteProxies}>
+                <Trash2 size={16} /> Delete
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {profileDeleteRequest && (
+        <div className="modal-backdrop" onMouseDown={() => {
+          setProfileDeleteRequest(null);
+          setProfileDeleteRemoveProxy(false);
+        }}>
+          <section className="profile-modal small-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <h2>Delete {profileDeleteRequest.label}?</h2>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => {
+                  setProfileDeleteRequest(null);
+                  setProfileDeleteRemoveProxy(false);
+                }}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p className="error-detail">
+              Moved to Trash for {TRASH_RETENTION_DAYS} days (Profiles tab &rarr; Trash), then permanently deleted. You can restore
+              {profileDeleteRequest.profileIds.length === 1 ? ' it' : ' them'} any time before that.
+            </p>
+            {profileDeleteRequest.exclusiveProxyIds.length > 0 && (
+              <label className="checkbox-confirm">
+                <input
+                  type="checkbox"
+                  checked={profileDeleteRemoveProxy}
+                  onChange={(event) => setProfileDeleteRemoveProxy(event.target.checked)}
+                />
+                <span>
+                  Also permanently delete {profileDeleteRequest.exclusiveProxyIds.length === 1 ? 'the proxy' : `the ${profileDeleteRequest.exclusiveProxyIds.length} proxies`} assigned
+                  {profileDeleteRequest.profileIds.length === 1 ? ' to this profile' : ' to these profiles'} now (not used by any other profile). Proxies aren't moved to Trash.
+                </span>
+              </label>
+            )}
+            <footer className="modal-actions">
+              <button
+                className="ghost"
+                onClick={() => {
+                  setProfileDeleteRequest(null);
+                  setProfileDeleteRemoveProxy(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button className="danger" onClick={confirmDeleteProfiles}>
+                <Trash2 size={16} /> Delete
+              </button>
             </footer>
           </section>
         </div>

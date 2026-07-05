@@ -11,4 +11,11 @@ contextBridge.exposeInMainWorld('argusNative', {
   saveTextFile: (defaultName, content) =>
     ipcRenderer.invoke('argus:save-text-file', {defaultName, content}),
   selectImportCsv: () => ipcRenderer.invoke('argus:select-import-csv'),
+  onBulkMatchCookiesRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:bulk-match-cookies-request', listener);
+    return () => ipcRenderer.removeListener('argus:bulk-match-cookies-request', listener);
+  },
+  sendBulkMatchCookiesResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:bulk-match-cookies-result', {requestId, result, error}),
 });

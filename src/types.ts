@@ -1,3 +1,41 @@
+// Mirrors argus::Fingerprint's JSON dict keys (chrome/browser/argus/
+// argus_fingerprint.cc ToDict/FromDict) so it can be dropped straight into
+// --argus-fingerprint-json for the browser to apply verbatim. timezone,
+// languages, latitude, and longitude are left undefined when the profile is
+// set to derive them from the assigned proxy's country -- electron/main.cjs
+// fills those in (reusing its existing COUNTRY_DEFAULTS resolution) right
+// before the payload is serialized, so that logic stays in exactly one place.
+export type RuntimeFingerprint = {
+  platform?: string;
+  ua_string?: string;
+  preset?: string;
+  seed: number;
+  webrtc_mode?: string;
+  canvas_mode?: string;
+  webgl_mode?: string;
+  webgpu_mode?: string;
+  client_rects_mode?: string;
+  audio_mode?: string;
+  webgl_vendor?: string;
+  webgl_renderer?: string;
+  timezone?: string;
+  languages?: string[];
+  geolocation_mode?: string;
+  latitude?: number;
+  longitude?: number;
+  cpu_cores?: number;
+  memory_gb?: number;
+  screen?: string;
+  rotate_on_launch?: boolean;
+};
+
+// How this profile connects: 'assigned' requires a real proxy_id (the
+// existing, default behavior); 'direct' explicitly opts out of any proxy
+// (no fallback extension either); 'free_proxy' explicitly opts into the
+// bundled FoxyWall Proxy extension as a fallback. Undefined means 'assigned'
+// for backward compatibility with profiles saved before this field existed.
+export type ProxyMode = 'assigned' | 'direct' | 'free_proxy';
+
 export type ArgusProfile = {
   id: string;
   name: string;
@@ -6,6 +44,7 @@ export type ArgusProfile = {
   tags?: string[];
   folder_id?: string | null;
   proxy_id?: string | null;
+  proxy_mode?: ProxyMode;
   start_url?: string | null;
   cookie_import_path?: string | null;
   cookie_import_count?: number | null;
@@ -28,6 +67,11 @@ export type ArgusProfile = {
     rotate_on_launch?: boolean;
   };
   created_at?: string;
+  // Soft-delete timestamp (ISO 8601). Set when a profile is moved to Trash;
+  // the profile is hidden from the normal profiles list but kept for 30 days
+  // (auto-purged on the next app launch after that) so an accidental delete
+  // can be restored.
+  deleted_at?: string | null;
 };
 
 export type ArgusFolder = {

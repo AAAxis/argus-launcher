@@ -47,3 +47,21 @@ p {
   font-size: 12px;
   margin: 0;
 }
+
+.seed-status {
+  background: #f3f1ec;
+  border-radius: 8px;
+  color: #46433d;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.seed-status.seeded {
+  background: #e9f7ee;
+  color: #1a7f3c;
+}
+
+.seed-status.not-seeded {
+  background: #fff1ef;
+  color: #d53c32;
+}

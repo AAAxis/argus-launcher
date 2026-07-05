@@ -1,3 +1,5 @@
+import type {RuntimeFingerprint} from './types';
+
 export type ProxyConfig = {
   id?: string;
   host?: string;
@@ -12,10 +14,18 @@ export type LaunchProfilePayload = {
   name: string;
   userDataDir: string;
   proxy?: ProxyConfig | null;
+  // True only when the profile's proxy_mode is explicitly 'free_proxy':
+  // bundles the FoxyWall Proxy extension as a fallback. Never set for
+  // 'direct' (no proxy, no fallback extension either) or 'assigned' (a real
+  // proxy is present in `proxy` instead).
+  useFreeProxy?: boolean;
   extensionPaths?: string[];
   commandLineSwitches?: string;
-  fingerprintTimezone?: string | null;
-  fingerprintLanguage?: string | null;
+  // Full resolved fingerprint, keyed exactly like argus::Fingerprint's JSON
+  // dict. electron/main.cjs resolves any proxy-derived fields still missing
+  // (timezone/languages/lat-long) and serializes this into
+  // --argus-fingerprint-json for the browser to apply before first navigation.
+  runtimeFingerprint?: RuntimeFingerprint | null;
   startUrl?: string;
   homeHtml?: string;
   cookieImportPath?: string | null;
@@ -40,6 +50,10 @@ type ArgusNative = {
     ok: boolean;
     pid?: number;
     appPath?: string;
+    // Path to the per-profile wrapper .app that was actually spawned (see
+    // electron/main.cjs's writeProfileLauncherApp) -- its Dock/Cmd+Tab name is
+    // the profile's own name, since that identity comes from the bundle, not
+    // from the shared Argys Browser binary or any window title.
     launcherAppPath?: string;
     error?: string;
   }>;
@@ -53,6 +67,18 @@ type ArgusNative = {
   ): Promise<Record<string, CookieFileSelection | null>>;
   saveTextFile?(defaultName: string, content: string): Promise<string | null>;
   selectImportCsv?(): Promise<{path: string; content: string} | null>;
+  // Local automation API (POST http://127.0.0.1:39219/v1/cookies/bulk-match)
+  // support: main.cjs forwards a bulk cookie-match request here so it can run
+  // against the signed-in renderer's cloud state, then reports the result
+  // back over sendBulkMatchCookiesResult so the HTTP caller gets a response.
+  onBulkMatchCookiesRequest?(
+    callback: (payload: {requestId: string; folderPath: string; profileIds: string[] | null}) => void,
+  ): () => void;
+  sendBulkMatchCookiesResult?(
+    requestId: string,
+    result?: {matched: number; total: number},
+    error?: string,
+  ): void;
 };
 
 declare global {

@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Argys SMS</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="provider">OnlineSim</p>
+        <p id="status">Ready</p>
+      </div>
+    </header>
+
+    <section class="panel" id="setup-panel" hidden>
+      <p class="setup-intro">
+        SMS Activate needs an OnlineSim API key to request phone numbers and read codes.
+      </p>
+      <a class="setup-link" href="https://onlinesim.io/" target="_blank" rel="noreferrer">
+        Get an API key at onlinesim.io ↗
+      </a>
+      <label for="setup-api-key">API key</label>
+      <input id="setup-api-key" placeholder="Paste your OnlineSim API key" autocomplete="off" spellcheck="false">
+      <div class="sms-actions">
+        <button id="setup-save" class="secondary">Save and continue</button>
+      </div>
+      <p id="setup-error" class="setup-error"></p>
+    </section>
+
+    <section class="panel" id="main-panel" hidden>
+      <div class="sms-picker">
+        <div class="field">
+          <label for="sms-service">SMS service</label>
+          <select id="sms-service"></select>
+        </div>
+        <div class="field">
+          <label for="sms-country">Country</label>
+          <select id="sms-country"></select>
+        </div>
+      </div>
+
+      <label for="phone">Phone number</label>
+      <div class="copy-row">
+        <input id="phone" placeholder="No number requested yet" autocomplete="off" readonly>
+        <button data-copy="phone" class="copy-icon" title="Copy phone">⧉</button>
+      </div>
+      <div class="sms-actions">
+        <button id="fetch-phone" class="secondary">Get Number</button>
+      </div>
+      <div class="sms-result">
+        <input id="sms-operation" type="hidden">
+        <div class="copy-row">
+          <input id="sms-code" placeholder="Waiting for code" readonly>
+          <button data-copy="sms-code" class="copy-icon" title="Copy SMS code">⧉</button>
+        </div>
+        <input id="sms-text" type="hidden">
+      </div>
+      <div class="sms-actions">
+        <button id="change-api-key" class="ghost-link" type="button">Change API key</button>
+      </div>
+    </section>
+  </main>
+  <script src="onlinesim.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

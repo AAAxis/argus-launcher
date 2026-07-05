@@ -1,6 +1,8 @@
 const {app, BrowserWindow, dialog, ipcMain, nativeImage} = require('electron');
 const {spawn, spawnSync} = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 
@@ -117,6 +119,8 @@ function browserAppCandidates(preferredAppPath) {
   return [...new Set(candidates.filter(Boolean))];
 }
 
+let mainWindow = null;
+
 function createWindow() {
   const icon = appIconPath();
   if (process.platform === 'darwin' && icon) {
@@ -135,6 +139,12 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+  mainWindow = win;
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null;
+    }
   });
 
   win.webContents.on('console-message', (_event, _level, message, line, sourceId) => {
@@ -187,9 +197,69 @@ function splitSwitches(raw) {
       .filter(Boolean);
 }
 
-function builtInCookieExtensionPath() {
+function cookieManagerSourcePath() {
   const candidate = path.join(__dirname, '../extensions/cookie-manager');
   return fs.existsSync(path.join(candidate, 'manifest.json')) ? candidate : '';
+}
+
+// onlinesim-sms is bundled for every profile regardless of proxy mode.
+function bundledExtensionPaths(payload) {
+  const candidates = [path.join(__dirname, '../extensions/onlinesim-sms')];
+  return candidates.filter((candidate) => fs.existsSync(path.join(candidate, 'manifest.json')));
+}
+
+const FREE_PROXY_SOURCE_PATH = '/Users/dima/Documents/GitHub/chrome-proxy';
+
+// Chrome caches an unpacked (--load-extension) service worker's script body
+// independently of its manifest version or file content -- reloading the
+// browser against the same stable path on an already-used profile can keep
+// running a stale background.js from hours earlier no matter how many times
+// the source file changes or its manifest version is bumped (confirmed via
+// live CDP inspection: chrome.runtime.getManifest().version reflected a fresh
+// bump, but functions/consts only present in newer source were still
+// undefined). Copying into a fresh, uniquely-named per-launch directory --
+// same pattern as writeProfileCookieManagerExtension below -- gives Chrome a
+// genuinely new extension identity every time, so it can never reuse a stale
+// cached service worker.
+function writeProfileFreeProxyExtension(payload) {
+  if (!fs.existsSync(path.join(FREE_PROXY_SOURCE_PATH, 'manifest.json'))) {
+    return '';
+  }
+  const extensionDir = path.join(payload.userDataDir, `ArgysFreeProxy-${Date.now()}`);
+  fs.mkdirSync(extensionDir, {recursive: true});
+  for (const entry of fs.readdirSync(FREE_PROXY_SOURCE_PATH, {withFileTypes: true})) {
+    if (entry.name === '.git') continue;
+    const from = path.join(FREE_PROXY_SOURCE_PATH, entry.name);
+    const to = path.join(extensionDir, entry.name);
+    fs.cpSync(from, to, {recursive: true});
+  }
+  // FoxyWall is now bundled for every profile (so its toolbar icon/manual
+  // toggle is always available), but must only auto-connect on launch when
+  // the user actually picked Free Proxy mode -- never for 'direct' (no proxy
+  // at all) or 'assigned' (a real proxy already owns the connection; this
+  // would be a second, competing proxy source). This config file is the
+  // signal background.js reads before deciding whether to auto-connect.
+  fs.writeFileSync(path.join(extensionDir, 'argus-config.json'), JSON.stringify({
+    autoConnect: Boolean(payload.useFreeProxy),
+  }));
+  return extensionDir;
+}
+
+// Stale per-launch free-proxy extension copies (see writeProfileFreeProxyExtension
+// above) accumulate one fresh directory per launch forever otherwise -- prune
+// old ones for this profile before writing today's.
+function pruneStaleFreeProxyExtensions(userDataDir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(userDataDir, {withFileTypes: true});
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory() && entry.name.startsWith('ArgysFreeProxy-')) {
+      fs.rmSync(path.join(userDataDir, entry.name), {recursive: true, force: true});
+    }
+  }
 }
 
 function normalizeCookieUrl(cookie) {
@@ -267,66 +337,43 @@ function parseCookieFile(filePath) {
   }
 }
 
-function writeCookieSeedExtension(payload) {
-  if (!payload.cookieImportPath) {
+// Writes one merged "Argys Cookie Manager" extension per launch, into the
+// profile's own user-data-dir: a copy of extensions/cookie-manager's manual
+// export/import UI, plus (only when this profile has a cookie file assigned)
+// a seed-cookies.json the extension's own background.js auto-imports once on
+// first run. Previously this shipped as two separate extensions (a shared
+// "Argys Cookie Manager" plus a per-profile "Argys Cookie Seed <name>"
+// generated from an inline script) -- merged so each profile shows exactly
+// one cookie extension that both seeds and manages.
+function writeProfileCookieManagerExtension(payload) {
+  const sourceDir = cookieManagerSourcePath();
+  if (!sourceDir) {
     return '';
   }
-  let cookies = [];
-  try {
-    cookies = parseCookieFile(payload.cookieImportPath);
-  } catch {
-    return '';
-  }
-  if (!cookies.length) {
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, 'ArgysCookieSeed');
+  const extensionDir = path.join(payload.userDataDir, 'ArgysCookieManager');
   fs.mkdirSync(extensionDir, {recursive: true});
-  fs.writeFileSync(path.join(extensionDir, 'manifest.json'), JSON.stringify({
-    manifest_version: 3,
-    name: `Argys Cookie Seed ${payload.name || ''}`.trim(),
-    version: '1.0.0',
-    permissions: ['cookies', 'storage'],
-    host_permissions: ['<all_urls>'],
-    background: {service_worker: 'background.js'},
+  for (const entry of fs.readdirSync(sourceDir, {withFileTypes: true})) {
+    const from = path.join(sourceDir, entry.name);
+    const to = path.join(extensionDir, entry.name);
+    fs.cpSync(from, to, {recursive: true});
+  }
+  // Lets the popup show which profile it's attached to (Argys Browser windows
+  // are otherwise unlabeled from the extension's point of view).
+  fs.writeFileSync(path.join(extensionDir, 'profile-meta.json'), JSON.stringify({
+    id: payload.id || '',
+    name: payload.name || '',
   }, null, 2));
-  fs.writeFileSync(path.join(extensionDir, 'cookies.json'), JSON.stringify({cookies}, null, 2));
-  fs.writeFileSync(path.join(extensionDir, 'background.js'), `
-const IMPORT_KEY = 'argysCookieSeedImported';
-
-async function importCookies() {
-  const state = await chrome.storage.local.get(IMPORT_KEY);
-  if (state[IMPORT_KEY]) return;
-  const response = await fetch(chrome.runtime.getURL('cookies.json'));
-  const payload = await response.json();
-  const cookies = Array.isArray(payload.cookies) ? payload.cookies : [];
-  let imported = 0;
-  for (const cookie of cookies) {
+  if (payload.cookieImportPath) {
     try {
-      const details = {
-        url: cookie.url,
-        name: cookie.name,
-        value: String(cookie.value ?? ''),
-        path: cookie.path || '/',
-        secure: Boolean(cookie.secure),
-        httpOnly: Boolean(cookie.httpOnly),
-        sameSite: cookie.sameSite || 'lax',
-      };
-      if (cookie.domain) details.domain = cookie.domain;
-      if (cookie.expirationDate) details.expirationDate = cookie.expirationDate;
-      await chrome.cookies.set(details);
-      imported++;
-    } catch (error) {
-      console.warn('Argys cookie import failed', cookie?.domain, cookie?.name, error);
+      const cookies = parseCookieFile(payload.cookieImportPath);
+      if (cookies.length) {
+        fs.writeFileSync(path.join(extensionDir, 'seed-cookies.json'), JSON.stringify({cookies}, null, 2));
+      }
+    } catch {
+      // No seed file written: the extension's own fetch() of seed-cookies.json
+      // simply finds nothing and skips seeding, so this fails soft.
     }
   }
-  await chrome.storage.local.set({[IMPORT_KEY]: true, imported, importedAt: Date.now()});
-}
-
-chrome.runtime.onInstalled.addListener(() => void importCookies());
-chrome.runtime.onStartup.addListener(() => void importCookies());
-void importCookies();
-`);
   return extensionDir;
 }
 
@@ -353,6 +400,44 @@ function proxyArgs(proxy) {
     args.push(`--argus-proxy-pass=${proxy.password || ''}`);
   }
   return args;
+}
+
+function base64UrlEncode(text) {
+  return Buffer.from(text, 'utf8').toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+}
+
+// Fills in whatever the renderer left unresolved on the runtime fingerprint
+// (timezone/languages when the profile is set to derive them from the proxy,
+// and lat/long for "manual" geolocation) using the same COUNTRY_DEFAULTS
+// table and resolveTimezone/resolveLanguage helpers already used for the TZ
+// env var and --lang switch below, so proxy-country resolution lives in
+// exactly one place. Returns the base64url-encoded JSON for
+// --argus-fingerprint-json, or '' if there is no fingerprint to send.
+function resolveRuntimeFingerprintArg(fingerprint, proxy, timezone, language) {
+  if (!fingerprint) {
+    return '';
+  }
+  const resolved = {...fingerprint};
+  if (!resolved.timezone && timezone) {
+    resolved.timezone = timezone;
+  }
+  if ((!resolved.languages || !resolved.languages.length) && language) {
+    const base = language.split('-')[0];
+    resolved.languages = base && base !== language ? [language, base] : [language];
+  }
+  if (resolved.geolocation_mode === 'manual' &&
+      (resolved.latitude == null || resolved.longitude == null)) {
+    const code = (proxy?.country_code || '').toLowerCase();
+    const defaults = COUNTRY_DEFAULTS[code];
+    if (defaults) {
+      resolved.latitude = defaults.latitude;
+      resolved.longitude = defaults.longitude;
+    }
+  }
+  return base64UrlEncode(JSON.stringify(resolved));
 }
 
 function proxyUrl(proxy) {
@@ -590,6 +675,13 @@ function copyBrowserIcon(browserAppPath, resourcesDir) {
   }
 }
 
+// The Dock/Cmd+Tab name for a running app comes from its bundle's Info.plist,
+// never from a window's title or command-line args -- there is no supported
+// way for one shared "Argys Browser" binary to report a different Dock
+// identity per profile. So each launch gets its own tiny wrapper .app (named
+// after the profile) whose sole job is to exec the real browser with this
+// profile's args; the Dock then shows the profile's name instead of the
+// shared "Argys Browser" identity, as required.
 function writeProfileLauncherApp(payload, resolved, args, timezone) {
   const appPath = profileLauncherPath(payload);
   const contentsDir = path.join(appPath, 'Contents');
@@ -657,21 +749,32 @@ function spawnProfile(payload, extraArgs = []) {
     };
   }
   const extensionPaths = [
-    builtInCookieExtensionPath(),
+    ...bundledExtensionPaths(payload),
     ...(payload.extensionPaths || []),
   ].filter(Boolean);
   killExistingProfileProcess(payload.id, payload.userDataDir);
   clearSessionRestore(payload.userDataDir);
   const launchUrl = payload.startUrl || writeHomeFile(payload);
   writeProfileStartupPrefs(payload.userDataDir, launchUrl);
-  const seedExtensionPath = writeCookieSeedExtension(payload);
-  if (seedExtensionPath) {
-    extensionPaths.push(seedExtensionPath);
+  const cookieManagerPath = writeProfileCookieManagerExtension(payload);
+  if (cookieManagerPath) {
+    extensionPaths.push(cookieManagerPath);
+  }
+  // Always bundled now (see writeProfileFreeProxyExtension) -- its own
+  // argus-config.json is what tells it whether to actually auto-connect.
+  pruneStaleFreeProxyExtensions(payload.userDataDir);
+  const freeProxyPath = writeProfileFreeProxyExtension(payload);
+  if (freeProxyPath) {
+    extensionPaths.push(freeProxyPath);
   }
   const uniqueExtensionPaths = [...new Set(extensionPaths)];
   const switches = splitSwitches(payload.commandLineSwitches);
-  const timezone = resolveTimezone(payload.fingerprintTimezone, payload.proxy);
-  const language = resolveLanguage(payload.fingerprintLanguage, payload.proxy);
+  const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
+  const explicitLanguage = payload.runtimeFingerprint?.languages?.[0] || null;
+  const timezone = resolveTimezone(explicitTimezone, payload.proxy);
+  const language = resolveLanguage(explicitLanguage, payload.proxy);
+  const fingerprintArg = resolveRuntimeFingerprintArg(
+      payload.runtimeFingerprint, payload.proxy, timezone, language);
   // The renderer's fingerprintSwitches() already emits --lang when the user set
   // an explicit fingerprint language; only fall back to the proxy-derived one
   // here so we don't send a conflicting duplicate.
@@ -691,6 +794,8 @@ function spawnProfile(payload, extraArgs = []) {
     '--disable-features=InfiniteSessionRestore',
     '--new-window',
     ...proxyArgs(payload.proxy),
+    ...(payload.useFreeProxy ? ['--argus-free-proxy'] : []),
+    ...(fingerprintArg ? [`--argus-fingerprint-json=${fingerprintArg}`] : []),
     ...(uniqueExtensionPaths.length ? [`--load-extension=${uniqueExtensionPaths.join(',')}`] : []),
     ...switches,
     ...(!hasLangSwitch && language ? [`--lang=${language}`] : []),
@@ -699,6 +804,12 @@ function spawnProfile(payload, extraArgs = []) {
   ];
 
   try {
+    // Launched through a per-profile wrapper .app (not spawned directly):
+    // the Dock/Cmd+Tab name comes from the running app's bundle, never from
+    // a window title or command-line args, so showing the profile's real
+    // name there requires its own tiny bundle. `open -n` always starts a new
+    // instance even though every wrapper shares the same underlying browser
+    // binary.
     const profileAppPath = writeProfileLauncherApp(payload, resolved, args, timezone);
     const child = spawn('/usr/bin/open', ['-n', profileAppPath], {
       detached: true,
@@ -834,7 +945,94 @@ ipcMain.handle('argus:set-browser-path', async (_event, nextBrowserAppPath) => {
   return nextBrowserAppPath;
 });
 
+// ---- Local automation API (127.0.0.1 only) --------------------------------
+// Lets an external script drive actions that otherwise require a native
+// dialog (e.g. bulk-matching a cookies folder to profiles) without clicking
+// through the UI. Requests are forwarded to the renderer -- which owns the
+// signed-in Supabase session and cloud state -- over IPC, matched back to
+// the waiting HTTP response by a request id. Never exposed on any interface
+// but loopback, and the renderer only runs the same matching logic the
+// "Import cookies" button already calls.
+const AUTOMATION_API_PORT = 39219;
+const pendingAutomationRequests = new Map();
+const AUTOMATION_REQUEST_TIMEOUT_MS = 20000;
+
+ipcMain.on('argus:bulk-match-cookies-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.res.writeHead(500, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error}));
+    return;
+  }
+  pending.res.writeHead(200, {'Content-Type': 'application/json'});
+  pending.res.end(JSON.stringify({status: true, ...result}));
+});
+
+function sendJson(res, statusCode, body) {
+  res.writeHead(statusCode, {'Content-Type': 'application/json'});
+  res.end(JSON.stringify(body));
+}
+
+function startAutomationApiServer() {
+  const server = http.createServer((req, res) => {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      });
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST' || req.url !== '/v1/cookies/bulk-match') {
+      sendJson(res, 404, {status: false, msg: 'Not found'});
+      return;
+    }
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      if (!mainWindow) {
+        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(body || '{}');
+      } catch {
+        sendJson(res, 400, {status: false, msg: 'Invalid JSON body'});
+        return;
+      }
+      if (!payload.folderPath || typeof payload.folderPath !== 'string') {
+        sendJson(res, 400, {status: false, msg: 'folderPath is required'});
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        pendingAutomationRequests.delete(requestId);
+        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
+      }, AUTOMATION_REQUEST_TIMEOUT_MS);
+      pendingAutomationRequests.set(requestId, {res, timeout});
+      mainWindow.webContents.send('argus:bulk-match-cookies-request', {
+        requestId,
+        folderPath: payload.folderPath,
+        // profileIds omitted/empty means "match against every profile".
+        profileIds: Array.isArray(payload.profileIds) ? payload.profileIds : null,
+      });
+    });
+  });
+  server.listen(AUTOMATION_API_PORT, '127.0.0.1');
+  server.on('error', (error) => {
+    console.log('[automation-api] failed to start:', error.message);
+  });
+}
+
 app.whenReady().then(createWindow);
+app.whenReady().then(startAutomationApiServer);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
