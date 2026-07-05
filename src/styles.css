@@ -212,7 +212,7 @@ textarea {
   font-size: 21px;
   font-weight: 800;
   letter-spacing: -0.01em;
-  margin: 0 0 28px;
+  margin: 0 0 6px;
   padding: 0 6px;
 }
 
@@ -244,6 +244,59 @@ nav button.active {
   color: var(--ink);
 }
 
+.update-panel {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.update-panel div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.update-panel span {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.update-panel strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.update-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.update-actions button:not(.icon-button) {
+  flex: 1;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.update-progress {
+  background: rgba(30, 29, 26, 0.10);
+  border-radius: 999px;
+  height: 5px;
+  overflow: hidden;
+}
+
+.update-progress span {
+  background: var(--accent-2);
+  display: block;
+  height: 100%;
+}
+
 .account {
   border-top: 1px solid var(--border);
   display: grid;
@@ -257,6 +310,21 @@ nav button.active {
   display: grid;
   gap: 10px;
   grid-template-columns: 38px minmax(0, 1fr);
+}
+
+.account-trigger {
+  background: transparent;
+  color: var(--ink);
+  justify-content: stretch;
+  min-height: 44px;
+  padding: 0;
+  text-align: left;
+}
+
+.account-trigger:hover {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
 }
 
 .account span,
@@ -285,6 +353,44 @@ nav button.active {
 .account button {
   justify-content: center;
   width: 100%;
+}
+
+.settings-modal {
+  gap: 20px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-section h3 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.settings-section p {
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.extension-add-modal {
+  gap: 20px;
+}
+
+.extension-add-section {
+  display: grid;
+  gap: 16px;
+}
+
+.extension-add-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.extension-add-actions button {
+  justify-content: center;
 }
 
 .content {

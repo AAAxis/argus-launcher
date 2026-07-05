@@ -1,17 +1,22 @@
 {
   "name": "argys-anty",
-  "version": "0.1.0",
+  "version": "1.0.6",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && env -u ELECTRON_RUN_AS_NODE ARGUS_LAUNCHER_DEV=1 electron .\"",
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && env -u ELECTRON_RUN_AS_NODE ARGUS_LAUNCHER_DEV=1 node scripts/start-macos-app.cjs\"",
     "build": "vite build",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never",
+    "release": "npm run build && electron-builder --publish always",
     "start": "env -u ELECTRON_RUN_AS_NODE node scripts/start-macos-app.cjs",
     "start:electron": "env -u ELECTRON_RUN_AS_NODE electron .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -24,8 +29,50 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
     "electron": "^33.2.1",
+    "electron-builder": "^24.13.3",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
     "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.argys.anty",
+    "productName": "Argys Anty",
+    "icon": "assets/app.icns",
+    "artifactName": "Argys-Anty-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "extensions/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/app.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "assets/app.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://pub-a6c0e96f900b4b698762591fddd497aa.r2.dev"
+      }
+    ]
   }
 }

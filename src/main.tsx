@@ -1,7 +1,8 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Cookie, Download, Pencil, Plus, Play, Shield, Trash2, Upload, X} from 'lucide-react';
+import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
+import type {UpdateState} from './native';
 import {supabase} from './supabase';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
@@ -88,6 +89,7 @@ const tabs: Array<{id: TabId; label: string}> = [
 ];
 
 const API_BASE_URL = 'http://127.0.0.1:39217';
+const SHARED_EXTENSIONS_BUCKET = 'global';
 const API_GROUPS: ApiGroup[] = [
   {
     title: 'Profiles',
@@ -840,6 +842,16 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
   };
 }
 
+function isSupabaseStorageNotWritable(error: {message?: string; statusCode?: string} | null) {
+  const message = error?.message?.toLowerCase() || '';
+  return message.includes('bucket not found') ||
+      message.includes('bucket') && message.includes('not found') ||
+      message.includes('row-level security') ||
+      message.includes('permission') ||
+      message.includes('unauthorized') ||
+      error?.statusCode === '404';
+}
+
 function newProxyDraft(): ProxyDraft {
   return {
     name: '',
@@ -918,6 +930,34 @@ function PaginationBar({page, totalPages, total, pageSize, onPage, onPageSize}: 
   );
 }
 
+function updateStatusLabel(state: UpdateState | null) {
+  if (!state) {
+    return 'Checking updater';
+  }
+  if (state.status === 'disabled') {
+    return 'Packaged builds only';
+  }
+  if (state.status === 'checking') {
+    return 'Checking for updates';
+  }
+  if (state.status === 'available') {
+    return `Version ${state.updateInfo?.version || 'available'} ready`;
+  }
+  if (state.status === 'downloading') {
+    return `Downloading ${Math.round(state.progress?.percent || 0)}%`;
+  }
+  if (state.status === 'downloaded') {
+    return `Version ${state.updateInfo?.version || ''} downloaded`;
+  }
+  if (state.status === 'not-available') {
+    return 'Up to date';
+  }
+  if (state.status === 'error') {
+    return state.error || 'Update check failed';
+  }
+  return 'Ready to check';
+}
+
 function App() {
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
@@ -927,6 +967,7 @@ function App() {
   const [appBooting, setAppBooting] = useState(true);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
+  const [webstoreLinkInput, setWebstoreLinkInput] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [profileSearch, setProfileSearch] = useState('');
@@ -958,6 +999,10 @@ function App() {
   const [proxyDeleteAck, setProxyDeleteAck] = useState(false);
   const [profileDeleteRequest, setProfileDeleteRequest] = useState<{profileIds: string[]; label: string; exclusiveProxyIds: string[]} | null>(null);
   const [profileDeleteRemoveProxy, setProfileDeleteRemoveProxy] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [extensionAddOpen, setExtensionAddOpen] = useState(false);
   const proxyChecksInFlight = useRef(new Set<string>());
   const proxyChecksAttempted = useRef(new Set<string>());
 
@@ -997,6 +1042,22 @@ function App() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void native?.getUpdateStatus?.().then((state) => {
+      if (!cancelled) {
+        setUpdateState(state);
+      }
+    });
+    const unsubscribe = native?.onUpdateState?.((state) => {
+      setUpdateState(state);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
     };
   }, []);
 
@@ -1087,6 +1148,32 @@ function App() {
       }
     });
   }, [cloudState]);
+
+  async function runUpdateAction(action: 'check' | 'download' | 'install') {
+    try {
+      setUpdateBusy(true);
+      if (action === 'check') {
+        const state = await native?.checkForUpdates?.();
+        if (state) {
+          setUpdateState(state);
+        }
+      } else if (action === 'download') {
+        const state = await native?.downloadUpdate?.();
+        if (state) {
+          setUpdateState(state);
+        }
+      } else {
+        const result = await native?.installUpdate?.();
+        if (result && !result.ok) {
+          setMessage(result.error || 'Update is not ready to install');
+        }
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
 
   async function loadCloudState() {
     setCloudLoading(true);
@@ -1378,7 +1465,7 @@ function App() {
         userDataDir: profileDataDir(launchProfile.id),
         proxy: selectedProxy,
         useFreeProxy: proxyMode === 'free_proxy',
-        extensionPaths: cloudState.shared_extensions.map((extension) => extension.path),
+        sharedExtensions: cloudState.shared_extensions,
         commandLineSwitches,
         runtimeFingerprint: buildRuntimeFingerprint(launchProfile),
         startUrl: browserStartUrl(launchProfile),
@@ -2302,27 +2389,107 @@ function App() {
     setMessage('Bookmark deleted');
   }
 
-  async function addExtension() {
-    if (!native?.selectExtensionFolder) {
+  // Chrome extension ids are 32 lowercase letters restricted to a-p. Accepts
+  // a bare id or any Web Store URL (chromewebstore.google.com/detail/.../<id>
+  // or the older chrome.google.com/webstore/detail/.../<id>).
+  function parseWebstoreExtensionId(input: string): string | null {
+    const trimmed = input.trim();
+    if (/^[a-p]{32}$/.test(trimmed)) {
+      return trimmed;
+    }
+    try {
+      const segments = new URL(trimmed).pathname.split('/').filter(Boolean);
+      const last = segments.at(-1) || '';
+      return /^[a-p]{32}$/.test(last) ? last : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Uploads the zipped folder to Supabase Storage so every team member can
+  // materialize their own local copy later (see main.cjs's
+  // materializeSharedExtension) -- cloud state only ever holds this public
+  // URL, never the extension's files directly.
+  async function addExtensionFromFolder() {
+    if (!native?.selectExtensionFolder || !native?.zipExtensionFolder) {
       setMessage('Native folder picker is not available. Restart Argys Anty and try again.');
       return;
     }
-    const path = await native.selectExtensionFolder();
-    if (!path?.trim()) {
+    const folderPath = await native.selectExtensionFolder();
+    if (!folderPath?.trim()) {
       return;
     }
-    if (cloudState.shared_extensions.some((extension) => extension.path === path.trim())) {
-      setMessage('Extension is already shared');
+    if (!supabase) {
+      setMessage('Cloud sync is not configured, so this extension can only be shared with your team once it is.');
       return;
+    }
+    setMessage('Uploading extension for your team…');
+    const zipped = await native.zipExtensionFolder(folderPath);
+    if (!zipped.ok || !zipped.base64) {
+      setMessage(zipped.error || 'Failed to zip that extension folder.');
+      return;
+    }
+    const id = crypto.randomUUID();
+    const name = folderPath.trim().split('/').filter(Boolean).at(-1) || 'Extension';
+    const bytes = Uint8Array.from(atob(zipped.base64), (c) => c.charCodeAt(0));
+    const objectPath = `shared-extensions/${id}.zip`;
+    const {error: uploadError} = await supabase.storage
+        .from(SHARED_EXTENSIONS_BUCKET)
+        .upload(objectPath, bytes, {contentType: 'application/zip', upsert: true});
+    let storageUrl = '';
+    let usedInlinePackage = false;
+    if (uploadError && isSupabaseStorageNotWritable(uploadError)) {
+      storageUrl = `data:application/zip;base64,${zipped.base64}`;
+      usedInlinePackage = true;
+    } else if (uploadError) {
+      setMessage(`Upload failed: ${uploadError.message}`);
+      return;
+    } else {
+      const {data: publicUrlData} = supabase.storage.from(SHARED_EXTENSIONS_BUCKET).getPublicUrl(objectPath);
+      storageUrl = publicUrlData.publicUrl;
     }
     const nextExtension: SharedExtension = {
-      path: path.trim(),
-      name: path.trim().split('/').filter(Boolean).at(-1) || 'Extension',
+      id,
+      name,
+      source: 'local',
+      storageUrl,
     };
     await saveCloudState({
       ...cloudState,
       shared_extensions: [...cloudState.shared_extensions, nextExtension],
     });
+    setExtensionAddOpen(false);
+    setMessage(usedInlinePackage ?
+      `${name} shared inline. Check the ${SHARED_EXTENSIONS_BUCKET} storage bucket for large extensions.` :
+      `${name} shared with your team`);
+  }
+
+  // Web Store extensions need no upload at all -- every team member
+  // downloads/unpacks the same published CRX directly from Google's own CDN
+  // the first time they launch a profile that uses it.
+  async function addExtensionFromWebStoreLink(input: string) {
+    const webstoreId = parseWebstoreExtensionId(input);
+    if (!webstoreId) {
+      setMessage('That doesn\'t look like a Chrome Web Store link or extension id.');
+      return;
+    }
+    if (cloudState.shared_extensions.some((extension) => extension.webstoreId === webstoreId)) {
+      setMessage('That extension is already shared');
+      return;
+    }
+    const nextExtension: SharedExtension = {
+      id: webstoreId,
+      name: webstoreId,
+      source: 'webstore',
+      webstoreId,
+    };
+    await saveCloudState({
+      ...cloudState,
+      shared_extensions: [...cloudState.shared_extensions, nextExtension],
+    });
+    setExtensionAddOpen(false);
+    setWebstoreLinkInput('');
+    setMessage('Extension shared with your team');
   }
 
   async function pickProfileCookieFile() {
@@ -2349,11 +2516,11 @@ function App() {
     }
   }
 
-  async function removeExtension(path: string) {
+  async function removeExtension(id: string) {
     await saveCloudState({
       ...cloudState,
       shared_extensions: cloudState.shared_extensions.filter(
-          (extension) => extension.path !== path),
+          (extension) => extension.id !== id),
     });
   }
 
@@ -2716,13 +2883,13 @@ function App() {
       <section className="panel">
         <div className="panel-title">
           <h2>Shared extensions</h2>
-          <button onClick={addExtension}><Plus size={16} /> Add</button>
+          <button onClick={() => setExtensionAddOpen(true)}><Plus size={16} /> Add</button>
         </div>
         {cloudState.shared_extensions.map((extension) => (
-          <div className="extension-row" key={extension.path}>
-            <span>{extension.name || extension.path}</span>
-            <small>{extension.path}</small>
-            <button onClick={() => removeExtension(extension.path)}><Trash2 size={16} /></button>
+          <div className="extension-row" key={extension.id}>
+            <span>{extension.name || extension.id}</span>
+            <small>{extension.source === 'webstore' ? 'Chrome Web Store' : 'Shared folder'}</small>
+            <button onClick={() => removeExtension(extension.id)}><Trash2 size={16} /></button>
           </div>
         ))}
         {cloudState.shared_extensions.length === 0 && <p className="empty-state">No shared extensions loaded.</p>}
@@ -2875,12 +3042,133 @@ function App() {
       case 'bookmarks':
         return <button onClick={openNewBookmark}><Plus size={18} /> Bookmark</button>;
       case 'extensions':
-        return <button onClick={addExtension}><Plus size={18} /> Extension</button>;
+        return null;
       case 'api':
       case 'import':
       default:
         return null;
     }
+  }
+
+  function renderUpdateControl() {
+    const state = updateState;
+    const isChecking = state?.status === 'checking';
+    const isDownloading = state?.status === 'downloading';
+    const busy = updateBusy || isChecking || isDownloading;
+    const canDownload = state?.status === 'available' && !busy;
+    const canInstall = state?.status === 'downloaded' && !busy;
+    return (
+      <section className="update-panel">
+        <div>
+          <span>Launcher {state?.currentVersion || ''}</span>
+          <strong>{updateStatusLabel(state)}</strong>
+        </div>
+        {state?.progress && (
+          <div className="update-progress">
+            <span style={{width: `${Math.min(100, Math.max(0, state.progress.percent))}%`}} />
+          </div>
+        )}
+        <div className="update-actions">
+          <button
+            className="ghost icon-button"
+            aria-label="Check for updates"
+            disabled={busy || state?.canCheck === false}
+            onClick={() => void runUpdateAction('check')}
+          >
+            <RefreshCw size={16} />
+          </button>
+          {canDownload && (
+            <button onClick={() => void runUpdateAction('download')}>
+              <Download size={16} /> Download
+            </button>
+          )}
+          {canInstall && (
+            <button onClick={() => void runUpdateAction('install')}>
+              Restart
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function renderSettingsModal() {
+    if (!settingsOpen) {
+      return null;
+    }
+    return (
+      <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}>
+        <section className="profile-modal small-modal settings-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Settings</h2>
+            </div>
+            <button className="icon-button" aria-label="Close" onClick={() => setSettingsOpen(false)}><X size={18} /></button>
+          </header>
+          <section className="settings-section">
+            <div>
+              <h3>Updates</h3>
+              <p>Check for launcher releases and choose when to download or restart.</p>
+            </div>
+            {renderUpdateControl()}
+          </section>
+          <section className="settings-section">
+            <div>
+              <h3>Account</h3>
+              <p>{signedInEmail}</p>
+            </div>
+            <button className="ghost" onClick={signOut}>Sign out</button>
+          </section>
+        </section>
+      </div>
+    );
+  }
+
+  function renderExtensionAddModal() {
+    if (!extensionAddOpen) {
+      return null;
+    }
+    return (
+      <div className="modal-backdrop" onMouseDown={() => setExtensionAddOpen(false)}>
+        <section className="profile-modal small-modal extension-add-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Add extension</h2>
+              <p>Share a Chrome Web Store extension or upload an unpacked folder.</p>
+            </div>
+            <button className="icon-button" aria-label="Close" onClick={() => setExtensionAddOpen(false)}><X size={18} /></button>
+          </header>
+          <section className="extension-add-section">
+            <label className="field wide">
+              <span>Chrome Web Store link or extension ID</span>
+              <input
+                autoFocus
+                type="text"
+                placeholder="https://chromewebstore.google.com/detail/..."
+                value={webstoreLinkInput}
+                onChange={(event) => setWebstoreLinkInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && webstoreLinkInput.trim()) {
+                    void addExtensionFromWebStoreLink(webstoreLinkInput);
+                  }
+                }}
+              />
+            </label>
+            <div className="extension-add-actions">
+              <button
+                disabled={!webstoreLinkInput.trim()}
+                onClick={() => void addExtensionFromWebStoreLink(webstoreLinkInput)}
+              >
+                Add from link
+              </button>
+              <button className="ghost" onClick={() => void addExtensionFromFolder()}>
+                Add from folder
+              </button>
+            </div>
+          </section>
+        </section>
+      </div>
+    );
   }
 
   function renderFingerprintFields() {
@@ -3075,11 +3363,10 @@ function App() {
           ))}
         </nav>
         <div className="account">
-          <div className="account-row">
+          <button className="account-row account-trigger" onClick={() => setSettingsOpen(true)}>
             <span>{initials(signedInEmail)}</span>
             <strong>{signedInEmail}</strong>
-          </div>
-          <button onClick={signOut}>Sign out</button>
+          </button>
         </div>
       </aside>
 
@@ -3098,6 +3385,9 @@ function App() {
 
         {message && <footer className="status">{message}</footer>}
       </section>
+
+      {renderSettingsModal()}
+      {renderExtensionAddModal()}
 
       {profileDraft && (
         <div className="modal-backdrop" onMouseDown={() => setProfileDraft(null)}>

@@ -1,4 +1,4 @@
-import type {RuntimeFingerprint} from './types';
+import type {RuntimeFingerprint, SharedExtension} from './types';
 
 export type ProxyConfig = {
   id?: string;
@@ -20,6 +20,10 @@ export type LaunchProfilePayload = {
   // proxy is present in `proxy` instead).
   useFreeProxy?: boolean;
   extensionPaths?: string[];
+  // Team-synced extensions (see SharedExtension in ./types) -- main.cjs
+  // materializes each into a local cache (downloading from the Web Store or
+  // Supabase Storage on first use) before launch.
+  sharedExtensions?: SharedExtension[];
   commandLineSwitches?: string;
   // Full resolved fingerprint, keyed exactly like argus::Fingerprint's JSON
   // dict. electron/main.cjs resolves any proxy-derived fields still missing
@@ -45,6 +49,35 @@ export type ProxyCheckResult = {
   error?: string;
 };
 
+export type UpdateState = {
+  status:
+    | 'disabled'
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'not-available'
+    | 'downloading'
+    | 'downloaded'
+    | 'error';
+  currentVersion: string;
+  updateInfo: {
+    version: string;
+    releaseName?: string;
+    releaseDate?: string;
+    releaseNotes?: string;
+  } | null;
+  progress: {
+    percent: number;
+    bytesPerSecond: number;
+    transferred: number;
+    total: number;
+  } | null;
+  downloaded: boolean;
+  error: string | null;
+  canCheck: boolean;
+  provider: 'github' | 'generic' | 'disabled';
+};
+
 type ArgusNative = {
   launchProfile(payload: LaunchProfilePayload): Promise<{
     ok: boolean;
@@ -58,7 +91,13 @@ type ArgusNative = {
     error?: string;
   }>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
+  getUpdateStatus?(): Promise<UpdateState>;
+  checkForUpdates?(): Promise<UpdateState>;
+  downloadUpdate?(): Promise<UpdateState>;
+  installUpdate?(): Promise<{ok: boolean; error?: string}>;
+  onUpdateState?(callback: (state: UpdateState) => void): () => void;
   selectExtensionFolder?(): Promise<string | null>;
+  zipExtensionFolder?(folderPath: string): Promise<{ok: boolean; base64?: string; error?: string}>;
   selectCookieFile?(): Promise<CookieFileSelection | null>;
   selectCookieFolder?(): Promise<string | null>;
   matchCookieFiles?(

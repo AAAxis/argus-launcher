@@ -1,12 +1,21 @@
 const {app, BrowserWindow, dialog, ipcMain, nativeImage} = require('electron');
+const {autoUpdater} = require('electron-updater');
 const {spawn, spawnSync} = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
+const https = require('node:https');
+const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 
 app.setName('Argys Anty');
+app.setAboutPanelOptions({
+  applicationName: 'Argys Anty',
+  applicationVersion: app.getVersion(),
+  credits: 'Developed by Dmitry Polskoy\nhttps://www.linkedin.com/in/dmitry-polskoy-a46103177/',
+  website: 'https://www.linkedin.com/in/dmitry-polskoy-a46103177/',
+});
 
 // Mirrors chrome/browser/argus/argus_fingerprint.cc's kDefaults table so a
 // proxy's country resolves to the same timezone/language/geo the in-app
@@ -121,6 +130,183 @@ function browserAppCandidates(preferredAppPath) {
 
 let mainWindow = null;
 
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const allowUpdaterInDev = process.env.ARGUS_FORCE_UPDATER === '1';
+const updateProvider = process.env.ARGUS_UPDATE_FEED_URL ? 'generic' :
+  app.isPackaged || allowUpdaterInDev ? 'github' :
+  'disabled';
+const updateState = {
+  status: app.isPackaged || allowUpdaterInDev ? 'idle' : 'disabled',
+  currentVersion: app.getVersion(),
+  updateInfo: null,
+  progress: null,
+  downloaded: false,
+  error: null,
+};
+
+function serializableUpdateInfo(info) {
+  if (!info) {
+    return null;
+  }
+  return {
+    version: info.version || '',
+    releaseName: info.releaseName || '',
+    releaseDate: info.releaseDate || '',
+    releaseNotes: info.releaseNotes || '',
+  };
+}
+
+function publicUpdateState() {
+  return {
+    ...updateState,
+    canCheck: app.isPackaged || allowUpdaterInDev,
+    provider: updateProvider,
+  };
+}
+
+function errorDetail(error) {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const pathPart = error.path ? ` (${error.path})` : '';
+  return `${error.message}${pathPart}${error.stack ? `\n\n${error.stack}` : ''}`;
+}
+
+function isMissingUpdateFeedError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(404|not_found|object not found)/i.test(message) &&
+    (/latest-(mac|linux)\.yml|latest\.yml/i.test(message) ||
+      /releases\.atom|\/releases\/latest/i.test(message));
+}
+
+function applyUpdateError(error, {manual = false} = {}) {
+  if (isMissingUpdateFeedError(error)) {
+    updateState.status = 'not-available';
+    updateState.updateInfo = null;
+    updateState.downloaded = false;
+    updateState.progress = null;
+    updateState.error = 'No update has been published yet.';
+    return;
+  }
+  updateState.status = manual ? 'error' : 'idle';
+  updateState.error = error instanceof Error ? error.message : String(error);
+}
+
+function broadcastUpdateState() {
+  const snapshot = publicUpdateState();
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('argus:update-state', snapshot);
+  }
+  return snapshot;
+}
+
+async function checkForUpdates({manual = false} = {}) {
+  if (!app.isPackaged && !allowUpdaterInDev) {
+    updateState.status = 'disabled';
+    updateState.error = 'Updates are available only in packaged builds.';
+    return broadcastUpdateState();
+  }
+  try {
+    updateState.status = 'checking';
+    updateState.error = null;
+    updateState.progress = null;
+    broadcastUpdateState();
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    applyUpdateError(error, {manual});
+    broadcastUpdateState();
+  }
+  return publicUpdateState();
+}
+
+async function downloadUpdate() {
+  if (!updateState.updateInfo) {
+    updateState.status = 'idle';
+    updateState.error = 'No available update has been found yet.';
+    return broadcastUpdateState();
+  }
+  try {
+    updateState.status = 'downloading';
+    updateState.error = null;
+    updateState.progress = null;
+    updateState.downloaded = false;
+    broadcastUpdateState();
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    updateState.status = 'error';
+    updateState.error = error instanceof Error ? error.message : String(error);
+    broadcastUpdateState();
+  }
+  return publicUpdateState();
+}
+
+function configureAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.allowPrerelease = process.env.ARGUS_UPDATE_PRERELEASE === '1';
+
+  if (process.env.ARGUS_UPDATE_FEED_URL) {
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: process.env.ARGUS_UPDATE_FEED_URL,
+    });
+  }
+
+  autoUpdater.on('checking-for-update', () => {
+    updateState.status = 'checking';
+    updateState.error = null;
+    broadcastUpdateState();
+  });
+  autoUpdater.on('update-available', (info) => {
+    updateState.status = 'available';
+    updateState.updateInfo = serializableUpdateInfo(info);
+    updateState.downloaded = false;
+    updateState.progress = null;
+    updateState.error = null;
+    broadcastUpdateState();
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    updateState.status = 'not-available';
+    updateState.updateInfo = serializableUpdateInfo(info);
+    updateState.downloaded = false;
+    updateState.progress = null;
+    updateState.error = null;
+    broadcastUpdateState();
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    updateState.status = 'downloading';
+    updateState.progress = {
+      percent: progress.percent || 0,
+      bytesPerSecond: progress.bytesPerSecond || 0,
+      transferred: progress.transferred || 0,
+      total: progress.total || 0,
+    };
+    updateState.error = null;
+    broadcastUpdateState();
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    updateState.status = 'downloaded';
+    updateState.updateInfo = serializableUpdateInfo(info) || updateState.updateInfo;
+    updateState.downloaded = true;
+    updateState.progress = null;
+    updateState.error = null;
+    broadcastUpdateState();
+  });
+  autoUpdater.on('error', (error) => {
+    applyUpdateError(error, {manual: true});
+    broadcastUpdateState();
+  });
+
+  if (app.isPackaged || allowUpdaterInDev) {
+    setTimeout(() => {
+      void checkForUpdates({manual: false});
+    }, 15000);
+    setInterval(() => {
+      void checkForUpdates({manual: false});
+    }, UPDATE_CHECK_INTERVAL_MS);
+  }
+}
+
 function createWindow() {
   const icon = appIconPath();
   if (process.platform === 'darwin' && icon) {
@@ -160,6 +346,9 @@ function createWindow() {
   } else {
     void win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+  win.webContents.once('did-finish-load', () => {
+    broadcastUpdateState();
+  });
 }
 
 function appExecutable(appPath) {
@@ -197,15 +386,51 @@ function splitSwitches(raw) {
       .filter(Boolean);
 }
 
+function launchSafeSwitches(raw) {
+  return splitSwitches(raw).filter((switchArg) => {
+    if (/^--load-extension(?:=|$)/.test(switchArg)) {
+      console.warn(`Ignoring unsafe launch switch: ${switchArg}`);
+      return false;
+    }
+    if (/^--disable-extensions-except(?:=|$)/.test(switchArg)) {
+      console.warn(`Ignoring unsafe launch switch: ${switchArg}`);
+      return false;
+    }
+    if (/^--user-data-dir(?:=|$)/.test(switchArg)) {
+      console.warn(`Ignoring unsafe launch switch: ${switchArg}`);
+      return false;
+    }
+    if (/^--profile-directory(?:=|$)/.test(switchArg)) {
+      console.warn(`Ignoring unsafe launch switch: ${switchArg}`);
+      return false;
+    }
+    return true;
+  });
+}
+
 function cookieManagerSourcePath() {
   const candidate = path.join(__dirname, '../extensions/cookie-manager');
-  return fs.existsSync(path.join(candidate, 'manifest.json')) ? candidate : '';
+  return isLoadableExtensionDir(candidate) ? candidate : '';
 }
 
 // onlinesim-sms is bundled for every profile regardless of proxy mode.
 function bundledExtensionPaths(payload) {
-  const candidates = [path.join(__dirname, '../extensions/onlinesim-sms')];
-  return candidates.filter((candidate) => fs.existsSync(path.join(candidate, 'manifest.json')));
+  const bundled = [
+    {name: 'SMSActivate', source: path.join(__dirname, '../extensions/onlinesim-sms')},
+  ];
+  return bundled
+      .map((entry) => materializeBundledExtension(payload, entry.name, entry.source))
+      .filter(Boolean);
+}
+
+function materializeBundledExtension(payload, name, sourceDir) {
+  if (!payload?.userDataDir || !isLoadableExtensionDir(sourceDir)) {
+    return '';
+  }
+  const extensionDir = path.join(payload.userDataDir, 'ArgysBundled', name);
+  fs.rmSync(extensionDir, {recursive: true, force: true});
+  copyDirectoryContents(sourceDir, extensionDir);
+  return isLoadableExtensionDir(extensionDir) ? extensionDir : '';
 }
 
 const FREE_PROXY_SOURCE_PATH = '/Users/dima/Documents/GitHub/chrome-proxy';
@@ -222,17 +447,11 @@ const FREE_PROXY_SOURCE_PATH = '/Users/dima/Documents/GitHub/chrome-proxy';
 // genuinely new extension identity every time, so it can never reuse a stale
 // cached service worker.
 function writeProfileFreeProxyExtension(payload) {
-  if (!fs.existsSync(path.join(FREE_PROXY_SOURCE_PATH, 'manifest.json'))) {
+  if (!isLoadableExtensionDir(FREE_PROXY_SOURCE_PATH)) {
     return '';
   }
   const extensionDir = path.join(payload.userDataDir, `ArgysFreeProxy-${Date.now()}`);
-  fs.mkdirSync(extensionDir, {recursive: true});
-  for (const entry of fs.readdirSync(FREE_PROXY_SOURCE_PATH, {withFileTypes: true})) {
-    if (entry.name === '.git') continue;
-    const from = path.join(FREE_PROXY_SOURCE_PATH, entry.name);
-    const to = path.join(extensionDir, entry.name);
-    fs.cpSync(from, to, {recursive: true});
-  }
+  copyDirectoryContents(FREE_PROXY_SOURCE_PATH, extensionDir);
   // FoxyWall is now bundled for every profile (so its toolbar icon/manual
   // toggle is always available), but must only auto-connect on launch when
   // the user actually picked Free Proxy mode -- never for 'direct' (no proxy
@@ -259,6 +478,208 @@ function pruneStaleFreeProxyExtensions(userDataDir) {
     if (entry.isDirectory() && entry.name.startsWith('ArgysFreeProxy-')) {
       fs.rmSync(path.join(userDataDir, entry.name), {recursive: true, force: true});
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared extensions (team-synced, see SharedExtension in src/types.ts).
+// Cloud state only ever holds a *reference* (a webstore id, or a Storage URL
+// for a zipped local folder) -- never the extension's actual files, since
+// those live on whichever machine added them. Each team member materializes
+// their own local copy into SHARED_EXTENSIONS_ROOT the first time they use
+// it, keyed by the entry's stable id so every machine ends up with the same
+// on-disk layout independently.
+// ---------------------------------------------------------------------------
+
+function sharedExtensionsRoot() {
+  return path.join(app.getPath('userData'), 'SharedExtensions');
+}
+
+function downloadBuffer(url, redirectsLeft = 5) {
+  if (url.startsWith('data:')) {
+    const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url);
+    if (!match) {
+      return Promise.reject(new Error('Invalid inline extension package URL'));
+    }
+    return Promise.resolve(
+        match[2] ? Buffer.from(match[3], 'base64') : Buffer.from(decodeURIComponent(match[3])));
+  }
+  return new Promise((resolve, reject) => {
+    https.get(url, {headers: {'User-Agent': 'ArgysAnty/1.0'}}, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
+        res.resume();
+        resolve(downloadBuffer(new URL(res.headers.location, url).toString(), redirectsLeft - 1));
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+        return;
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+// A CRX file is a small header (magic + version + a length-prefixed
+// signature block) directly followed by a plain ZIP -- this only needs to
+// find where the header ends, never to actually parse it.
+function crxZipOffset(buffer) {
+  if (buffer.toString('ascii', 0, 4) !== 'Cr24') {
+    throw new Error('Not a CRX file (bad magic)');
+  }
+  const version = buffer.readUInt32LE(4);
+  if (version === 3) {
+    const headerSize = buffer.readUInt32LE(8);
+    return 12 + headerSize;
+  }
+  if (version === 2) {
+    const pubKeyLen = buffer.readUInt32LE(8);
+    const sigLen = buffer.readUInt32LE(12);
+    return 16 + pubKeyLen + sigLen;
+  }
+  throw new Error(`Unsupported CRX version ${version}`);
+}
+
+function unzipBufferTo(zipBuffer, destDir) {
+  fs.mkdirSync(destDir, {recursive: true});
+  const tmpZip = path.join(os.tmpdir(), `argys-ext-${crypto.randomUUID()}.zip`);
+  fs.writeFileSync(tmpZip, zipBuffer);
+  try {
+    const result = spawnSync('/usr/bin/unzip', ['-o', '-q', tmpZip, '-d', destDir]);
+    if (result.status !== 0) {
+      throw new Error(`unzip failed: ${result.stderr?.toString() || result.status}`);
+    }
+  } finally {
+    fs.rmSync(tmpZip, {force: true});
+  }
+}
+
+function isDirectory(candidatePath) {
+  try {
+    return fs.statSync(candidatePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function ensureDirectoryPath(dirPath) {
+  if (!dirPath) {
+    return;
+  }
+  if (fs.existsSync(dirPath) && !isDirectory(dirPath)) {
+    fs.renameSync(dirPath, `${dirPath}.file-${Date.now()}`);
+  }
+  fs.mkdirSync(dirPath, {recursive: true});
+}
+
+function isLoadableExtensionDir(candidatePath) {
+  return Boolean(candidatePath) &&
+    isDirectory(candidatePath) &&
+    fs.existsSync(path.join(candidatePath, 'manifest.json'));
+}
+
+function copyDirectoryContents(sourceDir, destDir) {
+  ensureDirectoryPath(destDir);
+  for (const entry of fs.readdirSync(sourceDir, {withFileTypes: true})) {
+    if (entry.name === '.git') continue;
+    const from = path.join(sourceDir, entry.name);
+    const to = path.join(destDir, entry.name);
+    try {
+      copyPathRecursive(from, to, entry);
+    } catch (error) {
+      console.error(`Skipping extension file ${from}:`, error);
+    }
+  }
+}
+
+function copyPathRecursive(from, to, dirent = null) {
+  const entry = dirent || fs.statSync(from);
+  if (entry.isDirectory()) {
+    ensureDirectoryPath(to);
+    for (const child of fs.readdirSync(from, {withFileTypes: true})) {
+      copyPathRecursive(path.join(from, child.name), path.join(to, child.name), child);
+    }
+    return;
+  }
+  if (entry.isFile()) {
+    fs.copyFileSync(from, to);
+  }
+}
+
+// Google's public CRX update endpoint -- the same one Chrome itself uses to
+// fetch/update webstore extensions, so this always gets whatever the
+// developer currently has published, with no re-hosting on our side.
+async function downloadWebstoreExtension(extensionId, destDir) {
+  const url = 'https://clients2.google.com/service/update2/crx?response=redirect' +
+      '&acceptformat=crx2,crx3&prodversion=124.0.0.0' +
+      `&x=id%3D${extensionId}%26installsource%3Dondemand%26uc`;
+  const crxBuffer = await downloadBuffer(url);
+  const zipOffset = crxZipOffset(crxBuffer);
+  unzipBufferTo(crxBuffer.subarray(zipOffset), destDir);
+}
+
+async function downloadLocalSharedExtension(storageUrl, destDir) {
+  const zipBuffer = await downloadBuffer(storageUrl);
+  unzipBufferTo(zipBuffer, destDir);
+}
+
+// Returns the local, ready-to-load path for a shared extension, downloading
+// and unpacking it into the local cache on first use. Returns '' (and lets
+// the profile launch without it) rather than throwing, so one bad/offline
+// shared extension never blocks the whole launch.
+async function materializeSharedExtension(entry) {
+  if (!entry?.id) return '';
+  const destDir = path.join(sharedExtensionsRoot(), entry.id);
+  if (isLoadableExtensionDir(destDir)) {
+    return destDir; // Already materialized on this machine.
+  }
+  try {
+    fs.rmSync(destDir, {recursive: true, force: true});
+    if (entry.source === 'webstore' && entry.webstoreId) {
+      await downloadWebstoreExtension(entry.webstoreId, destDir);
+    } else if (entry.source === 'local' && entry.storageUrl) {
+      await downloadLocalSharedExtension(entry.storageUrl, destDir);
+    } else {
+      return '';
+    }
+    if (!fs.existsSync(path.join(destDir, 'manifest.json'))) {
+      // Some extensions (or CRXs with a nested single top-level folder) can
+      // unzip one level deeper than expected -- fall back to that.
+      const nested = isDirectory(destDir) ?
+        fs.readdirSync(destDir, {withFileTypes: true}).find((e) => e.isDirectory()) :
+        null;
+      if (nested && isLoadableExtensionDir(path.join(destDir, nested.name))) {
+        return path.join(destDir, nested.name);
+      }
+      fs.rmSync(destDir, {recursive: true, force: true});
+      return '';
+    }
+    return destDir;
+  } catch (error) {
+    console.error(`Failed to materialize shared extension ${entry.id}:`, error);
+    fs.rmSync(destDir, {recursive: true, force: true});
+    return '';
+  }
+}
+
+// Zips a locally-picked extension folder to a temp file and returns its
+// bytes base64-encoded, so the renderer (which already holds the
+// authenticated Supabase client) can upload it to Storage itself -- main.cjs
+// never needs its own Supabase credentials.
+function zipFolderToBase64(folderPath) {
+  const tmpZip = path.join(os.tmpdir(), `argys-ext-upload-${crypto.randomUUID()}.zip`);
+  try {
+    const result = spawnSync('/usr/bin/zip', ['-r', '-q', tmpZip, '.'], {cwd: folderPath});
+    if (result.status !== 0) {
+      throw new Error(`zip failed: ${result.stderr?.toString() || result.status}`);
+    }
+    return fs.readFileSync(tmpZip).toString('base64');
+  } finally {
+    fs.rmSync(tmpZip, {force: true});
   }
 }
 
@@ -347,16 +768,12 @@ function parseCookieFile(filePath) {
 // one cookie extension that both seeds and manages.
 function writeProfileCookieManagerExtension(payload) {
   const sourceDir = cookieManagerSourcePath();
-  if (!sourceDir) {
+  if (!isLoadableExtensionDir(sourceDir)) {
     return '';
   }
   const extensionDir = path.join(payload.userDataDir, 'ArgysCookieManager');
-  fs.mkdirSync(extensionDir, {recursive: true});
-  for (const entry of fs.readdirSync(sourceDir, {withFileTypes: true})) {
-    const from = path.join(sourceDir, entry.name);
-    const to = path.join(extensionDir, entry.name);
-    fs.cpSync(from, to, {recursive: true});
-  }
+  fs.rmSync(extensionDir, {recursive: true, force: true});
+  copyDirectoryContents(sourceDir, extensionDir);
   // Lets the popup show which profile it's attached to (Argys Browser windows
   // are otherwise unlabeled from the extension's point of view).
   fs.writeFileSync(path.join(extensionDir, 'profile-meta.json'), JSON.stringify({
@@ -582,7 +999,7 @@ function writeHomeFile(payload) {
   const html = payload.homeHtml || fallbackHomeHtml(payload.name);
   const root = payload.userDataDir || app.getPath('userData');
   const homeDir = path.join(root, 'ArgysHome');
-  fs.mkdirSync(homeDir, {recursive: true});
+  ensureDirectoryPath(homeDir);
   const homePath = path.join(homeDir, 'home.html');
   fs.writeFileSync(homePath, html);
   return pathToFileURL(homePath).toString();
@@ -593,7 +1010,7 @@ function writeProfileStartupPrefs(userDataDir, launchUrl) {
     return;
   }
   const defaultDir = path.join(userDataDir, 'Default');
-  fs.mkdirSync(defaultDir, {recursive: true});
+  ensureDirectoryPath(defaultDir);
   const prefsPath = path.join(defaultDir, 'Preferences');
   let prefs = {};
   try {
@@ -687,8 +1104,9 @@ function writeProfileLauncherApp(payload, resolved, args, timezone) {
   const contentsDir = path.join(appPath, 'Contents');
   const macosDir = path.join(contentsDir, 'MacOS');
   const resourcesDir = path.join(contentsDir, 'Resources');
-  fs.mkdirSync(macosDir, {recursive: true});
-  fs.mkdirSync(resourcesDir, {recursive: true});
+  fs.rmSync(appPath, {recursive: true, force: true});
+  ensureDirectoryPath(macosDir);
+  ensureDirectoryPath(resourcesDir);
 
   const displayName = fileSafeName(payload.name);
   const bundleId = `com.argys.browser.profile.${bundleSafeId(payload.id || displayName)}`;
@@ -739,7 +1157,18 @@ done
 // automation: builds the launcher args/app and spawns the browser. `extraArgs`
 // lets the automation path append --remote-debugging-port for CDP without
 // exposing it on ordinary launches.
-function spawnProfile(payload, extraArgs = []) {
+async function spawnProfile(payload, extraArgs = []) {
+  try {
+    return await spawnProfileUnchecked(payload, extraArgs);
+  } catch (error) {
+    return {
+      ok: false,
+      error: errorDetail(error),
+    };
+  }
+}
+
+async function spawnProfileUnchecked(payload, extraArgs = []) {
   const resolved = resolveBrowserExecutable();
   if (!resolved) {
     return {
@@ -752,6 +1181,13 @@ function spawnProfile(payload, extraArgs = []) {
     ...bundledExtensionPaths(payload),
     ...(payload.extensionPaths || []),
   ].filter(Boolean);
+  // Team-shared extensions (see SharedExtension in src/types.ts): each is a
+  // reference (webstore id, or a Storage URL), materialized into a local
+  // cache on first use on this machine. A missing/offline one resolves to ''
+  // and is simply skipped rather than blocking the launch.
+  const sharedExtensionPaths = await Promise.all(
+      (payload.sharedExtensions || []).map(materializeSharedExtension));
+  extensionPaths.push(...sharedExtensionPaths.filter(Boolean));
   killExistingProfileProcess(payload.id, payload.userDataDir);
   clearSessionRestore(payload.userDataDir);
   const launchUrl = payload.startUrl || writeHomeFile(payload);
@@ -767,8 +1203,8 @@ function spawnProfile(payload, extraArgs = []) {
   if (freeProxyPath) {
     extensionPaths.push(freeProxyPath);
   }
-  const uniqueExtensionPaths = [...new Set(extensionPaths)];
-  const switches = splitSwitches(payload.commandLineSwitches);
+  const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);
+  const switches = launchSafeSwitches(payload.commandLineSwitches);
   const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
   const explicitLanguage = payload.runtimeFingerprint?.languages?.[0] || null;
   const timezone = resolveTimezone(explicitTimezone, payload.proxy);
@@ -803,31 +1239,24 @@ function spawnProfile(payload, extraArgs = []) {
     launchUrl,
   ];
 
-  try {
-    // Launched through a per-profile wrapper .app (not spawned directly):
-    // the Dock/Cmd+Tab name comes from the running app's bundle, never from
-    // a window title or command-line args, so showing the profile's real
-    // name there requires its own tiny bundle. `open -n` always starts a new
-    // instance even though every wrapper shares the same underlying browser
-    // binary.
-    const profileAppPath = writeProfileLauncherApp(payload, resolved, args, timezone);
-    const child = spawn('/usr/bin/open', ['-n', profileAppPath], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
-    return {
-      ok: true,
-      pid: child.pid || 0,
-      appPath: resolved.appPath,
-      launcherAppPath: profileAppPath,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
+  // Launched through a per-profile wrapper .app (not spawned directly):
+  // the Dock/Cmd+Tab name comes from the running app's bundle, never from
+  // a window title or command-line args, so showing the profile's real
+  // name there requires its own tiny bundle. `open -n` always starts a new
+  // instance even though every wrapper shares the same underlying browser
+  // binary.
+  const profileAppPath = writeProfileLauncherApp(payload, resolved, args, timezone);
+  const child = spawn('/usr/bin/open', ['-n', profileAppPath], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  return {
+    ok: true,
+    pid: child.pid || 0,
+    appPath: resolved.appPath,
+    launcherAppPath: profileAppPath,
+  };
 }
 
 ipcMain.handle('argus:launch-profile', async (_event, payload) => {
@@ -836,6 +1265,26 @@ ipcMain.handle('argus:launch-profile', async (_event, payload) => {
 
 ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
   return checkProxy(proxy);
+});
+
+ipcMain.handle('argus:update-status', async () => {
+  return publicUpdateState();
+});
+
+ipcMain.handle('argus:check-for-updates', async () => {
+  return checkForUpdates({manual: true});
+});
+
+ipcMain.handle('argus:download-update', async () => {
+  return downloadUpdate();
+});
+
+ipcMain.handle('argus:install-update', async () => {
+  if (!updateState.downloaded) {
+    return {ok: false, error: 'No downloaded update is ready to install.'};
+  }
+  autoUpdater.quitAndInstall(false, true);
+  return {ok: true};
 });
 
 ipcMain.handle('argus:select-extension-folder', async () => {
@@ -847,6 +1296,20 @@ ipcMain.handle('argus:select-extension-folder', async () => {
     return null;
   }
   return result.filePaths[0];
+});
+
+// Zips a locally-picked extension folder and returns it base64-encoded so
+// the renderer can upload it to Supabase Storage with its own authenticated
+// client -- this process never needs its own Supabase credentials.
+ipcMain.handle('argus:zip-extension-folder', async (_event, folderPath) => {
+  try {
+    if (!folderPath || !fs.existsSync(path.join(folderPath, 'manifest.json'))) {
+      return {ok: false, error: 'Not a valid unpacked extension folder (no manifest.json).'};
+    }
+    return {ok: true, base64: zipFolderToBase64(folderPath)};
+  } catch (error) {
+    return {ok: false, error: error instanceof Error ? error.message : String(error)};
+  }
 });
 
 ipcMain.handle('argus:select-cookie-file', async () => {
@@ -1031,7 +1494,10 @@ function startAutomationApiServer() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  configureAutoUpdater();
+  createWindow();
+});
 app.whenReady().then(startAutomationApiServer);
 
 app.on('window-all-closed', () => {

@@ -97,9 +97,22 @@ export type ArgusProxy = {
 };
 
 export type SharedExtension = {
-  id?: string;
-  path: string;
+  // Stable id (generated at add-time) used as the local cache-directory name
+  // every team member materializes this extension into -- the actual files
+  // are never stored directly in cloud state, only enough to fetch/rebuild
+  // them locally on any machine.
+  id: string;
   name?: string;
+  source: 'local' | 'webstore';
+  // source === 'webstore': downloaded/unpacked fresh from Google's own CDN
+  // by each team member, so it's always the current published version and
+  // never re-hosted by us.
+  webstoreId?: string;
+  // source === 'local': a public Supabase Storage URL for the zipped
+  // folder, uploaded once by whoever added it; every other team member
+  // downloads+unpacks it into their own local cache the first time they
+  // launch a profile that uses it.
+  storageUrl?: string;
 };
 
 export type SharedBookmark = {

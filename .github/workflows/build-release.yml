@@ -1,0 +1,155 @@
+name: Build Electron releases
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  R2_ENDPOINT: https://fdbfca2be2ba5fdd40b274450f22c6ad.r2.cloudflarestorage.com
+  R2_BUCKET: global
+  UPDATE_FEED_URL: ${{ vars.R2_PUBLIC_URL || 'https://pub-a6c0e96f900b4b698762591fddd497aa.r2.dev' }}
+
+jobs:
+  build-mac:
+    name: Build macOS DMG
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure update feed
+        shell: bash
+        run: |
+          if [ -z "${UPDATE_FEED_URL}" ]; then
+            echo "Missing repository variable: R2_PUBLIC_URL"
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build DMG
+        run: npx electron-builder --mac dmg zip --arm64 --publish never
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: argys-anty-macos
+          path: |
+            release/*.dmg
+            release/*.dmg.blockmap
+            release/*.zip
+            release/*.zip.blockmap
+            release/latest-mac.yml
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure update feed
+        shell: bash
+        run: |
+          if [ -z "${UPDATE_FEED_URL}" ]; then
+            echo "Missing repository variable: R2_PUBLIC_URL"
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build EXE
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: argys-anty-windows
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+          if-no-files-found: error
+
+  publish:
+    name: Publish tagged release
+    needs:
+      - build-mac
+      - build-windows
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          files: release-artifacts/*
+          fail_on_unmatched_files: true
+
+      - name: Configure R2 credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          aws-region: auto
+
+      - name: Upload updater files to R2
+        shell: bash
+        env:
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          set -euo pipefail
+          aws s3 cp release-artifacts "s3://${R2_BUCKET}/" \
+            --recursive \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=60"
