@@ -419,13 +419,20 @@ function fileSha512Base64(filePath) {
   return crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
 }
 
-// Marks which manifest version is currently installed under managedBrowserRoot()
-// -- resolveBrowserExecutable() alone can only tell us *some* browser exists
-// there, never whether it's the version currently published, so a stale
+// Marks which build is currently installed under managedBrowserRoot() --
+// resolveBrowserExecutable() alone can only tell us *some* browser exists
+// there, never whether it's the build currently published, so a stale
 // managed install from months ago would otherwise be treated as "ready"
 // forever and never get replaced.
+//
+// This is keyed on the manifest's sha512, not its version: every published
+// manifest observed so far (mac-arm64 and win-x64, built hours apart) reports
+// the same literal "1.0.0" -- whatever publishes these manifests doesn't
+// actually bump the version field per build. sha512 is the only field that
+// reliably changes when the archive's contents change, so it's the only safe
+// staleness signal here.
 function managedBrowserVersionPath() {
-  return path.join(managedBrowserRoot(), '.argus-browser-version');
+  return path.join(managedBrowserRoot(), '.argus-browser-build');
 }
 
 function readManagedBrowserVersion() {
@@ -436,12 +443,12 @@ function readManagedBrowserVersion() {
   }
 }
 
-function writeManagedBrowserVersion(version) {
+function writeManagedBrowserVersion(manifest) {
   try {
-    fs.writeFileSync(managedBrowserVersionPath(), String(version || ''));
+    fs.writeFileSync(managedBrowserVersionPath(), String(manifest?.sha512 || manifest?.version || ''));
   } catch {
     // Best effort -- a missing/unwritable marker just means the next check
-    // re-verifies against the manifest instead of trusting a cached version.
+    // re-verifies against the manifest instead of trusting a cached build.
   }
 }
 
@@ -495,8 +502,9 @@ async function ensureBrowserResource({manual = false} = {}) {
     resourceState.progress = null;
     broadcastResourceState();
     const manifest = await downloadJson(browserResourceManifestUrl());
-    if (usingManaged && readManagedBrowserVersion() === String(manifest.version || '')) {
-      // Already installed and matches the latest published version -- nothing to do.
+    const manifestBuildId = String(manifest.sha512 || manifest.version || '');
+    if (usingManaged && manifestBuildId && readManagedBrowserVersion() === manifestBuildId) {
+      // Already installed and matches the latest published build -- nothing to do.
       resourceState.browserStatus = 'ready';
       resourceState.browserPath = resolved.appPath;
       resourceState.browserVersion = manifest.version || '';
@@ -521,7 +529,7 @@ async function ensureBrowserResource({manual = false} = {}) {
     if (!installedBrowserPath) {
       throw new Error(`Downloaded browser did not contain a supported app for ${browserResourceKey()}.`);
     }
-    writeManagedBrowserVersion(manifest.version || '');
+    writeManagedBrowserVersion(manifest);
     resourceState.browserStatus = 'ready';
     resourceState.browserPath = installedBrowserPath;
     resourceState.progress = null;
@@ -791,7 +799,7 @@ function materializeBundledExtension(payload, name, sourceDir) {
   return extensionDir;
 }
 
-const FREE_PROXY_SOURCE_PATH = '/Users/dima/Documents/GitHub/chrome-proxy';
+const FREE_PROXY_SOURCE_PATH = path.join(__dirname, '../extensions/foxywall');
 
 // Chrome caches an unpacked (--load-extension) service worker's script body
 // independently of its manifest version or file content -- reloading the
@@ -1620,7 +1628,33 @@ async function spawnProfile(payload, extraArgs = []) {
   }
 }
 
+// The renderer's profileDataDir() (src/main.tsx) hands back a bare relative
+// path on Windows (e.g. "ArgysProfiles/<id>", no drive letter). Every file
+// operation below resolves payload.userDataDir with path.join(), and the
+// --user-data-dir switch handed to the spawned browser is a relative string
+// too -- both Node and Chromium resolve a relative path against the
+// process's own cwd at the moment each one runs, and that cwd is whatever
+// Windows happened to set for this process (e.g. a shortcut's "Start in"
+// directory, or wherever the process was launched from), not anything under
+// this app's control. If that cwd ever differs between when the launcher
+// writes the profile's files and when Chromium itself resolves the same
+// switch, the two sides land in different directories -- Chromium then opens
+// a --user-data-dir that never received the extension files the launcher
+// just wrote, and reports exactly "Manifest file is missing or unreadable"
+// even though materializeBundledExtension() copied everything correctly.
+// Anchoring to a fixed, absolute directory make the resolution
+// deterministic regardless of process cwd.
+function resolveProfileUserDataDir(userDataDir) {
+  if (!userDataDir) {
+    return userDataDir;
+  }
+  return path.isAbsolute(userDataDir) ?
+    userDataDir :
+    path.join(app.getPath('userData'), userDataDir);
+}
+
 async function spawnProfileUnchecked(payload, extraArgs = []) {
+  payload = {...payload, userDataDir: resolveProfileUserDataDir(payload.userDataDir)};
   const resolved = resolveBrowserExecutable();
   console.log(
       `Launching profile "${payload.name}" (${payload.id}): resolved browser ` +
