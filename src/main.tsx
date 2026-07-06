@@ -255,8 +255,57 @@ function mergeBookmarks(bookmarks: SharedBookmark[], presets: SharedBookmark[]) 
   return {bookmarks: [...byUrl.values()], changed};
 }
 
-function anonymousHomeHtml(profile: ArgusProfile, bookmarks: SharedBookmark[]) {
+function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null) {
+  const mode = profile.proxy_mode || 'assigned';
+  if (mode !== 'assigned') {
+    return {
+      ok: false,
+      title: mode === 'free_proxy' ? 'Anti-detect needs verified proxy' : 'Anti-detect proxy missing',
+      detail: mode === 'free_proxy' ?
+        'Free proxy fallback is active, but no verified assigned proxy is available.' :
+        'Direct connection is active. Assign a checked proxy before using this profile.',
+    };
+  }
+  if (!proxy?.host || !proxy.port) {
+    return {
+      ok: false,
+      title: 'Anti-detect proxy missing',
+      detail: 'No valid proxy is assigned to this profile.',
+    };
+  }
+  const proxyLabel = `${proxy.host}:${proxy.port}`;
+  if (proxy.check_error) {
+    return {
+      ok: false,
+      title: 'Anti-detect proxy failed',
+      detail: `${proxyLabel} failed its last check: ${proxy.check_error}`,
+    };
+  }
+  if (!proxy.checked_at) {
+    return {
+      ok: false,
+      title: 'Anti-detect proxy unverified',
+      detail: `${proxyLabel} has not passed a proxy check yet.`,
+    };
+  }
+  const egressIp = proxy.egress_ip && proxy.egress_ip !== proxy.host ? proxy.egress_ip : '';
+  const location = [proxy.country || proxy.country_code, egressIp]
+      .filter(Boolean)
+      .join(' · ');
+  const latency = typeof proxy.ping_ms === 'number' ? ` · ${proxy.ping_ms}ms` : '';
+  return {
+    ok: true,
+    title: 'Anti-detect proxy active',
+    detail: `${proxyLabel}${location ? ` · ${location}` : ''}${latency}`,
+  };
+}
+
+function anonymousHomeHtml(profile: ArgusProfile, bookmarks: SharedBookmark[], proxy: ArgusProxy | null) {
   const safeName = escapeHtml(profile.name || 'Profile');
+  const proxyStatus = homeProxyStatus(profile, proxy);
+  const badgeClass = proxyStatus.ok ? 'badge ok' : 'badge fail';
+  const badgeTitle = escapeHtml(proxyStatus.title);
+  const badgeDetail = escapeHtml(proxyStatus.detail);
   const bookmarkItems = bookmarks
       .map((bookmark) => {
         const url = normalizeBookmarkUrl(bookmark.url);
@@ -285,7 +334,15 @@ main{min-height:100vh;padding:56px;box-sizing:border-box}
 header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e4ddd1;padding-bottom:24px}
 h1{font-size:34px;margin:0 0 8px;font-weight:850}
 p{margin:0;color:#716b62;font-size:17px}
-.badge{border:1px solid #ded6c8;border-radius:999px;padding:10px 16px;background:#fff;font-weight:750}
+.badge{align-items:flex-start;border:1px solid #ded6c8;border-radius:14px;display:grid;gap:4px;max-width:420px;padding:10px 14px;background:#fff;font-weight:750;text-decoration:none}
+.badge::before{border-radius:999px;content:"";height:10px;margin-top:4px;width:10px;grid-row:1 / span 2}
+.badge.ok{border-color:#9fd3b2;background:#f1fbf5;color:#14532d;grid-template-columns:10px 1fr}
+.badge.ok::before{background:#16a34a}
+.badge.fail{border-color:#f0b4ad;background:#fff5f4;color:#7f1d1d;grid-template-columns:10px 1fr}
+.badge.fail::before{background:#dc2626}
+.badge:hover{filter:brightness(.98)}
+.badge strong{font-size:13px;line-height:1.2}
+.badge small{color:inherit;font-size:12px;font-weight:650;line-height:1.35;opacity:.78;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:34px}
 .bookmark{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center;text-decoration:none;color:inherit;background:#fff;border:1px solid #e4ddd1;border-radius:12px;padding:16px;min-height:82px}
 .bookmark:hover{border-color:#171613}
@@ -299,7 +356,7 @@ p{margin:0;color:#716b62;font-size:17px}
 <main>
 <header>
 <div><h1>${safeName}</h1><p>Anonymous Argys Browser session</p></div>
-<div class="badge">Anti-detect mode on</div>
+<a class="${badgeClass}" href="https://ip.me/"><strong>${badgeTitle}</strong><small>${badgeDetail}</small></a>
 </header>
 ${bookmarkItems ? `<section class="grid">${bookmarkItems}</section>` : '<p class="empty">No shared bookmarks yet.</p>'}
 </main>
@@ -1414,10 +1471,95 @@ function App() {
     return lines.join(' \\\n');
   }
 
+  function apiExampleScript() {
+    return `#!/usr/bin/env node
+// Argys Anty Browser API example.
+// Keep Argys Anty open and signed in while running this script.
+
+const BASE_URL = ${JSON.stringify(API_BASE_URL)};
+const TOKEN = ${JSON.stringify(apiToken || 'argys_api_token')};
+
+async function argys(method, path, body) {
+  const response = await fetch(\`\${BASE_URL}\${path}\`, {
+    method,
+    headers: {
+      Authorization: \`Bearer \${TOKEN}\`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(\`\${method} \${path} failed: \${response.status} \${text}\`);
+  }
+  return data;
+}
+
+async function main() {
+  console.log('Health:', await argys('GET', '/health'));
+
+  const profiles = await argys('GET', '/v1/profiles');
+  console.log('Profiles:', profiles);
+
+  const proxy = await argys('POST', '/v1/proxies', {
+    name: 'Example US proxy',
+    type: 'socks5',
+    host: '1.2.3.4',
+    port: 1080,
+    username: 'user',
+    password: 'pass',
+  });
+  console.log('Created proxy:', proxy);
+
+  const profile = await argys('POST', '/v1/profiles', {
+    name: 'API example profile',
+    proxyId: proxy.id,
+    startUrl: 'https://browserargus.com/',
+  });
+  console.log('Created profile:', profile);
+
+  console.log('Launch:', await argys('POST', \`/v1/profiles/\${profile.id}/launch\`));
+
+  // Optional cookie import helper. Replace folderPath with the folder that
+  // contains exported cookie txt/json files named after profile names.
+  // console.log('Cookie match:', await argys('POST', '/v1/cookies/bulk-match', {
+  //   folderPath: '/Users/name/Downloads/cookies',
+  //   profileIds: [profile.id],
+  // }));
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+`;
+  }
+
   async function copyCurl(endpoint: ApiEndpoint) {
     await navigator.clipboard.writeText(curlFor(endpoint));
     setCopiedEndpoint(`${endpoint.method} ${endpoint.path}`);
     window.setTimeout(() => setCopiedEndpoint(''), 1800);
+  }
+
+  async function downloadApiExample() {
+    const content = apiExampleScript();
+    const defaultName = `argys-api-example-${Date.now()}.js`;
+    if (native?.saveTextFile) {
+      const savedPath = await native.saveTextFile(defaultName, content);
+      if (savedPath) {
+        setMessage(`Saved API example to ${savedPath.split('/').pop()}`);
+      }
+      return;
+    }
+    const blob = new Blob([content], {type: 'text/javascript'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = defaultName;
+    link.click();
+    URL.revokeObjectURL(url);
+    setMessage('Downloaded API example');
   }
 
   function proxyFor(profile: ArgusProfile) {
@@ -1501,19 +1643,50 @@ function App() {
           });
           return;
         }
-        if (!selectedProxy.checked_at) {
-          setErrorDialog({
-            title: 'Launch blocked',
-            detail: `Proxy for ${launchProfile.name} is still checking. Launch is blocked until proxy check succeeds.`,
-          });
-          return;
-        }
-        if (selectedProxy.check_error) {
-          setErrorDialog({
-            title: 'Launch blocked',
-            detail: `Proxy for ${launchProfile.name} failed its last check: ${selectedProxy.check_error}`,
-          });
-          return;
+        if (!selectedProxy.checked_at || selectedProxy.check_error) {
+          if (!native.checkProxy) {
+            setErrorDialog({
+              title: 'Launch blocked',
+              detail: 'Native proxy checker is not available. Restart Argys Anty and try again.',
+            });
+            return;
+          }
+          setMessage(`Checking proxy for ${launchProfile.name}`);
+          setCheckingProxyId(selectedProxy.id);
+          try {
+            const result = await native.checkProxy(selectedProxy);
+            const checkedProxy: ArgusProxy = {
+              ...selectedProxy,
+              country: result.country,
+              country_code: result.countryCode,
+              egress_ip: result.ip,
+              ping_ms: result.pingMs,
+              checked_at: new Date().toISOString(),
+              check_error: result.ok ? undefined : result.error || 'Proxy check failed',
+            };
+            selectedProxy = checkedProxy;
+            const profiles = cloudState.profiles.map((item) =>
+              item.id === launchProfile.id ? launchProfile : item);
+            const proxies = cloudState.proxies.map((item) =>
+              item.id === checkedProxy.id ? checkedProxy : item);
+            await saveCloudState({...cloudState, profiles, proxies});
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setErrorDialog({
+              title: 'Launch blocked',
+              detail: `Proxy for ${launchProfile.name} failed its check: ${message}`,
+            });
+            return;
+          } finally {
+            setCheckingProxyId('');
+          }
+          if (selectedProxy.check_error) {
+            setErrorDialog({
+              title: 'Launch blocked',
+              detail: `Proxy for ${launchProfile.name} failed its check: ${selectedProxy.check_error}`,
+            });
+            return;
+          }
         }
       }
       const result = await native.launchProfile({
@@ -1526,7 +1699,7 @@ function App() {
         commandLineSwitches,
         runtimeFingerprint: buildRuntimeFingerprint(launchProfile),
         startUrl: browserStartUrl(launchProfile),
-        homeHtml: anonymousHomeHtml(launchProfile, cloudState.shared_bookmarks),
+        homeHtml: anonymousHomeHtml(launchProfile, cloudState.shared_bookmarks, selectedProxy),
         cookieImportPath: launchProfile.cookie_import_path || null,
       });
       if (result.ok) {
@@ -2992,6 +3165,11 @@ function App() {
           <div className="summary-item wide">
             <span>Header</span>
             <code>{authHeader()}</code>
+          </div>
+          <div className="summary-actions">
+            <button onClick={downloadApiExample}>
+              <Download size={16} /> Download example
+            </button>
           </div>
         </section>
 
