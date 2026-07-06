@@ -1307,6 +1307,10 @@ function proxyUrl(proxy) {
   return `${scheme}://${proxy.host}:${proxy.port}`;
 }
 
+function proxyCheckCurlBinary() {
+  return process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl';
+}
+
 // Runs one curl attempt against `endpoint` through the proxy and resolves to a
 // normalized result -- never rejects, so Promise.allSettled/race logic upstream
 // doesn't need try/catch around each attempt.
@@ -1328,7 +1332,7 @@ function checkProxyEndpoint(proxy, endpoint) {
       args.push('--proxy-user', `${proxy.username || ''}:${proxy.password || ''}`);
     }
     args.push(endpoint);
-    const child = spawn('/usr/bin/curl', args);
+    const child = spawn(proxyCheckCurlBinary(), args);
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
