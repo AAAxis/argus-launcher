@@ -483,19 +483,11 @@ async function ensureBrowserResource({manual = false} = {}) {
   const resolved = resolveBrowserExecutable();
   const managedPath = managedBrowserAppPath();
   const usingManaged = Boolean(resolved && managedPath && resolved.appPath === managedPath);
-  // A bundled browser (shipped inside this launcher release) or an explicit
-  // env/settings override isn't something this function downloads, so trust
-  // it as-is with no manifest round-trip. Only the auto-downloaded "managed"
-  // copy needs a version check, since it's the one that can otherwise go
-  // stale forever: resolveBrowserExecutable() only proves *something* is
-  // installed there, never that it's still the currently-published version.
-  if (resolved && !usingManaged) {
-    resourceState.browserStatus = 'ready';
-    resourceState.browserPath = resolved.appPath;
-    resourceState.error = null;
-    resourceState.progress = null;
-    return broadcastResourceState();
-  }
+  // A bundled browser proves the launcher can start offline, but it does not
+  // prove the browser is current. Always check the published browser manifest
+  // when possible and install the managed copy when its build marker differs.
+  // If the network/manifest check fails, the catch block below falls back to
+  // any resolved browser so existing installs still launch offline.
   try {
     resourceState.browserStatus = 'checking';
     resourceState.error = null;
