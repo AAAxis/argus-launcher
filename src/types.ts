@@ -26,6 +26,8 @@ export type RuntimeFingerprint = {
   cpu_cores?: number;
   memory_gb?: number;
   screen?: string;
+  media_devices?: string;
+  do_not_track?: boolean;
   rotate_on_launch?: boolean;
 };
 
@@ -59,11 +61,17 @@ export type ArgusProfile = {
     webrtc?: string;
     canvas?: string;
     webgl?: string;
+    webgpu?: string;
+    client_rects?: string;
+    audio?: string;
     webgl_vendor?: string;
     webgl_renderer?: string;
     screen?: string;
+    cpu_model?: string;
     cpu_cores?: number | null;
     memory_gb?: number | null;
+    media_devices?: string;
+    do_not_track?: boolean;
     rotate_on_launch?: boolean;
   };
   created_at?: string;

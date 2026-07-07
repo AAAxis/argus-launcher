@@ -45,11 +45,17 @@ type ProfileDraft = {
   fingerprint_webrtc: string;
   fingerprint_canvas: string;
   fingerprint_webgl: string;
+  fingerprint_webgpu: string;
+  fingerprint_client_rects: string;
+  fingerprint_audio: string;
   fingerprint_webgl_vendor: string;
   fingerprint_webgl_renderer: string;
   fingerprint_screen: string;
+  fingerprint_cpu_model: string;
   fingerprint_cpu_cores: string;
   fingerprint_memory_gb: string;
+  fingerprint_media_devices: string;
+  fingerprint_do_not_track: boolean;
   fingerprint_rotate: boolean;
 };
 
@@ -180,13 +186,254 @@ const languagePresets = ['en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;
 const timezonePresets = ['Auto from proxy', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Asia/Jerusalem'];
 const webRtcModes = ['Proxy only', 'Disabled', 'Real', 'Custom'];
 const noiseModes = ['Real', 'Noise', 'Block'];
-const screenPresets = ['Auto', '1920x1080', '1440x900', '1366x768', '1536x864'];
-const webglVendors = ['Google Inc.', 'Apple Inc.', 'Intel Inc.', 'NVIDIA Corporation'];
-const webglRenderers = [
-  'ANGLE (Apple, Apple M2, OpenGL 4.1)',
-  'ANGLE (Intel, Intel Iris OpenGL Engine, OpenGL 4.1)',
-  'ANGLE (NVIDIA, NVIDIA GeForce, OpenGL 4.1)',
+const webGpuModes = ['Real', 'Block'];
+const mediaDevicePresets = [
+  '1 camera 1 microphone 1 speaker',
+  '0 camera 1 microphone 1 speaker',
+  '1 camera 1 microphone 0 speaker',
+  '0 camera 0 microphone 0 speaker',
 ];
+const screenPresets = ['Auto', '1920x1080', '1536x864', '1366x768', '1600x900', '1920x1200', '2560x1440', '2560x1600', '3440x1440', '3840x2160'];
+const webglVendors = ['Google Inc. (NVIDIA)', 'Google Inc. (AMD)', 'Google Inc. (Intel)', 'Google Inc.', 'Apple Inc.'];
+const webglRenderers = [
+  'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+  'ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+  'ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+  'ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+  'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)',
+];
+
+type RealisticFingerprintPattern = Pick<ProfileDraft,
+  'fingerprint_os' |
+  'fingerprint_browser_version' |
+  'fingerprint_webgl_vendor' |
+  'fingerprint_webgl_renderer' |
+  'fingerprint_screen' |
+  'fingerprint_cpu_model' |
+  'fingerprint_cpu_cores' |
+  'fingerprint_memory_gb'
+>;
+
+const realisticWindowsFingerprintPatterns: RealisticFingerprintPattern[] = [
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'Intel Core i5-12400F',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'Intel Core i5-13400F',
+    fingerprint_cpu_cores: '16',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '2560x1440',
+    fingerprint_cpu_model: 'AMD Ryzen 7 5800X',
+    fingerprint_cpu_cores: '16',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '2560x1440',
+    fingerprint_cpu_model: 'Intel Core i7-13700K',
+    fingerprint_cpu_cores: '20',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 10',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'Intel Core i5-10400',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 10',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'Intel Core i5-11400',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 10',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'AMD Ryzen 5 3600',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '3840x2160',
+    fingerprint_cpu_model: 'Intel Core i9-12900K',
+    fingerprint_cpu_cores: '24',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4050 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1200',
+    fingerprint_cpu_model: 'Intel Core i7-12700H',
+    fingerprint_cpu_cores: '16',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '2560x1600',
+    fingerprint_cpu_model: 'Intel Core i7-13700H',
+    fingerprint_cpu_cores: '20',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 10',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1366x768',
+    fingerprint_cpu_model: 'Intel Core i5-7300HQ',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (AMD)',
+    fingerprint_webgl_renderer: 'ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'AMD Ryzen 5 5600X',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (AMD)',
+    fingerprint_webgl_renderer: 'ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '2560x1440',
+    fingerprint_cpu_model: 'AMD Ryzen 7 5800X3D',
+    fingerprint_cpu_cores: '16',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (AMD)',
+    fingerprint_webgl_renderer: 'ANGLE (AMD, AMD Radeon RX 7600 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'AMD Ryzen 5 7600',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (AMD)',
+    fingerprint_webgl_renderer: 'ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '2560x1440',
+    fingerprint_cpu_model: 'AMD Ryzen 7 7800X3D',
+    fingerprint_cpu_cores: '16',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (AMD)',
+    fingerprint_webgl_renderer: 'ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'AMD Ryzen 7 5700U',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 10',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Intel)',
+    fingerprint_webgl_renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1366x768',
+    fingerprint_cpu_model: 'Intel Core i5-8250U',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Intel)',
+    fingerprint_webgl_renderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1920x1200',
+    fingerprint_cpu_model: 'Intel Core i5-1135G7',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Intel)',
+    fingerprint_webgl_renderer: 'ANGLE (Intel, Intel(R) Arc(TM) A750 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '2560x1440',
+    fingerprint_cpu_model: 'Intel Core i5-12600K',
+    fingerprint_cpu_cores: '16',
+    fingerprint_memory_gb: '16',
+  },
+  {
+    fingerprint_os: 'Windows 11',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (NVIDIA)',
+    fingerprint_webgl_renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    fingerprint_screen: '1536x864',
+    fingerprint_cpu_model: 'Intel Core i5-11400H',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+];
+
+const defaultWindowsFingerprintPattern = realisticWindowsFingerprintPatterns[0];
+
+const gpuPresets = realisticWindowsFingerprintPatterns.map((pattern) => ({
+  label: pattern.fingerprint_webgl_renderer.replace(/^ANGLE \(([^,]+), /, '').replace(/ Direct3D11.*$/, ''),
+  vendor: pattern.fingerprint_webgl_vendor,
+  renderer: pattern.fingerprint_webgl_renderer,
+}));
+
+const cpuPresets = Array.from(new Map(realisticWindowsFingerprintPatterns.map((pattern) => [
+  pattern.fingerprint_cpu_model,
+  {
+    model: pattern.fingerprint_cpu_model,
+    cores: pattern.fingerprint_cpu_cores,
+  },
+])).values());
+
+const memoryPresets = ['4', '8', '16', '32'];
 
 function countryFlag(countryCode?: string) {
   const code = countryCode?.trim().toUpperCase();
@@ -427,11 +674,17 @@ function newProfileDraft(): ProfileDraft {
     fingerprint_webrtc: 'Proxy only',
     fingerprint_canvas: 'Noise',
     fingerprint_webgl: 'Noise',
-    fingerprint_webgl_vendor: '',
-    fingerprint_webgl_renderer: '',
-    fingerprint_screen: 'Auto',
-    fingerprint_cpu_cores: '8',
-    fingerprint_memory_gb: '8',
+    fingerprint_webgpu: 'Real',
+    fingerprint_client_rects: 'Noise',
+    fingerprint_audio: 'Noise',
+    fingerprint_webgl_vendor: defaultWindowsFingerprintPattern.fingerprint_webgl_vendor,
+    fingerprint_webgl_renderer: defaultWindowsFingerprintPattern.fingerprint_webgl_renderer,
+    fingerprint_screen: defaultWindowsFingerprintPattern.fingerprint_screen,
+    fingerprint_cpu_model: defaultWindowsFingerprintPattern.fingerprint_cpu_model,
+    fingerprint_cpu_cores: defaultWindowsFingerprintPattern.fingerprint_cpu_cores,
+    fingerprint_memory_gb: defaultWindowsFingerprintPattern.fingerprint_memory_gb,
+    fingerprint_media_devices: mediaDevicePresets[0],
+    fingerprint_do_not_track: false,
     fingerprint_rotate: true,
   };
 }
@@ -462,11 +715,17 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     fingerprint_webrtc: fingerprint.webrtc || 'Proxy only',
     fingerprint_canvas: fingerprint.canvas || 'Noise',
     fingerprint_webgl: fingerprint.webgl || 'Noise',
+    fingerprint_webgpu: fingerprint.webgpu || 'Real',
+    fingerprint_client_rects: fingerprint.client_rects || 'Noise',
+    fingerprint_audio: fingerprint.audio || 'Noise',
     fingerprint_webgl_vendor: fingerprint.webgl_vendor || '',
     fingerprint_webgl_renderer: fingerprint.webgl_renderer || '',
     fingerprint_screen: fingerprint.screen || 'Auto',
+    fingerprint_cpu_model: fingerprint.cpu_model || '',
     fingerprint_cpu_cores: fingerprint.cpu_cores ? String(fingerprint.cpu_cores) : '8',
     fingerprint_memory_gb: fingerprint.memory_gb ? String(fingerprint.memory_gb) : '8',
+    fingerprint_media_devices: fingerprint.media_devices || mediaDevicePresets[0],
+    fingerprint_do_not_track: Boolean(fingerprint.do_not_track),
     fingerprint_rotate: Boolean(fingerprint.rotate_on_launch),
   };
 }
@@ -610,29 +869,23 @@ function randomChoice<T>(items: T[]) {
 }
 
 function randomFingerprintPatch(): Partial<ProfileDraft> {
-  const os = randomChoice(osPresets);
-  const screen = randomChoice(screenPresets.filter((item) => item !== 'Auto'));
-  const browserVersion = randomChoice(browserVersionPresets.filter((item) => item !== 'Auto'));
+  const pattern = randomChoice(realisticWindowsFingerprintPatterns);
   return {
-    fingerprint_os: os,
-    fingerprint_browser_version: browserVersion,
+    ...pattern,
     // Timezone and language are deliberately NOT randomized to an unrelated
-    // preset here: leaving them on "Auto from proxy" (undefined language)
-    // lets the launcher derive both from the assigned proxy's country at
-    // launch time, so they stay consistent with the proxy's apparent
-    // location instead of fighting it (the #1 cause of fingerprint-test
-    // "trying to hide your location" flags).
-    fingerprint_language: undefined,
+    // preset here: leaving timezone on "Auto from proxy" and preserving the
+    // current language lets the launcher derive location-sensitive values
+    // from the assigned proxy at launch time.
     fingerprint_timezone: 'Auto from proxy',
-    fingerprint_geolocation: randomChoice(['Ask', 'Block', 'Auto from proxy']),
-    fingerprint_webrtc: randomChoice(webRtcModes),
-    fingerprint_canvas: randomChoice(noiseModes),
-    fingerprint_webgl: randomChoice(noiseModes),
-    fingerprint_webgl_vendor: randomChoice(webglVendors),
-    fingerprint_webgl_renderer: randomChoice(webglRenderers),
-    fingerprint_screen: screen,
-    fingerprint_cpu_cores: String(randomChoice([4, 6, 8, 10, 12])),
-    fingerprint_memory_gb: String(randomChoice([4, 8, 12, 16, 32])),
+    fingerprint_geolocation: randomChoice(['Ask', 'Auto from proxy']),
+    fingerprint_webrtc: 'Proxy only',
+    fingerprint_canvas: 'Noise',
+    fingerprint_webgl: 'Noise',
+    fingerprint_webgpu: 'Real',
+    fingerprint_client_rects: 'Noise',
+    fingerprint_audio: 'Noise',
+    fingerprint_media_devices: mediaDevicePresets[0],
+    fingerprint_do_not_track: false,
     fingerprint_user_agent: '',
   };
 }
@@ -730,11 +983,17 @@ function fingerprintFromDraftPatch(patch: Partial<ProfileDraft>): NonNullable<Ar
     webrtc: patch.fingerprint_webrtc,
     canvas: patch.fingerprint_canvas,
     webgl: patch.fingerprint_webgl,
+    webgpu: patch.fingerprint_webgpu,
+    client_rects: patch.fingerprint_client_rects,
+    audio: patch.fingerprint_audio,
     webgl_vendor: patch.fingerprint_webgl_vendor,
     webgl_renderer: patch.fingerprint_webgl_renderer,
     screen: patch.fingerprint_screen,
+    cpu_model: patch.fingerprint_cpu_model,
     cpu_cores: numberOrNull(patch.fingerprint_cpu_cores || ''),
     memory_gb: numberOrNull(patch.fingerprint_memory_gb || ''),
+    media_devices: patch.fingerprint_media_devices,
+    do_not_track: Boolean(patch.fingerprint_do_not_track),
     rotate_on_launch: Boolean(patch.fingerprint_rotate),
   };
 }
@@ -887,6 +1146,9 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
     webrtc_mode: fingerprintWebrtcModeFor(fingerprint.webrtc),
     canvas_mode: fingerprintNoiseModeFor(fingerprint.canvas),
     webgl_mode: fingerprintNoiseModeFor(fingerprint.webgl),
+    webgpu_mode: fingerprintNoiseModeFor(fingerprint.webgpu),
+    client_rects_mode: fingerprintNoiseModeFor(fingerprint.client_rects),
+    audio_mode: fingerprintNoiseModeFor(fingerprint.audio),
     webgl_vendor: fingerprint.webgl_vendor || undefined,
     webgl_renderer: fingerprint.webgl_renderer || undefined,
     timezone: explicitTimezone,
@@ -895,6 +1157,8 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
     cpu_cores: numberOrNull(String(fingerprint.cpu_cores ?? '')) || undefined,
     memory_gb: numberOrNull(String(fingerprint.memory_gb ?? '')) || undefined,
     screen: fingerprint.screen && fingerprint.screen !== 'Auto' ? fingerprint.screen : undefined,
+    media_devices: fingerprint.media_devices || undefined,
+    do_not_track: Boolean(fingerprint.do_not_track),
     rotate_on_launch: rotate,
   };
 }
@@ -1839,11 +2103,17 @@ main().catch((error) => {
         webrtc: profileDraft.fingerprint_webrtc,
         canvas: profileDraft.fingerprint_canvas,
         webgl: profileDraft.fingerprint_webgl,
+        webgpu: profileDraft.fingerprint_webgpu,
+        client_rects: profileDraft.fingerprint_client_rects,
+        audio: profileDraft.fingerprint_audio,
         webgl_vendor: profileDraft.fingerprint_webgl_vendor.trim(),
         webgl_renderer: profileDraft.fingerprint_webgl_renderer.trim(),
         screen: profileDraft.fingerprint_screen,
+        cpu_model: profileDraft.fingerprint_cpu_model,
         cpu_cores: numberOrNull(profileDraft.fingerprint_cpu_cores),
         memory_gb: numberOrNull(profileDraft.fingerprint_memory_gb),
+        media_devices: profileDraft.fingerprint_media_devices,
+        do_not_track: profileDraft.fingerprint_do_not_track,
         rotate_on_launch: profileDraft.fingerprint_rotate,
       },
       created_at: profileDraft.id ?
@@ -2091,9 +2361,17 @@ main().catch((error) => {
             webrtc: 'Proxy only',
             canvas: 'Noise',
             webgl: 'Noise',
-            screen: 'Auto',
-            cpu_cores: 8,
-            memory_gb: 8,
+            webgpu: 'Real',
+            client_rects: 'Noise',
+            audio: 'Noise',
+            webgl_vendor: defaultWindowsFingerprintPattern.fingerprint_webgl_vendor,
+            webgl_renderer: defaultWindowsFingerprintPattern.fingerprint_webgl_renderer,
+            screen: defaultWindowsFingerprintPattern.fingerprint_screen,
+            cpu_model: defaultWindowsFingerprintPattern.fingerprint_cpu_model,
+            cpu_cores: numberOrNull(defaultWindowsFingerprintPattern.fingerprint_cpu_cores),
+            memory_gb: numberOrNull(defaultWindowsFingerprintPattern.fingerprint_memory_gb),
+            media_devices: mediaDevicePresets[0],
+            do_not_track: false,
             rotate_on_launch: true,
           },
           created_at: existingProfileIndex >= 0 ? profiles[existingProfileIndex].created_at : createdAt,
@@ -2239,19 +2517,21 @@ main().catch((error) => {
       ['Canvas', profileDraft.fingerprint_canvas],
       ['WebGL', profileDraft.fingerprint_webgl],
       ['WebGL Info', webglInfo],
-      ['WebGPU', 'Real'],
-      ['Client Rects', 'Real'],
+      ['WebGPU', profileDraft.fingerprint_webgpu],
+      ['Client Rects', profileDraft.fingerprint_client_rects],
       ['Timezone', profileDraft.fingerprint_timezone],
       ['Language', profileDraft.fingerprint_language],
       ['Geolocation', profileDraft.fingerprint_geolocation],
-      ['CPU', profileDraft.fingerprint_cpu_cores ? `${profileDraft.fingerprint_cpu_cores} cores` : 'Real'],
+      ['CPU', profileDraft.fingerprint_cpu_model ?
+        `${profileDraft.fingerprint_cpu_model} (${profileDraft.fingerprint_cpu_cores || 'real'} threads)` :
+        profileDraft.fingerprint_cpu_cores ? `${profileDraft.fingerprint_cpu_cores} threads` : 'Real'],
       ['Memory', profileDraft.fingerprint_memory_gb ? `${profileDraft.fingerprint_memory_gb} GB` : 'Real'],
       ['MAC address', 'OFF'],
       ['DeviceName', 'OFF'],
-      ['Audio', 'Real'],
+      ['Audio', profileDraft.fingerprint_audio],
       ['Screen', profileDraft.fingerprint_screen],
-      ['Media devices', 'Real'],
-      ['Do not track', 'Off'],
+      ['Media devices', profileDraft.fingerprint_media_devices],
+      ['Do not track', profileDraft.fingerprint_do_not_track ? 'On' : 'Off'],
     ] as const;
   }
 
@@ -3525,20 +3805,49 @@ main().catch((error) => {
             </select>
           </label>
           <label className="field">
-            <span>WebGL vendor</span>
-            <input
-              placeholder="Auto"
-              value={profileDraft.fingerprint_webgl_vendor}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webgl_vendor: event.target.value})}
-            />
+            <span>WebGPU</span>
+            <select
+              value={profileDraft.fingerprint_webgpu}
+              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webgpu: event.target.value})}
+            >
+              {webGpuModes.map((item) => <option key={item}>{item}</option>)}
+            </select>
           </label>
           <label className="field">
-            <span>WebGL renderer</span>
-            <input
-              placeholder="Auto"
+            <span>Client rects</span>
+            <select
+              value={profileDraft.fingerprint_client_rects}
+              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_client_rects: event.target.value})}
+            >
+              {noiseModes.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Audio</span>
+            <select
+              value={profileDraft.fingerprint_audio}
+              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_audio: event.target.value})}
+            >
+              {noiseModes.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>GPU</span>
+            <select
               value={profileDraft.fingerprint_webgl_renderer}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_webgl_renderer: event.target.value})}
-            />
+              onChange={(event) => {
+                const pattern = realisticWindowsFingerprintPatterns.find((item) =>
+                  item.fingerprint_webgl_renderer === event.target.value);
+                if (pattern) {
+                  setProfileDraft({...profileDraft, ...pattern});
+                }
+              }}
+            >
+              <option value="">Auto</option>
+              {gpuPresets.map((item) => (
+                <option value={item.renderer} key={item.renderer}>{item.label}</option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>Screen</span>
@@ -3548,21 +3857,50 @@ main().catch((error) => {
               onChange={(event) => setProfileDraft({...profileDraft, fingerprint_screen: event.target.value})}
             />
           </label>
-          <label className="field compact">
-            <span>CPU cores</span>
-            <input
-              inputMode="numeric"
-              value={profileDraft.fingerprint_cpu_cores}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_cpu_cores: event.target.value.replace(/[^\d]/g, '')})}
-            />
+          <label className="field">
+            <span>CPU</span>
+            <select
+              value={profileDraft.fingerprint_cpu_model}
+              onChange={(event) => {
+                const preset = cpuPresets.find((item) => item.model === event.target.value);
+                setProfileDraft({
+                  ...profileDraft,
+                  fingerprint_cpu_model: preset?.model || '',
+                  fingerprint_cpu_cores: preset?.cores || profileDraft.fingerprint_cpu_cores,
+                });
+              }}
+            >
+              <option value="">Auto</option>
+              {cpuPresets.map((item) => (
+                <option value={item.model} key={item.model}>{item.model} ({item.cores} threads)</option>
+              ))}
+            </select>
           </label>
           <label className="field compact">
             <span>Memory GB</span>
-            <input
-              inputMode="numeric"
+            <select
               value={profileDraft.fingerprint_memory_gb}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_memory_gb: event.target.value.replace(/[^\d]/g, '')})}
+              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_memory_gb: event.target.value})}
+            >
+              {memoryPresets.map((item) => <option value={item} key={item}>{item} GB</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Media devices</span>
+            <select
+              value={profileDraft.fingerprint_media_devices}
+              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_media_devices: event.target.value})}
+            >
+              {mediaDevicePresets.map((item) => <option value={item} key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="check-field">
+            <input
+              checked={profileDraft.fingerprint_do_not_track}
+              type="checkbox"
+              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_do_not_track: event.target.checked})}
             />
+            <span>Do not track</span>
           </label>
           <label className="check-field wide">
             <input
