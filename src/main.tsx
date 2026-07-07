@@ -182,7 +182,8 @@ function daysUntilPurge(deletedAt: string): number {
 const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
 const osPresets = ['Windows 10', 'Windows 11', 'macOS', 'Ubuntu'];
 const browserVersionPresets = ['Auto', 'Chrome 126', 'Chrome 125', 'Chrome 124'];
-const languagePresets = ['en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;q=0.8'];
+const AUTO_FROM_PROXY = 'Auto from proxy';
+const languagePresets = [AUTO_FROM_PROXY, 'en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;q=0.8'];
 const timezonePresets = ['Auto from proxy', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Asia/Jerusalem'];
 const webRtcModes = ['Proxy only', 'Disabled', 'Real', 'Custom'];
 const noiseModes = ['Real', 'Noise', 'Block'];
@@ -668,9 +669,9 @@ function newProfileDraft(): ProfileDraft {
     fingerprint_os: 'Windows 11',
     fingerprint_browser_version: 'Auto',
     fingerprint_user_agent: '',
-    fingerprint_language: languagePresets[0],
-    fingerprint_timezone: 'Auto from proxy',
-    fingerprint_geolocation: 'Ask',
+    fingerprint_language: AUTO_FROM_PROXY,
+    fingerprint_timezone: AUTO_FROM_PROXY,
+    fingerprint_geolocation: AUTO_FROM_PROXY,
     fingerprint_webrtc: 'Proxy only',
     fingerprint_canvas: 'Noise',
     fingerprint_webgl: 'Noise',
@@ -709,9 +710,9 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     fingerprint_os: normalizeOsPreset(fingerprint.os),
     fingerprint_browser_version: fingerprint.browser_version || 'Auto',
     fingerprint_user_agent: fingerprint.user_agent || '',
-    fingerprint_language: fingerprint.language || languagePresets[0],
-    fingerprint_timezone: fingerprint.timezone || 'Auto from proxy',
-    fingerprint_geolocation: fingerprint.geolocation || 'Ask',
+    fingerprint_language: fingerprint.language || AUTO_FROM_PROXY,
+    fingerprint_timezone: fingerprint.timezone || AUTO_FROM_PROXY,
+    fingerprint_geolocation: fingerprint.geolocation || AUTO_FROM_PROXY,
     fingerprint_webrtc: fingerprint.webrtc || 'Proxy only',
     fingerprint_canvas: fingerprint.canvas || 'Noise',
     fingerprint_webgl: fingerprint.webgl || 'Noise',
@@ -877,7 +878,8 @@ function randomFingerprintPatch(): Partial<ProfileDraft> {
     // current language lets the launcher derive location-sensitive values
     // from the assigned proxy at launch time.
     fingerprint_timezone: 'Auto from proxy',
-    fingerprint_geolocation: randomChoice(['Ask', 'Auto from proxy']),
+    fingerprint_geolocation: AUTO_FROM_PROXY,
+    fingerprint_language: AUTO_FROM_PROXY,
     fingerprint_webrtc: 'Proxy only',
     fingerprint_canvas: 'Noise',
     fingerprint_webgl: 'Noise',
@@ -1131,10 +1133,10 @@ function randomSeed(): number {
 function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
   const fingerprint = profile.fingerprint || {};
   const preset = fingerprintPresetFor(fingerprint.os);
-  const explicitTimezone = fingerprint.timezone && fingerprint.timezone !== 'Auto from proxy' ?
+  const explicitTimezone = fingerprint.timezone && fingerprint.timezone !== AUTO_FROM_PROXY ?
     fingerprint.timezone :
     undefined;
-  const explicitLanguages = fingerprint.language ?
+  const explicitLanguages = fingerprint.language && fingerprint.language !== AUTO_FROM_PROXY ?
     fingerprint.language.split(',').map((part) => part.split(';')[0].trim()).filter(Boolean) :
     undefined;
   const rotate = Boolean(fingerprint.rotate_on_launch);

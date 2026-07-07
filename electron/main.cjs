@@ -76,7 +76,7 @@ function resolveTimezone(fingerprintTimezone, proxy) {
 }
 
 function resolveLanguage(fingerprintLanguage, proxy) {
-  if (fingerprintLanguage) {
+  if (fingerprintLanguage && fingerprintLanguage !== 'Auto from proxy') {
     return fingerprintLanguage;
   }
   const code = (proxy?.country_code || '').toLowerCase();
