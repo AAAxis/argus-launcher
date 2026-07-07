@@ -27,6 +27,7 @@ export type RuntimeFingerprint = {
   memory_gb?: number;
   screen?: string;
   media_devices?: string;
+  ports_to_protect?: string;
   do_not_track?: boolean;
   rotate_on_launch?: boolean;
 };

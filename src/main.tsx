@@ -194,6 +194,7 @@ const mediaDevicePresets = [
   '1 camera 1 microphone 0 speaker',
   '0 camera 0 microphone 0 speaker',
 ];
+const portsToProtect = '3389,5900,5800,7070,6568,5938,63333,5901,5902,5903,5950,5931,5939,6039,5944,6040,5279,2112';
 const screenPresets = ['Auto', '1920x1080', '1536x864', '1366x768', '1600x900', '1920x1200', '2560x1440', '2560x1600', '3440x1440', '3840x2160'];
 const webglVendors = ['Google Inc. (NVIDIA)', 'Google Inc. (AMD)', 'Google Inc. (Intel)', 'Google Inc.', 'Apple Inc.'];
 const webglRenderers = [
@@ -1160,6 +1161,7 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
     memory_gb: numberOrNull(String(fingerprint.memory_gb ?? '')) || undefined,
     screen: fingerprint.screen && fingerprint.screen !== 'Auto' ? fingerprint.screen : undefined,
     media_devices: fingerprint.media_devices || undefined,
+    ports_to_protect: portsToProtect,
     do_not_track: Boolean(fingerprint.do_not_track),
     rotate_on_launch: rotate,
   };
