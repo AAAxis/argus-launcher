@@ -2400,6 +2400,18 @@ main().catch((error) => {
     setMessage(`${folder.name} folder deleted`);
   }
 
+  function deleteFolderDraft() {
+    if (!folderDraft?.id) {
+      setFolderDraft(null);
+      return;
+    }
+    const folder = cloudState.folders.find((item) => item.id === folderDraft.id);
+    setFolderDraft(null);
+    if (folder) {
+      void deleteFolder(folder);
+    }
+  }
+
   function openNewStatus() {
     setStatusDraft({name: ''});
   }
@@ -3563,9 +3575,6 @@ main().catch((error) => {
               <button className="icon-button" aria-label={`Rename ${folder.name}`} onClick={() => renameFolder(folder)}>
                 <Pencil size={14} />
               </button>
-              <button className="icon-button danger-icon" aria-label={`Delete ${folder.name}`} onClick={() => deleteFolder(folder)}>
-                <Trash2 size={14} />
-              </button>
             </div>
           ))}
           <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
@@ -4225,9 +4234,6 @@ main().catch((error) => {
               ? `Downloading update… ${Math.round(updateState.progress?.percent || 0)}%`
               : `Update ${updateState.updateInfo?.version || ''} available`}
           </strong>
-          {updateState.updateInfo?.releaseNotes && (
-            <p className="update-toast-notes">{updateState.updateInfo.releaseNotes}</p>
-          )}
         </div>
         <div className="update-toast-actions">
           {updateState.status === 'available' && (
@@ -4726,7 +4732,6 @@ main().catch((error) => {
 
       {renderSettingsModal()}
       {renderChangelogModal()}
-      {renderCookiePickerModal()}
       {renderExtensionAddModal()}
 
       {profileDraft && (
@@ -5023,6 +5028,8 @@ main().catch((error) => {
         </div>
       )}
 
+      {renderCookiePickerModal()}
+
       {folderDraft && (
         <div className="modal-backdrop" onMouseDown={() => setFolderDraft(null)}>
           <section className="profile-modal small-modal" onMouseDown={(event) => event.stopPropagation()}>
@@ -5053,7 +5060,9 @@ main().catch((error) => {
             </div>
 
             <footer className="modal-actions">
-              <button className="ghost" onClick={() => setFolderDraft(null)}>Cancel</button>
+              {folderDraft.id && (
+                <button className="danger ghost" onClick={deleteFolderDraft}><Trash2 size={16} /> Delete</button>
+              )}
               <button onClick={saveFolderDraft}>{folderDraft.id ? 'Save changes' : 'Create folder'}</button>
             </footer>
           </section>

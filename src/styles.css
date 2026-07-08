@@ -1146,15 +1146,6 @@ textarea {
   min-width: 0;
 }
 
-.update-toast-notes {
-  color: #6e6a63;
-  font-size: 12px;
-  margin: 0;
-  max-height: 60px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-}
-
 .update-toast-actions {
   align-items: center;
   display: flex;
