@@ -5,6 +5,7 @@ import {native} from './native';
 import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
+import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
 type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api' | 'import';
@@ -1387,6 +1388,7 @@ function App() {
   const [signedInEmail, setSignedInEmail] = useState('');
   const [message, setMessage] = useState('');
   const [errorDialog, setErrorDialog] = useState<{title: string; detail: string} | null>(null);
+  const {run: runAsyncAction, isPending: isActionPending} = useAsyncAction();
   // Tracks which update version the user has dismissed the corner toast for,
   // so closing it doesn't hide it forever -- a later, different version still
   // prompts. Previously an available/downloaded update only ever showed up as
@@ -3452,8 +3454,14 @@ main().catch((error) => {
                   <option key={folder.id} value={folder.id}>{folder.name}</option>
                 ))}
               </select>
-              <button className="ghost" onClick={importCookiesForSelectedProfiles}>
-                <Cookie size={16} /> Import cookies
+              <button
+                  className="ghost"
+                  disabled={isActionPending('import-cookies')}
+                  onClick={() => runAsyncAction('import-cookies', importCookiesForSelectedProfiles)}>
+                {isActionPending('import-cookies') ?
+                    <RefreshCw size={16} className="btn-spin" /> :
+                    <Cookie size={16} />}
+                {isActionPending('import-cookies') ? 'Importing…' : 'Import cookies'}
               </button>
               <button
                 className="ghost"
@@ -4551,7 +4559,14 @@ main().catch((error) => {
                 <button className="danger ghost" onClick={deleteProfileDraft}><Trash2 size={16} /> Delete</button>
               )}
               <button className="ghost" onClick={() => setProfileDraft(null)}>Cancel</button>
-              <button onClick={saveProfileDraft}>{profileDraft.id ? 'Save changes' : 'Create profile'}</button>
+              <button
+                  disabled={isActionPending('save-profile')}
+                  onClick={() => runAsyncAction('save-profile', saveProfileDraft)}>
+                {isActionPending('save-profile') && <RefreshCw size={16} className="btn-spin" />}
+                {isActionPending('save-profile') ?
+                    'Saving…' :
+                    (profileDraft.id ? 'Save changes' : 'Create profile')}
+              </button>
             </footer>
           </section>
         </div>
@@ -4889,8 +4904,15 @@ main().catch((error) => {
               >
                 Cancel
               </button>
-              <button className="danger" onClick={confirmDeleteProfiles}>
-                <Trash2 size={16} /> Delete
+              <button
+                className="danger"
+                disabled={isActionPending('delete-profiles')}
+                onClick={() => runAsyncAction('delete-profiles', confirmDeleteProfiles)}
+              >
+                {isActionPending('delete-profiles') ?
+                    <RefreshCw size={16} className="btn-spin" /> :
+                    <Trash2 size={16} />}
+                {isActionPending('delete-profiles') ? 'Deleting…' : 'Delete'}
               </button>
             </footer>
           </section>
