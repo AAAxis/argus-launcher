@@ -180,7 +180,7 @@ function daysUntilPurge(deletedAt: string): number {
   return Math.max(0, Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000)));
 }
 const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
-const osPresets = ['Windows 10', 'Windows 11', 'macOS', 'Ubuntu'];
+const osPresets = ['Android', 'iOS', 'macOS', 'Windows 11', 'Windows 10', 'Ubuntu'];
 const browserVersionPresets = ['Auto', 'Chrome 126', 'Chrome 125', 'Chrome 124'];
 const AUTO_FROM_PROXY = 'Auto from proxy';
 const languagePresets = [AUTO_FROM_PROXY, 'en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;q=0.8'];
@@ -195,15 +195,58 @@ const mediaDevicePresets = [
   '0 camera 0 microphone 0 speaker',
 ];
 const portsToProtect = '3389,5900,5800,7070,6568,5938,63333,5901,5902,5903,5950,5931,5939,6039,5944,6040,5279,2112';
-const screenPresets = ['Auto', '1920x1080', '1536x864', '1366x768', '1600x900', '1920x1200', '2560x1440', '2560x1600', '3440x1440', '3840x2160'];
-const webglVendors = ['Google Inc. (NVIDIA)', 'Google Inc. (AMD)', 'Google Inc. (Intel)', 'Google Inc.', 'Apple Inc.'];
+const screenPresets = ['Auto', '390x844', '393x873', '412x915', '430x932', '1920x1080', '1536x864', '1366x768', '1600x900', '1920x1200', '2560x1440', '2560x1600', '3440x1440', '3840x2160'];
+const webglVendors = ['Google Inc. (NVIDIA)', 'Google Inc. (AMD)', 'Google Inc. (Intel)', 'Google Inc. (Qualcomm)', 'Google Inc.', 'Apple Inc.'];
 const webglRenderers = [
+  'Adreno (TM) 740',
+  'Apple GPU',
   'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
   'ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
   'ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)',
   'ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)',
   'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)',
 ];
+
+const osFingerprintDefaults: Record<string, Partial<ProfileDraft>> = {
+  Android: {
+    fingerprint_user_agent: '',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '393x873',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+    fingerprint_media_devices: '1 camera 1 microphone 1 speaker',
+  },
+  iOS: {
+    fingerprint_user_agent: '',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '390x844',
+    fingerprint_cpu_model: 'Apple A16 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '6',
+    fingerprint_media_devices: '1 camera 1 microphone 1 speaker',
+  },
+  macOS: {
+    fingerprint_user_agent: '',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '1512x982',
+    fingerprint_cpu_model: 'Apple M2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  Ubuntu: {
+    fingerprint_user_agent: '',
+    fingerprint_webgl_vendor: 'Google Inc. (Intel)',
+    fingerprint_webgl_renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics, OpenGL)',
+    fingerprint_screen: '1920x1080',
+    fingerprint_cpu_model: 'Intel Core i5-12400',
+    fingerprint_cpu_cores: '12',
+    fingerprint_memory_gb: '8',
+  },
+};
 
 type RealisticFingerprintPattern = Pick<ProfileDraft,
   'fingerprint_os' |
@@ -860,10 +903,30 @@ function normalizeOsPreset(value?: string) {
   if (value === 'Windows') {
     return 'Windows 11';
   }
-  if (value === 'Linux' || value === 'Android') {
+  if (value === 'Linux') {
     return 'Ubuntu';
   }
   return value && osPresets.includes(value) ? value : 'macOS';
+}
+
+function fingerprintPatchForOs(os: string): Partial<ProfileDraft> {
+  if (os.startsWith('Windows')) {
+    const matchingPatterns = realisticWindowsFingerprintPatterns.filter((pattern) =>
+      pattern.fingerprint_os === os);
+    return {
+      ...randomChoice(matchingPatterns.length ? matchingPatterns : realisticWindowsFingerprintPatterns),
+      fingerprint_user_agent: '',
+    };
+  }
+  return osFingerprintDefaults[os] || {};
+}
+
+function withFingerprintOs(draft: ProfileDraft, os: string): ProfileDraft {
+  return {
+    ...draft,
+    fingerprint_os: os,
+    ...fingerprintPatchForOs(os),
+  };
 }
 
 function randomChoice<T>(items: T[]) {
@@ -1023,9 +1086,8 @@ function fingerprintSwitches(profile: ArgusProfile) {
 }
 
 // Maps the profile-edit UI's os preset to argus::Fingerprint's `preset` and
-// `platform` keys -- mirrors the renderer's own platformMap in
-// chrome/renderer/argus/argus_fingerprint_injector.cc so navigator.platform
-// agrees with the preset the browser applies.
+// `platform` keys. Desktop presets use Chromium's UA-CH override path; mobile
+// choices pass explicit UA/platform values through the runtime fingerprint.
 function fingerprintPresetFor(os?: string): string | undefined {
   if (!os) {
     return undefined;
@@ -1042,7 +1104,13 @@ function fingerprintPresetFor(os?: string): string | undefined {
   return undefined;
 }
 
-function fingerprintPlatformFor(preset?: string): string | undefined {
+function fingerprintPlatformFor(preset?: string, os?: string): string | undefined {
+  if (os === 'Android') {
+    return 'Linux armv8l';
+  }
+  if (os === 'iOS') {
+    return 'iPhone';
+  }
   if (preset === 'windows') {
     return 'Win32';
   }
@@ -1053,6 +1121,24 @@ function fingerprintPlatformFor(preset?: string): string | undefined {
     return 'Linux x86_64';
   }
   return undefined;
+}
+
+function userAgentForFingerprint(os?: string, browserVersion?: string): string {
+  const chromeVersion = browserVersion === 'Auto' || !browserVersion ?
+    '149.0.0.0' :
+    browserVersion.replace('Chrome ', '') + '.0.0.0';
+  switch (os) {
+    case 'Android':
+      return `Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Mobile Safari/537.36`;
+    case 'iOS':
+      return 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    case 'macOS':
+      return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    case 'Ubuntu':
+      return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    default:
+      return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+  }
 }
 
 // UI webrtc preset -> argus::Fingerprint.webrtc_mode ("real"|"noise"|"off").
@@ -1142,8 +1228,8 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
     undefined;
   const rotate = Boolean(fingerprint.rotate_on_launch);
   return {
-    platform: fingerprintPlatformFor(preset),
-    ua_string: fingerprint.user_agent || undefined,
+    platform: fingerprintPlatformFor(preset, fingerprint.os),
+    ua_string: fingerprint.user_agent || userAgentForFingerprint(fingerprint.os, fingerprint.browser_version),
     preset,
     seed: rotate ? randomSeed() : stableSeedFor(profile.id),
     webrtc_mode: fingerprintWebrtcModeFor(fingerprint.webrtc),
@@ -2489,15 +2575,7 @@ main().catch((error) => {
     if (profileDraft.fingerprint_user_agent.trim()) {
       return profileDraft.fingerprint_user_agent.trim();
     }
-    const osToken = profileDraft.fingerprint_os === 'macOS' ?
-      'Macintosh; Intel Mac OS X 10_15_7' :
-      profileDraft.fingerprint_os === 'Ubuntu' ?
-        'X11; Linux x86_64' :
-        'Windows NT 10.0; Win64; x64';
-    const version = profileDraft.fingerprint_browser_version === 'Auto' ?
-      '149.0.0.0' :
-      profileDraft.fingerprint_browser_version.replace('Chrome ', '') + '.0.0.0';
-    return `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
+    return userAgentForFingerprint(profileDraft.fingerprint_os, profileDraft.fingerprint_browser_version);
   }
 
   function summaryRows() {
@@ -3731,7 +3809,7 @@ main().catch((error) => {
             <span>Operating system</span>
             <select
               value={profileDraft.fingerprint_os}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_os: event.target.value})}
+              onChange={(event) => setProfileDraft(withFingerprintOs(profileDraft, event.target.value))}
             >
               {osPresets.map((item) => <option key={item}>{item}</option>)}
             </select>
