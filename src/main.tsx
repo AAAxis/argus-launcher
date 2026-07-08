@@ -2142,6 +2142,7 @@ main().catch((error) => {
       if (proxyMode === 'assigned') {
         selectedProxy = proxyFor(launchProfile);
         if (!selectedProxy?.host || !selectedProxy.port) {
+          setMessage('');
           setErrorDialog({
             title: 'Launch blocked',
             detail: `Proxy for ${launchProfile.name} is invalid. Fix host and port before launch.`,
@@ -2150,6 +2151,7 @@ main().catch((error) => {
         }
         if (!selectedProxy.checked_at || selectedProxy.check_error) {
           if (!native.checkProxy) {
+            setMessage('');
             setErrorDialog({
               title: 'Launch blocked',
               detail: 'Native proxy checker is not available. Restart Argys Anty and try again.',
@@ -2177,6 +2179,7 @@ main().catch((error) => {
             await saveCloudState({...cloudState, profiles, proxies});
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            setMessage('');
             setErrorDialog({
               title: 'Launch blocked',
               detail: `Proxy for ${launchProfile.name} failed its check: ${message}`,
@@ -2186,6 +2189,7 @@ main().catch((error) => {
             setCheckingProxyId('');
           }
           if (selectedProxy.check_error) {
+            setMessage('');
             setErrorDialog({
               title: 'Launch blocked',
               detail: `Proxy for ${launchProfile.name} failed its check: ${selectedProxy.check_error}`,
@@ -2212,9 +2216,11 @@ main().catch((error) => {
       if (result.ok) {
         setMessage(`Launched ${launchProfile.name}`);
       } else {
+        setMessage('');
         setErrorDialog({title: `Couldn't launch ${launchProfile.name}`, detail: result.error || 'Launch failed for an unknown reason.'});
       }
     } catch (error) {
+      setMessage('');
       setErrorDialog({
         title: `Couldn't launch ${profile.name}`,
         detail: error instanceof Error ? error.message : String(error),
