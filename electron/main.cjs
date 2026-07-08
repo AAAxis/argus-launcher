@@ -130,6 +130,72 @@ function managedBrowserRoot() {
   return path.join(app.getPath('userData'), 'Browser');
 }
 
+// The active managed-browser build lives in its own "v-<buildId>" directory
+// rather than being extracted directly into managedBrowserRoot(). A user
+// routinely has dozens of profile chrome.exe processes running out of that
+// install at once, and Windows will not let an in-place delete-and-overwrite
+// touch DLLs/EXEs those processes still have open -- the previous direct-
+// overwrite approach silently failed under load and left old, unpatched
+// binaries running with no visible error (see ensureBrowserResource's catch
+// block). A fresh build now gets its own directory instead, so installing it
+// never has to touch files a running process might be holding.
+function managedBrowserCurrentPointerPath() {
+  return path.join(managedBrowserRoot(), '.argus-browser-current');
+}
+
+function managedBrowserVersionedDir(buildId) {
+  const safeId = String(buildId || 'build').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'build';
+  return path.join(managedBrowserRoot(), `v-${safeId}`);
+}
+
+function readManagedBrowserCurrentDir() {
+  try {
+    const name = fs.readFileSync(managedBrowserCurrentPointerPath(), 'utf8').trim();
+    return name ? path.join(managedBrowserRoot(), name) : '';
+  } catch {
+    return '';
+  }
+}
+
+function writeManagedBrowserCurrentDir(dir) {
+  try {
+    fs.writeFileSync(managedBrowserCurrentPointerPath(), path.basename(dir));
+  } catch {
+    // Best effort -- worst case the next resolve falls back to scanning
+    // managedBrowserRoot() directly instead of the versioned directory.
+  }
+}
+
+// Removes every managed-browser build directory except the current one.
+// Best-effort per directory: one still backing a running profile window has
+// its files locked by Windows and rmSync throws for just that entry, which is
+// caught and skipped -- it gets swept on a later call once nothing running
+// still references it, instead of blocking or corrupting today's install.
+function pruneStaleManagedBrowserDirs() {
+  const root = managedBrowserRoot();
+  const currentDir = readManagedBrowserCurrentDir();
+  let entries;
+  try {
+    entries = fs.readdirSync(root, {withFileTypes: true});
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('v-')) {
+      continue;
+    }
+    const fullPath = path.join(root, entry.name);
+    if (fullPath === currentDir) {
+      continue;
+    }
+    try {
+      fs.rmSync(fullPath, {recursive: true, force: true});
+    } catch {
+      // Still in use by a running profile process -- try again next time.
+    }
+  }
+}
+
 function findFirstMatching(root, predicate, maxDepth = 4) {
   if (!root || maxDepth < 0 || !fs.existsSync(root)) {
     return '';
@@ -159,7 +225,11 @@ function findFirstMatching(root, predicate, maxDepth = 4) {
 }
 
 function managedBrowserAppPath() {
-  const root = managedBrowserRoot();
+  // Prefer the versioned directory the last successful install pointed at;
+  // fall back to scanning managedBrowserRoot() directly for installs made
+  // before this directory-per-build scheme existed.
+  const currentDir = readManagedBrowserCurrentDir();
+  const root = currentDir && fs.existsSync(currentDir) ? currentDir : managedBrowserRoot();
   const candidates = process.platform === 'darwin' ? [
     path.join(root, 'Argys Browser.app'),
     path.join(root, 'Argus.app'),
@@ -515,13 +585,23 @@ async function ensureBrowserResource({manual = false} = {}) {
     }
     resourceState.browserStatus = 'installing';
     broadcastResourceState();
-    extractBrowserArchive(archivePath, managedBrowserRoot());
+    // Extract into a fresh directory of its own (named for this build) rather
+    // than overwriting managedBrowserRoot() in place: any currently-running
+    // profile windows have the previous build's DLLs/EXEs open, and Windows
+    // refuses to delete those out from under them. A new directory means this
+    // install never has to touch a file another process might be holding.
+    const versionedDir = managedBrowserVersionedDir(manifestBuildId);
+    extractBrowserArchive(archivePath, versionedDir);
     fs.rmSync(archivePath, {force: true});
+    writeManagedBrowserCurrentDir(versionedDir);
     const installedBrowserPath = managedBrowserAppPath();
     if (!installedBrowserPath) {
       throw new Error(`Downloaded browser did not contain a supported app for ${browserResourceKey()}.`);
     }
     writeManagedBrowserVersion(manifest);
+    // Best-effort cleanup of the previous build(s). Anything still backing a
+    // running profile simply fails to delete and is retried on a later check.
+    pruneStaleManagedBrowserDirs();
     resourceState.browserStatus = 'ready';
     resourceState.browserPath = installedBrowserPath;
     resourceState.progress = null;
