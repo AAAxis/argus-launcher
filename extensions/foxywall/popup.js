@@ -319,13 +319,10 @@ class SimplePopupController {
     }
   }
 
-  // ISO 3166-1 alpha-2 → flag emoji (regional indicator pair).
+  // Windows Chromium does not reliably render emoji flag pairs; show ISO code.
   ccToFlag(cc) {
-    if (!cc || cc.length !== 2) return '🌐';
-    const base = 0x1f1e6;
-    const A = 'A'.charCodeAt(0);
-    const up = cc.toUpperCase();
-    return String.fromCodePoint(base + (up.charCodeAt(0) - A), base + (up.charCodeAt(1) - A));
+    const up = String(cc || '').trim().toUpperCase();
+    return up.length === 2 ? up : '--';
   }
 
   async toggleConnection() {

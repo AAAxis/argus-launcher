@@ -485,11 +485,9 @@ const memoryPresets = ['4', '8', '16', '32'];
 function countryFlag(countryCode?: string) {
   const code = countryCode?.trim().toUpperCase();
   if (!code || code.length !== 2) {
-    return '🌐';
+    return '--';
   }
-  return [...code]
-      .map((char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
-      .join('');
+  return code;
 }
 
 const socialBookmarks: SharedBookmark[] = [
@@ -4157,7 +4155,7 @@ main().catch((error) => {
               <button className="icon-button" aria-label="Close" onClick={() => setProfileDraft(null)}><X size={18} /></button>
             </header>
 
-            <div className={profileDraft.id ? 'profile-editor-layout' : 'profile-editor-layout single'}>
+            <div className="profile-editor-layout">
             <div className="profile-form profile-editor-main">
               <label className="field wide">
                 <span>Name</span>
@@ -4322,8 +4320,6 @@ main().catch((error) => {
                   )}
                 </div>
               </section>
-              {profileDraft.id && (
-                <>
               <section className="form-section wide compact-section fingerprint-card">
                 <div>
                   <h3>Fingerprint</h3>
@@ -4341,10 +4337,7 @@ main().catch((error) => {
                   onChange={(event) => setProfileDraft({...profileDraft, command_line_switches: event.target.value})}
                 />
               </label>
-                </>
-              )}
             </div>
-            {profileDraft.id && (
             <aside className="profile-summary">
               <div className="summary-heading">
                 <h3>Summary</h3>
@@ -4375,7 +4368,6 @@ main().catch((error) => {
                 ))}
               </div>
             </aside>
-            )}
             </div>
 
             <datalist id="language-presets">

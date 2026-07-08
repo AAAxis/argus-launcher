@@ -1,6 +1,6 @@
 {
   "name": "argys-anty",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
