@@ -8,7 +8,7 @@ import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensio
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
-type TabId = 'profiles' | 'proxies' | 'bookmarks' | 'extensions' | 'api' | 'import';
+type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'api' | 'import';
 
 type ApiEndpoint = {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -96,6 +96,7 @@ type StatusDraft = {
 const tabs: Array<{id: TabId; label: string}> = [
   {id: 'profiles', label: 'Profiles'},
   {id: 'proxies', label: 'Proxies'},
+  {id: 'cookies', label: 'Cookies'},
   {id: 'bookmarks', label: 'Bookmarks'},
   {id: 'extensions', label: 'Extensions'},
   {id: 'api', label: 'API'},
@@ -1340,13 +1341,16 @@ function LoadingState({label, detail, failed = false, onRetry}: {
   );
 }
 
-function PaginationBar({page, totalPages, total, pageSize, onPage, onPageSize}: {
+function PaginationBar({page, totalPages, total, pageSize, onPage, onPageSize, extra}: {
   page: number;
   totalPages: number;
   total: number;
   pageSize: number;
   onPage: (page: number) => void;
   onPageSize: (size: number) => void;
+  // Optional caller-specific content (e.g. the Trash filter toggle on the
+  // Profiles tab) rendered in the same row, before the range text.
+  extra?: React.ReactNode;
 }) {
   if (total === 0) {
     return null;
@@ -1355,6 +1359,7 @@ function PaginationBar({page, totalPages, total, pageSize, onPage, onPageSize}: 
   const end = Math.min(total, (page + 1) * pageSize);
   return (
     <section className="pagination-bar">
+      {extra}
       <span className="pagination-range">{start}-{end} of {total}</span>
       <div className="pagination-controls">
         <select value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}>
@@ -1461,6 +1466,7 @@ function App() {
   const [updateBusy, setUpdateBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [cookiePickerOpen, setCookiePickerOpen] = useState(false);
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
   const proxyChecksInFlight = useRef(new Set<string>());
   const proxyChecksAttempted = useRef(new Set<string>());
@@ -2290,6 +2296,13 @@ main().catch((error) => {
       // second check is invisible: several seconds of silence between
       // clicking Launch and either the window opening or an error dialog.
       setMessage(`Launching ${launchProfile.name}`);
+      // A saved cookie-set (Cookies tab) takes priority over the legacy
+      // pasted/uploaded cookie_import_* fields -- both resolve to the same
+      // cookieImportUrl the launch payload consumes, just from a different
+      // source.
+      const savedCookie = launchProfile.cookie_mode === 'saved' && launchProfile.cookie_id ?
+        cloudState.cookies.find((item) => item.id === launchProfile.cookie_id) :
+        null;
       const result = await native.launchProfile({
         id: launchProfile.id,
         name: launchProfile.name,
@@ -2301,9 +2314,9 @@ main().catch((error) => {
         runtimeFingerprint: buildRuntimeFingerprint(launchProfile),
         startUrl: browserStartUrl(launchProfile),
         homeHtml: anonymousHomeHtml(launchProfile, cloudState.shared_bookmarks, selectedProxy),
-        cookieImportPath: launchProfile.cookie_import_path || null,
-        cookieImportUrl: launchProfile.cookie_import_url || null,
-        cookieImportName: launchProfile.cookie_import_name || null,
+        cookieImportPath: savedCookie ? null : (launchProfile.cookie_import_path || null),
+        cookieImportUrl: savedCookie ? savedCookie.url : (launchProfile.cookie_import_url || null),
+        cookieImportName: savedCookie ? savedCookie.name : (launchProfile.cookie_import_name || null),
         enableCookieManager: cloudState.built_in_extensions?.cookie_manager !== false,
         enableSmsActivate: cloudState.built_in_extensions?.sms_activate !== false,
         enableFoxywallFreeProxy: cloudState.built_in_extensions?.foxywall_free_proxy !== false,
@@ -2438,6 +2451,8 @@ main().catch((error) => {
       cookie_import_count: profileDraft.cookie_import_path.trim() || profileDraft.cookie_import_url.trim() ?
         profileDraft.cookie_import_count || null :
         null,
+      cookie_mode: profileDraft.cookie_mode,
+      cookie_id: profileDraft.cookie_mode === 'saved' ? (profileDraft.cookie_id || null) : null,
       command_line_switches: profileDraft.command_line_switches.trim() || null,
       fingerprint: {
         os: profileDraft.fingerprint_os,
@@ -3435,6 +3450,88 @@ main().catch((error) => {
     }
   }
 
+  // ---- Cookies tab / shared cookie-set library --------------------------
+
+  function filteredCookieLibrary() {
+    if (!profileDraft?.cookie_search.trim()) {
+      return cloudState.cookies;
+    }
+    const query = profileDraft.cookie_search.trim().toLowerCase();
+    return cloudState.cookies.filter((cookie) => cookie.name.toLowerCase().includes(query));
+  }
+
+  function cookieLibraryLabel(cookieId: string): string {
+    const cookie = cloudState.cookies.find((item) => item.id === cookieId);
+    if (!cookie) {
+      return cookieId;
+    }
+    return cookie.count ? `${cookie.name} (${cookie.count} cookies)` : cookie.name;
+  }
+
+  function selectCookieFromLibrary(cookie: ArgusCookie) {
+    if (!profileDraft) {
+      return;
+    }
+    setProfileDraft({...profileDraft, cookie_mode: 'saved', cookie_id: cookie.id, cookie_search: ''});
+  }
+
+  function clearSelectedCookie() {
+    if (!profileDraft) {
+      return;
+    }
+    setProfileDraft({...profileDraft, cookie_mode: 'paste', cookie_id: ''});
+  }
+
+  // Uploads a new cookie file straight into the shared library (Cookies tab),
+  // then selects it for the currently-open profile draft. Reuses
+  // cloudCookieFromSelection's upload path, keyed by a fresh cookie id instead
+  // of a profile id.
+  async function addCookieToLibrary() {
+    if (!native?.selectCookieFile) {
+      setMessage('Native cookie file picker is not available. Restart Argys Anty and try again.');
+      return;
+    }
+    try {
+      const selection = await native.selectCookieFile();
+      if (!selection) {
+        return;
+      }
+      const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+      const cloudCookie = await cloudCookieFromSelection(id, selection);
+      if (!cloudCookie.cookie_import_url) {
+        throw new Error('Cookie upload did not return a usable URL.');
+      }
+      const entry: ArgusCookie = {
+        id,
+        name: cloudCookie.cookie_import_name || 'cookies.txt',
+        url: cloudCookie.cookie_import_url,
+        count: cloudCookie.cookie_import_count,
+      };
+      await saveCloudState({...cloudState, cookies: [...cloudState.cookies, entry]});
+      if (profileDraft) {
+        setProfileDraft({...profileDraft, cookie_mode: 'saved', cookie_id: entry.id, cookie_search: ''});
+      }
+      setMessage(`Added "${entry.name}" to the cookie library`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function deleteCookieFromLibrary(id: string) {
+    const cookie = cloudState.cookies.find((item) => item.id === id);
+    const profiles = cloudState.profiles.map((profile) =>
+      profile.cookie_id === id ? {...profile, cookie_id: null, cookie_mode: 'paste' as const} : profile);
+    await saveCloudState({
+      ...cloudState,
+      profiles,
+      cookies: cloudState.cookies.filter((item) => item.id !== id),
+    });
+    if (profileDraft?.cookie_id === id) {
+      setProfileDraft({...profileDraft, cookie_mode: 'paste', cookie_id: ''});
+    }
+    setMessage(cookie ? `Deleted "${cookie.name}"` : 'Cookie-set deleted');
+  }
+
   async function removeExtension(id: string) {
     await saveCloudState({
       ...cloudState,
@@ -3446,6 +3543,7 @@ main().catch((error) => {
   function renderProfilesTab() {
     const visible = visibleProfiles();
     const inTrash = selectedFolderId === TRASH_FOLDER_ID;
+    const trashedCount = cloudState.profiles.filter((profile) => profile.deleted_at).length;
     const allVisibleSelected = visible.length > 0 &&
       visible.every((profile) => selectedProfileIds.has(profile.id));
     const {items: pageProfiles, page: clampedProfilePage, totalPages: profileTotalPages, total: profileTotal} =
@@ -3638,10 +3736,6 @@ main().catch((error) => {
                             event.stopPropagation();
                             openEditProfile(profile);
                           }}><Pencil size={16} /></button>
-                          <button className="icon-button danger-icon" aria-label={`Delete ${profile.name}`} onClick={(event) => {
-                            event.stopPropagation();
-                            void deleteProfile(profile);
-                          }}><Trash2 size={16} /></button>
                         </>
                       )}
                     </td>
@@ -3669,6 +3763,14 @@ main().catch((error) => {
           pageSize={profilePageSize}
           onPage={setProfilePage}
           onPageSize={(size) => { setProfilePageSize(size); setProfilePage(0); }}
+          extra={
+            <button
+                className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
+                onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
+            >
+              <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
+            </button>
+          }
         />
       </>
     );
@@ -3835,6 +3937,25 @@ main().catch((error) => {
     },
   ];
 
+  function renderCookiesTab() {
+    return (
+      <section className="panel">
+        <div className="panel-title">
+          <h2>Saved cookie-sets</h2>
+        </div>
+        <p>Shared cookie-set library. Assign one to a profile from its Cookie import section.</p>
+        {cloudState.cookies.length === 0 && <p className="empty-state">No saved cookie-sets yet.</p>}
+        {cloudState.cookies.map((cookie) => (
+          <div className="extension-row" key={cookie.id}>
+            <span>{cookie.name}</span>
+            <small>{cookie.count ? `${cookie.count} cookies` : ''}</small>
+            <button onClick={() => void deleteCookieFromLibrary(cookie.id)}><Trash2 size={16} /></button>
+          </div>
+        ))}
+      </section>
+    );
+  }
+
   function renderExtensionsTab() {
     return (
       <section className="panel">
@@ -3856,18 +3977,20 @@ main().catch((error) => {
           </div>
         ))}
 
-        <div className="panel-title">
-          <h2>Shared extensions</h2>
-          <button onClick={() => setExtensionAddOpen(true)}><Plus size={16} /> Add</button>
-        </div>
-        {cloudState.shared_extensions.map((extension) => (
-          <div className="extension-row" key={extension.id}>
-            <span>{extension.name || extension.id}</span>
-            <small>{extension.source === 'webstore' ? 'Chrome Web Store' : 'Shared folder'}</small>
-            <button onClick={() => removeExtension(extension.id)}><Trash2 size={16} /></button>
+        <div className="panel-subsection">
+          <div className="panel-title">
+            <h2>Shared extensions</h2>
+            <button onClick={() => setExtensionAddOpen(true)}><Plus size={16} /> Add</button>
           </div>
-        ))}
-        {cloudState.shared_extensions.length === 0 && <p className="empty-state">No shared extensions loaded.</p>}
+          {cloudState.shared_extensions.map((extension) => (
+            <div className="extension-row" key={extension.id}>
+              <span>{extension.name || extension.id}</span>
+              <small>{extension.source === 'webstore' ? 'Chrome Web Store' : 'Shared folder'}</small>
+              <button onClick={() => removeExtension(extension.id)}><Trash2 size={16} /></button>
+            </div>
+          ))}
+          {cloudState.shared_extensions.length === 0 && <p className="empty-state">No shared extensions loaded.</p>}
+        </div>
       </section>
     );
   }
@@ -3999,6 +4122,8 @@ main().catch((error) => {
     switch (activeTab) {
       case 'proxies':
         return renderProxiesTab();
+      case 'cookies':
+        return renderCookiesTab();
       case 'bookmarks':
         return renderBookmarksTab();
       case 'extensions':
@@ -4015,22 +4140,19 @@ main().catch((error) => {
 
   function renderTopAction() {
     switch (activeTab) {
-      case 'profiles': {
-        const trashedCount = cloudState.profiles.filter((profile) => profile.deleted_at).length;
-        return (
-          <>
-            <button
-                className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
-                onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
-            >
-              <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
-            </button>
-            <button onClick={openNewProfile}><Plus size={18} /> Profile</button>
-          </>
-        );
-      }
+      case 'profiles':
+        return <button onClick={openNewProfile}><Plus size={18} /> Profile</button>;
       case 'proxies':
         return <button onClick={openNewProxy}><Plus size={18} /> Proxy</button>;
+      case 'cookies':
+        return (
+          <button
+              disabled={isActionPending('pick-cookie-file')}
+              onClick={() => runAsyncAction('pick-cookie-file', addCookieToLibrary)}>
+            {isActionPending('pick-cookie-file') && <RefreshCw size={16} className="btn-spin" />}
+            {isActionPending('pick-cookie-file') ? 'Uploading…' : <><Plus size={18} /> Cookie-set</>}
+          </button>
+        );
       case 'bookmarks':
         return <button onClick={openNewBookmark}><Plus size={18} /> Bookmark</button>;
       case 'extensions':
@@ -4190,6 +4312,59 @@ main().catch((error) => {
               </button>
             </div>
           )}
+        </section>
+      </div>
+    );
+  }
+
+  function renderCookiePickerModal() {
+    if (!cookiePickerOpen || !profileDraft) {
+      return null;
+    }
+    const results = filteredCookieLibrary();
+    return (
+      <div className="modal-backdrop" onMouseDown={() => setCookiePickerOpen(false)}>
+        <section className="profile-modal small-modal cookie-picker-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Select cookies</h2>
+              <p>Pick a saved cookie-set, or upload a new JSON/Netscape file to the library.</p>
+            </div>
+            <button className="icon-button" aria-label="Close" onClick={() => setCookiePickerOpen(false)}><X size={18} /></button>
+          </header>
+          <input
+            type="text"
+            placeholder="Search cookie-sets…"
+            value={profileDraft.cookie_search}
+            onChange={(event) => setProfileDraft({...profileDraft, cookie_search: event.target.value})}
+          />
+          <div className="cookie-picker-list">
+            {results.length === 0 && (
+              <p className="empty-state">No saved cookie-sets{profileDraft.cookie_search.trim() ? ' match your search' : ' yet'}.</p>
+            )}
+            {results.map((cookie) => (
+              <button
+                type="button"
+                key={cookie.id}
+                className={profileDraft.cookie_id === cookie.id ? 'cookie-picker-row active' : 'cookie-picker-row'}
+                onClick={() => selectCookieFromLibrary(cookie)}
+              >
+                <span>{cookie.name}</span>
+                <small>{cookie.count ? `${cookie.count} cookies` : ''}</small>
+              </button>
+            ))}
+          </div>
+          <footer className="modal-actions">
+            <button
+                className="ghost"
+                type="button"
+                disabled={isActionPending('pick-cookie-file')}
+                onClick={() => runAsyncAction('pick-cookie-file', addCookieToLibrary)}>
+              {isActionPending('pick-cookie-file') && <RefreshCw size={16} className="btn-spin" />}
+              {isActionPending('pick-cookie-file') ? 'Uploading…' : 'Upload new'}
+            </button>
+            <button type="button" onClick={() => setCookiePickerOpen(false)}>Save</button>
+          </footer>
         </section>
       </div>
     );
@@ -4551,6 +4726,7 @@ main().catch((error) => {
 
       {renderSettingsModal()}
       {renderChangelogModal()}
+      {renderCookiePickerModal()}
       {renderExtensionAddModal()}
 
       {profileDraft && (
@@ -4701,15 +4877,24 @@ main().catch((error) => {
                   <p>Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches.</p>
                 </div>
                 <div className="file-row wide">
-                  <button
-                      className="ghost"
-                      type="button"
-                      disabled={isActionPending('pick-cookie-file')}
-                      onClick={() => runAsyncAction('pick-cookie-file', pickProfileCookieFile)}>
-                    {isActionPending('pick-cookie-file') && <RefreshCw size={16} className="btn-spin" />}
-                    {isActionPending('pick-cookie-file') ? 'Uploading…' : 'Select cookies file'}
+                  <button className="ghost" type="button" onClick={() => setCookiePickerOpen(true)}>
+                    Select cookies…
                   </button>
-                  {profileDraft.cookie_import_path || profileDraft.cookie_import_url ? (
+                  {profileDraft.cookie_mode === 'saved' && profileDraft.cookie_id ? (
+                    <>
+                      <span>
+                        {cookieLibraryLabel(profileDraft.cookie_id)}
+                      </span>
+                      <button
+                        className="icon-button danger-icon"
+                        type="button"
+                        aria-label="Clear selected cookie-set"
+                        onClick={clearSelectedCookie}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </>
+                  ) : profileDraft.cookie_import_path || profileDraft.cookie_import_url ? (
                     <>
                       <span>
                         {profileDraft.cookie_import_count || 0} cookies · {profileDraft.cookie_import_name || (profileDraft.cookie_import_url ? 'Cloud cookie file' : profileDraft.cookie_import_path)}

@@ -1057,6 +1057,12 @@ button:disabled {
   justify-content: space-between;
 }
 
+.panel-subsection {
+  border-top: 1px solid #ece6da;
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
 textarea {
   margin-top: 14px;
   min-height: 130px;
@@ -1220,6 +1226,46 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.cookie-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.cookie-picker-row {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.cookie-picker-row:hover {
+  background: #f4f0e6;
+}
+
+.cookie-picker-row.active {
+  background: var(--ink);
+  color: #fff;
+}
+
+.cookie-picker-row.active small {
+  color: #ded8cc;
+}
+
+.cookie-picker-row small {
+  color: #6e6a63;
+  flex-shrink: 0;
 }
 
 .error-modal {
