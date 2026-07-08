@@ -1387,6 +1387,12 @@ function App() {
   const [signedInEmail, setSignedInEmail] = useState('');
   const [message, setMessage] = useState('');
   const [errorDialog, setErrorDialog] = useState<{title: string; detail: string} | null>(null);
+  // Tracks which update version the user has dismissed the corner toast for,
+  // so closing it doesn't hide it forever -- a later, different version still
+  // prompts. Previously an available/downloaded update only ever showed up as
+  // a one-line status buried in Settings, so it was easy to sit on an old,
+  // unpatched build indefinitely without ever knowing an update existed.
+  const [updateToastDismissedVersion, setUpdateToastDismissedVersion] = useState('');
   const [appBooting, setAppBooting] = useState(true);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
@@ -2198,6 +2204,13 @@ main().catch((error) => {
           }
         }
       }
+      // spawnProfileUnchecked (main process) re-checks the assigned proxy on
+      // every launch regardless of the pre-check above -- it's the
+      // authoritative gate, this one is just a UI convenience that skips
+      // re-checking a proxy already known-good. Without this message that
+      // second check is invisible: several seconds of silence between
+      // clicking Launch and either the window opening or an error dialog.
+      setMessage(`Launching ${launchProfile.name}`);
       const result = await native.launchProfile({
         id: launchProfile.id,
         name: launchProfile.name,
@@ -4881,6 +4894,35 @@ main().catch((error) => {
               </button>
             </footer>
           </section>
+        </div>
+      )}
+
+      {updateState &&
+        ['available', 'downloading', 'downloaded'].includes(updateState.status) &&
+        updateToastDismissedVersion !== (updateState.updateInfo?.version || '') && (
+        <div className="update-toast">
+          <strong>
+            {updateState.status === 'downloaded'
+              ? `Version ${updateState.updateInfo?.version || ''} downloaded — restart to install`
+              : updateState.status === 'downloading'
+              ? `Downloading update… ${Math.round(updateState.progress?.percent || 0)}%`
+              : `Update ${updateState.updateInfo?.version || ''} available`}
+          </strong>
+          <div className="update-toast-actions">
+            {updateState.status === 'available' && (
+              <button onClick={() => native?.downloadUpdate?.()}>Download</button>
+            )}
+            {updateState.status === 'downloaded' && (
+              <button onClick={() => native?.installUpdate?.()}>Restart &amp; install</button>
+            )}
+            <button
+              className="icon-button"
+              aria-label="Dismiss update notice"
+              onClick={() => setUpdateToastDismissedVersion(updateState.updateInfo?.version || 'unknown')}
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
       )}
 
