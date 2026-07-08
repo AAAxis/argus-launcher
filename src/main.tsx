@@ -3598,13 +3598,14 @@ main().catch((error) => {
       <>
         <section className="table-toolbar">
           <select
-            value={selectedFolderId === TRASH_FOLDER_ID ? '' : selectedFolderId}
+            value={selectedFolderId}
             onChange={(event) => setSelectedFolderId(event.target.value)}
           >
             <option value="">All profiles</option>
             {cloudState.folders.map((folder) => (
               <option key={folder.id} value={folder.id}>{folder.name}</option>
             ))}
+            <option value={TRASH_FOLDER_ID}>Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}</option>
           </select>
           {selectedFolderId && selectedFolderId !== TRASH_FOLDER_ID && (
             <button
@@ -3800,17 +3801,9 @@ main().catch((error) => {
           onPage={setProfilePage}
           onPageSize={(size) => { setProfilePageSize(size); setProfilePage(0); }}
           extra={
-            <>
-              {selectedProfileIds.size > 0 && (
-                <span className="pagination-selected">{selectedProfileIds.size} selected</span>
-              )}
-              <button
-                  className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
-                  onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
-              >
-                <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
-              </button>
-            </>
+            selectedProfileIds.size > 0 && (
+              <span className="pagination-selected">{selectedProfileIds.size} selected</span>
+            )
           }
         />
       </>
