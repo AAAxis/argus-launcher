@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
+import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
 import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
 import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
@@ -489,21 +490,20 @@ const cpuPresets = Array.from(new Map(realisticWindowsFingerprintPatterns.map((p
 
 const memoryPresets = ['4', '8', '16', '32'];
 
-// Builds the actual flag emoji from a 2-letter ISO country code by mapping
-// each letter to its Unicode Regional Indicator Symbol (U+1F1E6 = 'A') --
-// this previously just returned the bare code as text, so no platform ever
-// showed a real flag, not only Windows. Windows 11 (22H2+) renders these as
-// real flag glyphs same as macOS; older Windows builds without an updated
-// Segoe UI Emoji may still fall back to two letter-in-box glyphs -- that's an
-// OS font limitation, not something fixable from here without bundling flag
-// image assets instead of emoji.
-function countryFlag(countryCode?: string) {
+// Renders a real flag SVG (bundled, so it never depends on the OS having a
+// color-emoji font with flag glyphs -- Regional Indicator Symbol emoji looked
+// right in theory but rendered as two boxed letters on this user's Windows
+// build even with an explicit emoji font-family). Falls back to the bare
+// 2-letter code as text if it's not a recognized ISO code.
+function FlagIcon({countryCode}: {countryCode?: string}) {
   const code = countryCode?.trim().toUpperCase();
-  if (!code || code.length !== 2 || !/^[A-Z]{2}$/.test(code)) {
-    return code || '--';
+  const Flag = code && /^[A-Z]{2}$/.test(code) ?
+    (CountryFlagIcons as Record<string, React.FC<React.SVGProps<SVGSVGElement>>>)[code] :
+    undefined;
+  if (Flag) {
+    return <Flag className="flag-svg" />;
   }
-  const points = [...code].map((letter) => 0x1f1e6 + (letter.charCodeAt(0) - 65));
-  return String.fromCodePoint(...points);
+  return <>{code || '--'}</>;
 }
 
 const socialBookmarks: SharedBookmark[] = [
@@ -3880,7 +3880,7 @@ main().catch((error) => {
               <div className="proxy-card-main">
                 <div className="proxy-title-row">
                   <span className="proxy-flag" title={proxy.country || proxy.country_code || 'Unchecked'}>
-                    {countryFlag(proxy.country_code)}
+                    <FlagIcon countryCode={proxy.country_code} />
                   </span>
                   <h2>{proxy.name || proxy.host}</h2>
                 </div>

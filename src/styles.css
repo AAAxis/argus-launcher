@@ -739,23 +739,32 @@ td:last-child {
 }
 
 .data-card .proxy-flag {
+  align-items: center;
   background: var(--surface-sunken);
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   color: var(--ink);
+  display: inline-flex;
   flex: 0 0 auto;
-  /* The base app font (Inter) has no emoji font in its fallback chain, so
-   * without this Windows can render the two Regional Indicator Symbol
-   * codepoints as separate boxed letters instead of triggering the flag
-   * ligature. Explicit emoji fonts first forces the real flag glyph. */
-  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
-  font-size: 15px;
+  font-size: 11px;
   font-weight: 900;
+  justify-content: center;
   letter-spacing: 0.06em;
   line-height: 1;
   min-width: 34px;
+  overflow: hidden;
   padding: 6px 7px;
   text-align: center;
+}
+
+/* Bundled real flag SVGs (country-flag-icons) instead of relying on the OS's
+ * emoji font, which some Windows builds render as boxed letters instead of a
+ * flag glyph even with an explicit font-family. */
+.flag-svg {
+  border-radius: 2px;
+  display: block;
+  height: 14px;
+  width: 21px;
 }
 
 button:disabled {

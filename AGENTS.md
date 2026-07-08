@@ -56,11 +56,10 @@ Port `3001` is currently owned by Dolphin Anty on this machine:
 
 Argys API docs currently mention `http://127.0.0.1:3001`, but requests there hit Dolphin and return `invalid session token` for Argys tokens. Do not debug Argys token auth against Dolphin's port. If a real Argys local API is implemented later, use a different port and update the API tab.
 
-Known token for `holylabsltd@gmail.com`:
-
-```text
-argys_holylabsltd_gmail_com_d42105fc
-```
+A token for `holylabsltd@gmail.com` is available in the app's own API tab
+(Settings → API) once signed in. Do not hardcode tokens in this file --
+if one ever ends up here, treat it as compromised and rotate it immediately,
+especially before this repo is made public.
 
 ## Verification Checklist
 
