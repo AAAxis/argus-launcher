@@ -4300,7 +4300,7 @@ main().catch((error) => {
                   {profileDraft.cookie_import_path || profileDraft.cookie_import_url ? (
                     <>
                       <span>
-                        {profileDraft.cookie_import_count || 0} cookies · {profileDraft.cookie_import_path}
+                        {profileDraft.cookie_import_count || 0} cookies · {profileDraft.cookie_import_name || (profileDraft.cookie_import_url ? 'Cloud cookie file' : profileDraft.cookie_import_path)}
                       </span>
                       <button
                         className="icon-button danger-icon"
