@@ -146,6 +146,30 @@ type ArgusNative = {
     result?: {matched: number; total: number},
     error?: string,
   ): void;
+  onPushLocalCookiesRequest?(
+    callback: (payload: {requestId: string; profileId: string; profileName: string; cookies: unknown[]}) => void,
+  ): () => void;
+  sendPushLocalCookiesResult?(
+    requestId: string,
+    result?: {matched: boolean; count: number},
+    error?: string,
+  ): void;
+  onReimportProxiesRequest?(
+    callback: (payload: {requestId: string; proxies: Array<Record<string, unknown>>}) => void,
+  ): () => void;
+  sendReimportProxiesResult?(
+    requestId: string,
+    result?: {updated: number; created: number; total: number},
+    error?: string,
+  ): void;
+  onAssignProfileProxyRequest?(
+    callback: (payload: {requestId: string; profileId: string; proxyId?: string; proxyHost?: string; proxyPort?: number}) => void,
+  ): () => void;
+  sendAssignProfileProxyResult?(
+    requestId: string,
+    result?: {matched: boolean; profileId: string; proxyId?: string},
+    error?: string,
+  ): void;
 };
 
 declare global {

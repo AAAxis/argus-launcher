@@ -1722,11 +1722,12 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   if (cookieManagerPath) {
     extensionPaths.push(cookieManagerPath);
   }
-  // Always bundled now (see writeProfileFreeProxyExtension) -- its own
-  // argus-config.json is what tells it whether to actually auto-connect.
+  // Load FoxyWall only for explicit Free Proxy mode. Keeping it installed for
+  // assigned-proxy profiles lets a second chrome.proxy owner compete with the
+  // browser-managed authenticated bridge and can surface proxy auth prompts.
   pruneStaleFreeProxyExtensions(payload.userDataDir);
-  const freeProxyPath = writeProfileFreeProxyExtension(payload);
-  if (freeProxyPath) {
+  const freeProxyPath = payload.useFreeProxy ? writeProfileFreeProxyExtension(payload) : '';
+  if (payload.useFreeProxy && freeProxyPath) {
     extensionPaths.push(freeProxyPath);
   }
   const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);
@@ -2003,6 +2004,54 @@ ipcMain.on('argus:bulk-match-cookies-result', (_event, {requestId, result, error
   pending.res.end(JSON.stringify({status: true, ...result}));
 });
 
+ipcMain.on('argus:push-local-cookies-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.res.writeHead(500, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error}));
+    return;
+  }
+  pending.res.writeHead(200, {'Content-Type': 'application/json'});
+  pending.res.end(JSON.stringify({status: true, ...result}));
+});
+
+ipcMain.on('argus:reimport-proxies-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.res.writeHead(500, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error}));
+    return;
+  }
+  pending.res.writeHead(200, {'Content-Type': 'application/json'});
+  pending.res.end(JSON.stringify({status: true, ...result}));
+});
+
+ipcMain.on('argus:assign-profile-proxy-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.res.writeHead(500, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error}));
+    return;
+  }
+  pending.res.writeHead(200, {'Content-Type': 'application/json'});
+  pending.res.end(JSON.stringify({status: true, ...result}));
+});
+
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, {'Content-Type': 'application/json'});
   res.end(JSON.stringify(body));
@@ -2026,7 +2075,11 @@ function startAutomationApiServer() {
       sendJson(res, 200, {status: true, service: 'argys-anty-api'});
       return;
     }
-    if (req.method !== 'POST' || req.url !== '/v1/cookies/bulk-match') {
+    if (req.method !== 'POST' ||
+        (req.url !== '/v1/cookies/bulk-match' &&
+         req.url !== '/v1/cookies/push-local' &&
+         req.url !== '/v1/proxies/reimport' &&
+         req.url !== '/v1/profiles/assign-proxy')) {
       sendJson(res, 404, {status: false, msg: 'Not found'});
       return;
     }
@@ -2044,7 +2097,29 @@ function startAutomationApiServer() {
         sendJson(res, 400, {status: false, msg: 'Invalid JSON body'});
         return;
       }
-      if (!payload.folderPath || typeof payload.folderPath !== 'string') {
+      const isPushLocal = req.url === '/v1/cookies/push-local';
+      const isReimportProxies = req.url === '/v1/proxies/reimport';
+      const isAssignProfileProxy = req.url === '/v1/profiles/assign-proxy';
+      if (isPushLocal) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+        if (!Array.isArray(payload.cookies)) {
+          sendJson(res, 400, {status: false, msg: 'cookies array is required'});
+          return;
+        }
+      } else if (isReimportProxies) {
+        if (!Array.isArray(payload.proxies)) {
+          sendJson(res, 400, {status: false, msg: 'proxies array is required'});
+          return;
+        }
+      } else if (isAssignProfileProxy) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+      } else if (!payload.folderPath || typeof payload.folderPath !== 'string') {
         sendJson(res, 400, {status: false, msg: 'folderPath is required'});
         return;
       }
@@ -2054,12 +2129,34 @@ function startAutomationApiServer() {
         sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
       }, AUTOMATION_REQUEST_TIMEOUT_MS);
       pendingAutomationRequests.set(requestId, {res, timeout});
-      mainWindow.webContents.send('argus:bulk-match-cookies-request', {
-        requestId,
-        folderPath: payload.folderPath,
-        // profileIds omitted/empty means "match against every profile".
-        profileIds: Array.isArray(payload.profileIds) ? payload.profileIds : null,
-      });
+      if (isPushLocal) {
+        mainWindow.webContents.send('argus:push-local-cookies-request', {
+          requestId,
+          profileId: payload.profileId,
+          profileName: typeof payload.profileName === 'string' ? payload.profileName : '',
+          cookies: payload.cookies,
+        });
+      } else if (isReimportProxies) {
+        mainWindow.webContents.send('argus:reimport-proxies-request', {
+          requestId,
+          proxies: payload.proxies,
+        });
+      } else if (isAssignProfileProxy) {
+        mainWindow.webContents.send('argus:assign-profile-proxy-request', {
+          requestId,
+          profileId: payload.profileId,
+          proxyId: typeof payload.proxyId === 'string' ? payload.proxyId : '',
+          proxyHost: typeof payload.proxyHost === 'string' ? payload.proxyHost : '',
+          proxyPort: Number.isInteger(payload.proxyPort) ? payload.proxyPort : 0,
+        });
+      } else {
+        mainWindow.webContents.send('argus:bulk-match-cookies-request', {
+          requestId,
+          folderPath: payload.folderPath,
+          // profileIds omitted/empty means "match against every profile".
+          profileIds: Array.isArray(payload.profileIds) ? payload.profileIds : null,
+        });
+      }
     });
   });
   server.listen(AUTOMATION_API_PORT, '127.0.0.1', () => {

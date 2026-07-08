@@ -45,6 +45,63 @@ async function exportAllCookies() {
   return {count: cookies.length};
 }
 
+async function profileMeta() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('profile-meta.json'));
+    if (!response.ok) {
+      return {};
+    }
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+async function pushLocalCookiesToLauncher() {
+  const meta = await profileMeta();
+  if (!meta.id) {
+    return;
+  }
+  const cookies = await chrome.cookies.getAll({});
+  const signature = seedSignature(cookies);
+  const state = await chrome.storage.local.get(PUSH_SIGNATURE_KEY);
+  if (state[PUSH_SIGNATURE_KEY] === signature) {
+    return;
+  }
+  try {
+    const response = await fetch('http://127.0.0.1:39219/v1/cookies/push-local', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        profileId: meta.id,
+        profileName: meta.name || '',
+        cookies,
+      }),
+    });
+    if (response.ok) {
+      await chrome.storage.local.set({
+        [PUSH_SIGNATURE_KEY]: signature,
+        pushedAt: Date.now(),
+        pushedCount: cookies.length,
+      });
+    }
+  } catch (error) {
+    console.warn('Argys local cookie migration failed', error);
+  }
+}
+
+let pushTimer = 0;
+
+function scheduleCookieCloudSync() {
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+  }
+  pushTimer = setTimeout(() => {
+    pushTimer = 0;
+    void pushLocalCookiesToLauncher();
+  }, 3000);
+}
+
 function cookieUrl(cookie) {
   if (cookie.url) {
     return cookie.url;
@@ -117,12 +174,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // imports it through the same importCookies() the popup's manual import
 // uses, then remembers it's done so later launches don't re-seed.
 const SEED_IMPORTED_KEY = 'argysSeedCookiesImported';
+const SEED_SIGNATURE_KEY = 'argysSeedCookiesSignature';
+const PUSH_SIGNATURE_KEY = 'argysCloudPushedCookiesSignature';
+
+function seedSignature(cookies) {
+  return cookies
+      .map((cookie) => `${cookie.domain || ''}\t${cookie.path || '/'}\t${cookie.name || ''}\t${cookie.value || ''}`)
+      .join('\n');
+}
 
 async function importSeedCookiesIfPresent() {
-  const state = await chrome.storage.local.get(SEED_IMPORTED_KEY);
-  if (state[SEED_IMPORTED_KEY]) {
-    return;
-  }
   let payload;
   try {
     const response = await fetch(chrome.runtime.getURL('seed-cookies.json'));
@@ -136,9 +197,18 @@ async function importSeedCookiesIfPresent() {
   }
   const cookies = Array.isArray(payload) ? payload :
     Array.isArray(payload?.cookies) ? payload.cookies : [];
+  const signature = seedSignature(cookies);
+  const state = await chrome.storage.local.get([SEED_IMPORTED_KEY, SEED_SIGNATURE_KEY]);
+  if (state[SEED_IMPORTED_KEY] && state[SEED_SIGNATURE_KEY] === signature) {
+    return;
+  }
   const result = await importCookies(cookies);
+  if (!result.count) {
+    return;
+  }
   await chrome.storage.local.set({
     [SEED_IMPORTED_KEY]: true,
+    [SEED_SIGNATURE_KEY]: signature,
     seededAt: Date.now(),
     seededCount: result.count,
   });
@@ -147,3 +217,7 @@ async function importSeedCookiesIfPresent() {
 chrome.runtime.onInstalled.addListener(() => void importSeedCookiesIfPresent());
 chrome.runtime.onStartup.addListener(() => void importSeedCookiesIfPresent());
 void importSeedCookiesIfPresent();
+chrome.runtime.onInstalled.addListener(() => void pushLocalCookiesToLauncher());
+chrome.runtime.onStartup.addListener(() => void pushLocalCookiesToLauncher());
+chrome.cookies.onChanged.addListener(() => scheduleCookieCloudSync());
+void pushLocalCookiesToLauncher();

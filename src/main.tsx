@@ -1026,11 +1026,13 @@ function repairProxyAssignments(state: CloudState) {
     if (!proxy) {
       return profile;
     }
-    if (comparable(profile.proxy_id) === comparable(proxy.id)) {
+    const alreadyAssigned = comparable(profile.proxy_id) === comparable(proxy.id);
+    const alreadyAssignedMode = (profile.proxy_mode || 'assigned') === 'assigned';
+    if (alreadyAssigned && alreadyAssignedMode) {
       return profile;
     }
     repaired++;
-    return {...profile, proxy_id: proxy.id};
+    return {...profile, proxy_id: proxy.id, proxy_mode: 'assigned' as const};
   });
   return {state: {...state, profiles}, repaired};
 }
@@ -1615,6 +1617,151 @@ function App() {
       try {
         const result = await matchCookiesToProfiles(folderPath, profileIds);
         sendResult(requestId, result);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  // Argys Cookie Manager extensions can push decrypted local browser cookies
+  // over the loopback automation API. Store that snapshot as the profile's
+  // cloud cookie-import source so other machines and later launches seed it.
+  useEffect(() => {
+    const onRequest = native?.onPushLocalCookiesRequest;
+    const sendResult = native?.sendPushLocalCookiesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, profileName, cookies}) => {
+      try {
+        const profile = cloudState.profiles.find((item) => item.id === profileId) ||
+          cloudState.profiles.find((item) => comparable(item.name) === comparable(profileName));
+        if (!profile) {
+          sendResult(requestId, {matched: false, count: 0});
+          return;
+        }
+        const safeName = (profile.name || profileId).replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || profileId;
+        const raw = JSON.stringify({
+          exportedAt: new Date().toISOString(),
+          scope: 'all',
+          source: 'local-profile',
+          profileId,
+          cookies,
+        }, null, 2);
+        const selection: CookieFileSelection = {
+          path: `local-profile:${profileId}`,
+          name: `argys-local-cookies-${safeName}.json`,
+          count: cookies.length,
+          base64: btoa(unescape(encodeURIComponent(raw))),
+        };
+        const cloudCookie = await cloudCookieFromSelection(profile.id, selection);
+        const profiles = cloudState.profiles.map((item) =>
+          item.id === profile.id ? {...item, ...cloudCookie} : item);
+        await saveCloudState({...cloudState, profiles});
+        sendResult(requestId, {matched: true, count: cookies.length});
+        setMessage(`Migrated ${cookies.length} local cookies for ${profile.name}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onReimportProxiesRequest;
+    const sendResult = native?.sendReimportProxiesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, proxies: rows}) => {
+      try {
+        let updated = 0;
+        let created = 0;
+        const proxies = [...cloudState.proxies];
+        const keyFor = (type: string, host: string, port: number) =>
+          `${type.toLowerCase()}|${host.toLowerCase()}|${port}`;
+        const indexByKey = new Map<string, number>();
+        proxies.forEach((proxy, index) => {
+          indexByKey.set(keyFor(proxy.type || 'http', proxy.host, proxy.port), index);
+        });
+        for (const row of rows) {
+          const host = String(row.ip || row.host || '').trim();
+          const socksPort = Number(row.port_socks5 || row.socks_port || 0);
+          const httpPort = Number(row.port_http || row.http_port || row.port || 0);
+          const type: ArgusProxy['type'] = socksPort ? 'socks5' : 'http';
+          const port = type === 'socks5' ? socksPort : httpPort;
+          if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
+            continue;
+          }
+          const username = String(row.username || '').trim();
+          const password = String(row.password || '');
+          const country = String(row.country || '').trim();
+          const key = keyFor(type, host, port);
+          const existingIndex = indexByKey.get(key);
+          const nextProxy: ArgusProxy = {
+            ...(existingIndex == null ? {} : proxies[existingIndex]),
+            id: existingIndex == null ?
+              String(row.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${created}`) :
+              proxies[existingIndex].id,
+            name: existingIndex == null ?
+              (country ? `${country.toUpperCase()} proxy ${host}` : `${host}:${port}`) :
+              proxies[existingIndex].name,
+            type,
+            host,
+            port,
+            username: username || undefined,
+            password: password || undefined,
+            country: country || (existingIndex == null ? undefined : proxies[existingIndex].country),
+            country_code: country || (existingIndex == null ? undefined : proxies[existingIndex].country_code),
+            checked_at: undefined,
+            check_error: undefined,
+            egress_ip: undefined,
+            ping_ms: undefined,
+          };
+          if (existingIndex == null) {
+            indexByKey.set(key, proxies.length);
+            proxies.push(nextProxy);
+            created++;
+          } else {
+            proxies[existingIndex] = nextProxy;
+            updated++;
+          }
+        }
+        const nextState = repairProxyAssignments({...cloudState, proxies}).state;
+        await saveCloudState(nextState);
+        sendResult(requestId, {updated, created, total: rows.length});
+        setMessage(`Reimported proxies: ${updated} updated, ${created} created`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onAssignProfileProxyRequest;
+    const sendResult = native?.sendAssignProfileProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, proxyId, proxyHost, proxyPort}) => {
+      try {
+        const proxy = cloudState.proxies.find((item) => proxyId && item.id === proxyId) ||
+          cloudState.proxies.find((item) =>
+            proxyHost &&
+            item.host === proxyHost &&
+            (!proxyPort || item.port === proxyPort));
+        if (!proxy) {
+          sendResult(requestId, {matched: false, profileId});
+          return;
+        }
+        const profiles = cloudState.profiles.map((profile) =>
+          profile.id === profileId ? {
+            ...profile,
+            proxy_id: proxy.id,
+            proxy_mode: 'assigned' as const,
+          } : profile);
+        await saveCloudState({...cloudState, profiles});
+        sendResult(requestId, {matched: true, profileId, proxyId: proxy.id});
+        setMessage(`Assigned ${proxy.host}:${proxy.port} to ${profileId}`);
       } catch (error) {
         sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
       }
@@ -3126,12 +3273,12 @@ main().catch((error) => {
       selection: CookieFileSelection): Promise<Pick<ArgusProfile, 'cookie_import_path' | 'cookie_import_url' | 'cookie_import_name' | 'cookie_import_count'>> {
     const cookieName = selection.name || selection.path.split(/[\\/]/).filter(Boolean).at(-1) || 'cookies.txt';
     const base = {
-      cookie_import_path: selection.path,
+      cookie_import_path: null,
       cookie_import_name: cookieName,
       cookie_import_count: selection.count || null,
     };
     if (!selection.base64) {
-      return {...base, cookie_import_url: null};
+      throw new Error('Cookie file upload payload is missing. Select the cookie file again.');
     }
     if (!supabase) {
       return {...base, cookie_import_url: `data:text/plain;base64,${selection.base64}`};
@@ -4289,7 +4436,7 @@ main().catch((error) => {
               <section className="form-section wide compact-section">
                 <div>
                   <h3>Cookie import</h3>
-                  <p>Store a JSON or Netscape cookies.txt file in cloud sync and import it when this profile launches.</p>
+                  <p>Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches.</p>
                 </div>
                 <div className="file-row wide">
                   <button className="ghost" type="button" onClick={pickProfileCookieFile}>

@@ -41,4 +41,25 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendBulkMatchCookiesResult: (requestId, result, error) =>
     ipcRenderer.send('argus:bulk-match-cookies-result', {requestId, result, error}),
+  onPushLocalCookiesRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:push-local-cookies-request', listener);
+    return () => ipcRenderer.removeListener('argus:push-local-cookies-request', listener);
+  },
+  sendPushLocalCookiesResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:push-local-cookies-result', {requestId, result, error}),
+  onReimportProxiesRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:reimport-proxies-request', listener);
+    return () => ipcRenderer.removeListener('argus:reimport-proxies-request', listener);
+  },
+  sendReimportProxiesResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:reimport-proxies-result', {requestId, result, error}),
+  onAssignProfileProxyRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:assign-profile-proxy-request', listener);
+    return () => ipcRenderer.removeListener('argus:assign-profile-proxy-request', listener);
+  },
+  sendAssignProfileProxyResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:assign-profile-proxy-result', {requestId, result, error}),
 });
