@@ -142,6 +142,34 @@ textarea {
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
+.status-select.status-active {
+  background: #eefaf1;
+  border-color: #37a862;
+  color: #1e7a45;
+  font-weight: 700;
+}
+
+.status-select.status-warmup {
+  background: #fff7e6;
+  border-color: #d9932a;
+  color: #92600f;
+  font-weight: 700;
+}
+
+.status-select.status-ban {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.status-select.status-review {
+  background: #f0edfc;
+  border-color: #7c5cd6;
+  color: #5c3fb0;
+  font-weight: 700;
+}
+
 .login-panel input:focus-visible {
   border-color: var(--accent-2);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
@@ -515,6 +543,12 @@ td.name-cell {
 }
 
 td.checkbox-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+td.platform-cell {
+  color: var(--ink-soft);
   width: 1%;
   white-space: nowrap;
 }

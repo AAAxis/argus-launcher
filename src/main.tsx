@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
-import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload, X} from 'lucide-react';
+import {Apple, Cookie, Download, Monitor, Pencil, Plus, Play, RefreshCw, Shield, Smartphone, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
 import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
@@ -180,6 +180,23 @@ const defaultState: CloudState = {
 };
 
 const baseProfileStatuses = ['Ready', 'Active', 'Warmup', 'Ban', 'Review'];
+
+// Custom statuses (user-created) fall through to the neutral default class --
+// only the known built-in ones get a distinct color.
+function statusSelectClass(status: string): string {
+  switch (status) {
+    case 'Active':
+      return 'status-select status-active';
+    case 'Warmup':
+      return 'status-select status-warmup';
+    case 'Ban':
+      return 'status-select status-ban';
+    case 'Review':
+      return 'status-select status-review';
+    default:
+      return 'status-select';
+  }
+}
 // Sentinel folder_id used to view Trash in the profiles folder bar; never
 // written to a profile's actual folder_id.
 const TRASH_FOLDER_ID = '__trash__';
@@ -504,6 +521,24 @@ function FlagIcon({countryCode}: {countryCode?: string}) {
     return <Flag className="flag-svg" />;
   }
   return <>{code || '--'}</>;
+}
+
+// Maps a fingerprint OS preset (see osPresets) to a generic device-type icon
+// -- lucide-react has no Windows/Android/Ubuntu brand logos, so this
+// distinguishes desktop vs. mobile and gives macOS its own glyph rather than
+// showing nothing at all.
+function PlatformIcon({os}: {os?: string}) {
+  const label = os || 'Unknown';
+  if (os === 'macOS') {
+    return <Apple size={16} aria-label={label}><title>{label}</title></Apple>;
+  }
+  if (os === 'Android' || os === 'iOS') {
+    return <Smartphone size={16} aria-label={label}><title>{label}</title></Smartphone>;
+  }
+  if (os === 'Windows 11' || os === 'Windows 10' || os === 'Ubuntu') {
+    return <Monitor size={16} aria-label={label}><title>{label}</title></Monitor>;
+  }
+  return <Monitor size={16} aria-label={label} opacity={0.4}><title>{label}</title></Monitor>;
 }
 
 const socialBookmarks: SharedBookmark[] = [
@@ -3708,6 +3743,7 @@ main().catch((error) => {
                   )}
                 </th>
                 <th>Name</th>
+                <th>Platform</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Folder</th>
@@ -3739,8 +3775,12 @@ main().catch((error) => {
                       </span>
                       {profile.name}
                     </td>
+                    <td className="platform-cell">
+                      <PlatformIcon os={profile.fingerprint?.os} />
+                    </td>
                     <td>
                       <select
+                        className={statusSelectClass(profile.status || 'Ready')}
                         value={profile.status || 'Ready'}
                         onClick={(event) => event.stopPropagation()}
                         onChange={(event) => updateProfile(profile, {status: event.target.value})}
@@ -3905,7 +3945,6 @@ main().catch((error) => {
                 </p>
               </div>
               <div className="data-card-actions">
-                <span>{proxy.username ? 'Auth' : 'Open'}</span>
                 {checkingProxyId === proxy.id && <span className="proxy-status">Checking...</span>}
                 <button className="icon-button" aria-label={`Edit ${proxy.name || proxy.host}`} onClick={() => openEditProxy(proxy)}>
                   <Pencil size={16} />
