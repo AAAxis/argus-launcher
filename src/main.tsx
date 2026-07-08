@@ -8,7 +8,7 @@ import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensio
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
-type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'api' | 'import';
+type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'api';
 
 type ApiEndpoint = {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -100,7 +100,6 @@ const tabs: Array<{id: TabId; label: string}> = [
   {id: 'bookmarks', label: 'Bookmarks'},
   {id: 'extensions', label: 'Extensions'},
   {id: 'api', label: 'API'},
-  {id: 'import', label: 'Import'},
 ];
 
 const API_BASE_URL = 'http://127.0.0.1:39219';
@@ -490,12 +489,21 @@ const cpuPresets = Array.from(new Map(realisticWindowsFingerprintPatterns.map((p
 
 const memoryPresets = ['4', '8', '16', '32'];
 
+// Builds the actual flag emoji from a 2-letter ISO country code by mapping
+// each letter to its Unicode Regional Indicator Symbol (U+1F1E6 = 'A') --
+// this previously just returned the bare code as text, so no platform ever
+// showed a real flag, not only Windows. Windows 11 (22H2+) renders these as
+// real flag glyphs same as macOS; older Windows builds without an updated
+// Segoe UI Emoji may still fall back to two letter-in-box glyphs -- that's an
+// OS font limitation, not something fixable from here without bundling flag
+// image assets instead of emoji.
 function countryFlag(countryCode?: string) {
   const code = countryCode?.trim().toUpperCase();
-  if (!code || code.length !== 2) {
-    return '--';
+  if (!code || code.length !== 2 || !/^[A-Z]{2}$/.test(code)) {
+    return code || '--';
   }
-  return code;
+  const points = [...code].map((letter) => 0x1f1e6 + (letter.charCodeAt(0) - 65));
+  return String.fromCodePoint(...points);
 }
 
 const socialBookmarks: SharedBookmark[] = [
@@ -1053,6 +1061,34 @@ function repairProxyAssignments(state: CloudState) {
   return {state: {...state, profiles}, repaired};
 }
 
+// One-time backfill: profiles saved before the Cookies tab existed carry
+// their cookie file only as cookie_import_url/name (no cookie_id), so they
+// never show up in the shared library even though the profile clearly has
+// cookies assigned. Promotes each such profile's existing import into its own
+// library entry and points cookie_id at it, so the Cookies tab reflects what
+// was already configured instead of appearing empty.
+function migrateLegacyCookieImports(state: CloudState) {
+  let migrated = 0;
+  const cookies = [...state.cookies];
+  const profiles = state.profiles.map((profile) => {
+    if (profile.cookie_id || !profile.cookie_import_url) {
+      return profile;
+    }
+    const id = `legacy:${profile.id}`;
+    if (!cookies.some((cookie) => cookie.id === id)) {
+      cookies.push({
+        id,
+        name: profile.cookie_import_name || `${profile.name} cookies`,
+        url: profile.cookie_import_url,
+        count: profile.cookie_import_count ?? null,
+      });
+    }
+    migrated++;
+    return {...profile, cookie_id: id, cookie_mode: 'saved' as const};
+  });
+  return {state: {...state, profiles, cookies}, migrated};
+}
+
 function proxyOptionLabel(proxy: ArgusProxy) {
   const name = proxy.name || `${proxy.host}:${proxy.port || ''}`;
   const type = (proxy.type || 'http').toUpperCase();
@@ -1467,6 +1503,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [cookiePickerOpen, setCookiePickerOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
   const proxyChecksInFlight = useRef(new Set<string>());
   const proxyChecksAttempted = useRef(new Set<string>());
@@ -1930,13 +1967,14 @@ function App() {
       };
       const {state: repairedState, repaired} = repairProxyAssignments(nextState);
       const {state: purgedState, purged} = purgeExpiredTrash(repairedState);
-      setCloudState(purgedState);
-      setSelectedId(purgedState.profiles.find((profile) => !profile.deleted_at)?.id || null);
-      if (repaired > 0 || mergedBookmarks.changed || purged > 0) {
-        await saveCloudState(purgedState);
+      const {state: migratedState, migrated} = migrateLegacyCookieImports(purgedState);
+      setCloudState(migratedState);
+      setSelectedId(migratedState.profiles.find((profile) => !profile.deleted_at)?.id || null);
+      if (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0) {
+        await saveCloudState(migratedState);
       }
-      if (repaired > 0 || mergedBookmarks.changed || purged > 0) {
-        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}`);
+      if (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0) {
+        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}${migrated ? `${repaired || mergedBookmarks.changed || purged ? ' · ' : ''}Added ${migrated} existing cookie ${migrated === 1 ? 'import' : 'imports'} to the library` : ''}`);
       }
     } finally {
       setCloudLoading(false);
@@ -2630,6 +2668,7 @@ main().catch((error) => {
     const rows = parseCsv(result.content);
     setImportResult(null);
     setImportFile({path: result.path, rows});
+    setImportModalOpen(true);
   }
 
   async function runImport() {
@@ -3562,23 +3601,6 @@ main().catch((error) => {
       paginate(visible, profilePage, profilePageSize);
     return (
       <>
-        <section className="folder-bar">
-          <button
-            className={selectedFolderId ? 'ghost' : ''}
-            onClick={() => setSelectedFolderId('')}
-          >
-            All profiles
-          </button>
-          {cloudState.folders.map((folder) => (
-            <div className={selectedFolderId === folder.id ? 'folder-chip active' : 'folder-chip'} key={folder.id}>
-              <button onClick={() => setSelectedFolderId(folder.id)}>{folder.name}</button>
-              <button className="icon-button" aria-label={`Rename ${folder.name}`} onClick={() => renameFolder(folder)}>
-                <Pencil size={14} />
-              </button>
-            </div>
-          ))}
-          <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
-        </section>
         <section className="table-toolbar">
           {visible.length > 0 && (
             <label className="check-field">
@@ -3590,6 +3612,30 @@ main().catch((error) => {
               <span>{selectedProfileIds.size > 0 ? `${selectedProfileIds.size} selected` : 'Select all'}</span>
             </label>
           )}
+          <select
+            value={selectedFolderId === TRASH_FOLDER_ID ? '' : selectedFolderId}
+            onChange={(event) => setSelectedFolderId(event.target.value)}
+          >
+            <option value="">All profiles</option>
+            {cloudState.folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>{folder.name}</option>
+            ))}
+          </select>
+          {selectedFolderId && selectedFolderId !== TRASH_FOLDER_ID && (
+            <button
+              className="icon-button"
+              aria-label={`Rename ${cloudState.folders.find((folder) => folder.id === selectedFolderId)?.name || 'folder'}`}
+              onClick={() => {
+                const folder = cloudState.folders.find((item) => item.id === selectedFolderId);
+                if (folder) {
+                  renameFolder(folder);
+                }
+              }}
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+          <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
           <input
             type="text"
             value={profileSearch}
@@ -4060,19 +4106,26 @@ main().catch((error) => {
     );
   }
 
-  function renderImportTab() {
+  function renderImportModal() {
+    if (!importModalOpen) {
+      return null;
+    }
     return (
-      <section className="panel import-panel">
-        <div className="panel-title">
-          <h2>Mass import profiles</h2>
-        </div>
-        <p>
-          Import profiles in bulk from a Dolphin-style inventory CSV (the same format exported by
-          the profiles-cookie-inventory tooling). Each row's proxy_name must carry the
-          <code>type://host:port:username:password</code> connection string; proxies are matched
-          and reused by host/port/username, and re-importing the same CSV updates existing profiles
-          (matched by profile_id) instead of duplicating them.
-        </p>
+      <div className="modal-backdrop" onMouseDown={() => setImportModalOpen(false)}>
+        <section className="profile-modal import-panel" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Mass import profiles</h2>
+              <p>
+                Import profiles in bulk from a Dolphin-style inventory CSV (the same format exported by
+                the profiles-cookie-inventory tooling). Each row's proxy_name must carry the
+                <code>type://host:port:username:password</code> connection string; proxies are matched
+                and reused by host/port/username, and re-importing the same CSV updates existing profiles
+                (matched by profile_id) instead of duplicating them.
+              </p>
+            </div>
+            <button className="icon-button" aria-label="Close" onClick={() => setImportModalOpen(false)}><X size={18} /></button>
+          </header>
         <div className="import-actions">
           <button className="ghost" onClick={pickImportCsv}><Upload size={18} /> Choose CSV file</button>
           {importFile && (
@@ -4120,7 +4173,8 @@ main().catch((error) => {
             )}
           </div>
         )}
-      </section>
+        </section>
+      </div>
     );
   }
 
@@ -4139,8 +4193,6 @@ main().catch((error) => {
         return renderExtensionsTab();
       case 'api':
         return renderApiTab();
-      case 'import':
-        return renderImportTab();
       case 'profiles':
       default:
         return renderProfilesTab();
@@ -4150,7 +4202,12 @@ main().catch((error) => {
   function renderTopAction() {
     switch (activeTab) {
       case 'profiles':
-        return <button onClick={openNewProfile}><Plus size={18} /> Profile</button>;
+        return (
+          <>
+            <button className="ghost" onClick={() => void pickImportCsv()}><Upload size={18} /> Import</button>
+            <button onClick={openNewProfile}><Plus size={18} /> Profile</button>
+          </>
+        );
       case 'proxies':
         return <button onClick={openNewProxy}><Plus size={18} /> Proxy</button>;
       case 'cookies':
@@ -4167,7 +4224,6 @@ main().catch((error) => {
       case 'extensions':
         return null;
       case 'api':
-      case 'import':
       default:
         return null;
     }
@@ -4733,6 +4789,7 @@ main().catch((error) => {
       {renderSettingsModal()}
       {renderChangelogModal()}
       {renderExtensionAddModal()}
+      {renderImportModal()}
 
       {profileDraft && (
         <div className="modal-backdrop" onMouseDown={() => setProfileDraft(null)}>
@@ -4988,7 +5045,6 @@ main().catch((error) => {
               {profileDraft.id && (
                 <button className="danger ghost" onClick={deleteProfileDraft}><Trash2 size={16} /> Delete</button>
               )}
-              <button className="ghost" onClick={() => setProfileDraft(null)}>Cancel</button>
               <button
                   disabled={isActionPending('save-profile')}
                   onClick={() => runAsyncAction('save-profile', saveProfileDraft)}>
@@ -5099,7 +5155,6 @@ main().catch((error) => {
             </div>
 
             <footer className="modal-actions">
-              <button className="ghost" onClick={() => setStatusDraft(null)}>Cancel</button>
               <button onClick={saveStatusDraft}>Create status</button>
             </footer>
           </section>
@@ -5179,7 +5234,6 @@ main().catch((error) => {
               {proxyDraft.id && (
                 <button className="danger ghost" onClick={deleteProxyDraft}><Trash2 size={16} /> Delete</button>
               )}
-              <button className="ghost" onClick={closeProxyDraft}>Cancel</button>
               <button onClick={saveProxyDraft}>
                 {proxyDraft.id ? 'Save changes' : proxyDraftSource === 'profile' ? 'Create and assign' : 'Add proxy'}
               </button>
@@ -5231,7 +5285,6 @@ main().catch((error) => {
               {bookmarkDraft.originalUrl && (
                 <button className="danger ghost" onClick={deleteBookmarkDraft}><Trash2 size={16} /> Delete</button>
               )}
-              <button className="ghost" onClick={() => setBookmarkDraft(null)}>Cancel</button>
               <button onClick={saveBookmarkDraft}>{bookmarkDraft.originalUrl ? 'Save changes' : 'Add bookmark'}</button>
             </footer>
           </section>

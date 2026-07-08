@@ -443,18 +443,6 @@ nav button.active {
   box-shadow: var(--shadow-xs);
 }
 
-.folder-bar {
-  align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-xs);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 12px;
-}
-
 .table-toolbar {
   display: flex;
   gap: 10px;
@@ -485,33 +473,6 @@ nav button.active {
   border-color: var(--accent-2);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
   outline: none;
-}
-
-.folder-chip {
-  align-items: center;
-  background: var(--surface-sunken);
-  border-radius: 9px;
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  transition: box-shadow 0.12s var(--ease);
-}
-
-.folder-chip.active {
-  box-shadow: 0 0 0 2px var(--accent) inset;
-}
-
-.folder-chip > button:first-child {
-  background: transparent;
-  box-shadow: none;
-  color: var(--ink);
-  min-height: 34px;
-  padding: 0 10px;
-}
-
-.folder-chip > button:first-child:hover {
-  box-shadow: none;
-  transform: none;
 }
 
 table {
