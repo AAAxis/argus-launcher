@@ -53,6 +53,11 @@ export type ArgusProfile = {
   cookie_import_url?: string | null;
   cookie_import_name?: string | null;
   cookie_import_count?: number | null;
+  // 'saved' resolves cookie_id against CloudState.cookies at launch time
+  // (see ArgusCookie); undefined/'paste' uses the cookie_import_* fields
+  // above instead.
+  cookie_mode?: 'paste' | 'saved';
+  cookie_id?: string | null;
   command_line_switches?: string | null;
   fingerprint?: {
     os?: string;
@@ -107,6 +112,20 @@ export type ArgusProxy = {
   check_error?: string;
 };
 
+// A shared, reusable cookie-set in the Cookies tab library -- assignable to
+// one profile at a time via ArgusProfile.cookie_id. `url` is a Supabase
+// Storage public URL (or data: URL fallback), produced by the exact same
+// upload path as the per-profile cookie_import_url flow (see
+// cloudCookieFromSelection in main.tsx) -- so the launch payload consumes it
+// identically, no separate backend handling needed.
+export type ArgusCookie = {
+  id: string;
+  name: string;
+  url: string;
+  count?: number | null;
+  assigned_profile?: string | null;
+};
+
 export type SharedExtension = {
   // Stable id (generated at add-time) used as the local cache-directory name
   // every team member materializes this extension into -- the actual files
@@ -147,6 +166,7 @@ export type CloudState = {
   profiles: ArgusProfile[];
   folders: ArgusFolder[];
   proxies: ArgusProxy[];
+  cookies: ArgusCookie[];
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];
   custom_statuses: string[];

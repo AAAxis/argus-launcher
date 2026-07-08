@@ -4,7 +4,7 @@ import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload,
 import {native} from './native';
 import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
-import type {ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensionToggles, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
+import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensionToggles, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
@@ -38,6 +38,11 @@ type ProfileDraft = {
   cookie_import_url: string;
   cookie_import_name: string;
   cookie_import_count: number;
+  // 'saved' picks a shared cookie-set (Cookies tab) by cookie_id; 'paste'
+  // keeps the existing free-text/uploaded-file flow via cookie_import_*.
+  cookie_mode: 'paste' | 'saved';
+  cookie_id: string;
+  cookie_search: string;
   command_line_switches: string;
   fingerprint_os: string;
   fingerprint_browser_version: string;
@@ -167,6 +172,7 @@ const defaultState: CloudState = {
   profiles: [],
   folders: [],
   proxies: [],
+  cookies: [],
   shared_extensions: [],
   shared_bookmarks: [],
   custom_statuses: [],
@@ -502,6 +508,7 @@ let sharedBookmarksColumnAvailable = true;
 let foldersColumnAvailable = true;
 let customStatusesColumnAvailable = true;
 let builtInExtensionsColumnAvailable = true;
+let cookiesColumnAvailable = true;
 
 function initials(value: string) {
   return value
@@ -713,6 +720,9 @@ function newProfileDraft(): ProfileDraft {
     cookie_import_url: '',
     cookie_import_name: '',
     cookie_import_count: 0,
+    cookie_mode: 'paste',
+    cookie_id: '',
+    cookie_search: '',
     command_line_switches: '',
     fingerprint_os: 'Windows 11',
     fingerprint_browser_version: 'Auto',
@@ -756,6 +766,9 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     cookie_import_url: profile.cookie_import_url || '',
     cookie_import_name: profile.cookie_import_name || '',
     cookie_import_count: profile.cookie_import_count || 0,
+    cookie_mode: profile.cookie_id ? 'saved' : 'paste',
+    cookie_id: profile.cookie_id || '',
+    cookie_search: '',
     command_line_switches: profile.command_line_switches || '',
     fingerprint_os: normalizeOsPreset(fingerprint.os),
     fingerprint_browser_version: fingerprint.browser_version || 'Auto',
@@ -1447,6 +1460,7 @@ function App() {
   const [apiState, setApiState] = useState<ApiState | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
   const proxyChecksInFlight = useRef(new Set<string>());
   const proxyChecksAttempted = useRef(new Set<string>());
@@ -1850,6 +1864,21 @@ function App() {
           sharedBookmarks = result.data.shared_bookmarks;
         }
       }
+      let cookies: ArgusCookie[] = [];
+      if (cookiesColumnAvailable) {
+        const result = await supabase
+            .from('argus_cloud_state')
+            .select('cookies')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (isMissingColumnError(result.error)) {
+          cookiesColumnAvailable = false;
+        } else if (result.error) {
+          setMessage(result.error.message);
+        } else if (Array.isArray(result.data?.cookies)) {
+          cookies = result.data.cookies;
+        }
+      }
       let customStatuses: string[] = [];
       if (customStatusesColumnAvailable) {
         const result = await supabase
@@ -1885,6 +1914,7 @@ function App() {
         profiles: Array.isArray(data?.profiles) ? data.profiles : [],
         folders: Array.isArray(data?.folders) ? data.folders : [],
         proxies: Array.isArray(data?.proxies) ? data.proxies : [],
+        cookies,
         shared_extensions: Array.isArray(data?.shared_extensions) ?
           data.shared_extensions :
           [],
@@ -1940,6 +1970,9 @@ function App() {
     if (builtInExtensionsColumnAvailable) {
       payload.built_in_extensions = nextState.built_in_extensions;
     }
+    if (cookiesColumnAvailable) {
+      payload.cookies = nextState.cookies;
+    }
     let {error} = await supabase
         .from('argus_cloud_state')
         .upsert(payload, {onConflict: 'user_id'});
@@ -1959,6 +1992,10 @@ function App() {
       if (error?.message?.includes('built_in_extensions')) {
         builtInExtensionsColumnAvailable = false;
         delete payload.built_in_extensions;
+      }
+      if (error?.message?.includes('cookies')) {
+        cookiesColumnAvailable = false;
+        delete payload.cookies;
       }
       const fallback = await supabase
           .from('argus_cloud_state')
@@ -3595,7 +3632,7 @@ main().catch((error) => {
                             {isActionPending(`launch-${profile.id}`) ?
                                 <RefreshCw size={16} className="btn-spin" /> :
                                 <Play size={16} />}
-                            {isActionPending(`launch-${profile.id}`) ? 'Launching…' : 'Launch'}
+                            Launch
                           </button>
                           <button className="icon-button" aria-label={`Edit ${profile.name}`} onClick={(event) => {
                             event.stopPropagation();
@@ -3808,13 +3845,13 @@ main().catch((error) => {
           <div className="extension-row" key={entry.key}>
             <span>{entry.name}</span>
             <small>{entry.description}</small>
-            <label className="checkbox-confirm">
+            <label className="switch" aria-label={`${builtInExtensionEnabled(entry.key) ? 'Disable' : 'Enable'} ${entry.name}`}>
               <input
                 type="checkbox"
                 checked={builtInExtensionEnabled(entry.key)}
                 onChange={(event) => void setBuiltInExtensionEnabled(entry.key, event.target.checked)}
               />
-              <span>{builtInExtensionEnabled(entry.key) ? 'Enabled' : 'Disabled'}</span>
+              <span className="switch-track"><span className="switch-thumb" /></span>
             </label>
           </div>
         ))}
@@ -4047,6 +4084,48 @@ main().catch((error) => {
     );
   }
 
+  // The corner toast prompting an available/downloading/downloaded update.
+  // Lives in the shared .toast-stack alongside the status toast so the two
+  // stack instead of overlapping when both are visible at once.
+  function renderUpdateToast() {
+    if (!updateState ||
+        !['available', 'downloading', 'downloaded'].includes(updateState.status) ||
+        updateToastDismissedVersion === (updateState.updateInfo?.version || '')) {
+      return null;
+    }
+    return (
+      <div className="update-toast">
+        <div className="update-toast-body">
+          <strong>
+            {updateState.status === 'downloaded'
+              ? `Version ${updateState.updateInfo?.version || ''} downloaded — restart to install`
+              : updateState.status === 'downloading'
+              ? `Downloading update… ${Math.round(updateState.progress?.percent || 0)}%`
+              : `Update ${updateState.updateInfo?.version || ''} available`}
+          </strong>
+          {updateState.updateInfo?.releaseNotes && (
+            <p className="update-toast-notes">{updateState.updateInfo.releaseNotes}</p>
+          )}
+        </div>
+        <div className="update-toast-actions">
+          {updateState.status === 'available' && (
+            <button onClick={() => native?.downloadUpdate?.()}>Download</button>
+          )}
+          {updateState.status === 'downloaded' && (
+            <button onClick={() => native?.installUpdate?.()}>Restart &amp; install</button>
+          )}
+          <button
+            className="icon-button"
+            aria-label="Dismiss update notice"
+            onClick={() => setUpdateToastDismissedVersion(updateState.updateInfo?.version || 'unknown')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function renderSettingsModal() {
     if (!settingsOpen) {
       return null;
@@ -4069,11 +4148,48 @@ main().catch((error) => {
           </section>
           <section className="settings-section">
             <div>
+              <h3>Changelog</h3>
+              <p>What changed in the current or latest available release.</p>
+            </div>
+            <button className="ghost" onClick={() => setChangelogOpen(true)}>View changelog</button>
+          </section>
+          <section className="settings-section">
+            <div>
               <h3>Account</h3>
               <p>{signedInEmail}</p>
             </div>
             <button className="ghost" onClick={signOut}>Sign out</button>
           </section>
+        </section>
+      </div>
+    );
+  }
+
+  function renderChangelogModal() {
+    if (!changelogOpen) {
+      return null;
+    }
+    const notes = updateState?.updateInfo?.releaseNotes;
+    const version = updateState?.updateInfo?.version || updateState?.currentVersion;
+    return (
+      <div className="modal-backdrop" onMouseDown={() => setChangelogOpen(false)}>
+        <section className="profile-modal small-modal changelog-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Changelog{version ? ` · v${version}` : ''}</h2>
+            </div>
+            <button className="icon-button" aria-label="Close" onClick={() => setChangelogOpen(false)}><X size={18} /></button>
+          </header>
+          {notes ? (
+            <pre className="changelog-notes">{notes}</pre>
+          ) : (
+            <div className="changelog-empty">
+              <p>No changelog loaded yet.</p>
+              <button onClick={() => void runUpdateAction('check')}>
+                <RefreshCw size={16} /> Check for updates
+              </button>
+            </div>
+          )}
         </section>
       </div>
     );
@@ -4424,13 +4540,17 @@ main().catch((error) => {
         {renderActiveTab()}
       </section>
 
-      {message && (
-        <div className="status-toast" role="status">
-          {message}
-        </div>
-      )}
+      <div className="toast-stack">
+        {message && (
+          <div className="status-toast" role="status">
+            {message}
+          </div>
+        )}
+        {renderUpdateToast()}
+      </div>
 
       {renderSettingsModal()}
+      {renderChangelogModal()}
       {renderExtensionAddModal()}
 
       {profileDraft && (
@@ -5036,40 +5156,6 @@ main().catch((error) => {
               </button>
             </footer>
           </section>
-        </div>
-      )}
-
-      {updateState &&
-        ['available', 'downloading', 'downloaded'].includes(updateState.status) &&
-        updateToastDismissedVersion !== (updateState.updateInfo?.version || '') && (
-        <div className="update-toast">
-          <div className="update-toast-body">
-            <strong>
-              {updateState.status === 'downloaded'
-                ? `Version ${updateState.updateInfo?.version || ''} downloaded — restart to install`
-                : updateState.status === 'downloading'
-                ? `Downloading update… ${Math.round(updateState.progress?.percent || 0)}%`
-                : `Update ${updateState.updateInfo?.version || ''} available`}
-            </strong>
-            {updateState.updateInfo?.releaseNotes && (
-              <p className="update-toast-notes">{updateState.updateInfo.releaseNotes}</p>
-            )}
-          </div>
-          <div className="update-toast-actions">
-            {updateState.status === 'available' && (
-              <button onClick={() => native?.downloadUpdate?.()}>Download</button>
-            )}
-            {updateState.status === 'downloaded' && (
-              <button onClick={() => native?.installUpdate?.()}>Restart &amp; install</button>
-            )}
-            <button
-              className="icon-button"
-              aria-label="Dismiss update notice"
-              onClick={() => setUpdateToastDismissedVersion(updateState.updateInfo?.version || 'unknown')}
-            >
-              <X size={16} />
-            </button>
-          </div>
         </div>
       )}
 
