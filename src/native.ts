@@ -33,11 +33,15 @@ export type LaunchProfilePayload = {
   startUrl?: string;
   homeHtml?: string;
   cookieImportPath?: string | null;
+  cookieImportUrl?: string | null;
+  cookieImportName?: string | null;
 };
 
 export type CookieFileSelection = {
   path: string;
+  name?: string;
   count: number;
+  base64?: string;
 };
 
 export type ProxyCheckResult = {

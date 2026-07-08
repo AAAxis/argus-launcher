@@ -54,6 +54,7 @@ jobs:
         run: npx electron-builder --mac dmg zip --arm64 --publish never
 
       - name: Upload macOS artifact
+        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: argys-anty-macos
@@ -99,7 +100,26 @@ jobs:
       - name: Build EXE
         run: npx electron-builder --win nsis --x64 --publish never
 
+      - name: Upload Windows updater files to R2
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          set -euo pipefail
+          aws s3 cp release/latest.yml "s3://${R2_BUCKET}/latest.yml" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=60"
+          for file in release/Argys-Anty-*-win-x64.exe*; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+          done
+
       - name: Upload Windows artifact
+        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: argys-anty-windows
@@ -115,7 +135,7 @@ jobs:
       - build-mac
       - build-windows
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: ${{ false }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

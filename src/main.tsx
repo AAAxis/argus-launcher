@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
-import type {ApiState, ResourceState, UpdateState} from './native';
+import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import './styles.css';
@@ -34,6 +34,8 @@ type ProfileDraft = {
   tags: string;
   start_url: string;
   cookie_import_path: string;
+  cookie_import_url: string;
+  cookie_import_name: string;
   cookie_import_count: number;
   command_line_switches: string;
   fingerprint_os: string;
@@ -708,6 +710,8 @@ function newProfileDraft(): ProfileDraft {
     tags: '',
     start_url: '',
     cookie_import_path: '',
+    cookie_import_url: '',
+    cookie_import_name: '',
     cookie_import_count: 0,
     command_line_switches: '',
     fingerprint_os: 'Windows 11',
@@ -749,6 +753,8 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     tags: profile.tags?.join(', ') || '',
     start_url: profile.start_url || '',
     cookie_import_path: profile.cookie_import_path || '',
+    cookie_import_url: profile.cookie_import_url || '',
+    cookie_import_name: profile.cookie_import_name || '',
     cookie_import_count: profile.cookie_import_count || 0,
     command_line_switches: profile.command_line_switches || '',
     fingerprint_os: normalizeOsPreset(fingerprint.os),
@@ -2055,6 +2061,8 @@ main().catch((error) => {
         startUrl: browserStartUrl(launchProfile),
         homeHtml: anonymousHomeHtml(launchProfile, cloudState.shared_bookmarks, selectedProxy),
         cookieImportPath: launchProfile.cookie_import_path || null,
+        cookieImportUrl: launchProfile.cookie_import_url || null,
+        cookieImportName: launchProfile.cookie_import_name || null,
       });
       if (result.ok) {
         setMessage(`Launched ${launchProfile.name}`);
@@ -2179,7 +2187,9 @@ main().catch((error) => {
       tags: tagsFromDraft(profileDraft.tags),
       start_url: profileDraft.start_url.trim() || null,
       cookie_import_path: profileDraft.cookie_import_path.trim() || null,
-      cookie_import_count: profileDraft.cookie_import_path.trim() ?
+      cookie_import_url: profileDraft.cookie_import_url.trim() || null,
+      cookie_import_name: profileDraft.cookie_import_name.trim() || null,
+      cookie_import_count: profileDraft.cookie_import_path.trim() || profileDraft.cookie_import_url.trim() ?
         profileDraft.cookie_import_count || null :
         null,
       command_line_switches: profileDraft.command_line_switches.trim() || null,
@@ -2440,6 +2450,8 @@ main().catch((error) => {
           tags: tagsFromDraft(row.tags || ''),
           start_url: null,
           cookie_import_path: null,
+          cookie_import_url: null,
+          cookie_import_name: null,
           cookie_import_count: null,
           command_line_switches: null,
           fingerprint: existingProfileIndex >= 0 ? profiles[existingProfileIndex].fingerprint : {
@@ -2925,13 +2937,21 @@ main().catch((error) => {
     const selected = cloudState.profiles.filter(isTarget);
     const matches = await native.matchCookieFiles(folderPath, selected.map((profile) => profile.name));
     let matched = 0;
-    const profiles = cloudState.profiles.map((profile) => {
-      const match = isTarget(profile) ? matches[profile.name] : undefined;
+    const cookiePatches = new Map<string, Pick<ArgusProfile, 'cookie_import_path' | 'cookie_import_url' | 'cookie_import_name' | 'cookie_import_count'>>();
+    for (const profile of selected) {
+      const match = matches[profile.name];
       if (!match) {
+        continue;
+      }
+      cookiePatches.set(profile.id, await cloudCookieFromSelection(profile.id, match));
+      matched += 1;
+    }
+    const profiles = cloudState.profiles.map((profile) => {
+      const patch = isTarget(profile) ? cookiePatches.get(profile.id) : undefined;
+      if (!patch) {
         return profile;
       }
-      matched += 1;
-      return {...profile, cookie_import_path: match.path, cookie_import_count: match.count};
+      return {...profile, ...patch};
     });
     await saveCloudState({...cloudState, profiles});
     return {matched, total: selected.length};
@@ -3103,6 +3123,37 @@ main().catch((error) => {
     setMessage('Extension shared with your team');
   }
 
+  async function cloudCookieFromSelection(
+      profileId: string,
+      selection: CookieFileSelection): Promise<Pick<ArgusProfile, 'cookie_import_path' | 'cookie_import_url' | 'cookie_import_name' | 'cookie_import_count'>> {
+    const cookieName = selection.name || selection.path.split(/[\\/]/).filter(Boolean).at(-1) || 'cookies.txt';
+    const base = {
+      cookie_import_path: selection.path,
+      cookie_import_name: cookieName,
+      cookie_import_count: selection.count || null,
+    };
+    if (!selection.base64) {
+      return {...base, cookie_import_url: null};
+    }
+    if (!supabase) {
+      return {...base, cookie_import_url: `data:text/plain;base64,${selection.base64}`};
+    }
+    const safeName = cookieName.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'cookies.txt';
+    const objectPath = `profile-cookies/${profileId}/${Date.now()}-${safeName}`;
+    const bytes = Uint8Array.from(atob(selection.base64), (c) => c.charCodeAt(0));
+    const {error: uploadError} = await supabase.storage
+        .from(SHARED_EXTENSIONS_BUCKET)
+        .upload(objectPath, bytes, {contentType: 'text/plain', upsert: true});
+    if (uploadError && isSupabaseStorageNotWritable(uploadError)) {
+      return {...base, cookie_import_url: `data:text/plain;base64,${selection.base64}`};
+    }
+    if (uploadError) {
+      throw new Error(`Cookie upload failed: ${uploadError.message}`);
+    }
+    const {data: publicUrlData} = supabase.storage.from(SHARED_EXTENSIONS_BUCKET).getPublicUrl(objectPath);
+    return {...base, cookie_import_url: publicUrlData.publicUrl};
+  }
+
   async function pickProfileCookieFile() {
     if (!profileDraft) {
       return;
@@ -3116,12 +3167,17 @@ main().catch((error) => {
       if (!selection) {
         return;
       }
+      const profileId = profileDraft.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+      const cloudCookie = await cloudCookieFromSelection(profileId, selection);
       setProfileDraft({
         ...profileDraft,
-        cookie_import_path: selection.path,
-        cookie_import_count: selection.count,
+        id: profileDraft.id || profileId,
+        cookie_import_path: cloudCookie.cookie_import_path || '',
+        cookie_import_url: cloudCookie.cookie_import_url || '',
+        cookie_import_name: cloudCookie.cookie_import_name || '',
+        cookie_import_count: cloudCookie.cookie_import_count || 0,
       });
-      setMessage(`Loaded ${selection.count} cookies for import`);
+      setMessage(`Stored ${selection.count} cookies for import`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
@@ -4235,13 +4291,13 @@ main().catch((error) => {
               <section className="form-section wide compact-section">
                 <div>
                   <h3>Cookie import</h3>
-                  <p>Import a local JSON or Netscape cookies.txt file when this profile launches.</p>
+                  <p>Store a JSON or Netscape cookies.txt file in cloud sync and import it when this profile launches.</p>
                 </div>
                 <div className="file-row wide">
                   <button className="ghost" type="button" onClick={pickProfileCookieFile}>
                     Select cookies file
                   </button>
-                  {profileDraft.cookie_import_path ? (
+                  {profileDraft.cookie_import_path || profileDraft.cookie_import_url ? (
                     <>
                       <span>
                         {profileDraft.cookie_import_count || 0} cookies · {profileDraft.cookie_import_path}
@@ -4253,6 +4309,8 @@ main().catch((error) => {
                         onClick={() => setProfileDraft({
                           ...profileDraft,
                           cookie_import_path: '',
+                          cookie_import_url: '',
+                          cookie_import_name: '',
                           cookie_import_count: 0,
                         })}
                       >

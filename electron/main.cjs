@@ -1120,6 +1120,10 @@ function parseNetscapeCookies(raw) {
 
 function parseCookieFile(filePath) {
   const raw = fs.readFileSync(filePath, 'utf8');
+  return parseCookieContent(raw);
+}
+
+function parseCookieContent(raw) {
   try {
     const parsed = JSON.parse(raw);
     const list = Array.isArray(parsed) ? parsed : parsed.cookies;
@@ -1132,6 +1136,26 @@ function parseCookieFile(filePath) {
   }
 }
 
+function cookieRawFromDataUrl(url) {
+  const match = /^data:([^,]*?)(;base64)?,(.*)$/i.exec(String(url || ''));
+  if (!match) {
+    return null;
+  }
+  const [, , base64, body] = match;
+  return base64 ?
+    Buffer.from(body, 'base64').toString('utf8') :
+    decodeURIComponent(body);
+}
+
+async function parseCookieUrl(url) {
+  const inline = cookieRawFromDataUrl(url);
+  if (inline !== null) {
+    return parseCookieContent(inline);
+  }
+  const buffer = await downloadBuffer(url);
+  return parseCookieContent(buffer.toString('utf8'));
+}
+
 // Writes one merged "Argys Cookie Manager" extension per launch, into the
 // profile's own user-data-dir: a copy of extensions/cookie-manager's manual
 // export/import UI, plus (only when this profile has a cookie file assigned)
@@ -1140,7 +1164,7 @@ function parseCookieFile(filePath) {
 // "Argys Cookie Manager" plus a per-profile "Argys Cookie Seed <name>"
 // generated from an inline script) -- merged so each profile shows exactly
 // one cookie extension that both seeds and manages.
-function writeProfileCookieManagerExtension(payload) {
+async function writeProfileCookieManagerExtension(payload) {
   const sourceDir = cookieManagerSourcePath();
   if (!isLoadableExtensionDir(sourceDir)) {
     console.warn(
@@ -1164,12 +1188,21 @@ function writeProfileCookieManagerExtension(payload) {
     id: payload.id || '',
     name: payload.name || '',
   }, null, 2));
-  if (payload.cookieImportPath) {
+  const writeSeedCookies = (cookies) => {
+    if (cookies.length) {
+      fs.writeFileSync(path.join(extensionDir, 'seed-cookies.json'), JSON.stringify({cookies}, null, 2));
+    }
+  };
+  if (payload.cookieImportUrl) {
     try {
-      const cookies = parseCookieFile(payload.cookieImportPath);
-      if (cookies.length) {
-        fs.writeFileSync(path.join(extensionDir, 'seed-cookies.json'), JSON.stringify({cookies}, null, 2));
-      }
+      writeSeedCookies(await parseCookieUrl(payload.cookieImportUrl));
+    } catch {
+      // Fall back to a local path below if one is still available.
+    }
+  }
+  if (!fs.existsSync(path.join(extensionDir, 'seed-cookies.json')) && payload.cookieImportPath) {
+    try {
+      writeSeedCookies(parseCookieFile(payload.cookieImportPath));
     } catch {
       // No seed file written: the extension's own fetch() of seed-cookies.json
       // simply finds nothing and skips seeding, so this fails soft.
@@ -1685,7 +1718,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   const launchUrl = payload.startUrl || writeHomeFile(payload);
   writeProfileStartupPrefs(payload.userDataDir, launchUrl);
   writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
-  const cookieManagerPath = writeProfileCookieManagerExtension(payload);
+  const cookieManagerPath = await writeProfileCookieManagerExtension(payload);
   if (cookieManagerPath) {
     extensionPaths.push(cookieManagerPath);
   }
@@ -1850,7 +1883,12 @@ ipcMain.handle('argus:select-cookie-file', async () => {
   }
   const filePath = result.filePaths[0];
   const cookies = parseCookieFile(filePath);
-  return {path: filePath, count: cookies.length};
+  return {
+    path: filePath,
+    name: path.basename(filePath),
+    count: cookies.length,
+    base64: fs.readFileSync(filePath).toString('base64'),
+  };
 });
 
 ipcMain.handle('argus:select-cookie-folder', async () => {
@@ -1886,7 +1924,12 @@ ipcMain.handle('argus:match-cookie-files', async (_event, {folderPath, profileNa
     const filePath = path.join(folderPath, fileName);
     try {
       const cookies = parseCookieFile(filePath);
-      matches[name] = {path: filePath, count: cookies.length};
+      matches[name] = {
+        path: filePath,
+        name: fileName,
+        count: cookies.length,
+        base64: fs.readFileSync(filePath).toString('base64'),
+      };
     } catch {
       matches[name] = null;
     }

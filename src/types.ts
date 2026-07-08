@@ -50,6 +50,8 @@ export type ArgusProfile = {
   proxy_mode?: ProxyMode;
   start_url?: string | null;
   cookie_import_path?: string | null;
+  cookie_import_url?: string | null;
+  cookie_import_name?: string | null;
   cookie_import_count?: number | null;
   command_line_switches?: string | null;
   fingerprint?: {
