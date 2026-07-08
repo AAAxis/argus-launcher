@@ -132,6 +132,17 @@ export type SharedBookmark = {
   icon?: string;
 };
 
+// Per-extension on/off switches for the bundled (non-removable) "stock"
+// extensions -- these ship with every install (cookie-manager, SMS-Activate)
+// or are conditionally bundled per profile (foxywall_free_proxy, gated on a
+// profile's proxy_mode === 'free_proxy'). Undefined/missing means enabled,
+// for backward compatibility with cloud state saved before this existed.
+export type BuiltInExtensionToggles = {
+  cookie_manager?: boolean;
+  sms_activate?: boolean;
+  foxywall_free_proxy?: boolean;
+};
+
 export type CloudState = {
   profiles: ArgusProfile[];
   folders: ArgusFolder[];
@@ -139,4 +150,5 @@ export type CloudState = {
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];
   custom_statuses: string[];
+  built_in_extensions?: BuiltInExtensionToggles;
 };

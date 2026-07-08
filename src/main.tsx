@@ -4,7 +4,7 @@ import {Cookie, Download, Pencil, Plus, Play, RefreshCw, Shield, Trash2, Upload,
 import {native} from './native';
 import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
-import type {ArgusFolder, ArgusProfile, ArgusProxy, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
+import type {ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensionToggles, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
@@ -2227,6 +2227,9 @@ main().catch((error) => {
         cookieImportPath: launchProfile.cookie_import_path || null,
         cookieImportUrl: launchProfile.cookie_import_url || null,
         cookieImportName: launchProfile.cookie_import_name || null,
+        enableCookieManager: cloudState.built_in_extensions?.cookie_manager !== false,
+        enableSmsActivate: cloudState.built_in_extensions?.sms_activate !== false,
+        enableFoxywallFreeProxy: cloudState.built_in_extensions?.foxywall_free_proxy !== false,
       });
       if (result.ok) {
         setMessage(`Launched ${launchProfile.name}`);
@@ -3543,10 +3546,18 @@ main().catch((error) => {
                         </>
                       ) : (
                         <>
-                          <button className="launch" onClick={(event) => {
-                            event.stopPropagation();
-                            void launch(profile);
-                          }}><Play size={16} /> Launch</button>
+                          <button
+                              className="launch"
+                              disabled={isActionPending(`launch-${profile.id}`)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void runAsyncAction(`launch-${profile.id}`, () => launch(profile));
+                              }}>
+                            {isActionPending(`launch-${profile.id}`) ?
+                                <RefreshCw size={16} className="btn-spin" /> :
+                                <Play size={16} />}
+                            {isActionPending(`launch-${profile.id}`) ? 'Launching…' : 'Launch'}
+                          </button>
                           <button className="icon-button" aria-label={`Edit ${profile.name}`} onClick={(event) => {
                             event.stopPropagation();
                             openEditProfile(profile);
@@ -3717,9 +3728,58 @@ main().catch((error) => {
     );
   }
 
+  // Undefined/missing means enabled, for cloud state saved before this toggle
+  // existed.
+  function builtInExtensionEnabled(key: keyof BuiltInExtensionToggles): boolean {
+    return cloudState.built_in_extensions?.[key] !== false;
+  }
+
+  async function setBuiltInExtensionEnabled(key: keyof BuiltInExtensionToggles, enabled: boolean) {
+    await saveCloudState({
+      ...cloudState,
+      built_in_extensions: {...cloudState.built_in_extensions, [key]: enabled},
+    });
+  }
+
+  const BUILT_IN_EXTENSIONS: Array<{key: keyof BuiltInExtensionToggles; name: string; description: string}> = [
+    {
+      key: 'cookie_manager',
+      name: 'Argys Cookie Manager',
+      description: 'Manual cookie export/import UI, bundled into every profile.',
+    },
+    {
+      key: 'sms_activate',
+      name: 'SMSActivate',
+      description: 'Bundled into every profile regardless of proxy mode.',
+    },
+    {
+      key: 'foxywall_free_proxy',
+      name: 'FoxyWall Proxy',
+      description: 'Only loaded for profiles set to Free Proxy mode; this switch is a global kill switch on top of that.',
+    },
+  ];
+
   function renderExtensionsTab() {
     return (
       <section className="panel">
+        <div className="panel-title">
+          <h2>Built-in extensions</h2>
+        </div>
+        {BUILT_IN_EXTENSIONS.map((entry) => (
+          <div className="extension-row" key={entry.key}>
+            <span>{entry.name}</span>
+            <small>{entry.description}</small>
+            <label className="checkbox-confirm">
+              <input
+                type="checkbox"
+                checked={builtInExtensionEnabled(entry.key)}
+                onChange={(event) => void setBuiltInExtensionEnabled(entry.key, event.target.checked)}
+              />
+              <span>{builtInExtensionEnabled(entry.key) ? 'Enabled' : 'Disabled'}</span>
+            </label>
+          </div>
+        ))}
+
         <div className="panel-title">
           <h2>Shared extensions</h2>
           <button onClick={() => setExtensionAddOpen(true)}><Plus size={16} /> Add</button>
@@ -4466,8 +4526,13 @@ main().catch((error) => {
                   <p>Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches.</p>
                 </div>
                 <div className="file-row wide">
-                  <button className="ghost" type="button" onClick={pickProfileCookieFile}>
-                    Select cookies file
+                  <button
+                      className="ghost"
+                      type="button"
+                      disabled={isActionPending('pick-cookie-file')}
+                      onClick={() => runAsyncAction('pick-cookie-file', pickProfileCookieFile)}>
+                    {isActionPending('pick-cookie-file') && <RefreshCw size={16} className="btn-spin" />}
+                    {isActionPending('pick-cookie-file') ? 'Uploading…' : 'Select cookies file'}
                   </button>
                   {profileDraft.cookie_import_path || profileDraft.cookie_import_url ? (
                     <>
@@ -4923,13 +4988,18 @@ main().catch((error) => {
         ['available', 'downloading', 'downloaded'].includes(updateState.status) &&
         updateToastDismissedVersion !== (updateState.updateInfo?.version || '') && (
         <div className="update-toast">
-          <strong>
-            {updateState.status === 'downloaded'
-              ? `Version ${updateState.updateInfo?.version || ''} downloaded — restart to install`
-              : updateState.status === 'downloading'
-              ? `Downloading update… ${Math.round(updateState.progress?.percent || 0)}%`
-              : `Update ${updateState.updateInfo?.version || ''} available`}
-          </strong>
+          <div className="update-toast-body">
+            <strong>
+              {updateState.status === 'downloaded'
+                ? `Version ${updateState.updateInfo?.version || ''} downloaded — restart to install`
+                : updateState.status === 'downloading'
+                ? `Downloading update… ${Math.round(updateState.progress?.percent || 0)}%`
+                : `Update ${updateState.updateInfo?.version || ''} available`}
+            </strong>
+            {updateState.updateInfo?.releaseNotes && (
+              <p className="update-toast-notes">{updateState.updateInfo.releaseNotes}</p>
+            )}
+          </div>
           <div className="update-toast-actions">
             {updateState.status === 'available' && (
               <button onClick={() => native?.downloadUpdate?.()}>Download</button>

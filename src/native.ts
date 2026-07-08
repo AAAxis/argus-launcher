@@ -35,6 +35,11 @@ export type LaunchProfilePayload = {
   cookieImportPath?: string | null;
   cookieImportUrl?: string | null;
   cookieImportName?: string | null;
+  // Global on/off switches for the bundled "stock" extensions (Extensions
+  // tab). Undefined/missing means enabled, for backward compatibility.
+  enableCookieManager?: boolean;
+  enableSmsActivate?: boolean;
+  enableFoxywallFreeProxy?: boolean;
 };
 
 export type CookieFileSelection = {

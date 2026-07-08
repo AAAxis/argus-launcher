@@ -838,8 +838,12 @@ function cookieManagerSourcePath() {
   return isLoadableExtensionDir(candidate) ? candidate : '';
 }
 
-// onlinesim-sms is bundled for every profile regardless of proxy mode.
+// onlinesim-sms is bundled for every profile regardless of proxy mode, unless
+// the Extensions tab's global toggle turns it off.
 function bundledExtensionPaths(payload) {
+  if (payload.enableSmsActivate === false) {
+    return [];
+  }
   const bundled = [
     {name: 'SMSActivate', source: path.join(__dirname, '../extensions/onlinesim-sms')},
   ];
@@ -1816,16 +1820,20 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   const launchUrl = payload.startUrl || writeHomeFile(payload);
   writeProfileStartupPrefs(payload.userDataDir, launchUrl);
   writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
-  const cookieManagerPath = await writeProfileCookieManagerExtension(payload);
+  const cookieManagerPath = payload.enableCookieManager !== false ?
+    await writeProfileCookieManagerExtension(payload) : '';
   if (cookieManagerPath) {
     extensionPaths.push(cookieManagerPath);
   }
   // Load FoxyWall only for explicit Free Proxy mode. Keeping it installed for
   // assigned-proxy profiles lets a second chrome.proxy owner compete with the
   // browser-managed authenticated bridge and can surface proxy auth prompts.
+  // The Extensions tab's global toggle is an additional kill switch on top of
+  // that per-profile mode.
   pruneStaleFreeProxyExtensions(payload.userDataDir);
-  const freeProxyPath = payload.useFreeProxy ? writeProfileFreeProxyExtension(payload) : '';
-  if (payload.useFreeProxy && freeProxyPath) {
+  const useFreeProxy = payload.useFreeProxy && payload.enableFoxywallFreeProxy !== false;
+  const freeProxyPath = useFreeProxy ? writeProfileFreeProxyExtension(payload) : '';
+  if (useFreeProxy && freeProxyPath) {
     extensionPaths.push(freeProxyPath);
   }
   const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);
