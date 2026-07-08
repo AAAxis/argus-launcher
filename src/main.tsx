@@ -1067,14 +1067,27 @@ function repairProxyAssignments(state: CloudState) {
 // cookies assigned. Promotes each such profile's existing import into its own
 // library entry and points cookie_id at it, so the Cookies tab reflects what
 // was already configured instead of appearing empty.
+//
+// Self-healing, not just one-time: checks that cookie_id actually resolves to
+// a real entry in `cookies`, not just that it's set. If the `cookies` column
+// didn't exist in Supabase yet when this first ran, the save silently dropped
+// it (see saveCloudState's isMissingColumnError fallback) while cookie_id --
+// living inside the profiles JSON blob, a column that already existed --
+// persisted fine. That combination permanently fooled a plain truthiness
+// check into skipping profiles whose library entry was never actually saved,
+// leaving the Cookies tab stuck empty forever. Falling through to the
+// cookie_import_url fallback re-creates the missing entry every load until
+// it actually sticks.
 function migrateLegacyCookieImports(state: CloudState) {
   let migrated = 0;
   const cookies = [...state.cookies];
   const profiles = state.profiles.map((profile) => {
-    if (profile.cookie_id || !profile.cookie_import_url) {
+    const hasValidCookieId =
+      profile.cookie_id && cookies.some((cookie) => cookie.id === profile.cookie_id);
+    if (hasValidCookieId || !profile.cookie_import_url) {
       return profile;
     }
-    const id = `legacy:${profile.id}`;
+    const id = profile.cookie_id || `legacy:${profile.id}`;
     if (!cookies.some((cookie) => cookie.id === id)) {
       cookies.push({
         id,

@@ -7,6 +7,12 @@ add column if not exists folders jsonb not null default '[]'::jsonb;
 alter table public.argus_cloud_state
 add column if not exists custom_statuses jsonb not null default '[]'::jsonb;
 
+alter table public.argus_cloud_state
+add column if not exists cookies jsonb not null default '[]'::jsonb;
+
+alter table public.argus_cloud_state
+add column if not exists built_in_extensions jsonb not null default '{}'::jsonb;
+
 -- Public storage bucket used by:
 --   - shared-extensions/<id>.zip for local extension packages
 --
