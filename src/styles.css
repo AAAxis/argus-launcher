@@ -637,6 +637,12 @@ td:last-child {
   font-size: 13px;
 }
 
+.pagination-selected {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .pagination-controls {
   align-items: center;
   display: flex;
@@ -738,7 +744,12 @@ td:last-child {
   border-radius: 6px;
   color: var(--ink);
   flex: 0 0 auto;
-  font-size: 11px;
+  /* The base app font (Inter) has no emoji font in its fallback chain, so
+   * without this Windows can render the two Regional Indicator Symbol
+   * codepoints as separate boxed letters instead of triggering the flag
+   * ligature. Explicit emoji fonts first forces the real flag glyph. */
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+  font-size: 15px;
   font-weight: 900;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -1193,6 +1204,7 @@ textarea {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
+  color: var(--ink);
   cursor: pointer;
   display: flex;
   gap: 8px;

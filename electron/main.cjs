@@ -664,7 +664,11 @@ async function downloadUpdate() {
 }
 
 function configureAutoUpdater() {
-  autoUpdater.autoDownload = false;
+  // Download as soon as an update is found -- previously required opening
+  // Settings and clicking Download manually every time. Install still stays
+  // manual (autoInstallOnAppQuit false) so it never silently restarts and
+  // closes the user's browser sessions without a "Restart & install" click.
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = process.env.ARGUS_UPDATE_PRERELEASE === '1';
 

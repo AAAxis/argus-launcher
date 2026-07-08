@@ -1468,7 +1468,6 @@ function App() {
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [profileSearch, setProfileSearch] = useState('');
   const [profileStatusFilter, setProfileStatusFilter] = useState('');
-  const [profileProxyFilter, setProfileProxyFilter] = useState<'' | 'assigned' | 'unassigned'>('');
   const [profilePageSize, setProfilePageSize] = useState(25);
   const [profilePage, setProfilePage] = useState(0);
   const [proxySearch, setProxySearch] = useState('');
@@ -2214,15 +2213,11 @@ main().catch((error) => {
       inFolder.filter((profile) =>
         (profile.status || 'Ready').toLowerCase() === profileStatusFilter.toLowerCase()) :
       inFolder;
-    const byProxy = profileProxyFilter ?
-      byStatus.filter((profile) =>
-        Boolean(proxyFor(profile)) === (profileProxyFilter === 'assigned')) :
-      byStatus;
     const query = profileSearch.trim().toLowerCase();
     if (!query) {
-      return byProxy;
+      return byStatus;
     }
-    return byProxy.filter((profile) =>
+    return byStatus.filter((profile) =>
       profile.name?.toLowerCase().includes(query) ||
       profile.tags?.some((tag) => tag.toLowerCase().includes(query)));
   }
@@ -3602,16 +3597,6 @@ main().catch((error) => {
     return (
       <>
         <section className="table-toolbar">
-          {visible.length > 0 && (
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={() => toggleSelectAllProfiles(visible)}
-              />
-              <span>{selectedProfileIds.size > 0 ? `${selectedProfileIds.size} selected` : 'Select all'}</span>
-            </label>
-          )}
           <select
             value={selectedFolderId === TRASH_FOLDER_ID ? '' : selectedFolderId}
             onChange={(event) => setSelectedFolderId(event.target.value)}
@@ -3649,19 +3634,6 @@ main().catch((error) => {
             <option value="">All statuses</option>
             {profileStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
           </select>
-          <select
-            value={profileProxyFilter}
-            onChange={(event) => setProfileProxyFilter(event.target.value as '' | 'assigned' | 'unassigned')}
-          >
-            <option value="">Any proxy</option>
-            <option value="assigned">Proxy assigned</option>
-            <option value="unassigned">No proxy assigned</option>
-          </select>
-          {visible.length > 0 && (
-            <button className="ghost" onClick={() => exportProfilesToCsv(visible)}>
-              <Download size={16} /> Export all
-            </button>
-          )}
         </section>
         {selectedProfileIds.size > 0 && inTrash && (
           <section className="selection-toolbar">
@@ -3711,7 +3683,16 @@ main().catch((error) => {
           <table>
             <thead>
               <tr>
-                <th />
+                <th>
+                  {visible.length > 0 && (
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={allVisibleSelected}
+                      onChange={() => toggleSelectAllProfiles(visible)}
+                    />
+                  )}
+                </th>
                 <th>Name</th>
                 <th>Status</th>
                 <th>Created</th>
@@ -3819,12 +3800,17 @@ main().catch((error) => {
           onPage={setProfilePage}
           onPageSize={(size) => { setProfilePageSize(size); setProfilePage(0); }}
           extra={
-            <button
-                className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
-                onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
-            >
-              <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
-            </button>
+            <>
+              {selectedProfileIds.size > 0 && (
+                <span className="pagination-selected">{selectedProfileIds.size} selected</span>
+              )}
+              <button
+                  className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
+                  onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
+              >
+                <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
+              </button>
+            </>
           }
         />
       </>
