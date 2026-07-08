@@ -721,9 +721,12 @@ function configureAutoUpdater() {
   });
 
   if (app.isPackaged || allowUpdaterInDev) {
+    // A short delay so the first check doesn't compete with the window's own
+    // startup rendering/network calls, but short enough that it still reads
+    // as "automatic" rather than requiring a manual check.
     setTimeout(() => {
       void checkForUpdates({manual: false});
-    }, 15000);
+    }, 3000);
     setInterval(() => {
       void checkForUpdates({manual: false});
     }, UPDATE_CHECK_INTERVAL_MS);
@@ -1825,15 +1828,16 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   if (cookieManagerPath) {
     extensionPaths.push(cookieManagerPath);
   }
-  // Load FoxyWall only for explicit Free Proxy mode. Keeping it installed for
-  // assigned-proxy profiles lets a second chrome.proxy owner compete with the
-  // browser-managed authenticated bridge and can surface proxy auth prompts.
-  // The Extensions tab's global toggle is an additional kill switch on top of
-  // that per-profile mode.
+  // Bundled for every profile (so its toolbar icon/manual toggle is always
+  // available) unless the Extensions tab's global switch turns it off
+  // entirely. writeProfileFreeProxyExtension's own argus-config.json still
+  // gates auto-connect to payload.useFreeProxy only -- being merely installed
+  // never makes it touch chrome.proxy.settings on its own, so an
+  // assigned-proxy profile's connection is never contested.
   pruneStaleFreeProxyExtensions(payload.userDataDir);
-  const useFreeProxy = payload.useFreeProxy && payload.enableFoxywallFreeProxy !== false;
-  const freeProxyPath = useFreeProxy ? writeProfileFreeProxyExtension(payload) : '';
-  if (useFreeProxy && freeProxyPath) {
+  const freeProxyPath = payload.enableFoxywallFreeProxy !== false ?
+    writeProfileFreeProxyExtension(payload) : '';
+  if (freeProxyPath) {
     extensionPaths.push(freeProxyPath);
   }
   const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);

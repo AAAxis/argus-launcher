@@ -1097,6 +1097,22 @@ textarea {
   color: #6e6a63;
 }
 
+.status-toast {
+  animation: toast-in 0.18s var(--ease);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  bottom: 20px;
+  box-shadow: var(--shadow-lg);
+  color: #6e6a63;
+  font-size: 13px;
+  left: 20px;
+  max-width: 360px;
+  padding: 12px 16px;
+  position: fixed;
+  z-index: 40;
+}
+
 .update-toast {
   align-items: flex-start;
   animation: toast-in 0.18s var(--ease);

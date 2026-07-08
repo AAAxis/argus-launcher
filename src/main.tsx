@@ -501,6 +501,7 @@ const socialBookmarks: SharedBookmark[] = [
 let sharedBookmarksColumnAvailable = true;
 let foldersColumnAvailable = true;
 let customStatusesColumnAvailable = true;
+let builtInExtensionsColumnAvailable = true;
 
 function initials(value: string) {
   return value
@@ -1387,6 +1388,16 @@ function App() {
   const [password, setPassword] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
   const [message, setMessage] = useState('');
+  // Auto-dismiss the floating status-toast after a few seconds -- as an
+  // inline footer this never needed a timer, but a floating corner banner
+  // that never clears would sit there forever after the last action.
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    const timer = setTimeout(() => setMessage(''), 5000);
+    return () => clearTimeout(timer);
+  }, [message]);
   const [errorDialog, setErrorDialog] = useState<{title: string; detail: string} | null>(null);
   const {run: runAsyncAction, isPending: isActionPending} = useAsyncAction();
   // Tracks which update version the user has dismissed the corner toast for,
@@ -1854,6 +1865,21 @@ function App() {
           customStatuses = result.data.custom_statuses;
         }
       }
+      let builtInExtensions: BuiltInExtensionToggles | undefined;
+      if (builtInExtensionsColumnAvailable) {
+        const result = await supabase
+            .from('argus_cloud_state')
+            .select('built_in_extensions')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (isMissingColumnError(result.error)) {
+          builtInExtensionsColumnAvailable = false;
+        } else if (result.error) {
+          setMessage(result.error.message);
+        } else if (result.data?.built_in_extensions) {
+          builtInExtensions = result.data.built_in_extensions;
+        }
+      }
       const mergedBookmarks = mergeBookmarks(sharedBookmarks, socialBookmarks);
       const nextState = {
         profiles: Array.isArray(data?.profiles) ? data.profiles : [],
@@ -1864,6 +1890,7 @@ function App() {
           [],
         shared_bookmarks: mergedBookmarks.bookmarks,
         custom_statuses: customStatuses,
+        built_in_extensions: builtInExtensions,
       };
       const {state: repairedState, repaired} = repairProxyAssignments(nextState);
       const {state: purgedState, purged} = purgeExpiredTrash(repairedState);
@@ -1880,15 +1907,19 @@ function App() {
     }
   }
 
-  async function saveCloudState(nextState: CloudState) {
+  // Returns whether the write actually reached Supabase, so callers can tell
+  // a genuine save apart from one that only updated local state -- without
+  // this, every "$name saved" toast fired unconditionally, even when the
+  // Supabase upsert failed, silently losing the change on the next reload.
+  async function saveCloudState(nextState: CloudState): Promise<boolean> {
     setCloudState(nextState);
     if (!supabase) {
-      return;
+      return true;
     }
     const {data: userData} = await supabase.auth.getUser();
     const userId = userData.user?.id;
     if (!userId) {
-      return;
+      return false;
     }
     const payload: Record<string, unknown> = {
       user_id: userId,
@@ -1906,6 +1937,9 @@ function App() {
     if (customStatusesColumnAvailable) {
       payload.custom_statuses = nextState.custom_statuses;
     }
+    if (builtInExtensionsColumnAvailable) {
+      payload.built_in_extensions = nextState.built_in_extensions;
+    }
     let {error} = await supabase
         .from('argus_cloud_state')
         .upsert(payload, {onConflict: 'user_id'});
@@ -1922,6 +1956,10 @@ function App() {
         customStatusesColumnAvailable = false;
         delete payload.custom_statuses;
       }
+      if (error?.message?.includes('built_in_extensions')) {
+        builtInExtensionsColumnAvailable = false;
+        delete payload.built_in_extensions;
+      }
       const fallback = await supabase
           .from('argus_cloud_state')
           .upsert(payload, {onConflict: 'user_id'});
@@ -1929,7 +1967,9 @@ function App() {
     }
     if (error) {
       setMessage(error.message);
+      return false;
     }
+    return true;
   }
 
   async function signIn() {
@@ -2392,7 +2432,13 @@ main().catch((error) => {
     const profiles = profileDraft.id ?
       cloudState.profiles.map((item) => item.id === profile.id ? profile : item) :
       [...cloudState.profiles, profile];
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      // saveCloudState already surfaced the real Supabase error via
+      // setMessage; don't overwrite it with a false "saved" toast, and keep
+      // the dialog open so the user's edits aren't lost.
+      return;
+    }
     setSelectedId(profile.id);
     setProfileDraft(null);
     setMessage(`${profile.name} saved`);
@@ -3363,7 +3409,6 @@ main().catch((error) => {
   function renderProfilesTab() {
     const visible = visibleProfiles();
     const inTrash = selectedFolderId === TRASH_FOLDER_ID;
-    const trashedCount = cloudState.profiles.filter((profile) => profile.deleted_at).length;
     const allVisibleSelected = visible.length > 0 &&
       visible.every((profile) => selectedProfileIds.has(profile.id));
     const {items: pageProfiles, page: clampedProfilePage, totalPages: profileTotalPages, total: profileTotal} =
@@ -3389,12 +3434,6 @@ main().catch((error) => {
             </div>
           ))}
           <button className="ghost" onClick={createFolder}><Plus size={16} /> Folder</button>
-          <button
-            className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
-            onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
-          >
-            <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
-          </button>
         </section>
         <section className="table-toolbar">
           {visible.length > 0 && (
@@ -3755,7 +3794,7 @@ main().catch((error) => {
     {
       key: 'foxywall_free_proxy',
       name: 'FoxyWall Proxy',
-      description: 'Only loaded for profiles set to Free Proxy mode; this switch is a global kill switch on top of that.',
+      description: 'Bundled into every profile; only auto-connects for profiles set to Free Proxy mode. This switch turns off bundling it entirely.',
     },
   ];
 
@@ -3939,8 +3978,20 @@ main().catch((error) => {
 
   function renderTopAction() {
     switch (activeTab) {
-      case 'profiles':
-        return <button onClick={openNewProfile}><Plus size={18} /> Profile</button>;
+      case 'profiles': {
+        const trashedCount = cloudState.profiles.filter((profile) => profile.deleted_at).length;
+        return (
+          <>
+            <button
+                className={selectedFolderId === TRASH_FOLDER_ID ? '' : 'ghost'}
+                onClick={() => setSelectedFolderId(selectedFolderId === TRASH_FOLDER_ID ? '' : TRASH_FOLDER_ID)}
+            >
+              <Trash2 size={14} /> Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}
+            </button>
+            <button onClick={openNewProfile}><Plus size={18} /> Profile</button>
+          </>
+        );
+      }
       case 'proxies':
         return <button onClick={openNewProxy}><Plus size={18} /> Proxy</button>;
       case 'bookmarks':
@@ -4371,9 +4422,13 @@ main().catch((error) => {
         </header>
 
         {renderActiveTab()}
-
-        {message && <footer className="status">{message}</footer>}
       </section>
+
+      {message && (
+        <div className="status-toast" role="status">
+          {message}
+        </div>
+      )}
 
       {renderSettingsModal()}
       {renderExtensionAddModal()}

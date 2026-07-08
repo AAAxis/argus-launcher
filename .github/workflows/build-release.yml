@@ -44,6 +44,19 @@ jobs:
           fi
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
 
+      - name: Write release notes
+        shell: bash
+        # electron-builder picks up build/release-notes.md automatically and
+        # writes it into latest.yml's releaseNotes field, which the app's
+        # update toast displays. Falls back to the commit subject if this
+        # release's commit has no body.
+        run: |
+          mkdir -p build
+          git log -1 --format=%b > build/release-notes.md
+          if [ ! -s build/release-notes.md ]; then
+            git log -1 --format=%s > build/release-notes.md
+          fi
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -90,6 +103,19 @@ jobs:
             exit 1
           fi
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+
+      - name: Write release notes
+        shell: bash
+        # electron-builder picks up build/release-notes.md automatically and
+        # writes it into latest.yml's releaseNotes field, which the app's
+        # update toast displays. Falls back to the commit subject if this
+        # release's commit has no body.
+        run: |
+          mkdir -p build
+          git log -1 --format=%b > build/release-notes.md
+          if [ ! -s build/release-notes.md ]; then
+            git log -1 --format=%s > build/release-notes.md
+          fi
 
       - name: Typecheck
         run: npm run typecheck
