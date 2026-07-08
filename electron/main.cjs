@@ -1782,6 +1782,24 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
         'Argys Browser is not installed and no downloadable browser resource is available yet.',
     };
   }
+  // Proxy reachability is checked here, before the browser is ever spawned,
+  // rather than inside it: the browser used to re-verify the assigned proxy
+  // itself and fail closed with a generic, static error page on any failure
+  // -- indistinguishable from a genuinely dead proxy, and any transient hiccup
+  // in that verification round-trip silently ate an otherwise-working proxy.
+  // A profile in Free Proxy mode has no assigned proxy to check here; that
+  // extension owns and reports its own connection state instead.
+  if (payload.proxy?.host && payload.proxy.port && !payload.useFreeProxy) {
+    const proxyCheck = await checkProxy(payload.proxy);
+    if (!proxyCheck.ok) {
+      return {
+        ok: false,
+        error: `Proxy ${payload.proxy.host}:${payload.proxy.port} did not respond` +
+          `${proxyCheck.error ? ` (${proxyCheck.error})` : ''}. Fix the proxy in ` +
+          'Argys Anty and try again.',
+      };
+    }
+  }
   const extensionPaths = [
     ...bundledExtensionPaths(payload),
     ...(payload.extensionPaths || []),
