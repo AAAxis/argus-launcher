@@ -2040,6 +2040,34 @@ function App() {
     }
   }
 
+  // saveCloudState overwrites the entire profiles array with whatever this
+  // session has in memory -- if that's stale (e.g. a second computer that
+  // hasn't reloaded since a delete happened elsewhere), saving anything at
+  // all silently resurrects whatever this session still thinks exists. Used
+  // by the delete/restore family to apply their change on top of the actual
+  // current server state instead of a potentially-stale local cache. Falls
+  // back to the local list if the fetch fails or Supabase isn't configured,
+  // since refusing to delete at all would be worse than the existing risk.
+  async function fetchLatestProfiles(): Promise<ArgusProfile[]> {
+    if (!supabase) {
+      return cloudState.profiles;
+    }
+    const {data: userData} = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) {
+      return cloudState.profiles;
+    }
+    const {data, error} = await supabase
+        .from('argus_cloud_state')
+        .select('profiles')
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (error || !Array.isArray(data?.profiles)) {
+      return cloudState.profiles;
+    }
+    return data.profiles;
+  }
+
   // Returns whether the write actually reached Supabase, so callers can tell
   // a genuine save apart from one that only updated local state -- without
   // this, every "$name saved" toast fired unconditionally, even when the
@@ -2660,7 +2688,8 @@ main().catch((error) => {
     }
     const {profileIds, label, exclusiveProxyIds} = profileDeleteRequest;
     const deletedAt = new Date().toISOString();
-    const profiles = cloudState.profiles.map((item) =>
+    const latestProfiles = await fetchLatestProfiles();
+    const profiles = latestProfiles.map((item) =>
       profileIds.includes(item.id) ? {...item, deleted_at: deletedAt} : item);
     const proxies = profileDeleteRemoveProxy ?
       cloudState.proxies.filter((proxy) => !exclusiveProxyIds.includes(proxy.id)) :
@@ -2680,7 +2709,8 @@ main().catch((error) => {
   }
 
   async function restoreProfile(profile: ArgusProfile) {
-    const profiles = cloudState.profiles.map((item) =>
+    const latestProfiles = await fetchLatestProfiles();
+    const profiles = latestProfiles.map((item) =>
       item.id === profile.id ? {...item, deleted_at: null} : item);
     const ok = await saveCloudState({...cloudState, profiles});
     if (!ok) {
@@ -2693,7 +2723,8 @@ main().catch((error) => {
     if (!window.confirm(`Permanently delete ${profile.name}? This cannot be undone.`)) {
       return;
     }
-    const profiles = cloudState.profiles.filter((item) => item.id !== profile.id);
+    const latestProfiles = await fetchLatestProfiles();
+    const profiles = latestProfiles.filter((item) => item.id !== profile.id);
     const ok = await saveCloudState({...cloudState, profiles});
     if (!ok) {
       return;
@@ -2706,7 +2737,8 @@ main().catch((error) => {
       return;
     }
     const count = selectedProfileIds.size;
-    const profiles = cloudState.profiles.map((item) =>
+    const latestProfiles = await fetchLatestProfiles();
+    const profiles = latestProfiles.map((item) =>
       selectedProfileIds.has(item.id) ? {...item, deleted_at: null} : item);
     const ok = await saveCloudState({...cloudState, profiles});
     if (!ok) {
@@ -2724,7 +2756,8 @@ main().catch((error) => {
     if (!window.confirm(`Permanently delete ${count} selected ${count === 1 ? 'profile' : 'profiles'}? This cannot be undone.`)) {
       return;
     }
-    const profiles = cloudState.profiles.filter((item) => !selectedProfileIds.has(item.id));
+    const latestProfiles = await fetchLatestProfiles();
+    const profiles = latestProfiles.filter((item) => !selectedProfileIds.has(item.id));
     const ok = await saveCloudState({...cloudState, profiles});
     if (!ok) {
       return;
@@ -3721,7 +3754,6 @@ main().catch((error) => {
   function renderProfilesTab() {
     const visible = visibleProfiles();
     const inTrash = selectedFolderId === TRASH_FOLDER_ID;
-    const trashedCount = cloudState.profiles.filter((profile) => profile.deleted_at).length;
     const allVisibleSelected = visible.length > 0 &&
       visible.every((profile) => selectedProfileIds.has(profile.id));
     const {items: pageProfiles, page: clampedProfilePage, totalPages: profileTotalPages, total: profileTotal} =
@@ -3737,7 +3769,7 @@ main().catch((error) => {
             {cloudState.folders.map((folder) => (
               <option key={folder.id} value={folder.id}>{folder.name}</option>
             ))}
-            <option value={TRASH_FOLDER_ID}>Trash{trashedCount > 0 ? ` (${trashedCount})` : ''}</option>
+            <option value={TRASH_FOLDER_ID}>Trash</option>
           </select>
           {selectedFolderId && selectedFolderId !== TRASH_FOLDER_ID && (
             <button
