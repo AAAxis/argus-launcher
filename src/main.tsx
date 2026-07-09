@@ -1780,7 +1780,11 @@ function App() {
         const cloudCookie = await cloudCookieFromSelection(profile.id, selection);
         const profiles = cloudState.profiles.map((item) =>
           item.id === profile.id ? {...item, ...cloudCookie} : item);
-        await saveCloudState({...cloudState, profiles});
+        const ok = await saveCloudState({...cloudState, profiles});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
         sendResult(requestId, {matched: true, count: cookies.length});
         setMessage(`Migrated ${cookies.length} local cookies for ${profile.name}`);
       } catch (error) {
@@ -1850,7 +1854,11 @@ function App() {
           }
         }
         const nextState = repairProxyAssignments({...cloudState, proxies}).state;
-        await saveCloudState(nextState);
+        const ok = await saveCloudState(nextState);
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
         sendResult(requestId, {updated, created, total: rows.length});
         setMessage(`Reimported proxies: ${updated} updated, ${created} created`);
       } catch (error) {
@@ -1882,7 +1890,11 @@ function App() {
             proxy_id: proxy.id,
             proxy_mode: 'assigned' as const,
           } : profile);
-        await saveCloudState({...cloudState, profiles});
+        const ok = await saveCloudState({...cloudState, profiles});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
         sendResult(requestId, {matched: true, profileId, proxyId: proxy.id});
         setMessage(`Assigned ${proxy.host}:${proxy.port} to ${profileId}`);
       } catch (error) {
@@ -2018,10 +2030,10 @@ function App() {
       setCloudState(migratedState);
       setSelectedId(migratedState.profiles.find((profile) => !profile.deleted_at)?.id || null);
       if (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0) {
-        await saveCloudState(migratedState);
-      }
-      if (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0) {
-        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}${migrated ? `${repaired || mergedBookmarks.changed || purged ? ' · ' : ''}Added ${migrated} existing cookie ${migrated === 1 ? 'import' : 'imports'} to the library` : ''}`);
+        const ok = await saveCloudState(migratedState);
+        if (ok) {
+          setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}${migrated ? `${repaired || mergedBookmarks.changed || purged ? ' · ' : ''}Added ${migrated} existing cookie ${migrated === 1 ? 'import' : 'imports'} to the library` : ''}`);
+        }
       }
     } finally {
       setCloudLoading(false);
@@ -2420,6 +2432,11 @@ main().catch((error) => {
   async function updateProfile(profile: ArgusProfile, patch: Partial<ArgusProfile>) {
     const profiles = cloudState.profiles.map((item) =>
       item.id === profile.id ? {...item, ...patch} : item);
+    // saveCloudState already surfaces the real Supabase error via setMessage
+    // on failure; this function previously gave no feedback either way, so a
+    // failed save (e.g. a status change) looked identical to a successful
+    // one -- the change would show locally but silently never reach the
+    // cloud, then vanish on another machine's next fresh load.
     await saveCloudState({...cloudState, profiles});
   }
 
@@ -2453,7 +2470,10 @@ main().catch((error) => {
     if (folderDraft.id) {
       const folders = cloudState.folders.map((item) =>
         item.id === folderDraft.id ? {...item, name} : item);
-      await saveCloudState({...cloudState, folders});
+      const ok = await saveCloudState({...cloudState, folders});
+      if (!ok) {
+        return;
+      }
       setFolderDraft(null);
       setMessage(`${name} folder saved`);
       return;
@@ -2463,7 +2483,10 @@ main().catch((error) => {
       name,
       created_at: new Date().toISOString(),
     };
-    await saveCloudState({...cloudState, folders: [...cloudState.folders, folder]});
+    const ok = await saveCloudState({...cloudState, folders: [...cloudState.folders, folder]});
+    if (!ok) {
+      return;
+    }
     setSelectedFolderId(folder.id);
     setFolderDraft(null);
     setMessage(`${folder.name} folder created`);
@@ -2476,7 +2499,10 @@ main().catch((error) => {
     const folders = cloudState.folders.filter((item) => item.id !== folder.id);
     const profiles = cloudState.profiles.map((profile) =>
       profile.folder_id === folder.id ? {...profile, folder_id: null} : profile);
-    await saveCloudState({...cloudState, folders, profiles});
+    const ok = await saveCloudState({...cloudState, folders, profiles});
+    if (!ok) {
+      return;
+    }
     setSelectedFolderId('');
     setMessage(`${folder.name} folder deleted`);
   }
@@ -2509,7 +2535,10 @@ main().catch((error) => {
     const statuses = statusList(
         cloudState.custom_statuses,
         baseProfileStatuses.includes(name) ? [] : [name]);
-    await saveCloudState({...cloudState, custom_statuses: statuses});
+    const ok = await saveCloudState({...cloudState, custom_statuses: statuses});
+    if (!ok) {
+      return;
+    }
     setStatusDraft(null);
     setMessage(`${name} status created`);
   }
@@ -2636,7 +2665,10 @@ main().catch((error) => {
     const proxies = profileDeleteRemoveProxy ?
       cloudState.proxies.filter((proxy) => !exclusiveProxyIds.includes(proxy.id)) :
       cloudState.proxies;
-    await saveCloudState({...cloudState, profiles, proxies});
+    const ok = await saveCloudState({...cloudState, profiles, proxies});
+    if (!ok) {
+      return;
+    }
     if (selectedId && profileIds.includes(selectedId)) {
       setSelectedId(profiles.find((item) => !item.deleted_at)?.id || null);
     }
@@ -2650,7 +2682,10 @@ main().catch((error) => {
   async function restoreProfile(profile: ArgusProfile) {
     const profiles = cloudState.profiles.map((item) =>
       item.id === profile.id ? {...item, deleted_at: null} : item);
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      return;
+    }
     setMessage(`${profile.name} restored`);
   }
 
@@ -2659,7 +2694,10 @@ main().catch((error) => {
       return;
     }
     const profiles = cloudState.profiles.filter((item) => item.id !== profile.id);
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      return;
+    }
     setMessage(`${profile.name} permanently deleted`);
   }
 
@@ -2670,7 +2708,10 @@ main().catch((error) => {
     const count = selectedProfileIds.size;
     const profiles = cloudState.profiles.map((item) =>
       selectedProfileIds.has(item.id) ? {...item, deleted_at: null} : item);
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      return;
+    }
     setSelectedProfileIds(new Set());
     setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} restored`);
   }
@@ -2684,7 +2725,10 @@ main().catch((error) => {
       return;
     }
     const profiles = cloudState.profiles.filter((item) => !selectedProfileIds.has(item.id));
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      return;
+    }
     setSelectedProfileIds(new Set());
     setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} permanently deleted`);
   }
@@ -2848,7 +2892,10 @@ main().catch((error) => {
         }
       }
 
-      await saveCloudState({...cloudState, profiles, proxies, folders});
+      const ok = await saveCloudState({...cloudState, profiles, proxies, folders});
+      if (!ok) {
+        return;
+      }
       setImportResult({created, updated, proxiesCreated, proxiesReused, foldersCreated, skipped});
       setMessage(`Imported ${created} new, updated ${updated} profiles`);
       setImportFile(null);
@@ -3069,7 +3116,10 @@ main().catch((error) => {
     const proxies = proxyDraft.id ?
       cloudState.proxies.map((item) => item.id === proxy.id ? proxy : item) :
       [...cloudState.proxies, proxy];
-    await saveCloudState({...cloudState, proxies});
+    const ok = await saveCloudState({...cloudState, proxies});
+    if (!ok) {
+      return;
+    }
     if (!proxyDraft.id && proxyDraftSource === 'profile') {
       setProfileDraft((current) => current ? {
         ...current,
@@ -3103,7 +3153,10 @@ main().catch((error) => {
       };
       const proxies = cloudState.proxies.map((item) =>
         item.id === proxy.id ? checkedProxy : item);
-      await saveCloudState({...cloudState, proxies});
+      const ok = await saveCloudState({...cloudState, proxies});
+      if (!ok) {
+        return;
+      }
       setMessage(result.ok ?
         `${proxy.name || proxy.host} checked · ${result.country || result.countryCode || result.ip || 'OK'} · ${result.pingMs}ms` :
         `${proxy.name || proxy.host} check failed · ${checkedProxy.check_error}`);
@@ -3173,7 +3226,10 @@ main().catch((error) => {
       profile.proxy_id && proxyIds.includes(profile.proxy_id) ?
         {...profile, proxy_id: null} :
         profile);
-    await saveCloudState({...cloudState, proxies, profiles});
+    const ok = await saveCloudState({...cloudState, proxies, profiles});
+    if (!ok) {
+      return;
+    }
     setMessage(`${label} deleted`);
     setSelectedProxyIds(new Set());
     setProxyDraft(null);
@@ -3276,7 +3332,10 @@ main().catch((error) => {
     const nextFolderId = folderId || null;
     const profiles = cloudState.profiles.map((profile) =>
       selectedProfileIds.has(profile.id) ? {...profile, folder_id: nextFolderId} : profile);
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      return;
+    }
     const folderName = nextFolderId ?
       cloudState.folders.find((folder) => folder.id === nextFolderId)?.name :
       'All profiles';
@@ -3314,7 +3373,10 @@ main().catch((error) => {
       }
       return {...profile, ...patch};
     });
-    await saveCloudState({...cloudState, profiles});
+    const ok = await saveCloudState({...cloudState, profiles});
+    if (!ok) {
+      throw new Error('Failed to save matched cookies to cloud state.');
+    }
     return {matched, total: selected.length};
   }
 
@@ -3330,8 +3392,12 @@ main().catch((error) => {
     if (!folderPath) {
       return;
     }
-    const {matched, total} = await matchCookiesToProfiles(folderPath, [...selectedProfileIds]);
-    setMessage(`Matched cookies for ${matched} of ${total} selected profiles`);
+    try {
+      const {matched, total} = await matchCookiesToProfiles(folderPath, [...selectedProfileIds]);
+      setMessage(`Matched cookies for ${matched} of ${total} selected profiles`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function openNewBookmark() {
@@ -3359,10 +3425,13 @@ main().catch((error) => {
     };
     const bookmarks = cloudState.shared_bookmarks.filter(
         (item) => item.url !== (bookmarkDraft.originalUrl || bookmark.url));
-    await saveCloudState({
+    const ok = await saveCloudState({
       ...cloudState,
       shared_bookmarks: [...bookmarks, bookmark],
     });
+    if (!ok) {
+      return;
+    }
     setBookmarkDraft(null);
     setMessage(`${bookmark.title} saved`);
   }
@@ -3372,11 +3441,14 @@ main().catch((error) => {
       setBookmarkDraft(null);
       return;
     }
-    await saveCloudState({
+    const ok = await saveCloudState({
       ...cloudState,
       shared_bookmarks: cloudState.shared_bookmarks.filter(
           (bookmark) => bookmark.url !== bookmarkDraft.originalUrl),
     });
+    if (!ok) {
+      return;
+    }
     setBookmarkDraft(null);
     setMessage('Bookmark deleted');
   }
@@ -3446,10 +3518,13 @@ main().catch((error) => {
       source: 'local',
       storageUrl,
     };
-    await saveCloudState({
+    const ok = await saveCloudState({
       ...cloudState,
       shared_extensions: [...cloudState.shared_extensions, nextExtension],
     });
+    if (!ok) {
+      return;
+    }
     setExtensionAddOpen(false);
     setMessage(usedInlinePackage ?
       `${name} shared inline. Check the ${SHARED_EXTENSIONS_BUCKET} storage bucket for large extensions.` :
@@ -3475,10 +3550,13 @@ main().catch((error) => {
       source: 'webstore',
       webstoreId,
     };
-    await saveCloudState({
+    const ok = await saveCloudState({
       ...cloudState,
       shared_extensions: [...cloudState.shared_extensions, nextExtension],
     });
+    if (!ok) {
+      return;
+    }
     setExtensionAddOpen(false);
     setWebstoreLinkInput('');
     setMessage('Extension shared with your team');
@@ -3601,7 +3679,10 @@ main().catch((error) => {
         url: cloudCookie.cookie_import_url,
         count: cloudCookie.cookie_import_count,
       };
-      await saveCloudState({...cloudState, cookies: [...cloudState.cookies, entry]});
+      const ok = await saveCloudState({...cloudState, cookies: [...cloudState.cookies, entry]});
+      if (!ok) {
+        return;
+      }
       if (profileDraft) {
         setProfileDraft({...profileDraft, cookie_mode: 'saved', cookie_id: entry.id, cookie_search: ''});
       }
@@ -3615,11 +3696,14 @@ main().catch((error) => {
     const cookie = cloudState.cookies.find((item) => item.id === id);
     const profiles = cloudState.profiles.map((profile) =>
       profile.cookie_id === id ? {...profile, cookie_id: null, cookie_mode: 'paste' as const} : profile);
-    await saveCloudState({
+    const ok = await saveCloudState({
       ...cloudState,
       profiles,
       cookies: cloudState.cookies.filter((item) => item.id !== id),
     });
+    if (!ok) {
+      return;
+    }
     if (profileDraft?.cookie_id === id) {
       setProfileDraft({...profileDraft, cookie_mode: 'paste', cookie_id: ''});
     }
