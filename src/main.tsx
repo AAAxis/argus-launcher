@@ -1542,6 +1542,7 @@ function App() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [webstoreLinkInput, setWebstoreLinkInput] = useState('');
+  const [webstoreNameInput, setWebstoreNameInput] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [profileSearch, setProfileSearch] = useState('');
@@ -3801,7 +3802,7 @@ main().catch((error) => {
   // Web Store extensions need no upload at all -- every team member
   // downloads/unpacks the same published CRX directly from Google's own CDN
   // the first time they launch a profile that uses it.
-  async function addExtensionFromWebStoreLink(input: string) {
+  async function addExtensionFromWebStoreLink(input: string, displayName: string) {
     const webstoreId = parseWebstoreExtensionId(input);
     if (!webstoreId) {
       setMessage('That doesn\'t look like a Chrome Web Store link or extension id.');
@@ -3813,7 +3814,7 @@ main().catch((error) => {
     }
     const nextExtension: SharedExtension = {
       id: webstoreId,
-      name: webstoreId,
+      name: displayName.trim() || webstoreId,
       source: 'webstore',
       webstoreId,
     };
@@ -3826,6 +3827,7 @@ main().catch((error) => {
     }
     setExtensionAddOpen(false);
     setWebstoreLinkInput('');
+    setWebstoreNameInput('');
     setMessage('Extension shared with your team');
   }
 
@@ -4979,7 +4981,21 @@ main().catch((error) => {
                 onChange={(event) => setWebstoreLinkInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && webstoreLinkInput.trim()) {
-                    void addExtensionFromWebStoreLink(webstoreLinkInput);
+                    void addExtensionFromWebStoreLink(webstoreLinkInput, webstoreNameInput);
+                  }
+                }}
+              />
+            </label>
+            <label className="field wide">
+              <span>Name (optional)</span>
+              <input
+                type="text"
+                placeholder="Defaults to the extension id"
+                value={webstoreNameInput}
+                onChange={(event) => setWebstoreNameInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && webstoreLinkInput.trim()) {
+                    void addExtensionFromWebStoreLink(webstoreLinkInput, webstoreNameInput);
                   }
                 }}
               />
@@ -4987,7 +5003,7 @@ main().catch((error) => {
             <div className="extension-add-actions">
               <button
                 disabled={!webstoreLinkInput.trim()}
-                onClick={() => void addExtensionFromWebStoreLink(webstoreLinkInput)}
+                onClick={() => void addExtensionFromWebStoreLink(webstoreLinkInput, webstoreNameInput)}
               >
                 Add from link
               </button>
