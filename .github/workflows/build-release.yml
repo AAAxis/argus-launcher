@@ -78,13 +78,25 @@ jobs:
         run: npm run build
 
       - name: Build DMG
+        shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --mac dmg zip --arm64 --publish never
+        # GitHub Actions passes secrets that were never set as empty strings,
+        # not as unset vars. electron-builder treats an empty-but-present
+        # CSC_LINK as "sign with this" rather than "skip signing", which
+        # crashes the build. Until the signing secrets exist, unset them
+        # entirely so this produces an unsigned (but successful) build.
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "CSC_LINK not set; building unsigned."
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npx electron-builder --mac dmg zip --arm64 --publish never
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
