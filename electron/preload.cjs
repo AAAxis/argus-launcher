@@ -1,7 +1,12 @@
 const {contextBridge, ipcRenderer} = require('electron');
 
 contextBridge.exposeInMainWorld('argusNative', {
-  launchProfile: (payload) => ipcRenderer.invoke('argus:launch-profile', payload),
+  launchProfile: (payload, extraArgs) => ipcRenderer.invoke('argus:launch-profile', payload, extraArgs),
+  listApiKeys: () => ipcRenderer.invoke('argus:list-api-keys'),
+  createApiKey: (name, folderScope) => ipcRenderer.invoke('argus:create-api-key', {name, folderScope}),
+  revokeApiKey: (id) => ipcRenderer.invoke('argus:revoke-api-key', id),
+  applyIntegrationConfig: (integrationId, dir, token, base) =>
+    ipcRenderer.invoke('argus:apply-integration-config', {integrationId, dir, token, base}),
   checkProxy: (proxy) => ipcRenderer.invoke('argus:check-proxy', proxy),
   getUpdateStatus: () => ipcRenderer.invoke('argus:update-status'),
   checkForUpdates: () => ipcRenderer.invoke('argus:check-for-updates'),
@@ -62,4 +67,32 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendAssignProfileProxyResult: (requestId, result, error) =>
     ipcRenderer.send('argus:assign-profile-proxy-result', {requestId, result, error}),
+  onLaunchAutomationRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:launch-automation-request', listener);
+    return () => ipcRenderer.removeListener('argus:launch-automation-request', listener);
+  },
+  sendLaunchAutomationResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:launch-automation-result', {requestId, result, error}),
+  onListProfilesRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:list-profiles-request', listener);
+    return () => ipcRenderer.removeListener('argus:list-profiles-request', listener);
+  },
+  sendListProfilesResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:list-profiles-result', {requestId, result, error}),
+  onMonitoringReportRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:monitoring-report-request', listener);
+    return () => ipcRenderer.removeListener('argus:monitoring-report-request', listener);
+  },
+  sendMonitoringReportResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:monitoring-report-result', {requestId, result, error}),
+  onOAuthAuthorizeRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:oauth-authorize-request', listener);
+    return () => ipcRenderer.removeListener('argus:oauth-authorize-request', listener);
+  },
+  sendOAuthAuthorizeResult: (requestId, approved, folderScope, keyName) =>
+    ipcRenderer.send('argus:oauth-authorize-result', {requestId, approved, folderScope, keyName}),
 });

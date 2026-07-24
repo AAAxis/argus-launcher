@@ -1,15 +1,15 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
-import {Apple, Cookie, Download, Monitor, Pencil, Plus, Play, RefreshCw, Shield, Smartphone, Trash2, Upload, X} from 'lucide-react';
+import {Apple, Bot, Copy, Cookie, Download, Hexagon, Monitor, Pencil, Plug, Plus, Play, RefreshCw, Shield, Smartphone, SquareTerminal, Trash2, Upload, X} from 'lucide-react';
 import {native} from './native';
-import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
+import type {ApiKey, ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
 import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensionToggles, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
-type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'api';
+type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'integrations' | 'api';
 
 type ApiEndpoint = {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -100,6 +100,7 @@ const tabs: Array<{id: TabId; label: string}> = [
   {id: 'cookies', label: 'Cookies'},
   {id: 'bookmarks', label: 'Bookmarks'},
   {id: 'extensions', label: 'Extensions'},
+  {id: 'integrations', label: 'Integrations'},
   {id: 'api', label: 'API'},
 ];
 
@@ -168,6 +169,35 @@ const API_GROUPS: ApiGroup[] = [
     ],
   },
 ];
+
+type IntegrationId = 'hive' | 'claude-code' | 'codex';
+
+// Generic Lucide glyphs, not the real product marks -- swap for actual
+// brand logos (SVG assets) whenever those are available.
+const INTEGRATIONS: Array<{id: IntegrationId; name: string; description: string; icon: typeof Hexagon}> = [
+  {
+    id: 'hive',
+    name: 'Hive',
+    description: 'Multi-agent runtime -- run QA/monitoring sweeps across many profiles in parallel.',
+    icon: Hexagon,
+  },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    description: "Anthropic's coding agent CLI -- drive profiles as MCP tools from any project.",
+    icon: Bot,
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    description: "OpenAI's coding agent CLI -- same MCP tools, wired into Codex's own config.",
+    icon: SquareTerminal,
+  },
+];
+
+// Where argus-hive-bridge lives on this machine -- not user-editable in the
+// UI; update this if the checkout ever moves.
+const BRIDGE_PATH = 'C:\\Users\\dima\\argus-hive-bridge';
 
 const defaultState: CloudState = {
   profiles: [],
@@ -1526,7 +1556,13 @@ function App() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
-  const [apiToken, setApiToken] = useState('argys_api_token');
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [revealedKey, setRevealedKey] = useState<{name: string; token: string} | null>(null);
+  const [oauthRequest, setOauthRequest] = useState<{requestId: string; clientName: string; requestedScope: string} | null>(null);
+  const [oauthApprovalFolder, setOauthApprovalFolder] = useState('');
+  const [integrationStatus, setIntegrationStatus] = useState<Partial<Record<IntegrationId, {ok: boolean; message: string}>>>({});
+  const [integrationToken, setIntegrationToken] = useState<Partial<Record<IntegrationId, string>>>({});
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
   const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
@@ -1580,7 +1616,6 @@ function App() {
         }
         if (data.user?.email) {
           setSignedInEmail(data.user.email);
-          setApiToken(tokenForEmail(data.user.email));
           await loadCloudState();
         }
       } finally {
@@ -1593,6 +1628,70 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  // API keys are per-install, not per-user, and named/scoped rather than a
+  // single shared secret -- they're whatever main.cjs's AUTOMATION_KEYS_PATH
+  // holds. They don't change on sign-in/out.
+  async function refreshApiKeys() {
+    const keys = await native?.listApiKeys?.();
+    if (keys) {
+      setApiKeys(keys);
+    }
+  }
+
+  useEffect(() => {
+    void refreshApiKeys();
+  }, []);
+
+  async function createApiKey() {
+    if (!native?.createApiKey) {
+      return;
+    }
+    const created = await native.createApiKey(newKeyName || 'Unnamed key', null);
+    setRevealedKey({name: created.name, token: created.token});
+    setNewKeyName('');
+    await refreshApiKeys();
+  }
+
+  async function revokeApiKey(id: string) {
+    await native?.revokeApiKey?.(id);
+    await refreshApiKeys();
+  }
+
+  // One click, no modal: create the key (full access -- there's no scope
+  // picker in this flow) and immediately either write the target tool's
+  // config directly (claude-code/codex) or, for Hive, reveal the token
+  // inline right on the card since there's no local config file of Hive's
+  // for Anty to write to.
+  async function connectIntegrationOneClick(integrationId: IntegrationId) {
+    if (!native?.createApiKey) {
+      return;
+    }
+    const integration = INTEGRATIONS.find((item) => item.id === integrationId);
+    if (!integration) {
+      return;
+    }
+    const created = await native.createApiKey(integration.name, null);
+    await refreshApiKeys();
+    if (integrationId === 'hive') {
+      setIntegrationToken((prev) => ({...prev, [integrationId]: created.token}));
+      setIntegrationStatus((prev) => ({
+        ...prev,
+        [integrationId]: {ok: true, message: 'Copy this into argus-hive-bridge/.env as ARGYS_API_TOKEN -- shown once.'},
+      }));
+      return;
+    }
+    if (!native.applyIntegrationConfig) {
+      return;
+    }
+    const result = await native.applyIntegrationConfig(integrationId, BRIDGE_PATH, created.token, API_BASE_URL);
+    setIntegrationStatus((prev) => ({
+      ...prev,
+      [integrationId]: result.ok ?
+        {ok: true, message: `Connected -- restart ${integration.name} to use it.`} :
+        {ok: false, message: result.error || 'Failed to write config'},
+    }));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1903,6 +2002,152 @@ function App() {
     });
   }, [cloudState]);
 
+  useEffect(() => {
+    const onRequest = native?.onListProfilesRequest;
+    const sendResult = native?.sendListProfilesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(({requestId, folder, allowedFolders}) => {
+      const profiles = cloudState.profiles
+          .filter((profile) => !profile.deleted_at)
+          .filter((profile) => !folder || profile.folder_id === folder)
+          .filter((profile) => !allowedFolders || allowedFolders.includes(profile.folder_id || ''))
+          .map((profile) => ({id: profile.id, name: profile.name}));
+      sendResult(requestId, {profiles});
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onLaunchAutomationRequest;
+    const sendResult = native?.sendLaunchAutomationResult;
+    const launchProfile = native?.launchProfile;
+    if (!onRequest || !sendResult || !launchProfile) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, cdpPort, allowedFolders}) => {
+      try {
+        const profile = cloudState.profiles.find((item) => item.id === profileId && !item.deleted_at);
+        if (!profile) {
+          sendResult(requestId, {ok: false, error: 'Profile not found'});
+          return;
+        }
+        if (allowedFolders && !allowedFolders.includes(profile.folder_id || '')) {
+          sendResult(requestId, {ok: false, error: 'This key is not scoped to that profile\'s folder'});
+          return;
+        }
+        const commandLineSwitches = [
+          profile.command_line_switches || '',
+          fingerprintSwitches(profile),
+        ].filter(Boolean).join('\n');
+        const proxyMode = profile.proxy_mode || 'assigned';
+        let selectedProxy: ArgusProxy | null = null;
+        if (proxyMode === 'assigned') {
+          selectedProxy = proxyFor(profile);
+          if (!selectedProxy?.host || !selectedProxy.port) {
+            sendResult(requestId, {ok: false, error: `Proxy for ${profile.name} is invalid`});
+            return;
+          }
+        }
+        // spawnProfileUnchecked (main process) is the authoritative proxy
+        // gate on every launch regardless -- unlike the manual Launch button,
+        // this path skips the interactive pre-check/retry UI (nothing to
+        // show it to) and skips fingerprint-rotate-on-launch, since automated
+        // QA/monitoring runs want a stable, comparable fingerprint across
+        // repeated sweeps rather than a fresh one each time.
+        const savedCookie = profile.cookie_mode === 'saved' && profile.cookie_id ?
+          cloudState.cookies.find((item) => item.id === profile.cookie_id) :
+          null;
+        const result = await launchProfile({
+          id: profile.id,
+          name: profile.name,
+          userDataDir: profileDataDir(profile.id),
+          proxy: selectedProxy,
+          useFreeProxy: proxyMode === 'free_proxy',
+          sharedExtensions: cloudState.shared_extensions,
+          commandLineSwitches,
+          runtimeFingerprint: buildRuntimeFingerprint(profile),
+          startUrl: browserStartUrl(profile),
+          homeHtml: anonymousHomeHtml(profile, cloudState.shared_bookmarks, selectedProxy),
+          cookieImportPath: savedCookie ? null : (profile.cookie_import_path || null),
+          cookieImportUrl: savedCookie ? savedCookie.url : (profile.cookie_import_url || null),
+          cookieImportName: savedCookie ? savedCookie.name : (profile.cookie_import_name || null),
+          enableCookieManager: cloudState.built_in_extensions?.cookie_manager !== false,
+          enableSmsActivate: cloudState.built_in_extensions?.sms_activate !== false,
+          enableFoxywallFreeProxy: cloudState.built_in_extensions?.foxywall_free_proxy !== false,
+        }, [`--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*']);
+        sendResult(requestId, {ok: result.ok, pid: result.pid, error: result.error});
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onMonitoringReportRequest;
+    const sendResult = native?.sendMonitoringReportResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, runId, profileId, ok, detail, screenshotBase64}) => {
+      try {
+        if (!supabase) {
+          sendResult(requestId, undefined, 'Supabase env is missing in .env');
+          return;
+        }
+        const {data: userData, error: userError} = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        if (userError || !userId) {
+          sendResult(requestId, undefined, 'Not signed in');
+          return;
+        }
+        const {error} = await supabase.from('argus_monitoring_results').insert({
+          user_id: userId,
+          run_id: runId,
+          profile_id: profileId,
+          ok,
+          detail: detail || null,
+          screenshot_base64: screenshotBase64,
+        });
+        if (error) {
+          sendResult(requestId, undefined, error.message);
+          return;
+        }
+        sendResult(requestId, {ok: true});
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const onRequest = native?.onOAuthAuthorizeRequest;
+    if (!onRequest) {
+      return;
+    }
+    return onRequest(({requestId, clientName, requestedScope}) => {
+      const requestedFolder = requestedScope.startsWith('folder:') ? requestedScope.slice('folder:'.length) : '';
+      setOauthApprovalFolder(requestedFolder);
+      setOauthRequest({requestId, clientName, requestedScope});
+    });
+  }, []);
+
+  async function respondToOAuthRequest(approved: boolean) {
+    if (!oauthRequest || !native?.sendOAuthAuthorizeResult) {
+      return;
+    }
+    native.sendOAuthAuthorizeResult(
+        oauthRequest.requestId,
+        approved,
+        approved && oauthApprovalFolder ? [oauthApprovalFolder] : approved ? null : null,
+        oauthRequest.clientName,
+    );
+    setOauthRequest(null);
+    if (approved) {
+      await refreshApiKeys();
+    }
+  }
+
   async function runUpdateAction(action: 'check' | 'download' | 'install') {
     try {
       setUpdateBusy(true);
@@ -2151,7 +2396,6 @@ function App() {
       return;
     }
     setSignedInEmail(data.user.email || email);
-    setApiToken(tokenForEmail(data.user.email || email));
     setPassword('');
     await loadCloudState();
   }
@@ -2159,25 +2403,13 @@ function App() {
   async function signOut() {
     await supabase?.auth.signOut();
     setSignedInEmail('');
-    setApiToken('argys_api_token');
     setCloudState(defaultState);
     setSelectedId(null);
     setSelectedFolderId('');
   }
 
-  function tokenForEmail(value: string) {
-    let hash = 0x811c9dc5;
-    const normalized = value.trim().toLowerCase();
-    for (let i = 0; i < normalized.length; i++) {
-      hash ^= normalized.charCodeAt(i);
-      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) +
-          (hash << 24);
-    }
-    return `argys_${normalized.replace(/[^a-z0-9]/g, '_')}_${(hash >>> 0).toString(16).padStart(8, '0')}`;
-  }
-
   function authHeader() {
-    return `Authorization: Bearer ${apiToken || 'argys_api_token'}`;
+    return 'Authorization: Bearer <YOUR_API_KEY>';
   }
 
   function curlFor(endpoint: ApiEndpoint) {
@@ -2198,7 +2430,9 @@ function App() {
 // Keep Argys Anty open and signed in while running this script.
 
 const BASE_URL = ${JSON.stringify(API_BASE_URL)};
-const TOKEN = ${JSON.stringify(apiToken || 'argys_api_token')};
+// Create a key in Settings -> API and paste it here. Keys are only shown
+// once, at creation -- Anty never stores or displays the raw value again.
+const TOKEN = '<YOUR_API_KEY>';
 
 async function argys(method, path, body) {
   const response = await fetch(\`\${BASE_URL}\${path}\`, {
@@ -4197,6 +4431,71 @@ main().catch((error) => {
     );
   }
 
+  function renderIntegrationsTab() {
+    return (
+      <section className="api-panel">
+        <section className="api-note">
+          <Plug size={18} />
+          <span>
+            Connect drives every profile in this account as MCP tools --
+            launch, navigate, read, screenshot, close. One click creates a
+            key and, for Claude Code/Codex, writes their config directly --
+            nothing to copy or paste.
+          </span>
+        </section>
+
+        <section className="integration-grid">
+          {INTEGRATIONS.map((integration) => {
+            const connectedKeys = apiKeys.filter((key) => key.name === integration.name);
+            const Icon = integration.icon;
+            const status = integrationStatus[integration.id];
+            const token = integrationToken[integration.id];
+            return (
+              <div className="integration-card" key={integration.id}>
+                <div className="integration-card-head">
+                  <Icon size={22} />
+                  <h2>{integration.name}</h2>
+                </div>
+                <p>{integration.description}</p>
+                {connectedKeys.length > 0 ?
+                  <span className="status-pill"><span className="status-dot" />Connected</span> :
+                  <button onClick={() => void connectIntegrationOneClick(integration.id)}>Connect</button>}
+                {status && <p className={status.ok ? 'apply-status-ok' : 'apply-status-error'}>{status.message}</p>}
+                {token && (
+                  <div className="snippet-block">
+                    <button
+                        className="snippet-copy"
+                        onClick={() => { void navigator.clipboard.writeText(token); }}
+                        title="Copy to clipboard">
+                      <Copy size={14} /> Copy
+                    </button>
+                    <pre>{token}</pre>
+                  </div>
+                )}
+                {connectedKeys.map((key) => (
+                  <div className="endpoint" key={key.id}>
+                    <div className="endpoint-head">
+                      <code className="path">...{key.tokenPreview}</code>
+                      <span className="endpoint-label">
+                        {key.folderScope ?
+                          (key.folderScope.map((id) => cloudState.folders.find((f) => f.id === id)?.name || id).join(', ') || 'no folders') :
+                          'All folders'}
+                      </span>
+                      <span className="endpoint-label">
+                        {key.lastUsedAt ? `Last used ${new Date(key.lastUsedAt).toLocaleString()}` : 'Never used'}
+                      </span>
+                      <button className="copy-button" onClick={() => void revokeApiKey(key.id)}>Revoke</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </section>
+      </section>
+    );
+  }
+
   function renderApiTab() {
     return (
       <section className="api-panel">
@@ -4205,10 +4504,6 @@ main().catch((error) => {
             <span>Base URL</span>
             <code>{API_BASE_URL}</code>
           </div>
-          <label className="summary-item token-field">
-            <span>Bearer token</span>
-            <input value={apiToken} spellCheck={false} onChange={(event) => setApiToken(event.target.value)} />
-          </label>
           <div className="summary-item">
             <span>Account</span>
             <code>{signedInEmail}</code>
@@ -4226,7 +4521,20 @@ main().catch((error) => {
 
         <section className="api-note">
           <Shield size={18} />
-          <span>Argys API tokens are generated per signed-in email for local automation and cloud-backed profile data. Browser sessions stay anonymous.</span>
+          <span>Connected apps (Hive, etc.) show up on the Integrations tab via the connect flow. Create a key by hand here only for your own scripts.</span>
+        </section>
+
+        <section className="api-group">
+          <h2>Create a key</h2>
+          <div className="endpoint">
+            <input
+              placeholder="Key name (e.g. my script)"
+              value={newKeyName}
+              spellCheck={false}
+              onChange={(event) => setNewKeyName(event.target.value)}
+            />
+            <button className="copy-button" onClick={() => void createApiKey()}>Create key</button>
+          </div>
         </section>
 
         <div className="api-groups">
@@ -4250,6 +4558,70 @@ main().catch((error) => {
 
         {copiedEndpoint && <div className="toast">Copied {copiedEndpoint}</div>}
       </section>
+    );
+  }
+
+  function renderRevealedKeyModal() {
+    if (!revealedKey) {
+      return null;
+    }
+    return (
+      <div className="modal-backdrop" onMouseDown={() => setRevealedKey(null)}>
+        <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Key created: {revealedKey.name}</h2>
+            </div>
+          </header>
+          <p>Copy this now -- Anty won't show the raw key again.</p>
+          <div className="snippet-block">
+            <button
+                className="snippet-copy"
+                onClick={() => { void navigator.clipboard.writeText(revealedKey.token); }}
+                title="Copy to clipboard">
+              <Copy size={14} /> Copy
+            </button>
+            <pre>{revealedKey.token}</pre>
+          </div>
+          <div className="summary-actions">
+            <button onClick={() => setRevealedKey(null)}>Done</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderOAuthApprovalModal() {
+    if (!oauthRequest) {
+      return null;
+    }
+    return (
+      <div className="modal-backdrop">
+        <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>"{oauthRequest.clientName}" wants to connect</h2>
+            </div>
+          </header>
+          <p>
+            It's asking for: <strong>{oauthRequest.requestedScope === 'all' ? 'every profile folder' : oauthRequest.requestedScope}</strong>.
+            You can grant a narrower folder instead before approving.
+          </p>
+          <label>
+            <span>Grant access to</span>
+            <select value={oauthApprovalFolder} onChange={(event) => setOauthApprovalFolder(event.target.value)}>
+              <option value="">All folders</option>
+              {cloudState.folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="summary-actions">
+            <button onClick={() => void respondToOAuthRequest(false)}>Deny</button>
+            <button onClick={() => void respondToOAuthRequest(true)}>Approve</button>
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -4338,6 +4710,8 @@ main().catch((error) => {
         return renderBookmarksTab();
       case 'extensions':
         return renderExtensionsTab();
+      case 'integrations':
+        return renderIntegrationsTab();
       case 'api':
         return renderApiTab();
       case 'profiles':
@@ -4370,6 +4744,7 @@ main().catch((error) => {
         return <button onClick={openNewBookmark}><Plus size={18} /> Bookmark</button>;
       case 'extensions':
         return null;
+      case 'integrations':
       case 'api':
       default:
         return null;
@@ -4937,6 +5312,8 @@ main().catch((error) => {
       {renderChangelogModal()}
       {renderExtensionAddModal()}
       {renderImportModal()}
+      {renderOAuthApprovalModal()}
+      {renderRevealedKeyModal()}
 
       {profileDraft && (
         <div className="modal-backdrop" onMouseDown={() => setProfileDraft(null)}>

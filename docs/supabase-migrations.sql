@@ -61,3 +61,44 @@ on storage.objects
 for delete
 to authenticated
 using (bucket_id = 'global');
+
+-- Per-profile check results reported by external automation (e.g. a Hive
+-- QA/monitoring sweep) via POST /v1/monitoring/report. Anty's main process
+-- forwards the write to the renderer, which inserts here as the signed-in
+-- user -- the automation caller never gets a Supabase key of its own.
+create table if not exists public.argus_monitoring_results (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  run_id text not null,
+  profile_id text not null,
+  ok boolean not null,
+  detail text,
+  screenshot_base64 text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists argus_monitoring_results_user_run_idx
+on public.argus_monitoring_results (user_id, run_id);
+
+alter table public.argus_monitoring_results enable row level security;
+
+drop policy if exists "users can read their own monitoring results" on public.argus_monitoring_results;
+create policy "users can read their own monitoring results"
+on public.argus_monitoring_results
+for select
+to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "users can insert their own monitoring results" on public.argus_monitoring_results;
+create policy "users can insert their own monitoring results"
+on public.argus_monitoring_results
+for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "users can delete their own monitoring results" on public.argus_monitoring_results;
+create policy "users can delete their own monitoring results"
+on public.argus_monitoring_results
+for delete
+to authenticated
+using (auth.uid() = user_id);

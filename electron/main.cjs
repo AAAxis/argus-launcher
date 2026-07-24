@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
@@ -1919,8 +1920,8 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   };
 }
 
-ipcMain.handle('argus:launch-profile', async (_event, payload) => {
-  return spawnProfile(payload);
+ipcMain.handle('argus:launch-profile', async (_event, payload, extraArgs) => {
+  return spawnProfile(payload, Array.isArray(extraArgs) ? extraArgs : []);
 });
 
 ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
@@ -1941,6 +1942,113 @@ ipcMain.handle('argus:download-browser-resource', async () => {
 
 ipcMain.handle('argus:api-status', async () => {
   return publicApiState();
+});
+
+ipcMain.handle('argus:list-api-keys', async () => {
+  return publicAutomationKeys();
+});
+
+ipcMain.handle('argus:create-api-key', async (_event, {name, folderScope}) => {
+  return createAutomationKey(name, folderScope);
+});
+
+ipcMain.handle('argus:revoke-api-key', async (_event, id) => {
+  return {revoked: revokeAutomationKey(id)};
+});
+
+// Writes the argus-hive-bridge MCP server registration directly into the
+// config file each tool reads at startup, instead of making the user
+// copy/paste it -- every CLI-command form of this we tried
+// (`claude mcp add`, `claude mcp add-json`) turned out to be unreliable on
+// Windows, and file-editing has no shell argument-passing to go wrong.
+function claudeConfigPath() {
+  return path.join(app.getPath('home'), '.claude.json');
+}
+
+function codexConfigPath() {
+  return path.join(app.getPath('home'), '.codex', 'config.toml');
+}
+
+function applyClaudeCodeConfig(dir, token, base) {
+  const configPath = claudeConfigPath();
+  let config = {};
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // Missing or unreadable -- start fresh. We only ever touch mcpServers.
+  }
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+    config = {};
+  }
+  config.mcpServers = (config.mcpServers && typeof config.mcpServers === 'object') ? config.mcpServers : {};
+  config.mcpServers.argus = {
+    type: 'stdio',
+    // Point straight at the bridge's own venv Python rather than `uv run` --
+    // `uv` isn't guaranteed to be on PATH for whatever spawns this process
+    // (confirmed: it wasn't even installed on this machine), while the venv
+    // itself already has argus_hive_bridge installed and proven working.
+    command: path.join(dir, '.venv', 'Scripts', 'python.exe'),
+    args: ['-m', 'argus_hive_bridge.mcp_server'],
+    env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
+  };
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return configPath;
+}
+
+function applyCodexConfig(dir, token, base) {
+  const configPath = codexConfigPath();
+  fs.mkdirSync(path.dirname(configPath), {recursive: true});
+  let existing = '';
+  try {
+    existing = fs.readFileSync(configPath, 'utf8');
+  } catch {
+    // No config yet -- fine, we're creating it.
+  }
+  // Same reasoning as applyClaudeCodeConfig: point at the venv's own Python
+  // instead of `uv run` -- uv isn't confirmed present on PATH for whatever
+  // spawns this, the venv already works.
+  const escapedPython = path.join(dir, '.venv', 'Scripts', 'python.exe').replace(/\\/g, '\\\\');
+  const block = [
+    '[mcp_servers.argus]',
+    `command = "${escapedPython}"`,
+    'args = ["-m", "argus_hive_bridge.mcp_server"]',
+    '',
+    '[mcp_servers.argus.env]',
+    `ARGYS_API_TOKEN = "${token}"`,
+    `ARGYS_API_BASE = "${base}"`,
+    '',
+  ].join('\n');
+  // Text-based section replace/append -- no TOML library here, and this app
+  // only ever touches its own [mcp_servers.argus] table, so "find this exact
+  // header, cut to the next top-level [section] or EOF, splice in the new
+  // block" is safe without one.
+  const headerIndex = existing.indexOf('[mcp_servers.argus]');
+  if (headerIndex === -1) {
+    const separator = existing.trim().length > 0 ? '\n\n' : '';
+    fs.writeFileSync(configPath, existing.replace(/\s*$/, '') + separator + block);
+  } else {
+    const afterHeader = existing.slice(headerIndex + '[mcp_servers.argus]'.length);
+    const nextSectionMatch = afterHeader.match(/\n\[(?!mcp_servers\.argus\.)/);
+    const sectionEnd = nextSectionMatch ?
+      headerIndex + '[mcp_servers.argus]'.length + nextSectionMatch.index + 1 :
+      existing.length;
+    fs.writeFileSync(configPath, existing.slice(0, headerIndex) + block + existing.slice(sectionEnd));
+  }
+  return configPath;
+}
+
+ipcMain.handle('argus:apply-integration-config', async (_event, {integrationId, dir, token, base}) => {
+  try {
+    if (integrationId === 'claude-code') {
+      return {ok: true, path: applyClaudeCodeConfig(dir, token, base)};
+    }
+    if (integrationId === 'codex') {
+      return {ok: true, path: applyCodexConfig(dir, token, base)};
+    }
+    return {ok: false, error: `No auto-apply available for ${integrationId}`};
+  } catch (error) {
+    return {ok: false, error: error.message};
+  }
 });
 
 ipcMain.handle('argus:check-for-updates', async () => {
@@ -2102,6 +2210,189 @@ const AUTOMATION_API_PORT = 39219;
 const pendingAutomationRequests = new Map();
 const AUTOMATION_REQUEST_TIMEOUT_MS = 20000;
 
+// Loopback-only isn't the same as trusted: any local process (including a
+// page open in an ordinary browser tab, since this server answers with
+// permissive CORS headers) can already reach 127.0.0.1. Named, scoped,
+// revocable keys -- persisted as salted hashes, never plaintext -- are what
+// actually gate access. Each key optionally restricts which profile folders
+// it can see/launch, so a given integration (e.g. Hive) can be handed access
+// to one folder of profiles instead of the whole account.
+const AUTOMATION_KEYS_PATH = path.join(app.getPath('userData'), 'automation-keys.json');
+const LEGACY_AUTOMATION_TOKEN_PATH = path.join(app.getPath('userData'), 'automation-token.json');
+let automationKeysCache = null;
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function loadAutomationKeys() {
+  if (automationKeysCache) {
+    return automationKeysCache;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(AUTOMATION_KEYS_PATH, 'utf8'));
+    if (parsed && Array.isArray(parsed.keys)) {
+      automationKeysCache = parsed.keys;
+      return automationKeysCache;
+    }
+  } catch {
+    // No store on disk yet -- fall through to a possible legacy migration.
+  }
+  // One-time migration from the original single-token file so anything
+  // already relying on it (e.g. an already-configured Hive bridge) keeps
+  // working as a full-access "Legacy" key instead of silently breaking.
+  try {
+    const legacy = JSON.parse(fs.readFileSync(LEGACY_AUTOMATION_TOKEN_PATH, 'utf8'));
+    if (legacy && typeof legacy.token === 'string' && legacy.token.length >= 32) {
+      automationKeysCache = [{
+        id: crypto.randomUUID(),
+        name: 'Legacy (full access)',
+        tokenHash: hashToken(legacy.token),
+        tokenPreview: legacy.token.slice(-4),
+        folderScope: null,
+        createdAt: new Date().toISOString(),
+        lastUsedAt: null,
+      }];
+      saveAutomationKeys(automationKeysCache);
+      return automationKeysCache;
+    }
+  } catch {
+    // No legacy token either -- fresh install, start empty.
+  }
+  automationKeysCache = [];
+  return automationKeysCache;
+}
+
+function saveAutomationKeys(keys) {
+  automationKeysCache = keys;
+  fs.mkdirSync(path.dirname(AUTOMATION_KEYS_PATH), {recursive: true});
+  fs.writeFileSync(AUTOMATION_KEYS_PATH, JSON.stringify({keys}, null, 2), {mode: 0o600});
+}
+
+// folderScope: null grants every folder; an array (possibly empty) grants
+// only those folder ids.
+function createAutomationKey(name, folderScope) {
+  const token = crypto.randomBytes(24).toString('hex');
+  const key = {
+    id: crypto.randomUUID(),
+    name: (name || 'Unnamed key').slice(0, 80),
+    tokenHash: hashToken(token),
+    tokenPreview: token.slice(-4),
+    folderScope: Array.isArray(folderScope) ? folderScope : null,
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+  };
+  const keys = loadAutomationKeys();
+  saveAutomationKeys([...keys, key]);
+  // Raw token is returned exactly once, to the caller that just created it --
+  // only its hash is ever persisted.
+  return {...key, token};
+}
+
+function revokeAutomationKey(id) {
+  const keys = loadAutomationKeys();
+  const next = keys.filter((key) => key.id !== id);
+  if (next.length === keys.length) {
+    return false;
+  }
+  saveAutomationKeys(next);
+  return true;
+}
+
+function publicAutomationKeys() {
+  return loadAutomationKeys().map(({tokenHash, ...rest}) => rest);
+}
+
+// Resolves the caller's key from its Authorization header, or null if
+// missing/invalid/revoked. Updates lastUsedAt on a hit.
+function resolveAutomationKey(req) {
+  const match = /^Bearer (.+)$/.exec(req.headers['authorization'] || '');
+  if (!match) {
+    return null;
+  }
+  const provided = Buffer.from(hashToken(match[1]));
+  const keys = loadAutomationKeys();
+  const found = keys.find((key) => {
+    const expected = Buffer.from(key.tokenHash);
+    return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  });
+  if (!found) {
+    return null;
+  }
+  found.lastUsedAt = new Date().toISOString();
+  saveAutomationKeys(keys);
+  return found;
+}
+
+// undefined folderScope (key grants everything) or an explicit allow-list
+// that includes folderId.
+function keyAllowsFolder(key, folderId) {
+  return !key.folderScope || key.folderScope.includes(folderId);
+}
+
+// Profiles launched through /v1/profiles/launch-automation, keyed by
+// profileId. Deliberately separate from ordinary user-launched windows (which
+// this process doesn't track at all) so close-automation can never reach out
+// and kill a window a human opened by hand.
+const automationLaunches = new Map();
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const {port} = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+function waitForCdpReady(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const req = http.get({host: '127.0.0.1', port, path: '/json/version', timeout: 1500}, (res) => {
+        if (res.statusCode === 200) {
+          res.resume();
+          resolve();
+          return;
+        }
+        res.resume();
+        retry();
+      });
+      req.on('error', retry);
+      req.on('timeout', () => req.destroy());
+    };
+    const retry = () => {
+      if (Date.now() > deadline) {
+        reject(new Error('Timed out waiting for the browser\'s CDP endpoint to come up'));
+        return;
+      }
+      setTimeout(attempt, 300);
+    };
+    attempt();
+  });
+}
+
+function killAutomationLaunch(profileId) {
+  const tracked = automationLaunches.get(profileId);
+  if (!tracked) {
+    return false;
+  }
+  automationLaunches.delete(profileId);
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(tracked.pid), '/T', '/F'], {stdio: 'ignore'});
+    } else {
+      process.kill(tracked.pid);
+    }
+  } catch {
+    // Already exited -- nothing left to clean up.
+  }
+  return true;
+}
+
 ipcMain.on('argus:bulk-match-cookies-result', (_event, {requestId, result, error}) => {
   const pending = pendingAutomationRequests.get(requestId);
   if (!pending) {
@@ -2166,10 +2457,179 @@ ipcMain.on('argus:assign-profile-proxy-result', (_event, {requestId, result, err
   pending.res.end(JSON.stringify({status: true, ...result}));
 });
 
+ipcMain.on('argus:launch-automation-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error || !result?.ok) {
+    pending.res.writeHead(error ? 500 : 400, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error || result?.error || 'Launch failed'}));
+    return;
+  }
+  (async () => {
+    try {
+      await waitForCdpReady(pending.cdpPort, 15000);
+      automationLaunches.set(pending.profileId, {pid: result.pid, port: pending.cdpPort, launchedByKeyId: pending.keyId});
+      sendJson(pending.res, 200, {
+        status: true,
+        profileId: pending.profileId,
+        cdpUrl: `http://127.0.0.1:${pending.cdpPort}`,
+        pid: result.pid,
+      });
+    } catch (waitError) {
+      sendJson(pending.res, 504, {status: false, msg: waitError.message});
+    }
+  })();
+});
+
+ipcMain.on('argus:monitoring-report-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true});
+});
+
+ipcMain.on('argus:list-profiles-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, profiles: result?.profiles || []});
+});
+
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, {'Content-Type': 'application/json'});
   res.end(JSON.stringify(body));
 }
+
+function sendRedirect(res, location) {
+  res.writeHead(302, {Location: location});
+  res.end();
+}
+
+function isLoopbackRedirectUri(value) {
+  try {
+    const url = new URL(value);
+    return (url.hostname === '127.0.0.1' || url.hostname === 'localhost') &&
+      (url.protocol === 'http:' || url.protocol === 'https:');
+  } catch {
+    return false;
+  }
+}
+
+// Standard "loopback OAuth" pattern used by CLI tools (gh, gcloud, aws) when
+// there's no hosted authorization server: the client (e.g. Hive, running on
+// this same machine) opens this URL in a real browser, the user approves
+// inside Argys Anty itself, and Anty redirects back to the client's own
+// local callback with a short-lived one-time code. /v1/oauth/token then
+// exchanges that code for the actual key -- so the long-lived token never
+// sits in a URL/browser history, only the disposable code does.
+const oauthCodes = new Map();
+const OAUTH_CODE_TTL_MS = 60000;
+
+function handleOAuthAuthorize(req, res, parsedUrl) {
+  const clientName = parsedUrl.searchParams.get('client_name');
+  const redirectUri = parsedUrl.searchParams.get('redirect_uri');
+  const scope = parsedUrl.searchParams.get('scope') || 'all';
+  const state = parsedUrl.searchParams.get('state') || '';
+  if (!clientName) {
+    sendJson(res, 400, {status: false, msg: 'client_name is required'});
+    return;
+  }
+  if (!redirectUri || !isLoopbackRedirectUri(redirectUri)) {
+    sendJson(res, 400, {status: false, msg: 'redirect_uri must be a loopback (127.0.0.1/localhost) URL'});
+    return;
+  }
+  if (!mainWindow) {
+    sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+    return;
+  }
+  mainWindow.show();
+  mainWindow.focus();
+  const requestId = crypto.randomUUID();
+  // This one waits on a human clicking Approve/Deny, not another process --
+  // give it real time instead of the usual short automation timeout.
+  const timeout = setTimeout(() => {
+    pendingAutomationRequests.delete(requestId);
+    sendJson(res, 504, {status: false, msg: 'Timed out waiting for approval in Argys Anty'});
+  }, 5 * 60 * 1000);
+  pendingAutomationRequests.set(requestId, {res, timeout, redirectUri, state});
+  mainWindow.webContents.send('argus:oauth-authorize-request', {
+    requestId,
+    clientName,
+    requestedScope: scope,
+  });
+}
+
+function handleOAuthTokenExchange(req, res) {
+  let body = '';
+  req.on('data', (chunk) => { body += chunk; });
+  req.on('end', () => {
+    let payload;
+    try {
+      payload = JSON.parse(body || '{}');
+    } catch {
+      sendJson(res, 400, {status: false, msg: 'Invalid JSON body'});
+      return;
+    }
+    const entry = payload.code ? oauthCodes.get(payload.code) : null;
+    if (payload.code) {
+      oauthCodes.delete(payload.code);
+    }
+    if (!entry || entry.expiresAt < Date.now()) {
+      sendJson(res, 400, {status: false, msg: 'Invalid or expired code'});
+      return;
+    }
+    sendJson(res, 200, {status: true, token: entry.token, name: entry.name, folderScope: entry.folderScope});
+  });
+}
+
+ipcMain.on('argus:oauth-authorize-result', (_event, {requestId, approved, folderScope, keyName}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  const redirectUrl = new URL(pending.redirectUri);
+  if (!approved) {
+    redirectUrl.searchParams.set('error', 'access_denied');
+    if (pending.state) {
+      redirectUrl.searchParams.set('state', pending.state);
+    }
+    sendRedirect(pending.res, redirectUrl.toString());
+    return;
+  }
+  const created = createAutomationKey(keyName, folderScope);
+  const code = crypto.randomBytes(24).toString('hex');
+  oauthCodes.set(code, {
+    token: created.token,
+    name: created.name,
+    folderScope: created.folderScope,
+    expiresAt: Date.now() + OAUTH_CODE_TTL_MS,
+  });
+  redirectUrl.searchParams.set('code', code);
+  if (pending.state) {
+    redirectUrl.searchParams.set('state', pending.state);
+  }
+  sendRedirect(pending.res, redirectUrl.toString());
+});
 
 function startAutomationApiServer() {
   apiState.status = 'starting';
@@ -2179,8 +2639,8 @@ function startAutomationApiServer() {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       });
       res.end();
       return;
@@ -2189,21 +2649,54 @@ function startAutomationApiServer() {
       sendJson(res, 200, {status: true, service: 'argys-anty-api'});
       return;
     }
+    const parsedUrl = new URL(req.url, 'http://127.0.0.1');
+
+    if (req.method === 'GET' && parsedUrl.pathname === '/v1/oauth/authorize') {
+      handleOAuthAuthorize(req, res, parsedUrl);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/oauth/token') {
+      handleOAuthTokenExchange(req, res);
+      return;
+    }
+
+    const key = resolveAutomationKey(req);
+    if (!key) {
+      sendJson(res, 401, {status: false, msg: 'Missing or invalid Authorization bearer token'});
+      return;
+    }
+    if (req.method === 'GET' && parsedUrl.pathname === '/v1/profiles') {
+      if (!mainWindow) {
+        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        pendingAutomationRequests.delete(requestId);
+        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
+      }, AUTOMATION_REQUEST_TIMEOUT_MS);
+      pendingAutomationRequests.set(requestId, {res, timeout});
+      mainWindow.webContents.send('argus:list-profiles-request', {
+        requestId,
+        folder: parsedUrl.searchParams.get('folder') || null,
+        allowedFolders: key.folderScope,
+      });
+      return;
+    }
     if (req.method !== 'POST' ||
-        (req.url !== '/v1/cookies/bulk-match' &&
-         req.url !== '/v1/cookies/push-local' &&
-         req.url !== '/v1/proxies/reimport' &&
-         req.url !== '/v1/profiles/assign-proxy')) {
+        (parsedUrl.pathname !== '/v1/cookies/bulk-match' &&
+         parsedUrl.pathname !== '/v1/cookies/push-local' &&
+         parsedUrl.pathname !== '/v1/proxies/reimport' &&
+         parsedUrl.pathname !== '/v1/profiles/assign-proxy' &&
+         parsedUrl.pathname !== '/v1/profiles/launch-automation' &&
+         parsedUrl.pathname !== '/v1/profiles/close-automation' &&
+         parsedUrl.pathname !== '/v1/monitoring/report')) {
       sendJson(res, 404, {status: false, msg: 'Not found'});
       return;
     }
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      if (!mainWindow) {
-        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
-        return;
-      }
+    req.on('end', async () => {
       let payload;
       try {
         payload = JSON.parse(body || '{}');
@@ -2211,9 +2704,31 @@ function startAutomationApiServer() {
         sendJson(res, 400, {status: false, msg: 'Invalid JSON body'});
         return;
       }
-      const isPushLocal = req.url === '/v1/cookies/push-local';
-      const isReimportProxies = req.url === '/v1/proxies/reimport';
-      const isAssignProfileProxy = req.url === '/v1/profiles/assign-proxy';
+      if (parsedUrl.pathname === '/v1/profiles/close-automation') {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+        const tracked = automationLaunches.get(payload.profileId);
+        // A scoped key may only close what it (or an unscoped/full-access
+        // key) launched -- otherwise a narrowly-scoped integration could
+        // reach out and kill a session that belongs to a different one.
+        if (tracked && tracked.launchedByKeyId !== key.id && key.folderScope !== null) {
+          sendJson(res, 403, {status: false, msg: 'This key did not launch that profile'});
+          return;
+        }
+        sendJson(res, 200, {status: true, closed: killAutomationLaunch(payload.profileId)});
+        return;
+      }
+      if (!mainWindow) {
+        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        return;
+      }
+      const isPushLocal = parsedUrl.pathname === '/v1/cookies/push-local';
+      const isReimportProxies = parsedUrl.pathname === '/v1/proxies/reimport';
+      const isAssignProfileProxy = parsedUrl.pathname === '/v1/profiles/assign-proxy';
+      const isLaunchAutomation = parsedUrl.pathname === '/v1/profiles/launch-automation';
+      const isMonitoringReport = parsedUrl.pathname === '/v1/monitoring/report';
       if (isPushLocal) {
         if (!payload.profileId || typeof payload.profileId !== 'string') {
           sendJson(res, 400, {status: false, msg: 'profileId is required'});
@@ -2233,16 +2748,45 @@ function startAutomationApiServer() {
           sendJson(res, 400, {status: false, msg: 'profileId is required'});
           return;
         }
+      } else if (isLaunchAutomation) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+      } else if (isMonitoringReport) {
+        if (!payload.runId || typeof payload.runId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'runId is required'});
+          return;
+        }
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+        if (typeof payload.ok !== 'boolean') {
+          sendJson(res, 400, {status: false, msg: 'ok (boolean) is required'});
+          return;
+        }
       } else if (!payload.folderPath || typeof payload.folderPath !== 'string') {
         sendJson(res, 400, {status: false, msg: 'folderPath is required'});
         return;
+      }
+      let cdpPort = null;
+      if (isLaunchAutomation) {
+        try {
+          cdpPort = await getFreePort();
+        } catch (error) {
+          sendJson(res, 500, {status: false, msg: `Could not allocate a local port: ${error.message}`});
+          return;
+        }
       }
       const requestId = crypto.randomUUID();
       const timeout = setTimeout(() => {
         pendingAutomationRequests.delete(requestId);
         sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
       }, AUTOMATION_REQUEST_TIMEOUT_MS);
-      pendingAutomationRequests.set(requestId, {res, timeout});
+      pendingAutomationRequests.set(requestId, isLaunchAutomation ?
+        {res, timeout, cdpPort, profileId: payload.profileId, keyId: key.id} :
+        {res, timeout});
       if (isPushLocal) {
         mainWindow.webContents.send('argus:push-local-cookies-request', {
           requestId,
@@ -2262,6 +2806,22 @@ function startAutomationApiServer() {
           proxyId: typeof payload.proxyId === 'string' ? payload.proxyId : '',
           proxyHost: typeof payload.proxyHost === 'string' ? payload.proxyHost : '',
           proxyPort: Number.isInteger(payload.proxyPort) ? payload.proxyPort : 0,
+        });
+      } else if (isLaunchAutomation) {
+        mainWindow.webContents.send('argus:launch-automation-request', {
+          requestId,
+          profileId: payload.profileId,
+          cdpPort,
+          allowedFolders: key.folderScope,
+        });
+      } else if (isMonitoringReport) {
+        mainWindow.webContents.send('argus:monitoring-report-request', {
+          requestId,
+          runId: payload.runId,
+          profileId: payload.profileId,
+          ok: payload.ok,
+          detail: typeof payload.detail === 'string' ? payload.detail : '',
+          screenshotBase64: typeof payload.screenshotBase64 === 'string' ? payload.screenshotBase64 : null,
         });
       } else {
         mainWindow.webContents.send('argus:bulk-match-cookies-request', {

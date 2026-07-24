@@ -106,8 +106,19 @@ export type ApiState = {
   error: string | null;
 };
 
+export type ApiKey = {
+  id: string;
+  name: string;
+  tokenPreview: string;
+  // null means every folder (full access); an array (possibly empty) is an
+  // explicit allow-list of folder ids.
+  folderScope: string[] | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
 type ArgusNative = {
-  launchProfile(payload: LaunchProfilePayload): Promise<{
+  launchProfile(payload: LaunchProfilePayload, extraArgs?: string[]): Promise<{
     ok: boolean;
     pid?: number;
     appPath?: string;
@@ -118,6 +129,23 @@ type ArgusNative = {
     launcherAppPath?: string;
     error?: string;
   }>;
+  // Named, scoped keys enforced on every /v1/* request to the local
+  // automation API (see AUTOMATION_KEYS_PATH in main.cjs). Raw token is only
+  // ever returned from createApiKey, at creation time -- only its hash is
+  // persisted, so it can't be recovered later.
+  listApiKeys?(): Promise<ApiKey[]>;
+  createApiKey?(name: string, folderScope: string[] | null): Promise<ApiKey & {token: string}>;
+  revokeApiKey?(id: string): Promise<{revoked: boolean}>;
+  // Writes the MCP server registration directly into the target tool's own
+  // config file (~/.claude.json or ~/.codex/config.toml) instead of handing
+  // back a snippet to copy/paste -- see applyClaudeCodeConfig/applyCodexConfig
+  // in main.cjs for why (every CLI-command form proved unreliable on Windows).
+  applyIntegrationConfig?(
+    integrationId: string,
+    dir: string,
+    token: string,
+    base: string,
+  ): Promise<{ok: boolean; path?: string; error?: string}>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
   getUpdateStatus?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;
@@ -174,6 +202,60 @@ type ArgusNative = {
     requestId: string,
     result?: {matched: boolean; profileId: string; proxyId?: string},
     error?: string,
+  ): void;
+  // POST /v1/profiles/launch-automation: main.cjs already chose a free CDP
+  // port before forwarding this -- the renderer's job is only to resolve the
+  // profileId against cloud state and launch it, same as a manual Launch
+  // click, just with --remote-debugging-port appended and no interactive
+  // proxy-check/error-dialog UI (main process's spawnProfileUnchecked is the
+  // authoritative proxy gate either way).
+  onLaunchAutomationRequest?(
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      cdpPort: number;
+      // null = the calling key has full access; an array is the folder
+      // allow-list it was scoped to when created/approved.
+      allowedFolders: string[] | null;
+    }) => void,
+  ): () => void;
+  sendLaunchAutomationResult?(
+    requestId: string,
+    result?: {ok: boolean; pid?: number; error?: string},
+    error?: string,
+  ): void;
+  onListProfilesRequest?(
+    callback: (payload: {requestId: string; folder: string | null; allowedFolders: string[] | null}) => void,
+  ): () => void;
+  sendListProfilesResult?(
+    requestId: string,
+    result?: {profiles: Array<{id: string; name: string}>},
+    error?: string,
+  ): void;
+  onMonitoringReportRequest?(
+    callback: (payload: {
+      requestId: string;
+      runId: string;
+      profileId: string;
+      ok: boolean;
+      detail: string;
+      screenshotBase64: string | null;
+    }) => void,
+  ): () => void;
+  sendMonitoringReportResult?(requestId: string, result?: {ok: true}, error?: string): void;
+  // Loopback "Connect" flow (GET /v1/oauth/authorize): an external app
+  // (e.g. Hive) opens that URL in a real browser; this fires so the
+  // renderer can show an approve/deny dialog, then reports back which
+  // folders to actually grant (defaulting to what the caller requested, but
+  // the human approving can narrow it).
+  onOAuthAuthorizeRequest?(
+    callback: (payload: {requestId: string; clientName: string; requestedScope: string}) => void,
+  ): () => void;
+  sendOAuthAuthorizeResult?(
+    requestId: string,
+    approved: boolean,
+    folderScope: string[] | null,
+    keyName: string,
   ): void;
 };
 
