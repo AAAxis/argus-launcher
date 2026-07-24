@@ -45,15 +45,18 @@ jobs:
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
 
       - name: Configure notarization
-        if: ${{ secrets.APPLE_TEAM_ID != '' }}
         shell: bash
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         # notarytool rejects Apple ID + app-specific-password auth without an
         # explicit teamId (see @electron/notarize's validate-args.js), so it
         # has to be injected here rather than left as `notarize: true`.
+        # (Guarded with a shell `if`, not a step-level `if:`, because the
+        # `secrets` context isn't allowed in step conditionals.)
         run: |
-          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.mac.notarize={teamId:process.env.APPLE_TEAM_ID}; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+          if [ -n "$APPLE_TEAM_ID" ]; then
+            node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.mac.notarize={teamId:process.env.APPLE_TEAM_ID}; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+          fi
 
       - name: Write release notes
         shell: bash
