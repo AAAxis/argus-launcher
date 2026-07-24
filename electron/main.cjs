@@ -999,7 +999,19 @@ function unzipBufferTo(zipBuffer, destDir) {
   const tmpZip = path.join(os.tmpdir(), `argys-ext-${crypto.randomUUID()}.zip`);
   fs.writeFileSync(tmpZip, zipBuffer);
   try {
-    const result = spawnSync('/usr/bin/unzip', ['-o', '-q', tmpZip, '-d', destDir]);
+    if (process.platform === 'win32') {
+      const result = spawnSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        `Expand-Archive -LiteralPath ${JSON.stringify(tmpZip)} -DestinationPath ${JSON.stringify(destDir)} -Force`,
+      ], {encoding: 'utf8'});
+      if (result.status !== 0) {
+        throw new Error(result.stderr || result.stdout || `Expand-Archive exited ${result.status}`);
+      }
+      return;
+    }
+    const unzipBin = process.platform === 'darwin' ? '/usr/bin/unzip' : 'unzip';
+    const result = spawnSync(unzipBin, ['-o', '-q', tmpZip, '-d', destDir]);
     if (result.status !== 0) {
       throw new Error(`unzip failed: ${result.stderr?.toString() || result.status}`);
     }
