@@ -160,7 +160,6 @@ jobs:
       - build-mac
       - build-windows
     runs-on: ubuntu-latest
-    if: ${{ false }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
