@@ -176,7 +176,6 @@ jobs:
           done
 
       - name: Upload Windows artifact
-        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: argys-anty-windows
