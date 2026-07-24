@@ -63,6 +63,8 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/app.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
       "target": [
         "dmg",
         "zip"

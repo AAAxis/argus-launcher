@@ -44,6 +44,17 @@ jobs:
           fi
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
 
+      - name: Configure notarization
+        if: ${{ secrets.APPLE_TEAM_ID != '' }}
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # notarytool rejects Apple ID + app-specific-password auth without an
+        # explicit teamId (see @electron/notarize's validate-args.js), so it
+        # has to be injected here rather than left as `notarize: true`.
+        run: |
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.mac.notarize={teamId:process.env.APPLE_TEAM_ID}; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+
       - name: Write release notes
         shell: bash
         # electron-builder picks up build/release-notes.md automatically and
@@ -64,6 +75,12 @@ jobs:
         run: npm run build
 
       - name: Build DMG
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx electron-builder --mac dmg zip --arm64 --publish never
 
       - name: Upload macOS artifact
