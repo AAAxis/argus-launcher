@@ -21,10 +21,6 @@ env:
 jobs:
   build-mac:
     name: Build macOS DMG
-    # Disabled to control GitHub Actions spend -- macos-14 runners bill at
-    # 10x the Linux/Windows rate. Flip this back to enable once budget
-    # allows; nothing else about the job needs to change.
-    if: false
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -71,7 +67,6 @@ jobs:
         run: npx electron-builder --mac dmg zip --arm64 --publish never
 
       - name: Upload macOS artifact
-        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: argys-anty-macos
