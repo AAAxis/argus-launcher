@@ -1,4 +1,4 @@
-import type {RuntimeFingerprint, SharedExtension} from './types';
+import type {ArgusProfile, ArgusProxy, RuntimeFingerprint, SharedExtension} from './types';
 
 export type ProxyConfig = {
   id?: string;
@@ -201,6 +201,112 @@ type ArgusNative = {
   sendAssignProfileProxyResult?(
     requestId: string,
     result?: {matched: boolean; profileId: string; proxyId?: string},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/get: full profile detail by id, including credentials --
+  // deliberately separate from the bulk list-profiles endpoint (which only
+  // returns id+name) so a broad "list all profiles" call never bulk-exposes
+  // every stored password at once.
+  onGetProfileRequest?(
+    callback: (payload: {requestId: string; profileId: string; allowedFolders: string[] | null}) => void,
+  ): () => void;
+  sendGetProfileResult?(
+    requestId: string,
+    result?: {profile: ArgusProfile | null},
+    error?: string,
+  ): void;
+  // GET /v1/proxies: full proxy list, each annotated with which profiles
+  // currently use it -- lets an MCP-driven agent find an unassigned proxy
+  // to swap in without cross-referencing list_profiles itself.
+  onListProxiesRequest?(
+    callback: (payload: {requestId: string}) => void,
+  ): () => void;
+  sendListProxiesResult?(
+    requestId: string,
+    result?: {proxies: Array<ArgusProxy & {assignedProfileIds: string[]}>},
+    error?: string,
+  ): void;
+  // POST /v1/proxies/create
+  onCreateProxyRequest?(
+    callback: (payload: {
+      requestId: string;
+      name: string;
+      type: 'http' | 'socks5';
+      host: string;
+      port: number;
+      username?: string;
+      password?: string;
+    }) => void,
+  ): () => void;
+  sendCreateProxyResult?(
+    requestId: string,
+    result?: {proxyId: string},
+    error?: string,
+  ): void;
+  // POST /v1/proxies/update: partial field patch, same shape as update-profile.
+  onUpdateProxyRequest?(
+    callback: (payload: {
+      requestId: string;
+      proxyId: string;
+      fields: Partial<Pick<ArgusProxy, 'name' | 'type' | 'host' | 'port' | 'username' | 'password'>>;
+    }) => void,
+  ): () => void;
+  sendUpdateProxyResult?(
+    requestId: string,
+    result?: {matched: boolean},
+    error?: string,
+  ): void;
+  // POST /v1/proxies/delete: also unassigns (sets proxy_id null) any profile
+  // currently using this proxy, so no profile is left pointing at a proxy_id
+  // that no longer exists.
+  onDeleteProxyRequest?(
+    callback: (payload: {requestId: string; proxyId: string}) => void,
+  ): () => void;
+  sendDeleteProxyResult?(
+    requestId: string,
+    result?: {deleted: boolean; unassignedProfileIds: string[]},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/update: partial field patch (name/tags/status/color/folder_id/email/password).
+  // Proxy has its own endpoint (assign-proxy, above) and fingerprint has its
+  // own endpoint (update-fingerprint, below) since both need extra handling
+  // beyond a plain field overwrite.
+  onUpdateProfileRequest?(
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      fields: Partial<Pick<ArgusProfile, 'name' | 'tags' | 'status' | 'color' | 'folder_id' | 'email' | 'password'>>;
+    }) => void,
+  ): () => void;
+  sendUpdateProfileResult?(
+    requestId: string,
+    result?: {matched: boolean; profileId: string},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/delete: soft-deletes (moves to Trash, same as the
+  // Delete button in the UI) unless permanent is true. allowedFolders scopes
+  // which profiles a folder-restricted key may delete, same as get/launch.
+  onDeleteProfileRequest?(
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      permanent: boolean;
+      allowedFolders: string[] | null;
+    }) => void,
+  ): () => void;
+  sendDeleteProfileResult?(
+    requestId: string,
+    result?: {deleted: boolean; permanent: boolean},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/update-fingerprint: merges the given fields into the
+  // profile's existing fingerprint object rather than replacing it wholesale.
+  onUpdateFingerprintRequest?(
+    callback: (payload: {requestId: string; profileId: string; fingerprint: Record<string, unknown>}) => void,
+  ): () => void;
+  sendUpdateFingerprintResult?(
+    requestId: string,
+    result?: {matched: boolean; profileId: string},
     error?: string,
   ): void;
   // POST /v1/profiles/launch-automation: main.cjs already chose a free CDP

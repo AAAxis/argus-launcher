@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
-import {Apple, Bot, Copy, Cookie, Download, Hexagon, Monitor, Pencil, Plug, Plus, Play, RefreshCw, Shield, Smartphone, SquareTerminal, Trash2, Upload, X} from 'lucide-react';
+import {Apple, Bot, Copy, Cookie, Download, Hexagon, Monitor, Pencil, Plug, Plus, Play, RefreshCw, Shield, Smartphone, SquareTerminal, Trash2, Upload, Waypoints, X} from 'lucide-react';
 import {native} from './native';
 import type {ApiKey, ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {supabase} from './supabase';
@@ -29,6 +29,14 @@ type ProfileDraft = {
   status: string;
   color: string;
   folder_id: string;
+  // Login credentials for whatever account this profile is signed into --
+  // stored plaintext the same way proxy_search/proxy credentials already
+  // are (see ArgusProfile.email/password in types.ts). Not used by Anty
+  // itself for anything; exposed so MCP-driven agents (get_profile/
+  // update_profile) can read/fill a login form without the user re-typing
+  // credentials into the agent's own prompt each time.
+  email: string;
+  password: string;
   proxy_id: string;
   proxy_mode: ProxyMode;
   proxy_search: string;
@@ -170,7 +178,7 @@ const API_GROUPS: ApiGroup[] = [
   },
 ];
 
-type IntegrationId = 'hive' | 'claude-code' | 'codex';
+type IntegrationId = 'hive' | 'claude-code' | 'codex' | 'openclaw';
 
 // Generic Lucide glyphs, not the real product marks -- swap for actual
 // brand logos (SVG assets) whenever those are available.
@@ -192,6 +200,12 @@ const INTEGRATIONS: Array<{id: IntegrationId; name: string; description: string;
     name: 'Codex',
     description: "OpenAI's coding agent CLI -- same MCP tools, wired into Codex's own config.",
     icon: SquareTerminal,
+  },
+  {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    description: 'Personal AI assistant gateway across chat channels -- same MCP tools, wired into its own config.',
+    icon: Waypoints,
   },
 ];
 
@@ -519,6 +533,119 @@ const realisticWindowsFingerprintPatterns: RealisticFingerprintPattern[] = [
   },
 ];
 
+// Real device bundles for Android/iOS -- screen/GPU/CPU/memory are picked
+// together as one unit (via the "Device model" field below) instead of the
+// free-mix GPU/CPU dropdowns desktop platforms use, so a profile can no
+// longer end up as "Android" reporting an NVIDIA desktop GPU string. iOS
+// entries all use "Apple Inc." / "Apple GPU" since every iOS browser is
+// WebKit-based on real hardware, regardless of model.
+type MobileDevicePattern = RealisticFingerprintPattern & {label: string};
+const mobileDevicePatterns: MobileDevicePattern[] = [
+  {
+    label: 'iPhone 15 Pro Max',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '430x932',
+    fingerprint_cpu_model: 'Apple A17 Pro',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    label: 'iPhone 15',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '393x852',
+    fingerprint_cpu_model: 'Apple A16 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '6',
+  },
+  {
+    label: 'iPhone 14',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '390x844',
+    fingerprint_cpu_model: 'Apple A15 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '6',
+  },
+  {
+    label: 'iPhone 13 mini',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '375x812',
+    fingerprint_cpu_model: 'Apple A15 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '4',
+  },
+  {
+    label: 'Samsung Galaxy S24 Ultra',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 750',
+    fingerprint_screen: '412x915',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 3',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '12',
+  },
+  {
+    label: 'Samsung Galaxy S23',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '360x780',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    label: 'Google Pixel 8 Pro',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '412x892',
+    fingerprint_cpu_model: 'Google Tensor G3',
+    fingerprint_cpu_cores: '9',
+    fingerprint_memory_gb: '12',
+  },
+  {
+    label: 'Google Pixel 7',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Mali-G710 MC10',
+    fingerprint_screen: '412x915',
+    fingerprint_cpu_model: 'Google Tensor G2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    label: 'OnePlus 11',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '412x919',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '16',
+  },
+];
+
+function mobileDevicePatternsFor(os: string): MobileDevicePattern[] {
+  return mobileDevicePatterns.filter((item) => item.fingerprint_os === os);
+}
+
 const defaultWindowsFingerprintPattern = realisticWindowsFingerprintPatterns[0];
 
 const gpuPresets = realisticWindowsFingerprintPatterns.map((pattern) => ({
@@ -784,6 +911,8 @@ function newProfileDraft(): ProfileDraft {
     status: 'Ready',
     color: profileColors[1],
     folder_id: '',
+    email: '',
+    password: '',
     proxy_id: '',
     proxy_mode: 'assigned',
     proxy_search: '',
@@ -830,6 +959,8 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     status: profile.status || 'Ready',
     color: profile.color || profileColors[1],
     folder_id: profile.folder_id || '',
+    email: profile.email || '',
+    password: profile.password || '',
     proxy_id: profile.proxy_id || '',
     proxy_mode: profile.proxy_mode || 'assigned',
     proxy_search: '',
@@ -1026,7 +1157,33 @@ function randomChoice<T>(items: T[]) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-function randomFingerprintPatch(): Partial<ProfileDraft> {
+// `os` is the profile's *current* platform selection -- rotating must pick a
+// new device within that same platform (another iPhone, another Android
+// phone, another Windows box), never silently switch platforms. Previously
+// this always drew from realisticWindowsFingerprintPatterns regardless of
+// os, so rotating on an iOS/Android profile would overwrite it with a
+// random Windows/Samsung-style identity -- the actual bug behind "why does
+// iOS let me pick a Samsung device".
+function randomFingerprintPatch(os: string): Partial<ProfileDraft> {
+  const mobilePool = mobileDevicePatternsFor(os);
+  if (mobilePool.length > 0) {
+    const {label: _label, ...pattern} = randomChoice(mobilePool);
+    return {
+      ...pattern,
+      fingerprint_timezone: 'Auto from proxy',
+      fingerprint_geolocation: AUTO_FROM_PROXY,
+      fingerprint_language: AUTO_FROM_PROXY,
+      fingerprint_webrtc: 'Proxy only',
+      fingerprint_canvas: 'Noise',
+      fingerprint_webgl: 'Noise',
+      fingerprint_webgpu: 'Real',
+      fingerprint_client_rects: 'Noise',
+      fingerprint_audio: 'Noise',
+      fingerprint_media_devices: mediaDevicePresets[0],
+      fingerprint_do_not_track: false,
+      fingerprint_user_agent: '',
+    };
+  }
   const pattern = randomChoice(realisticWindowsFingerprintPatterns);
   return {
     ...pattern,
@@ -1237,6 +1394,12 @@ function fingerprintPresetFor(os?: string): string | undefined {
   if (os === 'Ubuntu') {
     return 'linux';
   }
+  if (os === 'Android') {
+    return 'android';
+  }
+  if (os === 'iOS') {
+    return 'ios';
+  }
   return undefined;
 }
 
@@ -1259,6 +1422,18 @@ function fingerprintPlatformFor(preset?: string, os?: string): string | undefine
   return undefined;
 }
 
+// iOS/CriOS has no "Chrome NNN" version concept -- it's WebKit-based, not
+// Blink, so the same browserVersionPresets dropdown maps onto real iOS/
+// Safari point releases instead of a Chrome major version. Previously this
+// was silently ignored entirely (the iOS UA string was one hardcoded
+// literal), so picking a different "Browser version" had zero effect on an
+// iOS profile -- unlike Android/desktop, where it visibly changes the UA.
+const iosVersionForBrowserPreset: Record<string, {ios: string; webkit: string}> = {
+  'Chrome 126': {ios: '17_5', webkit: '605.1.15'},
+  'Chrome 125': {ios: '17_4_1', webkit: '605.1.15'},
+  'Chrome 124': {ios: '17_3_1', webkit: '605.1.15'},
+};
+
 function userAgentForFingerprint(os?: string, browserVersion?: string): string {
   const chromeVersion = browserVersion === 'Auto' || !browserVersion ?
     '149.0.0.0' :
@@ -1266,8 +1441,11 @@ function userAgentForFingerprint(os?: string, browserVersion?: string): string {
   switch (os) {
     case 'Android':
       return `Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Mobile Safari/537.36`;
-    case 'iOS':
-      return 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    case 'iOS': {
+      const {ios, webkit} = iosVersionForBrowserPreset[browserVersion || ''] || {ios: '17_5', webkit: '605.1.15'};
+      const dotted = ios.replace(/_/g, '.');
+      return `Mozilla/5.0 (iPhone; CPU iPhone OS ${ios} like Mac OS X) AppleWebKit/${webkit} (KHTML, like Gecko) Version/${dotted} Mobile/15E148 Safari/604.1`;
+    }
     case 'macOS':
       return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
     case 'Ubuntu':
@@ -1363,11 +1541,23 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
     fingerprint.language.split(',').map((part) => part.split(';')[0].trim()).filter(Boolean) :
     undefined;
   const rotate = Boolean(fingerprint.rotate_on_launch);
+  const seed = rotate ? randomSeed() : stableSeedFor(profile.id);
+  // Mirrors Generate()'s own platform-derived defaults in argus_fingerprint.cc
+  // -- touch/sensor/battery aren't separate user-facing fields, they follow
+  // directly from which platform (desktop vs mobile) is selected above, same
+  // as webrtc_mode/canvas_mode etc already do.
+  const isMobile = preset === 'android' || preset === 'ios';
+  const kBatteryLevels = [23, 41, 58, 67, 82, 94];
   return {
     platform: fingerprintPlatformFor(preset, fingerprint.os),
     ua_string: fingerprint.user_agent || userAgentForFingerprint(fingerprint.os, fingerprint.browser_version),
     preset,
-    seed: rotate ? randomSeed() : stableSeedFor(profile.id),
+    seed,
+    touch_points: isMobile ? 5 : 0,
+    sensor_mode: isMobile ? 'idle-realistic' : 'off',
+    battery_spoof: isMobile,
+    battery_level: isMobile ? kBatteryLevels[seed % kBatteryLevels.length] / 100 : undefined,
+    battery_charging: isMobile ? seed % 4 === 0 : undefined,
     webrtc_mode: fingerprintWebrtcModeFor(fingerprint.webrtc),
     canvas_mode: fingerprintNoiseModeFor(fingerprint.canvas),
     webgl_mode: fingerprintNoiseModeFor(fingerprint.webgl),
@@ -2004,6 +2194,225 @@ function App() {
   }, [cloudState]);
 
   useEffect(() => {
+    const onRequest = native?.onGetProfileRequest;
+    const sendResult = native?.sendGetProfileResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(({requestId, profileId, allowedFolders}) => {
+      const profile = cloudState.profiles.find((item) => item.id === profileId && !item.deleted_at);
+      if (!profile || (allowedFolders && !allowedFolders.includes(profile.folder_id || ''))) {
+        sendResult(requestId, {profile: null});
+        return;
+      }
+      sendResult(requestId, {profile});
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onListProxiesRequest;
+    const sendResult = native?.sendListProxiesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(({requestId}) => {
+      const proxies = cloudState.proxies.map((proxy) => ({
+        ...proxy,
+        assignedProfileIds: cloudState.profiles
+          .filter((profile) => !profile.deleted_at && profile.proxy_id === proxy.id)
+          .map((profile) => profile.id),
+      }));
+      sendResult(requestId, {proxies});
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onCreateProxyRequest;
+    const sendResult = native?.sendCreateProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, name, type, host, port, username, password}) => {
+      try {
+        const proxy: ArgusProxy = {
+          id: globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+          name: name || `${host}:${port}`,
+          type,
+          host,
+          port,
+          username,
+          password,
+        };
+        const ok = await saveCloudState({...cloudState, proxies: [...cloudState.proxies, proxy]});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        sendResult(requestId, {proxyId: proxy.id});
+        setMessage(`Created proxy ${proxy.name}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onUpdateProxyRequest;
+    const sendResult = native?.sendUpdateProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, proxyId, fields}) => {
+      try {
+        const exists = cloudState.proxies.some((item) => item.id === proxyId);
+        if (!exists) {
+          sendResult(requestId, {matched: false});
+          return;
+        }
+        const proxies = cloudState.proxies.map((proxy) =>
+          proxy.id === proxyId ? {...proxy, ...fields} : proxy);
+        const ok = await saveCloudState({...cloudState, proxies});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        sendResult(requestId, {matched: true});
+        setMessage(`Updated proxy ${proxyId}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onDeleteProxyRequest;
+    const sendResult = native?.sendDeleteProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, proxyId}) => {
+      try {
+        const exists = cloudState.proxies.some((item) => item.id === proxyId);
+        if (!exists) {
+          sendResult(requestId, {deleted: false, unassignedProfileIds: []});
+          return;
+        }
+        const unassignedProfileIds: string[] = [];
+        const profiles = cloudState.profiles.map((profile) => {
+          if (profile.proxy_id === proxyId) {
+            unassignedProfileIds.push(profile.id);
+            return {...profile, proxy_id: null};
+          }
+          return profile;
+        });
+        const proxies = cloudState.proxies.filter((proxy) => proxy.id !== proxyId);
+        const ok = await saveCloudState({...cloudState, proxies, profiles});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        sendResult(requestId, {deleted: true, unassignedProfileIds});
+        setMessage(`Deleted proxy ${proxyId}${unassignedProfileIds.length ? ` (unassigned from ${unassignedProfileIds.length} profile(s))` : ''}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onUpdateProfileRequest;
+    const sendResult = native?.sendUpdateProfileResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, fields}) => {
+      try {
+        const exists = cloudState.profiles.some((item) => item.id === profileId);
+        if (!exists) {
+          sendResult(requestId, {matched: false, profileId});
+          return;
+        }
+        const profiles = cloudState.profiles.map((profile) =>
+          profile.id === profileId ? {...profile, ...fields} : profile);
+        const ok = await saveCloudState({...cloudState, profiles});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        sendResult(requestId, {matched: true, profileId});
+        setMessage(`Updated ${profileId}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onDeleteProfileRequest;
+    const sendResult = native?.sendDeleteProfileResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, permanent, allowedFolders}) => {
+      try {
+        const latestProfiles = await fetchLatestProfiles();
+        const target = latestProfiles.find((item) => item.id === profileId);
+        if (!target || (allowedFolders && !allowedFolders.includes(target.folder_id || ''))) {
+          sendResult(requestId, {deleted: false, permanent});
+          return;
+        }
+        const profiles = permanent ?
+          latestProfiles.filter((item) => item.id !== profileId) :
+          latestProfiles.map((item) =>
+            item.id === profileId ? {...item, deleted_at: new Date().toISOString()} : item);
+        const ok = await saveCloudState({...cloudState, profiles});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        if (selectedId === profileId) {
+          setSelectedId(profiles.find((item) => !item.deleted_at)?.id || null);
+        }
+        sendResult(requestId, {deleted: true, permanent});
+        setMessage(permanent ? `${profileId} permanently deleted` : `${profileId} moved to Trash`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onUpdateFingerprintRequest;
+    const sendResult = native?.sendUpdateFingerprintResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, fingerprint}) => {
+      try {
+        const target = cloudState.profiles.find((item) => item.id === profileId);
+        if (!target) {
+          sendResult(requestId, {matched: false, profileId});
+          return;
+        }
+        const profiles = cloudState.profiles.map((profile) =>
+          profile.id === profileId ? {
+            ...profile,
+            fingerprint: {...profile.fingerprint, ...fingerprint},
+          } : profile);
+        const ok = await saveCloudState({...cloudState, profiles});
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        sendResult(requestId, {matched: true, profileId});
+        setMessage(`Updated fingerprint for ${profileId}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
     const onRequest = native?.onListProfilesRequest;
     const sendResult = native?.sendListProfilesResult;
     if (!onRequest || !sendResult) {
@@ -2574,7 +2983,7 @@ main().catch((error) => {
     try {
       let launchProfile = profile;
       if (profile.fingerprint?.rotate_on_launch) {
-        const rotated = fingerprintFromDraftPatch(randomFingerprintPatch());
+        const rotated = fingerprintFromDraftPatch(randomFingerprintPatch(profile.fingerprint?.os || ''));
         launchProfile = {...profile, fingerprint: {...profile.fingerprint, ...rotated, rotate_on_launch: true}};
         const profiles = cloudState.profiles.map((item) =>
           item.id === profile.id ? launchProfile : item);
@@ -2826,6 +3235,8 @@ main().catch((error) => {
       status: profileDraft.status.trim() || 'Ready',
       color: profileDraft.color || profileColors[1],
       folder_id: profileDraft.folder_id.trim() || null,
+      email: profileDraft.email.trim() || undefined,
+      password: profileDraft.password || undefined,
       proxy_id: profileDraft.proxy_mode === 'assigned' ? (profileDraft.proxy_id || null) : null,
       proxy_mode: profileDraft.proxy_mode,
       tags: tagsFromDraft(profileDraft.tags),
@@ -5030,7 +5441,7 @@ main().catch((error) => {
             <button
               className="ghost"
               type="button"
-              onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+              onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch(profileDraft.fingerprint_os)})}
             >
               Rotate fingerprint
             </button>
@@ -5143,51 +5554,81 @@ main().catch((error) => {
               {noiseModes.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
-          <label className="field">
-            <span>GPU</span>
-            <select
-              value={profileDraft.fingerprint_webgl_renderer}
-              onChange={(event) => {
-                const pattern = realisticWindowsFingerprintPatterns.find((item) =>
-                  item.fingerprint_webgl_renderer === event.target.value);
-                if (pattern) {
-                  setProfileDraft({...profileDraft, ...pattern});
-                }
-              }}
-            >
-              <option value="">Auto</option>
-              {gpuPresets.map((item) => (
-                <option value={item.renderer} key={item.renderer}>{item.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Screen</span>
-            <input
-              list="screen-presets"
-              value={profileDraft.fingerprint_screen}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_screen: event.target.value})}
-            />
-          </label>
-          <label className="field">
-            <span>CPU</span>
-            <select
-              value={profileDraft.fingerprint_cpu_model}
-              onChange={(event) => {
-                const preset = cpuPresets.find((item) => item.model === event.target.value);
-                setProfileDraft({
-                  ...profileDraft,
-                  fingerprint_cpu_model: preset?.model || '',
-                  fingerprint_cpu_cores: preset?.cores || profileDraft.fingerprint_cpu_cores,
-                });
-              }}
-            >
-              <option value="">Auto</option>
-              {cpuPresets.map((item) => (
-                <option value={item.model} key={item.model}>{item.model} ({item.cores} threads)</option>
-              ))}
-            </select>
-          </label>
+          {profileDraft.fingerprint_os === 'Android' || profileDraft.fingerprint_os === 'iOS' ? (
+            <label className="field wide">
+              <span>Device model</span>
+              <select
+                value={profileDraft.fingerprint_cpu_model}
+                onChange={(event) => {
+                  const device = mobileDevicePatternsFor(profileDraft.fingerprint_os)
+                    .find((item) => item.fingerprint_cpu_model === event.target.value);
+                  if (device) {
+                    const {label: _label, ...pattern} = device;
+                    setProfileDraft({...profileDraft, ...pattern});
+                  }
+                }}
+              >
+                <option value="">Auto</option>
+                {mobileDevicePatternsFor(profileDraft.fingerprint_os).map((item) => (
+                  <option value={item.fingerprint_cpu_model} key={item.fingerprint_cpu_model}>
+                    {item.label} · {item.fingerprint_screen} · {item.fingerprint_memory_gb} GB
+                  </option>
+                ))}
+              </select>
+              {/* GPU/CPU/screen are picked together as one real device above
+                  instead of mixed freely -- prevents e.g. an Android profile
+                  ending up with a desktop NVIDIA GPU string, which is what a
+                  real Android Chrome build could never actually report. */}
+            </label>
+          ) : (
+            <>
+              <label className="field">
+                <span>GPU</span>
+                <select
+                  value={profileDraft.fingerprint_webgl_renderer}
+                  onChange={(event) => {
+                    const pattern = realisticWindowsFingerprintPatterns.find((item) =>
+                      item.fingerprint_webgl_renderer === event.target.value);
+                    if (pattern) {
+                      setProfileDraft({...profileDraft, ...pattern});
+                    }
+                  }}
+                >
+                  <option value="">Auto</option>
+                  {gpuPresets.map((item) => (
+                    <option value={item.renderer} key={item.renderer}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Screen</span>
+                <input
+                  list="screen-presets"
+                  value={profileDraft.fingerprint_screen}
+                  onChange={(event) => setProfileDraft({...profileDraft, fingerprint_screen: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>CPU</span>
+                <select
+                  value={profileDraft.fingerprint_cpu_model}
+                  onChange={(event) => {
+                    const preset = cpuPresets.find((item) => item.model === event.target.value);
+                    setProfileDraft({
+                      ...profileDraft,
+                      fingerprint_cpu_model: preset?.model || '',
+                      fingerprint_cpu_cores: preset?.cores || profileDraft.fingerprint_cpu_cores,
+                    });
+                  }}
+                >
+                  <option value="">Auto</option>
+                  {cpuPresets.map((item) => (
+                    <option value={item.model} key={item.model}>{item.model} ({item.cores} threads)</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
           <label className="field compact">
             <span>Memory GB</span>
             <select
@@ -5473,6 +5914,24 @@ main().catch((error) => {
                   onChange={(event) => setProfileDraft({...profileDraft, start_url: event.target.value})}
                 />
               </label>
+              <label className="field">
+                <span>Account email</span>
+                <input
+                  type="email"
+                  placeholder="Login for whatever account this profile is signed into"
+                  value={profileDraft.email}
+                  onChange={(event) => setProfileDraft({...profileDraft, email: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Account password</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={profileDraft.password}
+                  onChange={(event) => setProfileDraft({...profileDraft, password: event.target.value})}
+                />
+              </label>
               <section className="form-section wide compact-section">
                 <div>
                   <h3>Cookie import</h3>
@@ -5545,7 +6004,7 @@ main().catch((error) => {
                 <button
                   className="ghost"
                   type="button"
-                  onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+                  onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch(profileDraft.fingerprint_os)})}
                 >
                   New fingerprint
                 </button>
@@ -5614,7 +6073,7 @@ main().catch((error) => {
             <footer className="modal-actions">
               <button
                 className="ghost"
-                onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+                onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch(profileDraft.fingerprint_os)})}
               >
                 Rotate fingerprint
               </button>

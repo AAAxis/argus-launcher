@@ -67,6 +67,62 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendAssignProfileProxyResult: (requestId, result, error) =>
     ipcRenderer.send('argus:assign-profile-proxy-result', {requestId, result, error}),
+  onGetProfileRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:get-profile-request', listener);
+    return () => ipcRenderer.removeListener('argus:get-profile-request', listener);
+  },
+  sendGetProfileResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:get-profile-result', {requestId, result, error}),
+  onListProxiesRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:list-proxies-request', listener);
+    return () => ipcRenderer.removeListener('argus:list-proxies-request', listener);
+  },
+  sendListProxiesResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:list-proxies-result', {requestId, result, error}),
+  onCreateProxyRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:create-proxy-request', listener);
+    return () => ipcRenderer.removeListener('argus:create-proxy-request', listener);
+  },
+  sendCreateProxyResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:create-proxy-result', {requestId, result, error}),
+  onUpdateProxyRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:update-proxy-request', listener);
+    return () => ipcRenderer.removeListener('argus:update-proxy-request', listener);
+  },
+  sendUpdateProxyResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:update-proxy-result', {requestId, result, error}),
+  onDeleteProxyRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:delete-proxy-request', listener);
+    return () => ipcRenderer.removeListener('argus:delete-proxy-request', listener);
+  },
+  sendDeleteProxyResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:delete-proxy-result', {requestId, result, error}),
+  onUpdateProfileRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:update-profile-request', listener);
+    return () => ipcRenderer.removeListener('argus:update-profile-request', listener);
+  },
+  sendUpdateProfileResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:update-profile-result', {requestId, result, error}),
+  onDeleteProfileRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:delete-profile-request', listener);
+    return () => ipcRenderer.removeListener('argus:delete-profile-request', listener);
+  },
+  sendDeleteProfileResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:delete-profile-result', {requestId, result, error}),
+  onUpdateFingerprintRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:update-fingerprint-request', listener);
+    return () => ipcRenderer.removeListener('argus:update-fingerprint-request', listener);
+  },
+  sendUpdateFingerprintResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:update-fingerprint-result', {requestId, result, error}),
   onLaunchAutomationRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:launch-automation-request', listener);

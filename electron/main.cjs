@@ -1731,6 +1731,28 @@ done
   return appPath;
 }
 
+// Best-effort: a failure here shouldn't block the launch attempt itself,
+// since the normal case (no stale process) is expected to find nothing.
+function killStaleProfileProcess(profileId) {
+  if (!profileId) {
+    return;
+  }
+  const marker = `argus-profile-id=${profileId}`;
+  try {
+    if (process.platform === 'win32') {
+      const script =
+        `Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like '*${marker}*' } | ` +
+        'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
+        'Start-Sleep -Milliseconds 500';
+      spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {windowsHide: true});
+    } else if (process.platform === 'linux') {
+      spawnSync('pkill', ['-f', marker]);
+    }
+  } catch {
+    // Ignore -- see comment above.
+  }
+}
+
 function spawnProfileBrowserDirectly(resolved, args, timezone) {
   const env = {...process.env};
   if (timezone) {
@@ -1923,6 +1945,18 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   // Windows and Linux launch the browser executable directly. They do not
   // support the macOS bundle/Open flow, so spawning the resolved executable is
   // the correct platform-specific path.
+  //
+  // A profile's user-data-dir is a Chrome single-instance lock: if a browser
+  // window for this profile is already open (from a previous plain launch, or
+  // an automation launch whose tracking was lost e.g. across an Anty
+  // restart), a fresh spawn here silently hands off to that existing window
+  // and immediately exits instead of ever opening the new --remote-debugging-port
+  // -- so an automation launch_profile call just times out waiting for a CDP
+  // endpoint that will never come up, with no clear error pointing at why.
+  // macOS's writeProfileLauncherApp already avoids this with its own
+  // `pkill -f "$PROFILE_MARKER"` before spawning; this is the same fix for
+  // Windows/Linux, where there's no wrapper script to put it in.
+  killStaleProfileProcess(payload.id);
   const child = spawnProfileBrowserDirectly(resolved, args, timezone);
   return {
     ok: true,
@@ -1979,6 +2013,10 @@ function claudeConfigPath() {
 
 function codexConfigPath() {
   return path.join(app.getPath('home'), '.codex', 'config.toml');
+}
+
+function openclawConfigPath() {
+  return path.join(app.getPath('home'), '.openclaw', 'openclaw.json');
 }
 
 function applyClaudeCodeConfig(dir, token, base) {
@@ -2049,6 +2087,29 @@ function applyCodexConfig(dir, token, base) {
   return configPath;
 }
 
+function applyOpenClawConfig(dir, token, base) {
+  const configPath = openclawConfigPath();
+  fs.mkdirSync(path.dirname(configPath), {recursive: true});
+  let config = {};
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // Missing or unreadable -- start fresh. We only ever touch mcp.servers.
+  }
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+    config = {};
+  }
+  config.mcp = (config.mcp && typeof config.mcp === 'object') ? config.mcp : {};
+  config.mcp.servers = (config.mcp.servers && typeof config.mcp.servers === 'object') ? config.mcp.servers : {};
+  config.mcp.servers.argus = {
+    command: path.join(dir, '.venv', 'Scripts', 'python.exe'),
+    args: ['-m', 'argus_hive_bridge.mcp_server'],
+    env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
+  };
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return configPath;
+}
+
 ipcMain.handle('argus:apply-integration-config', async (_event, {integrationId, dir, token, base}) => {
   try {
     if (integrationId === 'claude-code') {
@@ -2056,6 +2117,9 @@ ipcMain.handle('argus:apply-integration-config', async (_event, {integrationId, 
     }
     if (integrationId === 'codex') {
       return {ok: true, path: applyCodexConfig(dir, token, base)};
+    }
+    if (integrationId === 'openclaw') {
+      return {ok: true, path: applyOpenClawConfig(dir, token, base)};
     }
     return {ok: false, error: `No auto-apply available for ${integrationId}`};
   } catch (error) {
@@ -2469,6 +2533,126 @@ ipcMain.on('argus:assign-profile-proxy-result', (_event, {requestId, result, err
   pending.res.end(JSON.stringify({status: true, ...result}));
 });
 
+ipcMain.on('argus:get-profile-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  if (!result?.profile) {
+    sendJson(pending.res, 404, {status: false, msg: 'Profile not found'});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, profile: result.profile});
+});
+
+ipcMain.on('argus:list-proxies-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, proxies: result?.proxies || []});
+});
+
+ipcMain.on('argus:create-proxy-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, ...result});
+});
+
+ipcMain.on('argus:update-proxy-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, ...result});
+});
+
+ipcMain.on('argus:delete-proxy-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, ...result});
+});
+
+ipcMain.on('argus:update-profile-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.res.writeHead(500, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error}));
+    return;
+  }
+  pending.res.writeHead(200, {'Content-Type': 'application/json'});
+  pending.res.end(JSON.stringify({status: true, ...result}));
+});
+
+ipcMain.on('argus:delete-profile-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    sendJson(pending.res, 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, ...result});
+});
+
+ipcMain.on('argus:update-fingerprint-result', (_event, {requestId, result, error}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.res.writeHead(500, {'Content-Type': 'application/json'});
+    pending.res.end(JSON.stringify({status: false, msg: error}));
+    return;
+  }
+  pending.res.writeHead(200, {'Content-Type': 'application/json'});
+  pending.res.end(JSON.stringify({status: true, ...result}));
+});
+
 ipcMain.on('argus:launch-automation-result', (_event, {requestId, result, error}) => {
   const pending = pendingAutomationRequests.get(requestId);
   if (!pending) {
@@ -2695,11 +2879,33 @@ function startAutomationApiServer() {
       });
       return;
     }
+    if (req.method === 'GET' && parsedUrl.pathname === '/v1/proxies') {
+      if (!mainWindow) {
+        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        pendingAutomationRequests.delete(requestId);
+        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
+      }, AUTOMATION_REQUEST_TIMEOUT_MS);
+      pendingAutomationRequests.set(requestId, {res, timeout});
+      mainWindow.webContents.send('argus:list-proxies-request', {requestId});
+      return;
+    }
     if (req.method !== 'POST' ||
         (parsedUrl.pathname !== '/v1/cookies/bulk-match' &&
          parsedUrl.pathname !== '/v1/cookies/push-local' &&
          parsedUrl.pathname !== '/v1/proxies/reimport' &&
+         parsedUrl.pathname !== '/v1/proxies/create' &&
+         parsedUrl.pathname !== '/v1/proxies/update' &&
+         parsedUrl.pathname !== '/v1/proxies/delete' &&
+         parsedUrl.pathname !== '/v1/proxies/check' &&
          parsedUrl.pathname !== '/v1/profiles/assign-proxy' &&
+         parsedUrl.pathname !== '/v1/profiles/get' &&
+         parsedUrl.pathname !== '/v1/profiles/update' &&
+         parsedUrl.pathname !== '/v1/profiles/delete' &&
+         parsedUrl.pathname !== '/v1/profiles/update-fingerprint' &&
          parsedUrl.pathname !== '/v1/profiles/launch-automation' &&
          parsedUrl.pathname !== '/v1/profiles/close-automation' &&
          parsedUrl.pathname !== '/v1/monitoring/report')) {
@@ -2738,7 +2944,15 @@ function startAutomationApiServer() {
       }
       const isPushLocal = parsedUrl.pathname === '/v1/cookies/push-local';
       const isReimportProxies = parsedUrl.pathname === '/v1/proxies/reimport';
+      const isCreateProxy = parsedUrl.pathname === '/v1/proxies/create';
+      const isUpdateProxy = parsedUrl.pathname === '/v1/proxies/update';
+      const isDeleteProxy = parsedUrl.pathname === '/v1/proxies/delete';
+      const isCheckProxy = parsedUrl.pathname === '/v1/proxies/check';
       const isAssignProfileProxy = parsedUrl.pathname === '/v1/profiles/assign-proxy';
+      const isGetProfile = parsedUrl.pathname === '/v1/profiles/get';
+      const isUpdateProfile = parsedUrl.pathname === '/v1/profiles/update';
+      const isDeleteProfile = parsedUrl.pathname === '/v1/profiles/delete';
+      const isUpdateFingerprint = parsedUrl.pathname === '/v1/profiles/update-fingerprint';
       const isLaunchAutomation = parsedUrl.pathname === '/v1/profiles/launch-automation';
       const isMonitoringReport = parsedUrl.pathname === '/v1/monitoring/report';
       if (isPushLocal) {
@@ -2755,9 +2969,61 @@ function startAutomationApiServer() {
           sendJson(res, 400, {status: false, msg: 'proxies array is required'});
           return;
         }
+      } else if (isCreateProxy) {
+        if (!payload.host || typeof payload.host !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'host is required'});
+          return;
+        }
+        if (!Number.isInteger(payload.port)) {
+          sendJson(res, 400, {status: false, msg: 'port (integer) is required'});
+          return;
+        }
+      } else if (isUpdateProxy) {
+        if (!payload.proxyId || typeof payload.proxyId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'proxyId is required'});
+          return;
+        }
+      } else if (isDeleteProxy) {
+        if (!payload.proxyId || typeof payload.proxyId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'proxyId is required'});
+          return;
+        }
+      } else if (isCheckProxy) {
+        if (!payload.host || typeof payload.host !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'host is required'});
+          return;
+        }
+        if (!Number.isInteger(payload.port)) {
+          sendJson(res, 400, {status: false, msg: 'port (integer) is required'});
+          return;
+        }
       } else if (isAssignProfileProxy) {
         if (!payload.profileId || typeof payload.profileId !== 'string') {
           sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+      } else if (isGetProfile) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+      } else if (isUpdateProfile) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+      } else if (isDeleteProfile) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+      } else if (isUpdateFingerprint) {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+        if (typeof payload.fingerprint !== 'object' || payload.fingerprint === null || Array.isArray(payload.fingerprint)) {
+          sendJson(res, 400, {status: false, msg: 'fingerprint object is required'});
           return;
         }
       } else if (isLaunchAutomation) {
@@ -2780,6 +3046,21 @@ function startAutomationApiServer() {
         }
       } else if (!payload.folderPath || typeof payload.folderPath !== 'string') {
         sendJson(res, 400, {status: false, msg: 'folderPath is required'});
+        return;
+      }
+      if (isCheckProxy) {
+        // Unlike every other path here, checkProxy() is a plain main-process
+        // function operating only on the host/port/credentials in the
+        // request body -- it doesn't touch cloudState, so there's no need
+        // for the IPC round-trip to the renderer (and it works even to
+        // test a proxy that was never saved as a profile's assigned proxy).
+        const result = await checkProxy({
+          host: payload.host,
+          port: payload.port,
+          username: typeof payload.username === 'string' ? payload.username : undefined,
+          password: typeof payload.password === 'string' ? payload.password : undefined,
+        });
+        sendJson(res, 200, {status: true, ...result});
         return;
       }
       let cdpPort = null;
@@ -2811,6 +3092,34 @@ function startAutomationApiServer() {
           requestId,
           proxies: payload.proxies,
         });
+      } else if (isCreateProxy) {
+        mainWindow.webContents.send('argus:create-proxy-request', {
+          requestId,
+          name: typeof payload.name === 'string' ? payload.name : '',
+          type: payload.type === 'http' ? 'http' : 'socks5',
+          host: payload.host,
+          port: payload.port,
+          username: typeof payload.username === 'string' ? payload.username : undefined,
+          password: typeof payload.password === 'string' ? payload.password : undefined,
+        });
+      } else if (isUpdateProxy) {
+        const fields = {};
+        if (typeof payload.name === 'string') fields.name = payload.name;
+        if (payload.type === 'http' || payload.type === 'socks5') fields.type = payload.type;
+        if (typeof payload.host === 'string') fields.host = payload.host;
+        if (Number.isInteger(payload.port)) fields.port = payload.port;
+        if (typeof payload.username === 'string') fields.username = payload.username;
+        if (typeof payload.password === 'string') fields.password = payload.password;
+        mainWindow.webContents.send('argus:update-proxy-request', {
+          requestId,
+          proxyId: payload.proxyId,
+          fields,
+        });
+      } else if (isDeleteProxy) {
+        mainWindow.webContents.send('argus:delete-proxy-request', {
+          requestId,
+          proxyId: payload.proxyId,
+        });
       } else if (isAssignProfileProxy) {
         mainWindow.webContents.send('argus:assign-profile-proxy-request', {
           requestId,
@@ -2818,6 +3127,43 @@ function startAutomationApiServer() {
           proxyId: typeof payload.proxyId === 'string' ? payload.proxyId : '',
           proxyHost: typeof payload.proxyHost === 'string' ? payload.proxyHost : '',
           proxyPort: Number.isInteger(payload.proxyPort) ? payload.proxyPort : 0,
+        });
+      } else if (isGetProfile) {
+        mainWindow.webContents.send('argus:get-profile-request', {
+          requestId,
+          profileId: payload.profileId,
+          allowedFolders: key.folderScope,
+        });
+      } else if (isUpdateProfile) {
+        // Only these fields are settable here -- proxy assignment has its
+        // own endpoint (assign-proxy) since it needs to resolve against the
+        // proxies list rather than take a bare proxy_id, and fingerprint has
+        // its own endpoint too since it's a nested object merged field-by-field.
+        const fields = {};
+        if (typeof payload.name === 'string') fields.name = payload.name;
+        if (Array.isArray(payload.tags)) fields.tags = payload.tags.filter((tag) => typeof tag === 'string');
+        if (typeof payload.status === 'string') fields.status = payload.status;
+        if (typeof payload.color === 'string') fields.color = payload.color;
+        if (typeof payload.folderId === 'string' || payload.folderId === null) fields.folder_id = payload.folderId;
+        if (typeof payload.email === 'string') fields.email = payload.email;
+        if (typeof payload.password === 'string') fields.password = payload.password;
+        mainWindow.webContents.send('argus:update-profile-request', {
+          requestId,
+          profileId: payload.profileId,
+          fields,
+        });
+      } else if (isDeleteProfile) {
+        mainWindow.webContents.send('argus:delete-profile-request', {
+          requestId,
+          profileId: payload.profileId,
+          permanent: payload.permanent === true,
+          allowedFolders: key.folderScope,
+        });
+      } else if (isUpdateFingerprint) {
+        mainWindow.webContents.send('argus:update-fingerprint-request', {
+          requestId,
+          profileId: payload.profileId,
+          fingerprint: payload.fingerprint,
         });
       } else if (isLaunchAutomation) {
         mainWindow.webContents.send('argus:launch-automation-request', {
