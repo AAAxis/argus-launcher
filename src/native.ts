@@ -1,4 +1,4 @@
-import type {RuntimeFingerprint, SharedExtension} from './types';
+import type {ArgusProfile, ArgusProxy, RuntimeFingerprint, SharedExtension} from './types';
 
 export type ProxyConfig = {
   id?: string;
@@ -106,8 +106,19 @@ export type ApiState = {
   error: string | null;
 };
 
+export type ApiKey = {
+  id: string;
+  name: string;
+  tokenPreview: string;
+  // null means every folder (full access); an array (possibly empty) is an
+  // explicit allow-list of folder ids.
+  folderScope: string[] | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
 type ArgusNative = {
-  launchProfile(payload: LaunchProfilePayload): Promise<{
+  launchProfile(payload: LaunchProfilePayload, extraArgs?: string[]): Promise<{
     ok: boolean;
     pid?: number;
     appPath?: string;
@@ -118,6 +129,23 @@ type ArgusNative = {
     launcherAppPath?: string;
     error?: string;
   }>;
+  // Named, scoped keys enforced on every /v1/* request to the local
+  // automation API (see AUTOMATION_KEYS_PATH in main.cjs). Raw token is only
+  // ever returned from createApiKey, at creation time -- only its hash is
+  // persisted, so it can't be recovered later.
+  listApiKeys?(): Promise<ApiKey[]>;
+  createApiKey?(name: string, folderScope: string[] | null): Promise<ApiKey & {token: string}>;
+  revokeApiKey?(id: string): Promise<{revoked: boolean}>;
+  // Writes the MCP server registration directly into the target tool's own
+  // config file (~/.claude.json or ~/.codex/config.toml) instead of handing
+  // back a snippet to copy/paste -- see applyClaudeCodeConfig/applyCodexConfig
+  // in main.cjs for why (every CLI-command form proved unreliable on Windows).
+  applyIntegrationConfig?(
+    integrationId: string,
+    dir: string,
+    token: string,
+    base: string,
+  ): Promise<{ok: boolean; path?: string; error?: string}>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
   getUpdateStatus?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;
@@ -174,6 +202,166 @@ type ArgusNative = {
     requestId: string,
     result?: {matched: boolean; profileId: string; proxyId?: string},
     error?: string,
+  ): void;
+  // POST /v1/profiles/get: full profile detail by id, including credentials --
+  // deliberately separate from the bulk list-profiles endpoint (which only
+  // returns id+name) so a broad "list all profiles" call never bulk-exposes
+  // every stored password at once.
+  onGetProfileRequest?(
+    callback: (payload: {requestId: string; profileId: string; allowedFolders: string[] | null}) => void,
+  ): () => void;
+  sendGetProfileResult?(
+    requestId: string,
+    result?: {profile: ArgusProfile | null},
+    error?: string,
+  ): void;
+  // GET /v1/proxies: full proxy list, each annotated with which profiles
+  // currently use it -- lets an MCP-driven agent find an unassigned proxy
+  // to swap in without cross-referencing list_profiles itself.
+  onListProxiesRequest?(
+    callback: (payload: {requestId: string}) => void,
+  ): () => void;
+  sendListProxiesResult?(
+    requestId: string,
+    result?: {proxies: Array<ArgusProxy & {assignedProfileIds: string[]}>},
+    error?: string,
+  ): void;
+  // POST /v1/proxies/create
+  onCreateProxyRequest?(
+    callback: (payload: {
+      requestId: string;
+      name: string;
+      type: 'http' | 'socks5';
+      host: string;
+      port: number;
+      username?: string;
+      password?: string;
+    }) => void,
+  ): () => void;
+  sendCreateProxyResult?(
+    requestId: string,
+    result?: {proxyId: string},
+    error?: string,
+  ): void;
+  // POST /v1/proxies/update: partial field patch, same shape as update-profile.
+  onUpdateProxyRequest?(
+    callback: (payload: {
+      requestId: string;
+      proxyId: string;
+      fields: Partial<Pick<ArgusProxy, 'name' | 'type' | 'host' | 'port' | 'username' | 'password'>>;
+    }) => void,
+  ): () => void;
+  sendUpdateProxyResult?(
+    requestId: string,
+    result?: {matched: boolean},
+    error?: string,
+  ): void;
+  // POST /v1/proxies/delete: also unassigns (sets proxy_id null) any profile
+  // currently using this proxy, so no profile is left pointing at a proxy_id
+  // that no longer exists.
+  onDeleteProxyRequest?(
+    callback: (payload: {requestId: string; proxyId: string}) => void,
+  ): () => void;
+  sendDeleteProxyResult?(
+    requestId: string,
+    result?: {deleted: boolean; unassignedProfileIds: string[]},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/update: partial field patch (name/tags/status/color/folder_id/email/password).
+  // Proxy has its own endpoint (assign-proxy, above) and fingerprint has its
+  // own endpoint (update-fingerprint, below) since both need extra handling
+  // beyond a plain field overwrite.
+  onUpdateProfileRequest?(
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      fields: Partial<Pick<ArgusProfile, 'name' | 'tags' | 'status' | 'color' | 'folder_id' | 'email' | 'password'>>;
+    }) => void,
+  ): () => void;
+  sendUpdateProfileResult?(
+    requestId: string,
+    result?: {matched: boolean; profileId: string},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/delete: soft-deletes (moves to Trash, same as the
+  // Delete button in the UI) unless permanent is true. allowedFolders scopes
+  // which profiles a folder-restricted key may delete, same as get/launch.
+  onDeleteProfileRequest?(
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      permanent: boolean;
+      allowedFolders: string[] | null;
+    }) => void,
+  ): () => void;
+  sendDeleteProfileResult?(
+    requestId: string,
+    result?: {deleted: boolean; permanent: boolean},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/update-fingerprint: merges the given fields into the
+  // profile's existing fingerprint object rather than replacing it wholesale.
+  onUpdateFingerprintRequest?(
+    callback: (payload: {requestId: string; profileId: string; fingerprint: Record<string, unknown>}) => void,
+  ): () => void;
+  sendUpdateFingerprintResult?(
+    requestId: string,
+    result?: {matched: boolean; profileId: string},
+    error?: string,
+  ): void;
+  // POST /v1/profiles/launch-automation: main.cjs already chose a free CDP
+  // port before forwarding this -- the renderer's job is only to resolve the
+  // profileId against cloud state and launch it, same as a manual Launch
+  // click, just with --remote-debugging-port appended and no interactive
+  // proxy-check/error-dialog UI (main process's spawnProfileUnchecked is the
+  // authoritative proxy gate either way).
+  onLaunchAutomationRequest?(
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      cdpPort: number;
+      // null = the calling key has full access; an array is the folder
+      // allow-list it was scoped to when created/approved.
+      allowedFolders: string[] | null;
+    }) => void,
+  ): () => void;
+  sendLaunchAutomationResult?(
+    requestId: string,
+    result?: {ok: boolean; pid?: number; error?: string},
+    error?: string,
+  ): void;
+  onListProfilesRequest?(
+    callback: (payload: {requestId: string; folder: string | null; allowedFolders: string[] | null}) => void,
+  ): () => void;
+  sendListProfilesResult?(
+    requestId: string,
+    result?: {profiles: Array<{id: string; name: string}>},
+    error?: string,
+  ): void;
+  onMonitoringReportRequest?(
+    callback: (payload: {
+      requestId: string;
+      runId: string;
+      profileId: string;
+      ok: boolean;
+      detail: string;
+      screenshotBase64: string | null;
+    }) => void,
+  ): () => void;
+  sendMonitoringReportResult?(requestId: string, result?: {ok: true}, error?: string): void;
+  // Loopback "Connect" flow (GET /v1/oauth/authorize): an external app
+  // (e.g. Hive) opens that URL in a real browser; this fires so the
+  // renderer can show an approve/deny dialog, then reports back which
+  // folders to actually grant (defaulting to what the caller requested, but
+  // the human approving can narrow it).
+  onOAuthAuthorizeRequest?(
+    callback: (payload: {requestId: string; clientName: string; requestedScope: string}) => void,
+  ): () => void;
+  sendOAuthAuthorizeResult?(
+    requestId: string,
+    approved: boolean,
+    folderScope: string[] | null,
+    keyName: string,
   ): void;
 };
 

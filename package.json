@@ -1,6 +1,6 @@
 {
   "name": "argys-anty",
-  "version": "1.0.44",
+  "version": "1.0.55",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
@@ -63,6 +63,8 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/app.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
       "target": [
         "dmg",
         "zip"

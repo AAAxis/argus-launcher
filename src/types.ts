@@ -25,6 +25,17 @@ export type RuntimeFingerprint = {
   longitude?: number;
   cpu_cores?: number;
   memory_gb?: number;
+  // Real, engine-level (not JS-shimmed) mobile signals -- see the matching
+  // Fingerprint::touch_points/sensor_mode/battery_* fields in
+  // chrome/browser/argus/argus_fingerprint.h for what each one actually
+  // does browser-side. Derived automatically from platform in
+  // buildRuntimeFingerprint() below, same as webrtc_mode/canvas_mode etc --
+  // not user-editable fields of their own.
+  touch_points?: number;
+  sensor_mode?: string;
+  battery_spoof?: boolean;
+  battery_level?: number;
+  battery_charging?: boolean;
   screen?: string;
   media_devices?: string;
   ports_to_protect?: string;
@@ -45,6 +56,11 @@ export type ArgusProfile = {
   status?: string;
   color?: string;
   tags?: string[];
+  // Login credentials for whatever account this profile is logged into.
+  // Stored in plaintext the same way ArgusProxy.password already is -- no
+  // separate encrypted store, consistent with the rest of this app's model.
+  email?: string;
+  password?: string;
   folder_id?: string | null;
   proxy_id?: string | null;
   proxy_mode?: ProxyMode;

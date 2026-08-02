@@ -21,10 +21,6 @@ env:
 jobs:
   build-mac:
     name: Build macOS DMG
-    # Disabled to control GitHub Actions spend -- macos-14 runners bill at
-    # 10x the Linux/Windows rate. Flip this back to enable once budget
-    # allows; nothing else about the job needs to change.
-    if: false
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -48,6 +44,20 @@ jobs:
           fi
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
 
+      - name: Configure notarization
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # notarytool rejects Apple ID + app-specific-password auth without an
+        # explicit teamId (see @electron/notarize's validate-args.js), so it
+        # has to be injected here rather than left as `notarize: true`.
+        # (Guarded with a shell `if`, not a step-level `if:`, because the
+        # `secrets` context isn't allowed in step conditionals.)
+        run: |
+          if [ -n "$APPLE_TEAM_ID" ]; then
+            node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.mac.notarize={teamId:process.env.APPLE_TEAM_ID}; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+          fi
+
       - name: Write release notes
         shell: bash
         # electron-builder picks up build/release-notes.md automatically and
@@ -68,10 +78,27 @@ jobs:
         run: npm run build
 
       - name: Build DMG
-        run: npx electron-builder --mac dmg zip --arm64 --publish never
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # GitHub Actions passes secrets that were never set as empty strings,
+        # not as unset vars. electron-builder treats an empty-but-present
+        # CSC_LINK as "sign with this" rather than "skip signing", which
+        # crashes the build. Until the signing secrets exist, unset them
+        # entirely so this produces an unsigned (but successful) build.
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "CSC_LINK not set; building unsigned."
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npx electron-builder --mac dmg zip --arm64 --publish never
 
       - name: Upload macOS artifact
-        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: argys-anty-macos
@@ -149,7 +176,6 @@ jobs:
           done
 
       - name: Upload Windows artifact
-        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: argys-anty-windows
@@ -165,7 +191,6 @@ jobs:
       - build-mac
       - build-windows
     runs-on: ubuntu-latest
-    if: ${{ false }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

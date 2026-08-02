@@ -1,18 +1,18 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
-import {Apple, Cookie, Download, Monitor, Pencil, Plus, Play, RefreshCw, Shield, Smartphone, Trash2, Upload, X} from 'lucide-react';
+import {Apple, Bot, Copy, Cookie, Download, Hexagon, Monitor, Pencil, Plug, Plus, Play, RefreshCw, Shield, Smartphone, SquareTerminal, Trash2, Upload, Waypoints, X} from 'lucide-react';
 import * as db from './db';
 import {describeDbError} from './db/errors';
 import {native} from './native';
-import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
+import type {ApiKey, ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
 import {OrgProvider, useOrg} from './org';
 import {supabase} from './supabase';
 import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensionToggles, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
-type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'api';
+type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'integrations' | 'api';
 
 type ApiEndpoint = {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -32,6 +32,14 @@ type ProfileDraft = {
   status: string;
   color: string;
   folder_id: string;
+  // Login credentials for whatever account this profile is signed into --
+  // stored plaintext the same way proxy_search/proxy credentials already
+  // are (see ArgusProfile.email/password in types.ts). Not used by Anty
+  // itself for anything; exposed so MCP-driven agents (get_profile/
+  // update_profile) can read/fill a login form without the user re-typing
+  // credentials into the agent's own prompt each time.
+  email: string;
+  password: string;
   proxy_id: string;
   proxy_mode: ProxyMode;
   proxy_search: string;
@@ -103,6 +111,7 @@ const tabs: Array<{id: TabId; label: string}> = [
   {id: 'cookies', label: 'Cookies'},
   {id: 'bookmarks', label: 'Bookmarks'},
   {id: 'extensions', label: 'Extensions'},
+  {id: 'integrations', label: 'Integrations'},
   {id: 'api', label: 'API'},
 ];
 
@@ -170,6 +179,41 @@ const API_GROUPS: ApiGroup[] = [
     ],
   },
 ];
+
+type IntegrationId = 'hive' | 'claude-code' | 'codex' | 'openclaw';
+
+// Generic Lucide glyphs, not the real product marks -- swap for actual
+// brand logos (SVG assets) whenever those are available.
+const INTEGRATIONS: Array<{id: IntegrationId; name: string; description: string; icon: typeof Hexagon}> = [
+  {
+    id: 'hive',
+    name: 'Hive',
+    description: 'Multi-agent runtime -- run QA/monitoring sweeps across many profiles in parallel.',
+    icon: Hexagon,
+  },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    description: "Anthropic's coding agent CLI -- drive profiles as MCP tools from any project.",
+    icon: Bot,
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    description: "OpenAI's coding agent CLI -- same MCP tools, wired into Codex's own config.",
+    icon: SquareTerminal,
+  },
+  {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    description: 'Personal AI assistant gateway across chat channels -- same MCP tools, wired into its own config.',
+    icon: Waypoints,
+  },
+];
+
+// Where argus-hive-bridge lives on this machine -- not user-editable in the
+// UI; update this if the checkout ever moves.
+const BRIDGE_PATH = 'C:\\Users\\dima\\argus-hive-bridge';
 
 const defaultState: CloudState = {
   profiles: [],
@@ -507,6 +551,119 @@ const realisticWindowsFingerprintPatterns: RealisticFingerprintPattern[] = [
   },
 ];
 
+// Real device bundles for Android/iOS -- screen/GPU/CPU/memory are picked
+// together as one unit (via the "Device model" field below) instead of the
+// free-mix GPU/CPU dropdowns desktop platforms use, so a profile can no
+// longer end up as "Android" reporting an NVIDIA desktop GPU string. iOS
+// entries all use "Apple Inc." / "Apple GPU" since every iOS browser is
+// WebKit-based on real hardware, regardless of model.
+type MobileDevicePattern = RealisticFingerprintPattern & {label: string};
+const mobileDevicePatterns: MobileDevicePattern[] = [
+  {
+    label: 'iPhone 15 Pro Max',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '430x932',
+    fingerprint_cpu_model: 'Apple A17 Pro',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    label: 'iPhone 15',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '393x852',
+    fingerprint_cpu_model: 'Apple A16 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '6',
+  },
+  {
+    label: 'iPhone 14',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '390x844',
+    fingerprint_cpu_model: 'Apple A15 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '6',
+  },
+  {
+    label: 'iPhone 13 mini',
+    fingerprint_os: 'iOS',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Apple Inc.',
+    fingerprint_webgl_renderer: 'Apple GPU',
+    fingerprint_screen: '375x812',
+    fingerprint_cpu_model: 'Apple A15 Bionic',
+    fingerprint_cpu_cores: '6',
+    fingerprint_memory_gb: '4',
+  },
+  {
+    label: 'Samsung Galaxy S24 Ultra',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 750',
+    fingerprint_screen: '412x915',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 3',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '12',
+  },
+  {
+    label: 'Samsung Galaxy S23',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '360x780',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    label: 'Google Pixel 8 Pro',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '412x892',
+    fingerprint_cpu_model: 'Google Tensor G3',
+    fingerprint_cpu_cores: '9',
+    fingerprint_memory_gb: '12',
+  },
+  {
+    label: 'Google Pixel 7',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Mali-G710 MC10',
+    fingerprint_screen: '412x915',
+    fingerprint_cpu_model: 'Google Tensor G2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '8',
+  },
+  {
+    label: 'OnePlus 11',
+    fingerprint_os: 'Android',
+    fingerprint_browser_version: 'Auto',
+    fingerprint_webgl_vendor: 'Google Inc. (Qualcomm)',
+    fingerprint_webgl_renderer: 'Adreno (TM) 740',
+    fingerprint_screen: '412x919',
+    fingerprint_cpu_model: 'Qualcomm Snapdragon 8 Gen 2',
+    fingerprint_cpu_cores: '8',
+    fingerprint_memory_gb: '16',
+  },
+];
+
+function mobileDevicePatternsFor(os: string): MobileDevicePattern[] {
+  return mobileDevicePatterns.filter((item) => item.fingerprint_os === os);
+}
+
 const defaultWindowsFingerprintPattern = realisticWindowsFingerprintPatterns[0];
 
 const gpuPresets = realisticWindowsFingerprintPatterns.map((pattern) => ({
@@ -758,6 +915,8 @@ function newProfileDraft(): ProfileDraft {
     status: 'Ready',
     color: profileColors[1],
     folder_id: '',
+    email: '',
+    password: '',
     proxy_id: '',
     proxy_mode: 'assigned',
     proxy_search: '',
@@ -804,6 +963,8 @@ function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     status: profile.status || 'Ready',
     color: profile.color || profileColors[1],
     folder_id: profile.folder_id || '',
+    email: profile.email || '',
+    password: profile.password || '',
     proxy_id: profile.proxy_id || '',
     proxy_mode: profile.proxy_mode || 'assigned',
     proxy_search: '',
@@ -1000,7 +1161,33 @@ function randomChoice<T>(items: T[]) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-function randomFingerprintPatch(): Partial<ProfileDraft> {
+// `os` is the profile's *current* platform selection -- rotating must pick a
+// new device within that same platform (another iPhone, another Android
+// phone, another Windows box), never silently switch platforms. Previously
+// this always drew from realisticWindowsFingerprintPatterns regardless of
+// os, so rotating on an iOS/Android profile would overwrite it with a
+// random Windows/Samsung-style identity -- the actual bug behind "why does
+// iOS let me pick a Samsung device".
+function randomFingerprintPatch(os: string): Partial<ProfileDraft> {
+  const mobilePool = mobileDevicePatternsFor(os);
+  if (mobilePool.length > 0) {
+    const {label: _label, ...pattern} = randomChoice(mobilePool);
+    return {
+      ...pattern,
+      fingerprint_timezone: 'Auto from proxy',
+      fingerprint_geolocation: AUTO_FROM_PROXY,
+      fingerprint_language: AUTO_FROM_PROXY,
+      fingerprint_webrtc: 'Proxy only',
+      fingerprint_canvas: 'Noise',
+      fingerprint_webgl: 'Noise',
+      fingerprint_webgpu: 'Real',
+      fingerprint_client_rects: 'Noise',
+      fingerprint_audio: 'Noise',
+      fingerprint_media_devices: mediaDevicePresets[0],
+      fingerprint_do_not_track: false,
+      fingerprint_user_agent: '',
+    };
+  }
   const pattern = randomChoice(realisticWindowsFingerprintPatterns);
   return {
     ...pattern,
@@ -1209,6 +1396,12 @@ function fingerprintPresetFor(os?: string): string | undefined {
   if (os === 'Ubuntu') {
     return 'linux';
   }
+  if (os === 'Android') {
+    return 'android';
+  }
+  if (os === 'iOS') {
+    return 'ios';
+  }
   return undefined;
 }
 
@@ -1231,6 +1424,18 @@ function fingerprintPlatformFor(preset?: string, os?: string): string | undefine
   return undefined;
 }
 
+// iOS/CriOS has no "Chrome NNN" version concept -- it's WebKit-based, not
+// Blink, so the same browserVersionPresets dropdown maps onto real iOS/
+// Safari point releases instead of a Chrome major version. Previously this
+// was silently ignored entirely (the iOS UA string was one hardcoded
+// literal), so picking a different "Browser version" had zero effect on an
+// iOS profile -- unlike Android/desktop, where it visibly changes the UA.
+const iosVersionForBrowserPreset: Record<string, {ios: string; webkit: string}> = {
+  'Chrome 126': {ios: '17_5', webkit: '605.1.15'},
+  'Chrome 125': {ios: '17_4_1', webkit: '605.1.15'},
+  'Chrome 124': {ios: '17_3_1', webkit: '605.1.15'},
+};
+
 function userAgentForFingerprint(os?: string, browserVersion?: string): string {
   const chromeVersion = browserVersion === 'Auto' || !browserVersion ?
     '149.0.0.0' :
@@ -1238,8 +1443,11 @@ function userAgentForFingerprint(os?: string, browserVersion?: string): string {
   switch (os) {
     case 'Android':
       return `Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Mobile Safari/537.36`;
-    case 'iOS':
-      return 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    case 'iOS': {
+      const {ios, webkit} = iosVersionForBrowserPreset[browserVersion || ''] || {ios: '17_5', webkit: '605.1.15'};
+      const dotted = ios.replace(/_/g, '.');
+      return `Mozilla/5.0 (iPhone; CPU iPhone OS ${ios} like Mac OS X) AppleWebKit/${webkit} (KHTML, like Gecko) Version/${dotted} Mobile/15E148 Safari/604.1`;
+    }
     case 'macOS':
       return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
     case 'Ubuntu':
@@ -1335,11 +1543,23 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
     fingerprint.language.split(',').map((part) => part.split(';')[0].trim()).filter(Boolean) :
     undefined;
   const rotate = Boolean(fingerprint.rotate_on_launch);
+  const seed = rotate ? randomSeed() : stableSeedFor(profile.id);
+  // Mirrors Generate()'s own platform-derived defaults in argus_fingerprint.cc
+  // -- touch/sensor/battery aren't separate user-facing fields, they follow
+  // directly from which platform (desktop vs mobile) is selected above, same
+  // as webrtc_mode/canvas_mode etc already do.
+  const isMobile = preset === 'android' || preset === 'ios';
+  const kBatteryLevels = [23, 41, 58, 67, 82, 94];
   return {
     platform: fingerprintPlatformFor(preset, fingerprint.os),
     ua_string: fingerprint.user_agent || userAgentForFingerprint(fingerprint.os, fingerprint.browser_version),
     preset,
-    seed: rotate ? randomSeed() : stableSeedFor(profile.id),
+    seed,
+    touch_points: isMobile ? 5 : 0,
+    sensor_mode: isMobile ? 'idle-realistic' : 'off',
+    battery_spoof: isMobile,
+    battery_level: isMobile ? kBatteryLevels[seed % kBatteryLevels.length] / 100 : undefined,
+    battery_charging: isMobile ? seed % 4 === 0 : undefined,
     webrtc_mode: fingerprintWebrtcModeFor(fingerprint.webrtc),
     canvas_mode: fingerprintNoiseModeFor(fingerprint.canvas),
     webgl_mode: fingerprintNoiseModeFor(fingerprint.webgl),
@@ -1509,6 +1729,7 @@ function App() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudState, setCloudState] = useState<CloudState>(defaultState);
   const [webstoreLinkInput, setWebstoreLinkInput] = useState('');
+  const [webstoreNameInput, setWebstoreNameInput] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [profileSearch, setProfileSearch] = useState('');
@@ -1523,7 +1744,13 @@ function App() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
-  const [apiToken, setApiToken] = useState('argys_api_token');
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [revealedKey, setRevealedKey] = useState<{name: string; token: string} | null>(null);
+  const [oauthRequest, setOauthRequest] = useState<{requestId: string; clientName: string; requestedScope: string} | null>(null);
+  const [oauthApprovalFolder, setOauthApprovalFolder] = useState('');
+  const [integrationStatus, setIntegrationStatus] = useState<Partial<Record<IntegrationId, {ok: boolean; message: string}>>>({});
+  const [integrationToken, setIntegrationToken] = useState<Partial<Record<IntegrationId, string>>>({});
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
   const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
@@ -1569,7 +1796,6 @@ function App() {
   // expires or is signed out in another window is noticed here too.
   useEffect(() => {
     setSignedInEmail(org.email);
-    setApiToken(org.email ? tokenForEmail(org.email) : 'argys_api_token');
   }, [org.email]);
 
   useEffect(() => {
@@ -1638,6 +1864,70 @@ function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
+
+  // API keys are per-install, not per-user, and named/scoped rather than a
+  // single shared secret -- they're whatever main.cjs's AUTOMATION_KEYS_PATH
+  // holds. They don't change on sign-in/out.
+  async function refreshApiKeys() {
+    const keys = await native?.listApiKeys?.();
+    if (keys) {
+      setApiKeys(keys);
+    }
+  }
+
+  useEffect(() => {
+    void refreshApiKeys();
+  }, []);
+
+  async function createApiKey() {
+    if (!native?.createApiKey) {
+      return;
+    }
+    const created = await native.createApiKey(newKeyName || 'Unnamed key', null);
+    setRevealedKey({name: created.name, token: created.token});
+    setNewKeyName('');
+    await refreshApiKeys();
+  }
+
+  async function revokeApiKey(id: string) {
+    await native?.revokeApiKey?.(id);
+    await refreshApiKeys();
+  }
+
+  // One click, no modal: create the key (full access -- there's no scope
+  // picker in this flow) and immediately either write the target tool's
+  // config directly (claude-code/codex) or, for Hive, reveal the token
+  // inline right on the card since there's no local config file of Hive's
+  // for Anty to write to.
+  async function connectIntegrationOneClick(integrationId: IntegrationId) {
+    if (!native?.createApiKey) {
+      return;
+    }
+    const integration = INTEGRATIONS.find((item) => item.id === integrationId);
+    if (!integration) {
+      return;
+    }
+    const created = await native.createApiKey(integration.name, null);
+    await refreshApiKeys();
+    if (integrationId === 'hive') {
+      setIntegrationToken((prev) => ({...prev, [integrationId]: created.token}));
+      setIntegrationStatus((prev) => ({
+        ...prev,
+        [integrationId]: {ok: true, message: 'Copy this into argus-hive-bridge/.env as ARGYS_API_TOKEN -- shown once.'},
+      }));
+      return;
+    }
+    if (!native.applyIntegrationConfig) {
+      return;
+    }
+    const result = await native.applyIntegrationConfig(integrationId, BRIDGE_PATH, created.token, API_BASE_URL);
+    setIntegrationStatus((prev) => ({
+      ...prev,
+      [integrationId]: result.ok ?
+        {ok: true, message: `Connected -- restart ${integration.name} to use it.`} :
+        {ok: false, message: result.error || 'Failed to write config'},
+    }));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1962,6 +2252,381 @@ function App() {
     });
   }, [cloudState]);
 
+  useEffect(() => {
+    const onRequest = native?.onGetProfileRequest;
+    const sendResult = native?.sendGetProfileResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(({requestId, profileId, allowedFolders}) => {
+      const profile = cloudState.profiles.find((item) => item.id === profileId && !item.deleted_at);
+      if (!profile || (allowedFolders && !allowedFolders.includes(profile.folder_id || ''))) {
+        sendResult(requestId, {profile: null});
+        return;
+      }
+      sendResult(requestId, {profile});
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onListProxiesRequest;
+    const sendResult = native?.sendListProxiesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(({requestId}) => {
+      const proxies = cloudState.proxies.map((proxy) => ({
+        ...proxy,
+        assignedProfileIds: cloudState.profiles
+          .filter((profile) => !profile.deleted_at && profile.proxy_id === proxy.id)
+          .map((profile) => profile.id),
+      }));
+      sendResult(requestId, {proxies});
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onCreateProxyRequest;
+    const sendResult = native?.sendCreateProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, name, type, host, port, username, password}) => {
+      try {
+        const proxy: ArgusProxy = {
+          id: globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+          name: name || `${host}:${port}`,
+          type,
+          host,
+          port,
+          username,
+          password,
+        };
+        const ok = await withDb((activeOrgId) => db.proxies.upsert(activeOrgId, proxy));
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        patchProxies((list) => [...list, proxy]);
+        sendResult(requestId, {proxyId: proxy.id});
+        setMessage(`Created proxy ${proxy.name}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onUpdateProxyRequest;
+    const sendResult = native?.sendUpdateProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, proxyId, fields}) => {
+      try {
+        const existing = cloudState.proxies.find((item) => item.id === proxyId);
+        if (!existing) {
+          sendResult(requestId, {matched: false});
+          return;
+        }
+        const updated = {...existing, ...fields};
+        const ok = await withDb((activeOrgId) => db.proxies.upsert(activeOrgId, updated));
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        patchProxies((list) => list.map((proxy) => proxy.id === proxyId ? updated : proxy));
+        sendResult(requestId, {matched: true});
+        setMessage(`Updated proxy ${proxyId}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onDeleteProxyRequest;
+    const sendResult = native?.sendDeleteProxyResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, proxyId}) => {
+      try {
+        const exists = cloudState.proxies.some((item) => item.id === proxyId);
+        if (!exists) {
+          sendResult(requestId, {deleted: false, unassignedProfileIds: []});
+          return;
+        }
+        const unassignedProfileIds = cloudState.profiles
+            .filter((profile) => profile.proxy_id === proxyId)
+            .map((profile) => profile.id);
+        // profiles.proxy_id is ON DELETE SET NULL, so the assigned profiles are
+        // cleared by the same statement; the patch below only mirrors it.
+        const ok = await withDb((activeOrgId) => db.proxies.remove(activeOrgId, [proxyId]));
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        patchProxies((list) => list.filter((proxy) => proxy.id !== proxyId));
+        patchProfiles((list) => list.map((profile) =>
+          profile.proxy_id === proxyId ? {...profile, proxy_id: null} : profile));
+        sendResult(requestId, {deleted: true, unassignedProfileIds});
+        setMessage(`Deleted proxy ${proxyId}${unassignedProfileIds.length ? ` (unassigned from ${unassignedProfileIds.length} profile(s))` : ''}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onUpdateProfileRequest;
+    const sendResult = native?.sendUpdateProfileResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, fields}) => {
+      try {
+        const exists = cloudState.profiles.some((item) => item.id === profileId);
+        if (!exists) {
+          sendResult(requestId, {matched: false, profileId});
+          return;
+        }
+        const ok = await withDb((activeOrgId) => db.profiles.update(activeOrgId, profileId, fields));
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        patchProfiles((list) => list.map((profile) =>
+          profile.id === profileId ? {...profile, ...fields} : profile));
+        sendResult(requestId, {matched: true, profileId});
+        setMessage(`Updated ${profileId}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onDeleteProfileRequest;
+    const sendResult = native?.sendDeleteProfileResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, permanent, allowedFolders}) => {
+      try {
+        if (!orgId) {
+          sendResult(requestId, undefined, 'No organization is selected yet.');
+          return;
+        }
+        // Still re-read before the folder check: allowedFolders is an
+        // authorization gate, so it has to see where the profile lives now
+        // rather than trusting this window's render cache. The delete itself
+        // is one statement against one id and needs nothing fresh.
+        const latestProfiles = await db.profiles.list(orgId);
+        const target = latestProfiles.find((item) => item.id === profileId);
+        if (!target || (allowedFolders && !allowedFolders.includes(target.folder_id || ''))) {
+          sendResult(requestId, {deleted: false, permanent});
+          return;
+        }
+        const ok = await withDb((activeOrgId) => permanent ?
+          db.profiles.purge(activeOrgId, [profileId]) :
+          db.profiles.softDelete(activeOrgId, [profileId]));
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        const profiles = permanent ?
+          latestProfiles.filter((item) => item.id !== profileId) :
+          latestProfiles.map((item) =>
+            item.id === profileId ? {...item, deleted_at: new Date().toISOString()} : item);
+        patchProfiles(() => profiles);
+        if (selectedId === profileId) {
+          setSelectedId(profiles.find((item) => !item.deleted_at)?.id || null);
+        }
+        sendResult(requestId, {deleted: true, permanent});
+        setMessage(permanent ? `${profileId} permanently deleted` : `${profileId} moved to Trash`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onUpdateFingerprintRequest;
+    const sendResult = native?.sendUpdateFingerprintResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, fingerprint}) => {
+      try {
+        const target = cloudState.profiles.find((item) => item.id === profileId);
+        if (!target) {
+          sendResult(requestId, {matched: false, profileId});
+          return;
+        }
+        const merged = {...target.fingerprint, ...fingerprint};
+        const ok = await withDb((activeOrgId) =>
+          db.profiles.update(activeOrgId, profileId, {fingerprint: merged}));
+        if (!ok) {
+          sendResult(requestId, undefined, 'Failed to save to cloud state.');
+          return;
+        }
+        patchProfiles((list) => list.map((profile) =>
+          profile.id === profileId ? {...profile, fingerprint: merged} : profile));
+        sendResult(requestId, {matched: true, profileId});
+        setMessage(`Updated fingerprint for ${profileId}`);
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onListProfilesRequest;
+    const sendResult = native?.sendListProfilesResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(({requestId, folder, allowedFolders}) => {
+      const profiles = cloudState.profiles
+          .filter((profile) => !profile.deleted_at)
+          .filter((profile) => !folder || profile.folder_id === folder)
+          .filter((profile) => !allowedFolders || allowedFolders.includes(profile.folder_id || ''))
+          .map((profile) => ({id: profile.id, name: profile.name}));
+      sendResult(requestId, {profiles});
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onLaunchAutomationRequest;
+    const sendResult = native?.sendLaunchAutomationResult;
+    const launchProfile = native?.launchProfile;
+    if (!onRequest || !sendResult || !launchProfile) {
+      return;
+    }
+    return onRequest(async ({requestId, profileId, cdpPort, allowedFolders}) => {
+      try {
+        const profile = cloudState.profiles.find((item) => item.id === profileId && !item.deleted_at);
+        if (!profile) {
+          sendResult(requestId, {ok: false, error: 'Profile not found'});
+          return;
+        }
+        if (allowedFolders && !allowedFolders.includes(profile.folder_id || '')) {
+          sendResult(requestId, {ok: false, error: 'This key is not scoped to that profile\'s folder'});
+          return;
+        }
+        const commandLineSwitches = [
+          profile.command_line_switches || '',
+          fingerprintSwitches(profile),
+        ].filter(Boolean).join('\n');
+        const proxyMode = profile.proxy_mode || 'assigned';
+        let selectedProxy: ArgusProxy | null = null;
+        if (proxyMode === 'assigned') {
+          selectedProxy = proxyFor(profile);
+          if (!selectedProxy?.host || !selectedProxy.port) {
+            sendResult(requestId, {ok: false, error: `Proxy for ${profile.name} is invalid`});
+            return;
+          }
+        }
+        // spawnProfileUnchecked (main process) is the authoritative proxy
+        // gate on every launch regardless -- unlike the manual Launch button,
+        // this path skips the interactive pre-check/retry UI (nothing to
+        // show it to) and skips fingerprint-rotate-on-launch, since automated
+        // QA/monitoring runs want a stable, comparable fingerprint across
+        // repeated sweeps rather than a fresh one each time.
+        const savedCookie = profile.cookie_mode === 'saved' && profile.cookie_id ?
+          cloudState.cookies.find((item) => item.id === profile.cookie_id) :
+          null;
+        const result = await launchProfile({
+          id: profile.id,
+          name: profile.name,
+          userDataDir: profileDataDir(profile.id),
+          proxy: selectedProxy,
+          useFreeProxy: proxyMode === 'free_proxy',
+          sharedExtensions: cloudState.shared_extensions,
+          commandLineSwitches,
+          runtimeFingerprint: buildRuntimeFingerprint(profile),
+          startUrl: browserStartUrl(profile),
+          homeHtml: anonymousHomeHtml(profile, cloudState.shared_bookmarks, selectedProxy),
+          cookieImportPath: savedCookie ? null : (profile.cookie_import_path || null),
+          cookieImportUrl: savedCookie ? savedCookie.url : (profile.cookie_import_url || null),
+          cookieImportName: savedCookie ? savedCookie.name : (profile.cookie_import_name || null),
+          enableCookieManager: cloudState.built_in_extensions?.cookie_manager !== false,
+          enableSmsActivate: cloudState.built_in_extensions?.sms_activate !== false,
+          enableFoxywallFreeProxy: cloudState.built_in_extensions?.foxywall_free_proxy !== false,
+        }, [`--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*']);
+        sendResult(requestId, {ok: result.ok, pid: result.pid, error: result.error});
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, [cloudState]);
+
+  useEffect(() => {
+    const onRequest = native?.onMonitoringReportRequest;
+    const sendResult = native?.sendMonitoringReportResult;
+    if (!onRequest || !sendResult) {
+      return;
+    }
+    return onRequest(async ({requestId, runId, profileId, ok, detail, screenshotBase64}) => {
+      try {
+        if (!supabase) {
+          sendResult(requestId, undefined, 'Supabase env is missing in .env');
+          return;
+        }
+        const {data: userData, error: userError} = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        if (userError || !userId) {
+          sendResult(requestId, undefined, 'Not signed in');
+          return;
+        }
+        const {error} = await supabase.from('argus_monitoring_results').insert({
+          user_id: userId,
+          run_id: runId,
+          profile_id: profileId,
+          ok,
+          detail: detail || null,
+          screenshot_base64: screenshotBase64,
+        });
+        if (error) {
+          sendResult(requestId, undefined, error.message);
+          return;
+        }
+        sendResult(requestId, {ok: true});
+      } catch (error) {
+        sendResult(requestId, undefined, error instanceof Error ? error.message : String(error));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const onRequest = native?.onOAuthAuthorizeRequest;
+    if (!onRequest) {
+      return;
+    }
+    return onRequest(({requestId, clientName, requestedScope}) => {
+      const requestedFolder = requestedScope.startsWith('folder:') ? requestedScope.slice('folder:'.length) : '';
+      setOauthApprovalFolder(requestedFolder);
+      setOauthRequest({requestId, clientName, requestedScope});
+    });
+  }, []);
+
+  async function respondToOAuthRequest(approved: boolean) {
+    if (!oauthRequest || !native?.sendOAuthAuthorizeResult) {
+      return;
+    }
+    native.sendOAuthAuthorizeResult(
+        oauthRequest.requestId,
+        approved,
+        approved && oauthApprovalFolder ? [oauthApprovalFolder] : approved ? null : null,
+        oauthRequest.clientName,
+    );
+    setOauthRequest(null);
+    if (approved) {
+      await refreshApiKeys();
+    }
+  }
+
   async function runUpdateAction(action: 'check' | 'download' | 'install') {
     try {
       setUpdateBusy(true);
@@ -2170,19 +2835,8 @@ function App() {
     setSelectedFolderId('');
   }
 
-  function tokenForEmail(value: string) {
-    let hash = 0x811c9dc5;
-    const normalized = value.trim().toLowerCase();
-    for (let i = 0; i < normalized.length; i++) {
-      hash ^= normalized.charCodeAt(i);
-      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) +
-          (hash << 24);
-    }
-    return `argys_${normalized.replace(/[^a-z0-9]/g, '_')}_${(hash >>> 0).toString(16).padStart(8, '0')}`;
-  }
-
   function authHeader() {
-    return `Authorization: Bearer ${apiToken || 'argys_api_token'}`;
+    return 'Authorization: Bearer <YOUR_API_KEY>';
   }
 
   function curlFor(endpoint: ApiEndpoint) {
@@ -2203,7 +2857,9 @@ function App() {
 // Keep Argys Anty open and signed in while running this script.
 
 const BASE_URL = ${JSON.stringify(API_BASE_URL)};
-const TOKEN = ${JSON.stringify(apiToken || 'argys_api_token')};
+// Create a key in Settings -> API and paste it here. Keys are only shown
+// once, at creation -- Anty never stores or displays the raw value again.
+const TOKEN = '<YOUR_API_KEY>';
 
 async function argys(method, path, body) {
   const response = await fetch(\`\${BASE_URL}\${path}\`, {
@@ -2344,7 +3000,7 @@ main().catch((error) => {
     try {
       let launchProfile = profile;
       if (profile.fingerprint?.rotate_on_launch) {
-        const rotated = fingerprintFromDraftPatch(randomFingerprintPatch());
+        const rotated = fingerprintFromDraftPatch(randomFingerprintPatch(profile.fingerprint?.os || ''));
         launchProfile = {...profile, fingerprint: {...profile.fingerprint, ...rotated, rotate_on_launch: true}};
         await withDb((activeOrgId) => db.profiles.update(activeOrgId, profile.id,
             {fingerprint: launchProfile.fingerprint}));
@@ -2609,6 +3265,8 @@ main().catch((error) => {
       status: profileDraft.status.trim() || 'Ready',
       color: profileDraft.color || profileColors[1],
       folder_id: profileDraft.folder_id.trim() || null,
+      email: profileDraft.email.trim() || undefined,
+      password: profileDraft.password || undefined,
       proxy_id: profileDraft.proxy_mode === 'assigned' ? (profileDraft.proxy_id || null) : null,
       proxy_mode: profileDraft.proxy_mode,
       tags: tagsFromDraft(profileDraft.tags),
@@ -3656,7 +4314,7 @@ main().catch((error) => {
   // Web Store extensions need no upload at all -- every team member
   // downloads/unpacks the same published CRX directly from Google's own CDN
   // the first time they launch a profile that uses it.
-  async function addExtensionFromWebStoreLink(input: string) {
+  async function addExtensionFromWebStoreLink(input: string, displayName: string) {
     const webstoreId = parseWebstoreExtensionId(input);
     if (!webstoreId) {
       setMessage('That doesn\'t look like a Chrome Web Store link or extension id.');
@@ -3668,7 +4326,7 @@ main().catch((error) => {
     }
     const nextExtension: SharedExtension = {
       id: webstoreId,
-      name: webstoreId,
+      name: displayName.trim() || webstoreId,
       source: 'webstore',
       webstoreId,
     };
@@ -3679,6 +4337,7 @@ main().catch((error) => {
     patchExtensions((list) => [...list, nextExtension]);
     setExtensionAddOpen(false);
     setWebstoreLinkInput('');
+    setWebstoreNameInput('');
     setMessage('Extension shared with your team');
   }
 
@@ -4293,6 +4952,71 @@ main().catch((error) => {
     );
   }
 
+  function renderIntegrationsTab() {
+    return (
+      <section className="api-panel">
+        <section className="api-note">
+          <Plug size={18} />
+          <span>
+            Connect drives every profile in this account as MCP tools --
+            launch, navigate, read, screenshot, close. One click creates a
+            key and, for Claude Code/Codex, writes their config directly --
+            nothing to copy or paste.
+          </span>
+        </section>
+
+        <section className="integration-grid">
+          {INTEGRATIONS.map((integration) => {
+            const connectedKeys = apiKeys.filter((key) => key.name === integration.name);
+            const Icon = integration.icon;
+            const status = integrationStatus[integration.id];
+            const token = integrationToken[integration.id];
+            return (
+              <div className="integration-card" key={integration.id}>
+                <div className="integration-card-head">
+                  <Icon size={22} />
+                  <h2>{integration.name}</h2>
+                </div>
+                <p>{integration.description}</p>
+                {connectedKeys.length > 0 ?
+                  <span className="status-pill"><span className="status-dot" />Connected</span> :
+                  <button onClick={() => void connectIntegrationOneClick(integration.id)}>Connect</button>}
+                {status && <p className={status.ok ? 'apply-status-ok' : 'apply-status-error'}>{status.message}</p>}
+                {token && (
+                  <div className="snippet-block">
+                    <button
+                        className="snippet-copy"
+                        onClick={() => { void navigator.clipboard.writeText(token); }}
+                        title="Copy to clipboard">
+                      <Copy size={14} /> Copy
+                    </button>
+                    <pre>{token}</pre>
+                  </div>
+                )}
+                {connectedKeys.map((key) => (
+                  <div className="endpoint" key={key.id}>
+                    <div className="endpoint-head">
+                      <code className="path">...{key.tokenPreview}</code>
+                      <span className="endpoint-label">
+                        {key.folderScope ?
+                          (key.folderScope.map((id) => cloudState.folders.find((f) => f.id === id)?.name || id).join(', ') || 'no folders') :
+                          'All folders'}
+                      </span>
+                      <span className="endpoint-label">
+                        {key.lastUsedAt ? `Last used ${new Date(key.lastUsedAt).toLocaleString()}` : 'Never used'}
+                      </span>
+                      <button className="copy-button" onClick={() => void revokeApiKey(key.id)}>Revoke</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </section>
+      </section>
+    );
+  }
+
   function renderApiTab() {
     return (
       <section className="api-panel">
@@ -4301,10 +5025,6 @@ main().catch((error) => {
             <span>Base URL</span>
             <code>{API_BASE_URL}</code>
           </div>
-          <label className="summary-item token-field">
-            <span>Bearer token</span>
-            <input value={apiToken} spellCheck={false} onChange={(event) => setApiToken(event.target.value)} />
-          </label>
           <div className="summary-item">
             <span>Account</span>
             <code>{signedInEmail}</code>
@@ -4322,7 +5042,20 @@ main().catch((error) => {
 
         <section className="api-note">
           <Shield size={18} />
-          <span>Argys API tokens are generated per signed-in email for local automation and cloud-backed profile data. Browser sessions stay anonymous.</span>
+          <span>Connected apps (Hive, etc.) show up on the Integrations tab via the connect flow. Create a key by hand here only for your own scripts.</span>
+        </section>
+
+        <section className="api-group">
+          <h2>Create a key</h2>
+          <div className="endpoint">
+            <input
+              placeholder="Key name (e.g. my script)"
+              value={newKeyName}
+              spellCheck={false}
+              onChange={(event) => setNewKeyName(event.target.value)}
+            />
+            <button className="copy-button" onClick={() => void createApiKey()}>Create key</button>
+          </div>
         </section>
 
         <div className="api-groups">
@@ -4346,6 +5079,70 @@ main().catch((error) => {
 
         {copiedEndpoint && <div className="toast">Copied {copiedEndpoint}</div>}
       </section>
+    );
+  }
+
+  function renderRevealedKeyModal() {
+    if (!revealedKey) {
+      return null;
+    }
+    return (
+      <div className="modal-backdrop" onMouseDown={() => setRevealedKey(null)}>
+        <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Key created: {revealedKey.name}</h2>
+            </div>
+          </header>
+          <p>Copy this now -- Anty won't show the raw key again.</p>
+          <div className="snippet-block">
+            <button
+                className="snippet-copy"
+                onClick={() => { void navigator.clipboard.writeText(revealedKey.token); }}
+                title="Copy to clipboard">
+              <Copy size={14} /> Copy
+            </button>
+            <pre>{revealedKey.token}</pre>
+          </div>
+          <div className="summary-actions">
+            <button onClick={() => setRevealedKey(null)}>Done</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderOAuthApprovalModal() {
+    if (!oauthRequest) {
+      return null;
+    }
+    return (
+      <div className="modal-backdrop">
+        <section className="profile-modal" onMouseDown={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>"{oauthRequest.clientName}" wants to connect</h2>
+            </div>
+          </header>
+          <p>
+            It's asking for: <strong>{oauthRequest.requestedScope === 'all' ? 'every profile folder' : oauthRequest.requestedScope}</strong>.
+            You can grant a narrower folder instead before approving.
+          </p>
+          <label>
+            <span>Grant access to</span>
+            <select value={oauthApprovalFolder} onChange={(event) => setOauthApprovalFolder(event.target.value)}>
+              <option value="">All folders</option>
+              {cloudState.folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="summary-actions">
+            <button onClick={() => void respondToOAuthRequest(false)}>Deny</button>
+            <button onClick={() => void respondToOAuthRequest(true)}>Approve</button>
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -4434,6 +5231,8 @@ main().catch((error) => {
         return renderBookmarksTab();
       case 'extensions':
         return renderExtensionsTab();
+      case 'integrations':
+        return renderIntegrationsTab();
       case 'api':
         return renderApiTab();
       case 'profiles':
@@ -4466,6 +5265,7 @@ main().catch((error) => {
         return <button onClick={openNewBookmark}><Plus size={18} /> Bookmark</button>;
       case 'extensions':
         return null;
+      case 'integrations':
       case 'api':
       default:
         return null;
@@ -4700,7 +5500,21 @@ main().catch((error) => {
                 onChange={(event) => setWebstoreLinkInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && webstoreLinkInput.trim()) {
-                    void addExtensionFromWebStoreLink(webstoreLinkInput);
+                    void addExtensionFromWebStoreLink(webstoreLinkInput, webstoreNameInput);
+                  }
+                }}
+              />
+            </label>
+            <label className="field wide">
+              <span>Name (optional)</span>
+              <input
+                type="text"
+                placeholder="Defaults to the extension id"
+                value={webstoreNameInput}
+                onChange={(event) => setWebstoreNameInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && webstoreLinkInput.trim()) {
+                    void addExtensionFromWebStoreLink(webstoreLinkInput, webstoreNameInput);
                   }
                 }}
               />
@@ -4708,7 +5522,7 @@ main().catch((error) => {
             <div className="extension-add-actions">
               <button
                 disabled={!webstoreLinkInput.trim()}
-                onClick={() => void addExtensionFromWebStoreLink(webstoreLinkInput)}
+                onClick={() => void addExtensionFromWebStoreLink(webstoreLinkInput, webstoreNameInput)}
               >
                 Add from link
               </button>
@@ -4735,7 +5549,7 @@ main().catch((error) => {
             <button
               className="ghost"
               type="button"
-              onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+              onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch(profileDraft.fingerprint_os)})}
             >
               Rotate fingerprint
             </button>
@@ -4848,51 +5662,81 @@ main().catch((error) => {
               {noiseModes.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
-          <label className="field">
-            <span>GPU</span>
-            <select
-              value={profileDraft.fingerprint_webgl_renderer}
-              onChange={(event) => {
-                const pattern = realisticWindowsFingerprintPatterns.find((item) =>
-                  item.fingerprint_webgl_renderer === event.target.value);
-                if (pattern) {
-                  setProfileDraft({...profileDraft, ...pattern});
-                }
-              }}
-            >
-              <option value="">Auto</option>
-              {gpuPresets.map((item) => (
-                <option value={item.renderer} key={item.renderer}>{item.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Screen</span>
-            <input
-              list="screen-presets"
-              value={profileDraft.fingerprint_screen}
-              onChange={(event) => setProfileDraft({...profileDraft, fingerprint_screen: event.target.value})}
-            />
-          </label>
-          <label className="field">
-            <span>CPU</span>
-            <select
-              value={profileDraft.fingerprint_cpu_model}
-              onChange={(event) => {
-                const preset = cpuPresets.find((item) => item.model === event.target.value);
-                setProfileDraft({
-                  ...profileDraft,
-                  fingerprint_cpu_model: preset?.model || '',
-                  fingerprint_cpu_cores: preset?.cores || profileDraft.fingerprint_cpu_cores,
-                });
-              }}
-            >
-              <option value="">Auto</option>
-              {cpuPresets.map((item) => (
-                <option value={item.model} key={item.model}>{item.model} ({item.cores} threads)</option>
-              ))}
-            </select>
-          </label>
+          {profileDraft.fingerprint_os === 'Android' || profileDraft.fingerprint_os === 'iOS' ? (
+            <label className="field wide">
+              <span>Device model</span>
+              <select
+                value={profileDraft.fingerprint_cpu_model}
+                onChange={(event) => {
+                  const device = mobileDevicePatternsFor(profileDraft.fingerprint_os)
+                    .find((item) => item.fingerprint_cpu_model === event.target.value);
+                  if (device) {
+                    const {label: _label, ...pattern} = device;
+                    setProfileDraft({...profileDraft, ...pattern});
+                  }
+                }}
+              >
+                <option value="">Auto</option>
+                {mobileDevicePatternsFor(profileDraft.fingerprint_os).map((item) => (
+                  <option value={item.fingerprint_cpu_model} key={item.fingerprint_cpu_model}>
+                    {item.label} · {item.fingerprint_screen} · {item.fingerprint_memory_gb} GB
+                  </option>
+                ))}
+              </select>
+              {/* GPU/CPU/screen are picked together as one real device above
+                  instead of mixed freely -- prevents e.g. an Android profile
+                  ending up with a desktop NVIDIA GPU string, which is what a
+                  real Android Chrome build could never actually report. */}
+            </label>
+          ) : (
+            <>
+              <label className="field">
+                <span>GPU</span>
+                <select
+                  value={profileDraft.fingerprint_webgl_renderer}
+                  onChange={(event) => {
+                    const pattern = realisticWindowsFingerprintPatterns.find((item) =>
+                      item.fingerprint_webgl_renderer === event.target.value);
+                    if (pattern) {
+                      setProfileDraft({...profileDraft, ...pattern});
+                    }
+                  }}
+                >
+                  <option value="">Auto</option>
+                  {gpuPresets.map((item) => (
+                    <option value={item.renderer} key={item.renderer}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Screen</span>
+                <input
+                  list="screen-presets"
+                  value={profileDraft.fingerprint_screen}
+                  onChange={(event) => setProfileDraft({...profileDraft, fingerprint_screen: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>CPU</span>
+                <select
+                  value={profileDraft.fingerprint_cpu_model}
+                  onChange={(event) => {
+                    const preset = cpuPresets.find((item) => item.model === event.target.value);
+                    setProfileDraft({
+                      ...profileDraft,
+                      fingerprint_cpu_model: preset?.model || '',
+                      fingerprint_cpu_cores: preset?.cores || profileDraft.fingerprint_cpu_cores,
+                    });
+                  }}
+                >
+                  <option value="">Auto</option>
+                  {cpuPresets.map((item) => (
+                    <option value={item.model} key={item.model}>{item.model} ({item.cores} threads)</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
           <label className="field compact">
             <span>Memory GB</span>
             <select
@@ -5050,6 +5894,8 @@ main().catch((error) => {
       {renderChangelogModal()}
       {renderExtensionAddModal()}
       {renderImportModal()}
+      {renderOAuthApprovalModal()}
+      {renderRevealedKeyModal()}
 
       {profileDraft && (
         <div className="modal-backdrop" onMouseDown={() => setProfileDraft(null)}>
@@ -5193,6 +6039,24 @@ main().catch((error) => {
                   onChange={(event) => setProfileDraft({...profileDraft, start_url: event.target.value})}
                 />
               </label>
+              <label className="field">
+                <span>Account email</span>
+                <input
+                  type="email"
+                  placeholder="Login for whatever account this profile is signed into"
+                  value={profileDraft.email}
+                  onChange={(event) => setProfileDraft({...profileDraft, email: event.target.value})}
+                />
+              </label>
+              <label className="field">
+                <span>Account password</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={profileDraft.password}
+                  onChange={(event) => setProfileDraft({...profileDraft, password: event.target.value})}
+                />
+              </label>
               <section className="form-section wide compact-section">
                 <div>
                   <h3>Cookie import</h3>
@@ -5265,7 +6129,7 @@ main().catch((error) => {
                 <button
                   className="ghost"
                   type="button"
-                  onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+                  onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch(profileDraft.fingerprint_os)})}
                 >
                   New fingerprint
                 </button>
@@ -5334,7 +6198,7 @@ main().catch((error) => {
             <footer className="modal-actions">
               <button
                 className="ghost"
-                onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch()})}
+                onClick={() => setProfileDraft({...profileDraft, ...randomFingerprintPatch(profileDraft.fingerprint_os)})}
               >
                 Rotate fingerprint
               </button>
