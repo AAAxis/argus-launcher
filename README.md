@@ -1,26 +1,77 @@
 # Argys Anty
 
-Standalone manager app for Argys cloud data.
+**The control plane for anonymous, disposable browser identities.**
 
-Agent handoff notes live in `AGENTS.md`. Read that file before changing,
-building, or running the app.
+Argys Anty is the desktop app that manages everything about your browser
+profiles — proxies, cookies, extensions, fingerprints — without ever letting
+that data touch the browser session itself. Every profile it launches starts
+from zero: no shared state, no cross-contamination, no fingerprint leakage
+between identities. The browser only ever sees what Argys Anty hands it at
+launch time, and nothing more.
 
-This app owns:
+We built it because every other multi-profile browser tool we tried made the
+same mistake: mixing management state (accounts, proxy pools, saved cookies)
+into the same process as the actual browsing session. That's a liability, not
+a feature. Argys Anty keeps them apart on purpose.
 
-- Supabase login/session
-- cloud-backed profiles, proxies, folders, statuses, bookmarks, shared extensions
-- API tokens for each signed-in email
-- launching Argys Browser with an anonymous runtime payload
+## What it does
 
-This app does not embed Chromium browser UI. It only starts Argys Browser as a
-separate process.
+- **Profiles** — create, clone, tag, fold into folders, bulk-launch, bulk-edit.
+- **Proxies** — a shared, searchable proxy library with live health checks
+  (egress IP, country, latency) and CSV bulk import.
+- **Cookies** — a shared cookie-set library. Upload once, assign to any
+  profile, swap between profiles without re-uploading.
+- **Fingerprints** — per-profile OS/browser/canvas/WebGL/WebRTC/audio spoofing,
+  coherent by construction (no mismatched OS+UA+timezone combinations).
+- **Extensions** — team-shared extensions (Web Store or local folder),
+  materialized fresh on every machine that needs them.
+- **Auto-updates** — background update checks, automatic download, and a
+  one-click restart when you're ready.
+- **A local automation API** — script profile creation and launch from your
+  own tooling.
 
-Argys Browser owns:
+## Architecture: two processes, one boundary
 
-- profile runtime
-- proxy application
-- extension loading
-- fingerprint flags
-- cookies for the launched profile only
+Argys Anty is one half of a deliberate two-process design:
 
-Argys Browser must not own Supabase login or cloud state.
+```
+┌─────────────────────┐        launch payload        ┌──────────────────────┐
+│      Argys Anty      │ ─────────────────────────────▶│    Argys Browser      │
+│  (this repo, open      │   (proxy, fingerprint,       │  (proprietary,        │
+│   source)              │    cookies, extensions)       │   closed source)      │
+│                       │                               │                       │
+│  owns:                │                               │  owns:                │
+│  · account/session      │                               │  · profile runtime    │
+│  · cloud-synced        │                               │  · proxy application  │
+│    profiles/proxies/   │                               │  · extension loading  │
+│    cookies/folders     │                               │  · fingerprint flags  │
+│  · API tokens          │                               │  · session cookies    │
+└─────────────────────┘                               └──────────────────────┘
+```
+
+Argys Anty never embeds browser UI, and Argys Browser never signs in to an
+account or shows any management surface. Each browser session is handed
+exactly one launch payload and nothing else — it doesn't know your account
+exists.
+
+Argys Browser is our proprietary anti-detect Chromium engine — it's closed
+source and distributed as a compiled binary that Argys Anty downloads and
+launches on demand. This repo is the entire open-source surface of the
+product: the control plane, the UI, and the launch orchestration.
+
+## Getting started
+
+```sh
+npm install
+npm run dev      # Vite + Electron, hot-reloaded
+npm run build    # production frontend build
+npm run dist     # package an installer (electron-builder)
+```
+
+Requires a `.env` with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` for
+cloud sync — see `.env.example`.
+
+## Contributing
+
+Agent/AI handoff notes live in `AGENTS.md` — read it before making changes,
+especially anything touching the process boundary above.

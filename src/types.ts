@@ -146,9 +146,16 @@ export type SharedExtension = {
 };
 
 export type SharedBookmark = {
+  // Row id (uuid) once the bookmark has been persisted. The UI still
+  // identifies a bookmark by its normalized url -- id only exists so an edit
+  // or delete can address the exact row instead of matching on url server-side.
+  id?: string;
   title: string;
   url: string;
   icon?: string;
+  // Display order, written from the array index. Rows are read back ordered by
+  // it so the list is stable across machines.
+  position?: number;
 };
 
 // Per-extension on/off switches for the bundled (non-removable) "stock"
@@ -160,6 +167,30 @@ export type BuiltInExtensionToggles = {
   cookie_manager?: boolean;
   sms_activate?: boolean;
   foxywall_free_proxy?: boolean;
+};
+
+// The tenant. One client firm is one org; its workers are org_members. Every
+// row in every table below hangs off organizations.id, and RLS keys on it --
+// see docs/data-model.md. profile_limit null means unlimited (Enterprise).
+export type ArgusOrg = {
+  id: string;
+  name: string;
+  plan: string;
+  profile_limit: number | null;
+  seat_limit: number;
+  billing_status: string;
+  current_period_end?: string | null;
+  built_in_extensions?: BuiltInExtensionToggles;
+};
+
+export type OrgRole = 'owner' | 'admin' | 'member';
+
+// One row of org_members joined to its organization. `role` decides whether the
+// org-wide settings (name, built-in extension toggles) are writable: the RLS
+// UPDATE policy on organizations requires is_org_admin.
+export type OrgMembership = {
+  org: ArgusOrg;
+  role: OrgRole;
 };
 
 export type CloudState = {

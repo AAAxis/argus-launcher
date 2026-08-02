@@ -1,74 +1,119 @@
 # Argys Anty Agent Notes
 
-Use this file as the handoff memory for future Codex/agent sessions.
+Handoff memory for agent sessions working on the launcher.
+
+Start with `../ARGUS.md` (the tree map) and `LAUNCHER.md` (this folder in detail).
+`../CLAUDE.md` holds the invariants. This file is the accumulated behavioral gotchas.
 
 ## Project Split
 
-There are two separate apps/processes:
+Two separate apps/processes:
 
-- `Argys Anty`: Electron launcher/manager in `/Users/dima/argus-launcher`.
-- `Argys Browser`: Chromium-based anonymous browser app, usually installed at `/Applications/Argys Browser.app`.
+- **Argys Anty** — Electron launcher/manager, this folder (`E:\argus\launcher`).
+- **Argys Browser** — Chromium-based anonymous browser (`E:\argus\browser\src`), built
+  and installed separately.
 
-Do not run the launcher dashboard inside Argys Browser. Argys Anty owns Supabase login, profiles, proxies, folders, statuses, bookmarks, shared extensions, API docs/tokens, and launch payloads. Argys Browser must stay anonymous and should only receive a profile runtime payload from the launcher.
+Do not run the launcher dashboard inside Argys Browser. Argys Anty owns Supabase login,
+profiles, proxies, folders, statuses, bookmarks, shared extensions, API docs/tokens,
+billing, and launch payloads. Argys Browser must stay anonymous and should only receive a
+profile runtime payload from the launcher.
 
 ## Run And Build
 
-From `/Users/dima/argus-launcher`:
+From `E:\argus\launcher` (PowerShell):
 
-```sh
-PATH=/Users/dima/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm run typecheck
-PATH=/Users/dima/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm run build
-PATH=/Users/dima/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm start
+```powershell
+npm run typecheck
+npm run build
 ```
 
-The explicit `PATH` matters in Codex sessions because plain `node`, `curl`, or other commands may not be found otherwise. Node is available at `/Users/dima/.local/bin/node`.
+`npm run dev` and `npm start` **do not work on Windows** — they use the Unix `env -u`
+and then call `scripts/start-macos-app.cjs`. Run the two halves directly instead:
+
+```powershell
+npx vite --host 127.0.0.1
+# second shell:
+$env:ARGUS_LAUNCHER_DEV = "1"; npx electron .
+```
+
+Node is at `C:\Program Files\nodejs` (v24.18.0, npm 11.16.0). Git is at
+`C:\Program Files\Git\cmd` and may not be on PATH in a fresh shell.
 
 To restart the app cleanly:
 
-```sh
-/usr/bin/pkill -f "Argys Anty" || true
-/usr/bin/pkill -f "electron.*argus-launcher" || true
-PATH=/Users/dima/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm start
+```powershell
+Get-Process | Where-Object { $_.Name -match 'electron|Argys' } | Stop-Process -Force
 ```
 
-To clear currently launched browser profile windows:
+To close currently launched browser profile windows:
 
-```sh
-/usr/bin/pkill -f "argus-profile-id=" || true
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -match 'argus-profile-id=' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
 ## Current Important Behavior
 
-- Direct connection is disabled for profiles. Saving or launching a profile requires a valid proxy.
-- Fingerprint controls belong in the profile edit dialog under `Edit fingerprint`, not in the main profiles table/view.
-- Argys Browser launch must open a launcher-provided local home file or a real profile start URL. It must not open Supabase login, `localhost`, `127.0.0.1`, `argus-launcher`, or `about:blank`.
+- Direct connection is disabled for profiles. Saving or launching a profile requires a
+  valid proxy.
+- Fingerprint controls belong in the profile edit dialog under `Edit fingerprint`, not in
+  the main profiles table/view.
+- Argys Browser launch must open a launcher-provided local home file or a real profile
+  start URL. It must not open Supabase login, `localhost`, `127.0.0.1`,
+  `argus-launcher`, or `about:blank`.
 - Proxy checks are automatic background checks. Do not add a manual check button back.
-- Shared extensions and the built-in cookie manager are loaded into browser sessions via `--load-extension`.
-- Cookie import is handled through a temporary generated `ArgysCookieSeed` extension in the profile user data dir.
+- Shared extensions and the built-in cookie manager are loaded into browser sessions via
+  `--load-extension`.
+- Cookie import is handled through a temporary generated `ArgysCookieSeed` extension in
+  the profile user data dir.
+- Profile ids double as on-disk directory names under `E:\ArgysProfiles\<id>`. Never
+  renumber them.
+
+## Windows Porting Debt
+
+`electron/main.cjs` still shells out to macOS binaries in several places — these
+silently no-op or throw on Windows:
+
+- `killExistingProfileProcess()` uses `/usr/bin/pgrep` (~line 1533)
+- other `pkill`-based cleanup paths
+- `resolveBrowserExecutable()` (~line 801) and the `ARGUS_BROWSER_APP` default expect a
+  `.app` bundle
+
+`scripts/start-macos-app.cjs` and `scripts/ensure-macos-app.cjs` are macOS-only by name
+and by content. Audit before shipping a Windows build.
 
 ## API Port Warning
 
-Port `3001` is currently owned by Dolphin Anty on this machine:
+Port `3001` was owned by Dolphin Anty on the previous (macOS) machine. The Argys API tab
+mentions `http://127.0.0.1:3001`. Confirm what actually holds that port here before
+debugging token auth against it:
 
-```sh
-/usr/sbin/lsof -nP -iTCP:3001 -sTCP:LISTEN
+```powershell
+Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue |
+  Select-Object OwningProcess |
+  ForEach-Object { Get-Process -Id $_.OwningProcess }
 ```
 
-Argys API docs currently mention `http://127.0.0.1:3001`, but requests there hit Dolphin and return `invalid session token` for Argys tokens. Do not debug Argys token auth against Dolphin's port. If a real Argys local API is implemented later, use a different port and update the API tab.
+If a real Argys local API is implemented, use a different port and update the API tab.
 
-A token for `holylabsltd@gmail.com` is available in the app's own API tab
-(Settings → API) once signed in. Do not hardcode tokens in this file --
-if one ever ends up here, treat it as compromised and rotate it immediately,
-especially before this repo is made public.
+**API tokens are currently fake.** `tokenForEmail()` in `src/main.tsx` (~line 2168) is a
+client-side FNV-1a hash of the email address — anyone who knows a user's email can
+compute their "token", and nothing server-side ever validates it. Do not build anything
+on top of it; `../prompts/07-api-tokens.md` replaces it with real hashed tokens.
+
+Never hardcode a token in this file. If one ever ends up here, treat it as compromised
+and rotate it immediately.
 
 ## Verification Checklist
 
 Before handing back UI/app changes:
 
-```sh
-PATH=/Users/dima/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm run typecheck
-PATH=/Users/dima/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin npm run build
+```powershell
+cd E:\argus\launcher
+npm run typecheck
+npm run build
 ```
 
-Then restart Argys Anty with `npm start` from `/Users/dima/argus-launcher`.
-
+Both must be clean. There is no test suite. Then restart the app and click through the
+path you changed.

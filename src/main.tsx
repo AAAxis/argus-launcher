@@ -2,8 +2,11 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
 import {Apple, Cookie, Download, Monitor, Pencil, Plus, Play, RefreshCw, Shield, Smartphone, Trash2, Upload, X} from 'lucide-react';
+import * as db from './db';
+import {describeDbError} from './db/errors';
 import {native} from './native';
 import type {ApiState, CookieFileSelection, ResourceState, UpdateState} from './native';
+import {OrgProvider, useOrg} from './org';
 import {supabase} from './supabase';
 import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensionToggles, CloudState, ProxyMode, RuntimeFingerprint, SharedBookmark, SharedExtension} from './types';
 import {useAsyncAction} from './useAsyncAction';
@@ -104,7 +107,6 @@ const tabs: Array<{id: TabId; label: string}> = [
 ];
 
 const API_BASE_URL = 'http://127.0.0.1:39219';
-const SHARED_EXTENSIONS_BUCKET = 'global';
 const API_GROUPS: ApiGroup[] = [
   {
     title: 'Profiles',
@@ -205,6 +207,22 @@ const TRASH_RETENTION_DAYS = 30;
 function daysUntilPurge(deletedAt: string): number {
   const purgeAt = Date.parse(deletedAt) + TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   return Math.max(0, Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
+// Anything soft-deleted before this instant has served its time in Trash. Sent
+// straight to the delete statement so the purge is one round trip rather than a
+// filter-and-rewrite of the whole profiles array.
+function trashCutoffIso(): string {
+  return new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+// Mirrors the profiles_id_fs_safe CHECK in supabase/migrations/0005. Ids are
+// also directory names under E:\ArgysProfiles, and the database is what
+// enforces that -- this is only here so the CSV importer, which takes
+// profile_id straight from a user-supplied file, can name the offending row in
+// its skipped list instead of surfacing a raw constraint violation.
+function isFsSafeId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && value.length <= 128;
 }
 const profileColors = ['#171613', '#2563eb', '#16a34a', '#a855f7', '#dc2626', '#f59e0b'];
 const osPresets = ['Android', 'iOS', 'macOS', 'Windows 11', 'Windows 10', 'Ubuntu'];
@@ -548,12 +566,6 @@ const socialBookmarks: SharedBookmark[] = [
   {title: 'Facebook', url: 'https://www.facebook.com/'},
 ];
 
-let sharedBookmarksColumnAvailable = true;
-let foldersColumnAvailable = true;
-let customStatusesColumnAvailable = true;
-let builtInExtensionsColumnAvailable = true;
-let cookiesColumnAvailable = true;
-
 function initials(value: string) {
   return value
       .split(/\s+/)
@@ -721,14 +733,6 @@ function browserStartUrl(profile: ArgusProfile) {
     return '';
   }
   return startUrl;
-}
-
-function isMissingColumnError(error: {message?: string; code?: string} | null) {
-  return Boolean(error?.message?.includes('shared_bookmarks') ||
-      error?.message?.includes('folders') ||
-      error?.message?.includes('custom_statuses') ||
-      error?.code === '42703' ||
-      error?.code === 'PGRST204');
 }
 
 function statusList(...groups: Array<Array<string | undefined | null>>) {
@@ -1103,16 +1107,14 @@ function repairProxyAssignments(state: CloudState) {
 // library entry and points cookie_id at it, so the Cookies tab reflects what
 // was already configured instead of appearing empty.
 //
-// Self-healing, not just one-time: checks that cookie_id actually resolves to
-// a real entry in `cookies`, not just that it's set. If the `cookies` column
-// didn't exist in Supabase yet when this first ran, the save silently dropped
-// it (see saveCloudState's isMissingColumnError fallback) while cookie_id --
-// living inside the profiles JSON blob, a column that already existed --
-// persisted fine. That combination permanently fooled a plain truthiness
-// check into skipping profiles whose library entry was never actually saved,
-// leaving the Cookies tab stuck empty forever. Falling through to the
-// cookie_import_url fallback re-creates the missing entry every load until
-// it actually sticks.
+// Self-healing, not just one-time: it checks that cookie_id actually resolves
+// to a real entry in `cookies`, not merely that it is set. Under the old blob
+// schema a save could drop the whole `cookies` column while cookie_id -- which
+// lived inside the profiles blob -- persisted fine, and a plain truthiness
+// check then skipped those profiles forever, leaving the Cookies tab stuck
+// empty. Relational rows make that exact failure impossible, but the resolve
+// check is still the right test: a cookie set deleted by one worker leaves
+// another worker's profile pointing at nothing, and this rebuilds it.
 function migrateLegacyCookieImports(state: CloudState) {
   let migrated = 0;
   const cookies = [...state.cookies];
@@ -1359,16 +1361,6 @@ function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerprint {
   };
 }
 
-function isSupabaseStorageNotWritable(error: {message?: string; statusCode?: string} | null) {
-  const message = error?.message?.toLowerCase() || '';
-  return message.includes('bucket not found') ||
-      message.includes('bucket') && message.includes('not found') ||
-      message.includes('row-level security') ||
-      message.includes('permission') ||
-      message.includes('unauthorized') ||
-      error?.statusCode === '404';
-}
-
 function newProxyDraft(): ProxyDraft {
   return {
     name: '',
@@ -1486,6 +1478,11 @@ function updateStatusLabel(state: UpdateState | null) {
 }
 
 function App() {
+  // Which tenant we are looking at. Every src/db call below takes this id
+  // explicitly; OrgProvider resolves it from the user's org_members rows and
+  // owns the auth subscription.
+  const org = useOrg();
+  const orgId = org.orgId;
   const [email, setEmail] = useState('holylabsltd@gmail.com');
   const [password, setPassword] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
@@ -1567,32 +1564,80 @@ function App() {
       [cloudState.custom_statuses, cloudState.profiles],
   );
 
+  // Signed-in identity now comes from OrgProvider's onAuthStateChange
+  // subscription instead of a one-shot getUser() at boot, so a session that
+  // expires or is signed out in another window is noticed here too.
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        if (!supabase) {
-          return;
-        }
-        const {data} = await supabase.auth.getUser();
-        if (cancelled) {
-          return;
-        }
-        if (data.user?.email) {
-          setSignedInEmail(data.user.email);
-          setApiToken(tokenForEmail(data.user.email));
-          await loadCloudState();
-        }
-      } finally {
-        if (!cancelled) {
-          setAppBooting(false);
-        }
+    setSignedInEmail(org.email);
+    setApiToken(org.email ? tokenForEmail(org.email) : 'argys_api_token');
+  }, [org.email]);
+
+  useEffect(() => {
+    if (org.ready) {
+      setAppBooting(false);
+    }
+  }, [org.ready]);
+
+  useEffect(() => {
+    if (org.error) {
+      setMessage(org.error);
+    }
+  }, [org.error]);
+
+  // Reload whenever the active organization changes. Everything keyed by an id
+  // has to be dropped first: a profile id from org A is also a real directory
+  // under E:\ArgysProfiles, so a leaked selection would launch the wrong
+  // firm's data.
+  useEffect(() => {
+    setCloudState(defaultState);
+    setSelectedId(null);
+    setSelectedFolderId('');
+    setSelectedProfileIds(new Set());
+    setSelectedProxyIds(new Set());
+    setProfileDraft(null);
+    setProxyDraft(null);
+    setFolderDraft(null);
+    setBookmarkDraft(null);
+    setStatusDraft(null);
+    setImportFile(null);
+    setImportResult(null);
+    proxyChecksAttempted.current.clear();
+    proxyChecksInFlight.current.clear();
+    if (!orgId) {
+      return;
+    }
+    void loadCloudState(orgId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
+  // A second worker's changes only reach this machine when we ask for them.
+  // Window focus is the cheapest honest trigger: it is exactly the moment the
+  // user comes back to the launcher, and eight small selects are far less
+  // traffic than a poll. Throttled so alt-tabbing does not hammer the API.
+  const lastRefreshRef = useRef(0);
+  useEffect(() => {
+    if (!orgId) {
+      return;
+    }
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') {
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
+      const now = Date.now();
+      if (now - lastRefreshRef.current < 10000) {
+        return;
+      }
+      lastRefreshRef.current = now;
+      void loadCloudState(orgId, {quiet: true});
     };
-  }, []);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1677,7 +1722,9 @@ function App() {
       proxyChecksAttempted.current.add(proxy.id);
     }
     void (async () => {
-      let nextState = cloudState;
+      // Each check writes only its own proxy's six result columns. The manual
+      // nextState threading this loop used to need is gone with the whole-blob
+      // write it existed to work around.
       for (const proxy of proxiesToCheck) {
         if (cancelled) {
           break;
@@ -1697,24 +1744,14 @@ function App() {
             checked_at: new Date().toISOString(),
             check_error: result.ok ? undefined : result.error || 'Proxy check failed',
           };
-          nextState = {
-            ...nextState,
-            proxies: nextState.proxies.map((item) =>
-              item.id === proxy.id ? checkedProxy : item),
-          };
-          await saveCloudState(nextState);
+          await recordProxyCheck(checkedProxy);
         } catch (error) {
           const checkedProxy: ArgusProxy = {
             ...proxy,
             checked_at: new Date().toISOString(),
             check_error: error instanceof Error ? error.message : String(error),
           };
-          nextState = {
-            ...nextState,
-            proxies: nextState.proxies.map((item) =>
-              item.id === proxy.id ? checkedProxy : item),
-          };
-          await saveCloudState(nextState);
+          await recordProxyCheck(checkedProxy);
         } finally {
           proxyChecksInFlight.current.delete(proxy.id);
           setCheckingProxyId('');
@@ -1778,13 +1815,14 @@ function App() {
           base64: btoa(unescape(encodeURIComponent(raw))),
         };
         const cloudCookie = await cloudCookieFromSelection(profile.id, selection);
-        const profiles = cloudState.profiles.map((item) =>
-          item.id === profile.id ? {...item, ...cloudCookie} : item);
-        const ok = await saveCloudState({...cloudState, profiles});
+        const ok = await withDb((activeOrgId) =>
+          db.profiles.update(activeOrgId, profile.id, cloudCookie));
         if (!ok) {
           sendResult(requestId, undefined, 'Failed to save to cloud state.');
           return;
         }
+        patchProfiles((list) => list.map((item) =>
+          item.id === profile.id ? {...item, ...cloudCookie} : item));
         sendResult(requestId, {matched: true, count: cookies.length});
         setMessage(`Migrated ${cookies.length} local cookies for ${profile.name}`);
       } catch (error) {
@@ -1804,6 +1842,9 @@ function App() {
         let updated = 0;
         let created = 0;
         const proxies = [...cloudState.proxies];
+        // The rows this run actually created or changed, so untouched proxies
+        // are not rewritten.
+        const touched: ArgusProxy[] = [];
         const keyFor = (type: string, host: string, port: number) =>
           `${type.toLowerCase()}|${host.toLowerCase()}|${port}`;
         const indexByKey = new Map<string, number>();
@@ -1852,13 +1893,30 @@ function App() {
             proxies[existingIndex] = nextProxy;
             updated++;
           }
+          touched.push(nextProxy);
         }
-        const nextState = repairProxyAssignments({...cloudState, proxies}).state;
-        const ok = await saveCloudState(nextState);
+        // repairProxyAssignments only ever rewrites proxy_id/proxy_mode, and it
+        // returns the same object for a profile it did not change -- so an
+        // identity comparison is enough to find the profiles that need writing.
+        const repairedProfiles = repairProxyAssignments({...cloudState, proxies}).state.profiles;
+        const ok = await withDb(async (activeOrgId) => {
+          for (const proxy of touched) {
+            await db.proxies.upsert(activeOrgId, proxy);
+          }
+          for (let index = 0; index < repairedProfiles.length; index++) {
+            const profile = repairedProfiles[index];
+            if (profile === cloudState.profiles[index]) {
+              continue;
+            }
+            await db.profiles.update(activeOrgId, profile.id,
+                {proxy_id: profile.proxy_id, proxy_mode: profile.proxy_mode});
+          }
+        });
         if (!ok) {
           sendResult(requestId, undefined, 'Failed to save to cloud state.');
           return;
         }
+        setCloudState((current) => ({...current, proxies, profiles: repairedProfiles}));
         sendResult(requestId, {updated, created, total: rows.length});
         setMessage(`Reimported proxies: ${updated} updated, ${created} created`);
       } catch (error) {
@@ -1884,17 +1942,18 @@ function App() {
           sendResult(requestId, {matched: false, profileId});
           return;
         }
-        const profiles = cloudState.profiles.map((profile) =>
-          profile.id === profileId ? {
-            ...profile,
-            proxy_id: proxy.id,
-            proxy_mode: 'assigned' as const,
-          } : profile);
-        const ok = await saveCloudState({...cloudState, profiles});
+        const ok = await withDb((activeOrgId) => db.profiles.update(activeOrgId, profileId,
+            {proxy_id: proxy.id, proxy_mode: 'assigned'}));
         if (!ok) {
           sendResult(requestId, undefined, 'Failed to save to cloud state.');
           return;
         }
+        patchProfiles((list) => list.map((profile) =>
+          profile.id === profileId ? {
+            ...profile,
+            proxy_id: proxy.id,
+            proxy_mode: 'assigned' as const,
+          } : profile));
         sendResult(requestId, {matched: true, profileId, proxyId: proxy.id});
         setMessage(`Assigned ${proxy.host}:${proxy.port} to ${profileId}`);
       } catch (error) {
@@ -1929,215 +1988,163 @@ function App() {
     }
   }
 
-  async function loadCloudState() {
-    setCloudLoading(true);
-    if (!supabase) {
-      setMessage('Supabase env is missing in .env');
-      setCloudLoading(false);
-      return;
+  // One parallel read per table instead of five sequential selects against one
+  // jsonb row. `quiet` suppresses the selection reset and the repair toast so a
+  // window-focus refresh does not move the user's cursor or nag them.
+  async function loadCloudState(targetOrgId: string, options?: {quiet?: boolean}) {
+    const quiet = Boolean(options?.quiet);
+    if (!quiet) {
+      setCloudLoading(true);
     }
     try {
-      const {data: userData} = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) {
-        return;
-      }
-      const {data, error}: {data: any; error: any} = await supabase
-          .from('argus_cloud_state')
-          .select('profiles,folders,proxies,shared_extensions')
-          .eq('user_id', userId)
-          .maybeSingle();
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-      let sharedBookmarks: SharedBookmark[] = [];
-      if (sharedBookmarksColumnAvailable) {
-        const result = await supabase
-            .from('argus_cloud_state')
-            .select('shared_bookmarks')
-            .eq('user_id', userId)
-            .maybeSingle();
-        if (isMissingColumnError(result.error)) {
-          sharedBookmarksColumnAvailable = false;
-        } else if (result.error) {
-          setMessage(result.error.message);
-        } else if (Array.isArray(result.data?.shared_bookmarks)) {
-          sharedBookmarks = result.data.shared_bookmarks;
-        }
-      }
-      let cookies: ArgusCookie[] = [];
-      if (cookiesColumnAvailable) {
-        const result = await supabase
-            .from('argus_cloud_state')
-            .select('cookies')
-            .eq('user_id', userId)
-            .maybeSingle();
-        if (isMissingColumnError(result.error)) {
-          cookiesColumnAvailable = false;
-        } else if (result.error) {
-          setMessage(result.error.message);
-        } else if (Array.isArray(result.data?.cookies)) {
-          cookies = result.data.cookies;
-        }
-      }
-      let customStatuses: string[] = [];
-      if (customStatusesColumnAvailable) {
-        const result = await supabase
-            .from('argus_cloud_state')
-            .select('custom_statuses')
-            .eq('user_id', userId)
-            .maybeSingle();
-        if (isMissingColumnError(result.error)) {
-          customStatusesColumnAvailable = false;
-        } else if (result.error) {
-          setMessage(result.error.message);
-        } else if (Array.isArray(result.data?.custom_statuses)) {
-          customStatuses = result.data.custom_statuses;
-        }
-      }
-      let builtInExtensions: BuiltInExtensionToggles | undefined;
-      if (builtInExtensionsColumnAvailable) {
-        const result = await supabase
-            .from('argus_cloud_state')
-            .select('built_in_extensions')
-            .eq('user_id', userId)
-            .maybeSingle();
-        if (isMissingColumnError(result.error)) {
-          builtInExtensionsColumnAvailable = false;
-        } else if (result.error) {
-          setMessage(result.error.message);
-        } else if (result.data?.built_in_extensions) {
-          builtInExtensions = result.data.built_in_extensions;
-        }
-      }
-      const mergedBookmarks = mergeBookmarks(sharedBookmarks, socialBookmarks);
-      const nextState = {
-        profiles: Array.isArray(data?.profiles) ? data.profiles : [],
-        folders: Array.isArray(data?.folders) ? data.folders : [],
-        proxies: Array.isArray(data?.proxies) ? data.proxies : [],
+      const [profiles, proxies, folders, cookies, sharedExtensions, bookmarkRows,
+        customStatuses, organization] = await Promise.all([
+        db.profiles.list(targetOrgId),
+        db.proxies.list(targetOrgId),
+        db.folders.list(targetOrgId),
+        db.cookieSets.list(targetOrgId),
+        db.extensions.list(targetOrgId),
+        db.bookmarks.list(targetOrgId),
+        db.statuses.list(targetOrgId),
+        db.orgs.getOrg(targetOrgId),
+      ]);
+      const mergedBookmarks = mergeBookmarks(bookmarkRows, socialBookmarks);
+      const loaded: CloudState = {
+        profiles,
+        folders,
+        proxies,
         cookies,
-        shared_extensions: Array.isArray(data?.shared_extensions) ?
-          data.shared_extensions :
-          [],
+        shared_extensions: sharedExtensions,
         shared_bookmarks: mergedBookmarks.bookmarks,
         custom_statuses: customStatuses,
-        built_in_extensions: builtInExtensions,
+        built_in_extensions: organization?.built_in_extensions,
       };
-      const {state: repairedState, repaired} = repairProxyAssignments(nextState);
-      const {state: purgedState, purged} = purgeExpiredTrash(repairedState);
-      const {state: migratedState, migrated} = migrateLegacyCookieImports(purgedState);
-      setCloudState(migratedState);
-      setSelectedId(migratedState.profiles.find((profile) => !profile.deleted_at)?.id || null);
-      if (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0) {
-        const ok = await saveCloudState(migratedState);
-        if (ok) {
-          setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}${migrated ? `${repaired || mergedBookmarks.changed || purged ? ' · ' : ''}Added ${migrated} existing cookie ${migrated === 1 ? 'import' : 'imports'} to the library` : ''}`);
+
+      // The three self-healing passes below used to rewrite the whole document
+      // when any of them changed anything. Each now writes only the rows it
+      // actually touched.
+      const {state: repairedState, repaired} = repairProxyAssignments(loaded);
+      const {state: migratedState, migrated} = migrateLegacyCookieImports(repairedState);
+
+      const purgedIds = await db.profiles.purgeExpired(targetOrgId, trashCutoffIso());
+      const purged = purgedIds.length;
+      const finalState: CloudState = purged === 0 ?
+        migratedState :
+        {
+          ...migratedState,
+          profiles: migratedState.profiles.filter((profile) => !purgedIds.includes(profile.id)),
+        };
+
+      if (mergedBookmarks.changed) {
+        for (let index = 0; index < mergedBookmarks.bookmarks.length; index++) {
+          const bookmark = mergedBookmarks.bookmarks[index];
+          if (!bookmarkRows.some((existing) => existing.url === bookmark.url)) {
+            await db.bookmarks.create(targetOrgId, {...bookmark, position: index});
+          }
         }
       }
+      if (repaired > 0) {
+        for (const profile of repairedState.profiles) {
+          const before = profiles.find((item) => item.id === profile.id);
+          if (before && (before.proxy_id !== profile.proxy_id ||
+              before.proxy_mode !== profile.proxy_mode)) {
+            await db.profiles.update(targetOrgId, profile.id,
+                {proxy_id: profile.proxy_id, proxy_mode: profile.proxy_mode});
+          }
+        }
+      }
+      if (migrated > 0) {
+        for (const cookie of migratedState.cookies) {
+          if (!cookies.some((existing) => existing.id === cookie.id)) {
+            await db.cookieSets.create(targetOrgId, cookie);
+          }
+        }
+        for (const profile of migratedState.profiles) {
+          const before = repairedState.profiles.find((item) => item.id === profile.id);
+          if (before && (before.cookie_id !== profile.cookie_id ||
+              before.cookie_mode !== profile.cookie_mode)) {
+            await db.profiles.update(targetOrgId, profile.id,
+                {cookie_id: profile.cookie_id, cookie_mode: profile.cookie_mode});
+          }
+        }
+      }
+
+      setCloudState(finalState);
+      if (!quiet) {
+        setSelectedId(finalState.profiles.find((profile) => !profile.deleted_at)?.id || null);
+      }
+      if (!quiet && (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0)) {
+        setMessage(`${repaired ? `Repaired ${repaired} proxy assignments` : ''}${repaired && mergedBookmarks.changed ? ' · ' : ''}${mergedBookmarks.changed ? 'Added social bookmarks' : ''}${purged ? `${repaired || mergedBookmarks.changed ? ' · ' : ''}Purged ${purged} trashed ${purged === 1 ? 'profile' : 'profiles'}` : ''}${migrated ? `${repaired || mergedBookmarks.changed || purged ? ' · ' : ''}Added ${migrated} existing cookie ${migrated === 1 ? 'import' : 'imports'} to the library` : ''}`);
+      }
+    } catch (error) {
+      setMessage(describeDbError(error, 'Could not load your data.'));
     } finally {
-      setCloudLoading(false);
+      if (!quiet) {
+        setCloudLoading(false);
+      }
     }
   }
 
-  // saveCloudState overwrites the entire profiles array with whatever this
-  // session has in memory -- if that's stale (e.g. a second computer that
-  // hasn't reloaded since a delete happened elsewhere), saving anything at
-  // all silently resurrects whatever this session still thinks exists. Used
-  // by the delete/restore family to apply their change on top of the actual
-  // current server state instead of a potentially-stale local cache. Falls
-  // back to the local list if the fetch fails or Supabase isn't configured,
-  // since refusing to delete at all would be worse than the existing risk.
-  async function fetchLatestProfiles(): Promise<ArgusProfile[]> {
-    if (!supabase) {
-      return cloudState.profiles;
+  // Runs targeted db writes and reports failure the way the whole app already
+  // expects: message set, false returned, caller bails without a false
+  // success toast.
+  async function withDb(action: (activeOrgId: string) => Promise<unknown>): Promise<boolean> {
+    if (!orgId) {
+      setMessage('No organization is selected yet.');
+      return false;
     }
-    const {data: userData} = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) {
-      return cloudState.profiles;
-    }
-    const {data, error} = await supabase
-        .from('argus_cloud_state')
-        .select('profiles')
-        .eq('user_id', userId)
-        .maybeSingle();
-    if (error || !Array.isArray(data?.profiles)) {
-      return cloudState.profiles;
-    }
-    return data.profiles;
-  }
-
-  // Returns whether the write actually reached Supabase, so callers can tell
-  // a genuine save apart from one that only updated local state -- without
-  // this, every "$name saved" toast fired unconditionally, even when the
-  // Supabase upsert failed, silently losing the change on the next reload.
-  async function saveCloudState(nextState: CloudState): Promise<boolean> {
-    setCloudState(nextState);
-    if (!supabase) {
+    try {
+      await action(orgId);
       return true;
-    }
-    const {data: userData} = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) {
+    } catch (error) {
+      setMessage(describeDbError(error, 'Could not save to the cloud.'));
       return false;
     }
-    const payload: Record<string, unknown> = {
-      user_id: userId,
-      profiles: nextState.profiles,
-      proxies: nextState.proxies,
-      shared_extensions: nextState.shared_extensions,
-      updated_at: new Date().toISOString(),
-    };
-    if (foldersColumnAvailable) {
-      payload.folders = nextState.folders;
-    }
-    if (sharedBookmarksColumnAvailable) {
-      payload.shared_bookmarks = nextState.shared_bookmarks;
-    }
-    if (customStatusesColumnAvailable) {
-      payload.custom_statuses = nextState.custom_statuses;
-    }
-    if (builtInExtensionsColumnAvailable) {
-      payload.built_in_extensions = nextState.built_in_extensions;
-    }
-    if (cookiesColumnAvailable) {
-      payload.cookies = nextState.cookies;
-    }
-    let {error} = await supabase
-        .from('argus_cloud_state')
-        .upsert(payload, {onConflict: 'user_id'});
-    if (isMissingColumnError(error)) {
-      if (error?.message?.includes('shared_bookmarks')) {
-        sharedBookmarksColumnAvailable = false;
-        delete payload.shared_bookmarks;
-      }
-      if (error?.message?.includes('folders')) {
-        foldersColumnAvailable = false;
-        delete payload.folders;
-      }
-      if (error?.message?.includes('custom_statuses')) {
-        customStatusesColumnAvailable = false;
-        delete payload.custom_statuses;
-      }
-      if (error?.message?.includes('built_in_extensions')) {
-        builtInExtensionsColumnAvailable = false;
-        delete payload.built_in_extensions;
-      }
-      if (error?.message?.includes('cookies')) {
-        cookiesColumnAvailable = false;
-        delete payload.cookies;
-      }
-      const fallback = await supabase
-          .from('argus_cloud_state')
-          .upsert(payload, {onConflict: 'user_id'});
-      error = fallback.error;
-    }
-    if (error) {
-      setMessage(error.message);
-      return false;
-    }
-    return true;
+  }
+
+  // cloudState stays the render cache the whole UI reads from; these apply the
+  // local half of a write. The updater form matters: several call sites write
+  // more than one row in a loop, and reading the closure-captured cloudState
+  // between iterations would lose the earlier ones.
+  function patchProfiles(fn: (list: ArgusProfile[]) => ArgusProfile[]) {
+    setCloudState((current) => ({...current, profiles: fn(current.profiles)}));
+  }
+
+  function patchProxies(fn: (list: ArgusProxy[]) => ArgusProxy[]) {
+    setCloudState((current) => ({...current, proxies: fn(current.proxies)}));
+  }
+
+  function patchFolders(fn: (list: ArgusFolder[]) => ArgusFolder[]) {
+    setCloudState((current) => ({...current, folders: fn(current.folders)}));
+  }
+
+  function patchCookies(fn: (list: ArgusCookie[]) => ArgusCookie[]) {
+    setCloudState((current) => ({...current, cookies: fn(current.cookies)}));
+  }
+
+  function patchExtensions(fn: (list: SharedExtension[]) => SharedExtension[]) {
+    setCloudState((current) => ({...current, shared_extensions: fn(current.shared_extensions)}));
+  }
+
+  function patchBookmarks(fn: (list: SharedBookmark[]) => SharedBookmark[]) {
+    setCloudState((current) => ({...current, shared_bookmarks: fn(current.shared_bookmarks)}));
+  }
+
+  // Every proxy-check path (background loop, manual re-check, pre-launch check)
+  // lands here. The write touches the six last_* columns only, so a check
+  // completing while someone edits that proxy's credentials cannot undo the
+  // edit. Explicit nulls matter: a proxy that just started working must clear
+  // its stored error, and PostgREST drops undefined rather than nulling it.
+  async function recordProxyCheck(proxy: ArgusProxy): Promise<boolean> {
+    patchProxies((list) => list.map((item) => item.id === proxy.id ? proxy : item));
+    return withDb((activeOrgId) => db.proxies.recordCheck(activeOrgId, proxy.id, {
+      country: proxy.country,
+      country_code: proxy.country_code,
+      egress_ip: proxy.egress_ip,
+      ping_ms: proxy.ping_ms,
+      checked_at: proxy.checked_at,
+      check_error: proxy.check_error,
+    }));
   }
 
   async function signIn() {
@@ -2145,21 +2152,19 @@ function App() {
       setMessage('Supabase env is missing in .env');
       return;
     }
-    const {data, error} = await supabase.auth.signInWithPassword({email, password});
+    // OrgProvider's onAuthStateChange picks the session up from here, resolves
+    // the user's organizations (bootstrapping one if they have none) and the
+    // orgId effect above loads the data.
+    const {error} = await supabase.auth.signInWithPassword({email, password});
     if (error) {
       setMessage(error.message);
       return;
     }
-    setSignedInEmail(data.user.email || email);
-    setApiToken(tokenForEmail(data.user.email || email));
     setPassword('');
-    await loadCloudState();
   }
 
   async function signOut() {
     await supabase?.auth.signOut();
-    setSignedInEmail('');
-    setApiToken('argys_api_token');
     setCloudState(defaultState);
     setSelectedId(null);
     setSelectedFolderId('');
@@ -2341,9 +2346,10 @@ main().catch((error) => {
       if (profile.fingerprint?.rotate_on_launch) {
         const rotated = fingerprintFromDraftPatch(randomFingerprintPatch());
         launchProfile = {...profile, fingerprint: {...profile.fingerprint, ...rotated, rotate_on_launch: true}};
-        const profiles = cloudState.profiles.map((item) =>
-          item.id === profile.id ? launchProfile : item);
-        await saveCloudState({...cloudState, profiles});
+        await withDb((activeOrgId) => db.profiles.update(activeOrgId, profile.id,
+            {fingerprint: launchProfile.fingerprint}));
+        patchProfiles((list) => list.map((item) =>
+          item.id === profile.id ? launchProfile : item));
       }
       const commandLineSwitches = [
         launchProfile.command_line_switches || '',
@@ -2384,11 +2390,9 @@ main().catch((error) => {
               check_error: result.ok ? undefined : result.error || 'Proxy check failed',
             };
             selectedProxy = checkedProxy;
-            const profiles = cloudState.profiles.map((item) =>
-              item.id === launchProfile.id ? launchProfile : item);
-            const proxies = cloudState.proxies.map((item) =>
-              item.id === checkedProxy.id ? checkedProxy : item);
-            await saveCloudState({...cloudState, profiles, proxies});
+            // Only the proxy's check result is new here -- launchProfile was
+            // already written above if its fingerprint rotated.
+            await recordProxyCheck(checkedProxy);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setMessage('');
@@ -2457,15 +2461,19 @@ main().catch((error) => {
     }
   }
 
+  // withDb surfaces the real error via setMessage on failure; this function
+  // previously gave no feedback either way, so a failed save (e.g. a status
+  // change) looked identical to a successful one -- the change would show
+  // locally but silently never reach the cloud, then vanish on another
+  // machine's next fresh load.
   async function updateProfile(profile: ArgusProfile, patch: Partial<ArgusProfile>) {
-    const profiles = cloudState.profiles.map((item) =>
-      item.id === profile.id ? {...item, ...patch} : item);
-    // saveCloudState already surfaces the real Supabase error via setMessage
-    // on failure; this function previously gave no feedback either way, so a
-    // failed save (e.g. a status change) looked identical to a successful
-    // one -- the change would show locally but silently never reach the
-    // cloud, then vanish on another machine's next fresh load.
-    await saveCloudState({...cloudState, profiles});
+    const ok = await withDb((activeOrgId) =>
+      db.profiles.update(activeOrgId, profile.id, patch));
+    if (!ok) {
+      return;
+    }
+    patchProfiles((list) => list.map((item) =>
+      item.id === profile.id ? {...item, ...patch} : item));
   }
 
   function openNewProfile() {
@@ -2496,12 +2504,13 @@ main().catch((error) => {
       return;
     }
     if (folderDraft.id) {
-      const folders = cloudState.folders.map((item) =>
-        item.id === folderDraft.id ? {...item, name} : item);
-      const ok = await saveCloudState({...cloudState, folders});
+      const folderId = folderDraft.id;
+      const ok = await withDb((activeOrgId) => db.folders.rename(activeOrgId, folderId, name));
       if (!ok) {
         return;
       }
+      patchFolders((list) => list.map((item) =>
+        item.id === folderId ? {...item, name} : item));
       setFolderDraft(null);
       setMessage(`${name} folder saved`);
       return;
@@ -2511,10 +2520,11 @@ main().catch((error) => {
       name,
       created_at: new Date().toISOString(),
     };
-    const ok = await saveCloudState({...cloudState, folders: [...cloudState.folders, folder]});
+    const ok = await withDb((activeOrgId) => db.folders.create(activeOrgId, folder));
     if (!ok) {
       return;
     }
+    patchFolders((list) => [...list, folder]);
     setSelectedFolderId(folder.id);
     setFolderDraft(null);
     setMessage(`${folder.name} folder created`);
@@ -2524,13 +2534,15 @@ main().catch((error) => {
     if (!window.confirm(`Delete folder ${folder.name}? Profiles will move to All profiles.`)) {
       return;
     }
-    const folders = cloudState.folders.filter((item) => item.id !== folder.id);
-    const profiles = cloudState.profiles.map((profile) =>
-      profile.folder_id === folder.id ? {...profile, folder_id: null} : profile);
-    const ok = await saveCloudState({...cloudState, folders, profiles});
+    // profiles.folder_id is nulled server-side by the FK's ON DELETE SET NULL,
+    // so this is genuinely one statement; the local list just mirrors it.
+    const ok = await withDb((activeOrgId) => db.folders.remove(activeOrgId, folder.id));
     if (!ok) {
       return;
     }
+    patchFolders((list) => list.filter((item) => item.id !== folder.id));
+    patchProfiles((list) => list.map((profile) =>
+      profile.folder_id === folder.id ? {...profile, folder_id: null} : profile));
     setSelectedFolderId('');
     setMessage(`${folder.name} folder deleted`);
   }
@@ -2560,13 +2572,19 @@ main().catch((error) => {
       setMessage('Status name is required');
       return;
     }
+    // A built-in status needs no row; statusList still dedupes the local list.
+    const isNew = !baseProfileStatuses.includes(name) &&
+      !cloudState.custom_statuses.includes(name);
+    if (isNew) {
+      const ok = await withDb((activeOrgId) => db.statuses.create(activeOrgId, name));
+      if (!ok) {
+        return;
+      }
+    }
     const statuses = statusList(
         cloudState.custom_statuses,
         baseProfileStatuses.includes(name) ? [] : [name]);
-    const ok = await saveCloudState({...cloudState, custom_statuses: statuses});
-    if (!ok) {
-      return;
-    }
+    setCloudState((current) => ({...current, custom_statuses: statuses}));
     setStatusDraft(null);
     setMessage(`${name} status created`);
   }
@@ -2631,16 +2649,22 @@ main().catch((error) => {
         cloudState.profiles.find((item) => item.id === profileDraft.id)?.created_at :
         new Date().toISOString(),
     };
-    const profiles = profileDraft.id ?
-      cloudState.profiles.map((item) => item.id === profile.id ? profile : item) :
-      [...cloudState.profiles, profile];
-    const ok = await saveCloudState({...cloudState, profiles});
+    // One row, keyed on the profile's own id -- which stays exactly what it was,
+    // because it is also the E:\ArgysProfiles\<id> directory name. Create and
+    // edit are separate statements on purpose (see db/profiles.ts): only the
+    // create path should be able to raise profile_limit_reached.
+    const isExisting = cloudState.profiles.some((item) => item.id === profile.id);
+    const ok = await withDb((activeOrgId) =>
+      db.profiles.save(activeOrgId, profile, isExisting));
     if (!ok) {
-      // saveCloudState already surfaced the real Supabase error via
-      // setMessage; don't overwrite it with a false "saved" toast, and keep
-      // the dialog open so the user's edits aren't lost.
+      // withDb already surfaced the real error via setMessage; don't overwrite
+      // it with a false "saved" toast, and keep the dialog open so the user's
+      // edits aren't lost.
       return;
     }
+    patchProfiles((list) => isExisting ?
+      list.map((item) => item.id === profile.id ? profile : item) :
+      [...list, profile]);
     setSelectedId(profile.id);
     setProfileDraft(null);
     setMessage(`${profile.name} saved`);
@@ -2688,15 +2712,29 @@ main().catch((error) => {
     }
     const {profileIds, label, exclusiveProxyIds} = profileDeleteRequest;
     const deletedAt = new Date().toISOString();
-    const latestProfiles = await fetchLatestProfiles();
-    const profiles = latestProfiles.map((item) =>
-      profileIds.includes(item.id) ? {...item, deleted_at: deletedAt} : item);
-    const proxies = profileDeleteRemoveProxy ?
-      cloudState.proxies.filter((proxy) => !exclusiveProxyIds.includes(proxy.id)) :
-      cloudState.proxies;
-    const ok = await saveCloudState({...cloudState, profiles, proxies});
+    // One UPDATE stamping deleted_at on these ids, and nothing else. The old
+    // path re-read the whole profiles array from the server first, because it
+    // was about to rewrite all of it; there is nothing left to be stale about.
+    const ok = await withDb(async (activeOrgId) => {
+      await db.profiles.softDelete(activeOrgId, profileIds);
+      if (profileDeleteRemoveProxy && exclusiveProxyIds.length) {
+        await db.proxies.remove(activeOrgId, exclusiveProxyIds);
+      }
+    });
     if (!ok) {
       return;
+    }
+    const profiles = cloudState.profiles.map((item) =>
+      profileIds.includes(item.id) ? {...item, deleted_at: deletedAt} : item);
+    patchProfiles(() => profiles);
+    if (profileDeleteRemoveProxy && exclusiveProxyIds.length) {
+      // The proxies FK is ON DELETE SET NULL, so the affected profiles lose
+      // their proxy_id server-side; mirror that locally.
+      patchProxies((list) => list.filter((proxy) => !exclusiveProxyIds.includes(proxy.id)));
+      patchProfiles((list) => list.map((item) =>
+        item.proxy_id && exclusiveProxyIds.includes(item.proxy_id) ?
+          {...item, proxy_id: null} :
+          item));
     }
     if (selectedId && profileIds.includes(selectedId)) {
       setSelectedId(profiles.find((item) => !item.deleted_at)?.id || null);
@@ -2708,14 +2746,17 @@ main().catch((error) => {
     setProfileDeleteRemoveProxy(false);
   }
 
+  // Restoring crosses the profile limit as much as creating does, so
+  // trg_profile_limit_restore fires on exactly this update and can refuse it.
+  // A bulk restore is one statement, so it either all lands or none of it does.
   async function restoreProfile(profile: ArgusProfile) {
-    const latestProfiles = await fetchLatestProfiles();
-    const profiles = latestProfiles.map((item) =>
-      item.id === profile.id ? {...item, deleted_at: null} : item);
-    const ok = await saveCloudState({...cloudState, profiles});
+    const ok = await withDb((activeOrgId) =>
+      db.profiles.restore(activeOrgId, [profile.id]));
     if (!ok) {
       return;
     }
+    patchProfiles((list) => list.map((item) =>
+      item.id === profile.id ? {...item, deleted_at: null} : item));
     setMessage(`${profile.name} restored`);
   }
 
@@ -2723,12 +2764,11 @@ main().catch((error) => {
     if (!window.confirm(`Permanently delete ${profile.name}? This cannot be undone.`)) {
       return;
     }
-    const latestProfiles = await fetchLatestProfiles();
-    const profiles = latestProfiles.filter((item) => item.id !== profile.id);
-    const ok = await saveCloudState({...cloudState, profiles});
+    const ok = await withDb((activeOrgId) => db.profiles.purge(activeOrgId, [profile.id]));
     if (!ok) {
       return;
     }
+    patchProfiles((list) => list.filter((item) => item.id !== profile.id));
     setMessage(`${profile.name} permanently deleted`);
   }
 
@@ -2737,13 +2777,13 @@ main().catch((error) => {
       return;
     }
     const count = selectedProfileIds.size;
-    const latestProfiles = await fetchLatestProfiles();
-    const profiles = latestProfiles.map((item) =>
-      selectedProfileIds.has(item.id) ? {...item, deleted_at: null} : item);
-    const ok = await saveCloudState({...cloudState, profiles});
+    const ids = [...selectedProfileIds];
+    const ok = await withDb((activeOrgId) => db.profiles.restore(activeOrgId, ids));
     if (!ok) {
       return;
     }
+    patchProfiles((list) => list.map((item) =>
+      selectedProfileIds.has(item.id) ? {...item, deleted_at: null} : item));
     setSelectedProfileIds(new Set());
     setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} restored`);
   }
@@ -2756,24 +2796,14 @@ main().catch((error) => {
     if (!window.confirm(`Permanently delete ${count} selected ${count === 1 ? 'profile' : 'profiles'}? This cannot be undone.`)) {
       return;
     }
-    const latestProfiles = await fetchLatestProfiles();
-    const profiles = latestProfiles.filter((item) => !selectedProfileIds.has(item.id));
-    const ok = await saveCloudState({...cloudState, profiles});
+    const ids = [...selectedProfileIds];
+    const ok = await withDb((activeOrgId) => db.profiles.purge(activeOrgId, ids));
     if (!ok) {
       return;
     }
+    patchProfiles((list) => list.filter((item) => !selectedProfileIds.has(item.id)));
     setSelectedProfileIds(new Set());
     setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} permanently deleted`);
-  }
-
-  // Auto-purge: profiles trashed more than TRASH_RETENTION_DAYS ago are
-  // permanently removed. Called once after cloud state loads (see
-  // loadCloudState), matching the existing proxy-assignment-repair pattern.
-  function purgeExpiredTrash(state: CloudState): {state: CloudState; purged: number} {
-    const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    const profiles = state.profiles.filter((profile) =>
-      !profile.deleted_at || Date.parse(profile.deleted_at) > cutoff);
-    return {state: {...state, profiles}, purged: state.profiles.length - profiles.length};
   }
 
   async function pickImportCsv() {
@@ -2800,6 +2830,11 @@ main().catch((error) => {
       const profiles = [...cloudState.profiles];
       const proxies = [...cloudState.proxies];
       const folders = [...cloudState.folders];
+      // What this run actually has to write. The blob path rewrote everything;
+      // rows the CSV never mentioned are now left alone.
+      const newProxies: ArgusProxy[] = [];
+      const newFolders: ArgusFolder[] = [];
+      const touchedProfiles: Array<{profile: ArgusProfile; exists: boolean}> = [];
       const proxyIndexByKey = new Map<string, number>();
       proxies.forEach((proxy, index) => {
         proxyIndexByKey.set(proxyDedupeKey(proxy.type || 'http', proxy.host, proxy.port, proxy.username || ''), index);
@@ -2845,6 +2880,7 @@ main().catch((error) => {
               password: parsedProxy.password || undefined,
             };
             proxies.push(proxy);
+            newProxies.push(proxy);
             proxyIndexByKey.set(key, proxies.length - 1);
             proxyId = proxy.id;
             proxiesCreated++;
@@ -2866,14 +2902,27 @@ main().catch((error) => {
               created_at: new Date().toISOString(),
             };
             folders.push(folder);
+            newFolders.push(folder);
             folderIdByCsvValue.set(csvFolder, folder.id);
             folderId = folder.id;
             foldersCreated++;
           }
         }
 
+        // profile_id is written verbatim on purpose: re-creating a profile with
+        // its exact original id is what reclaims an existing
+        // E:\ArgysProfiles\<id> directory, cookies and logged-in sessions
+        // intact. Which is also why a malformed one has to be refused here
+        // rather than quietly renumbered.
         const importId = (row.profile_id || '').trim() ||
           globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+        if (!isFsSafeId(importId)) {
+          skipped.push({
+            name,
+            reason: `Profile id "${importId}" can't be a folder name (letters, digits, dot, dash, underscore only)`,
+          });
+          continue;
+        }
         const existingProfileIndex = profiles.findIndex((item) => item.id === importId);
         const createdAt = Date.parse(row.created_at || '') ?
           new Date(row.created_at).toISOString() :
@@ -2923,9 +2972,35 @@ main().catch((error) => {
           profiles.push(profile);
           created++;
         }
+        touchedProfiles.push({profile, exists: existingProfileIndex >= 0});
       }
 
-      const ok = await saveCloudState({...cloudState, profiles, proxies, folders});
+      // FK order: a profile cannot reference a folder or proxy that is not
+      // there yet. Unlike the single blob write this replaces, these are
+      // separate statements -- if the org hits its profile limit partway
+      // through, the rows written before that point stay written, and the
+      // counts below are what the loop planned rather than what landed.
+      const writtenProfiles: string[] = [];
+      const ok = await withDb(async (activeOrgId) => {
+        for (const folder of newFolders) {
+          await db.folders.create(activeOrgId, folder);
+        }
+        for (const proxy of newProxies) {
+          await db.proxies.upsert(activeOrgId, proxy);
+        }
+        for (const {profile, exists} of touchedProfiles) {
+          await db.profiles.save(activeOrgId, profile, exists);
+          writtenProfiles.push(profile.id);
+        }
+      });
+      setCloudState((current) => ({
+        ...current,
+        folders,
+        proxies,
+        profiles: profiles.filter((profile) =>
+          writtenProfiles.includes(profile.id) ||
+          current.profiles.some((item) => item.id === profile.id)),
+      }));
       if (!ok) {
         return;
       }
@@ -3146,13 +3221,18 @@ main().catch((error) => {
       username: proxyDraft.username.trim() || undefined,
       password: proxyDraft.password || undefined,
     };
-    const proxies = proxyDraft.id ?
-      cloudState.proxies.map((item) => item.id === proxy.id ? proxy : item) :
-      [...cloudState.proxies, proxy];
-    const ok = await saveCloudState({...cloudState, proxies});
+    // When the connection details changed, the six last_* columns are written
+    // as explicit nulls by proxyToRow -- the stored check result no longer
+    // describes this proxy, and the background loop will re-check it.
+    const isExisting = Boolean(proxyDraft.id) &&
+      cloudState.proxies.some((item) => item.id === proxy.id);
+    const ok = await withDb((activeOrgId) => db.proxies.upsert(activeOrgId, proxy));
     if (!ok) {
       return;
     }
+    patchProxies((list) => isExisting ?
+      list.map((item) => item.id === proxy.id ? proxy : item) :
+      [...list, proxy]);
     if (!proxyDraft.id && proxyDraftSource === 'profile') {
       setProfileDraft((current) => current ? {
         ...current,
@@ -3184,9 +3264,7 @@ main().catch((error) => {
         checked_at: new Date().toISOString(),
         check_error: result.ok ? undefined : result.error || 'Proxy check failed',
       };
-      const proxies = cloudState.proxies.map((item) =>
-        item.id === proxy.id ? checkedProxy : item);
-      const ok = await saveCloudState({...cloudState, proxies});
+      const ok = await recordProxyCheck(checkedProxy);
       if (!ok) {
         return;
       }
@@ -3254,15 +3332,17 @@ main().catch((error) => {
       return;
     }
     const {proxyIds, label} = proxyDeleteRequest;
-    const proxies = cloudState.proxies.filter((item) => !proxyIds.includes(item.id));
-    const profiles = cloudState.profiles.map((profile) =>
-      profile.proxy_id && proxyIds.includes(profile.proxy_id) ?
-        {...profile, proxy_id: null} :
-        profile);
-    const ok = await saveCloudState({...cloudState, proxies, profiles});
+    // The FK on profiles.proxy_id is ON DELETE SET NULL, so the assigned
+    // profiles are cleared by the same statement; this only mirrors it locally.
+    const ok = await withDb((activeOrgId) => db.proxies.remove(activeOrgId, proxyIds));
     if (!ok) {
       return;
     }
+    patchProxies((list) => list.filter((item) => !proxyIds.includes(item.id)));
+    patchProfiles((list) => list.map((profile) =>
+      profile.proxy_id && proxyIds.includes(profile.proxy_id) ?
+        {...profile, proxy_id: null} :
+        profile));
     setMessage(`${label} deleted`);
     setSelectedProxyIds(new Set());
     setProxyDraft(null);
@@ -3363,12 +3443,17 @@ main().catch((error) => {
       return;
     }
     const nextFolderId = folderId || null;
-    const profiles = cloudState.profiles.map((profile) =>
-      selectedProfileIds.has(profile.id) ? {...profile, folder_id: nextFolderId} : profile);
-    const ok = await saveCloudState({...cloudState, profiles});
+    const ids = [...selectedProfileIds];
+    const ok = await withDb(async (activeOrgId) => {
+      for (const id of ids) {
+        await db.profiles.update(activeOrgId, id, {folder_id: nextFolderId});
+      }
+    });
     if (!ok) {
       return;
     }
+    patchProfiles((list) => list.map((profile) =>
+      selectedProfileIds.has(profile.id) ? {...profile, folder_id: nextFolderId} : profile));
     const folderName = nextFolderId ?
       cloudState.folders.find((folder) => folder.id === nextFolderId)?.name :
       'All profiles';
@@ -3399,17 +3484,20 @@ main().catch((error) => {
       cookiePatches.set(profile.id, await cloudCookieFromSelection(profile.id, match));
       matched += 1;
     }
-    const profiles = cloudState.profiles.map((profile) => {
-      const patch = isTarget(profile) ? cookiePatches.get(profile.id) : undefined;
-      if (!patch) {
-        return profile;
+    // One update per profile that actually matched a cookie file; the ones that
+    // did not match are never rewritten.
+    const ok = await withDb(async (activeOrgId) => {
+      for (const [profileId, patch] of cookiePatches) {
+        await db.profiles.update(activeOrgId, profileId, patch);
       }
-      return {...profile, ...patch};
     });
-    const ok = await saveCloudState({...cloudState, profiles});
     if (!ok) {
       throw new Error('Failed to save matched cookies to cloud state.');
     }
+    patchProfiles((list) => list.map((profile) => {
+      const patch = isTarget(profile) ? cookiePatches.get(profile.id) : undefined;
+      return patch ? {...profile, ...patch} : profile;
+    }));
     return {matched, total: selected.length};
   }
 
@@ -3456,15 +3544,27 @@ main().catch((error) => {
       url,
       icon: bookmarkDraft.icon.trim() || undefined,
     };
-    const bookmarks = cloudState.shared_bookmarks.filter(
-        (item) => item.url !== (bookmarkDraft.originalUrl || bookmark.url));
-    const ok = await saveCloudState({
-      ...cloudState,
-      shared_bookmarks: [...bookmarks, bookmark],
+    // Bookmarks are addressed by url, the way the edit dialog already thinks of
+    // them: originalUrl identifies the row when the url itself is being changed.
+    const originalUrl = bookmarkDraft.originalUrl;
+    const existing = cloudState.shared_bookmarks.find((item) =>
+      item.url === (originalUrl || bookmark.url));
+    const position = existing?.position ?? cloudState.shared_bookmarks.length;
+    const saved: SharedBookmark = {...bookmark, position};
+    const ok = await withDb(async (activeOrgId) => {
+      if (existing) {
+        await db.bookmarks.updateByUrl(activeOrgId, existing.url, saved);
+      } else {
+        await db.bookmarks.create(activeOrgId, saved);
+      }
     });
     if (!ok) {
       return;
     }
+    patchBookmarks((list) => [
+      ...list.filter((item) => item.url !== (originalUrl || bookmark.url)),
+      saved,
+    ]);
     setBookmarkDraft(null);
     setMessage(`${bookmark.title} saved`);
   }
@@ -3474,14 +3574,12 @@ main().catch((error) => {
       setBookmarkDraft(null);
       return;
     }
-    const ok = await saveCloudState({
-      ...cloudState,
-      shared_bookmarks: cloudState.shared_bookmarks.filter(
-          (bookmark) => bookmark.url !== bookmarkDraft.originalUrl),
-    });
+    const originalUrl = bookmarkDraft.originalUrl;
+    const ok = await withDb((activeOrgId) => db.bookmarks.removeByUrl(activeOrgId, originalUrl));
     if (!ok) {
       return;
     }
+    patchBookmarks((list) => list.filter((bookmark) => bookmark.url !== originalUrl));
     setBookmarkDraft(null);
     setMessage('Bookmark deleted');
   }
@@ -3528,39 +3626,30 @@ main().catch((error) => {
     }
     const id = crypto.randomUUID();
     const name = folderPath.trim().split('/').filter(Boolean).at(-1) || 'Extension';
-    const bytes = Uint8Array.from(atob(zipped.base64), (c) => c.charCodeAt(0));
-    const objectPath = `shared-extensions/${id}.zip`;
-    const {error: uploadError} = await supabase.storage
-        .from(SHARED_EXTENSIONS_BUCKET)
-        .upload(objectPath, bytes, {contentType: 'application/zip', upsert: true});
-    let storageUrl = '';
-    let usedInlinePackage = false;
-    if (uploadError && isSupabaseStorageNotWritable(uploadError)) {
-      storageUrl = `data:application/zip;base64,${zipped.base64}`;
-      usedInlinePackage = true;
-    } else if (uploadError) {
-      setMessage(`Upload failed: ${uploadError.message}`);
+    let uploaded: {url: string; inline: boolean};
+    try {
+      uploaded = await db.extensions.uploadPackage(id, zipped.base64);
+    } catch (error) {
+      setMessage(describeDbError(error, 'Upload failed.'));
       return;
-    } else {
-      const {data: publicUrlData} = supabase.storage.from(SHARED_EXTENSIONS_BUCKET).getPublicUrl(objectPath);
-      storageUrl = publicUrlData.publicUrl;
     }
     const nextExtension: SharedExtension = {
       id,
       name,
       source: 'local',
-      storageUrl,
+      storageUrl: uploaded.url,
     };
-    const ok = await saveCloudState({
-      ...cloudState,
-      shared_extensions: [...cloudState.shared_extensions, nextExtension],
-    });
+    const ok = await withDb((activeOrgId) =>
+      db.extensions.upsert(activeOrgId, nextExtension, uploaded.inline ?
+        null :
+        `shared-extensions/${id}.zip`));
     if (!ok) {
       return;
     }
+    patchExtensions((list) => [...list, nextExtension]);
     setExtensionAddOpen(false);
-    setMessage(usedInlinePackage ?
-      `${name} shared inline. Check the ${SHARED_EXTENSIONS_BUCKET} storage bucket for large extensions.` :
+    setMessage(uploaded.inline ?
+      `${name} shared inline. Check the ${db.STORAGE_BUCKET} storage bucket for large extensions.` :
       `${name} shared with your team`);
   }
 
@@ -3583,13 +3672,11 @@ main().catch((error) => {
       source: 'webstore',
       webstoreId,
     };
-    const ok = await saveCloudState({
-      ...cloudState,
-      shared_extensions: [...cloudState.shared_extensions, nextExtension],
-    });
+    const ok = await withDb((activeOrgId) => db.extensions.upsert(activeOrgId, nextExtension));
     if (!ok) {
       return;
     }
+    patchExtensions((list) => [...list, nextExtension]);
     setExtensionAddOpen(false);
     setWebstoreLinkInput('');
     setMessage('Extension shared with your team');
@@ -3607,23 +3694,8 @@ main().catch((error) => {
     if (!selection.base64) {
       throw new Error('Cookie file upload payload is missing. Select the cookie file again.');
     }
-    if (!supabase) {
-      return {...base, cookie_import_url: `data:text/plain;base64,${selection.base64}`};
-    }
-    const safeName = cookieName.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'cookies.txt';
-    const objectPath = `profile-cookies/${profileId}/${Date.now()}-${safeName}`;
-    const bytes = Uint8Array.from(atob(selection.base64), (c) => c.charCodeAt(0));
-    const {error: uploadError} = await supabase.storage
-        .from(SHARED_EXTENSIONS_BUCKET)
-        .upload(objectPath, bytes, {contentType: 'text/plain', upsert: true});
-    if (uploadError && isSupabaseStorageNotWritable(uploadError)) {
-      return {...base, cookie_import_url: `data:text/plain;base64,${selection.base64}`};
-    }
-    if (uploadError) {
-      throw new Error(`Cookie upload failed: ${uploadError.message}`);
-    }
-    const {data: publicUrlData} = supabase.storage.from(SHARED_EXTENSIONS_BUCKET).getPublicUrl(objectPath);
-    return {...base, cookie_import_url: publicUrlData.publicUrl};
+    const url = await db.cookieSets.uploadCookieFile(profileId, cookieName, selection.base64);
+    return {...base, cookie_import_url: url};
   }
 
   async function pickProfileCookieFile() {
@@ -3712,10 +3784,11 @@ main().catch((error) => {
         url: cloudCookie.cookie_import_url,
         count: cloudCookie.cookie_import_count,
       };
-      const ok = await saveCloudState({...cloudState, cookies: [...cloudState.cookies, entry]});
+      const ok = await withDb((activeOrgId) => db.cookieSets.create(activeOrgId, entry));
       if (!ok) {
         return;
       }
+      patchCookies((list) => [...list, entry]);
       if (profileDraft) {
         setProfileDraft({...profileDraft, cookie_mode: 'saved', cookie_id: entry.id, cookie_search: ''});
       }
@@ -3727,16 +3800,24 @@ main().catch((error) => {
 
   async function deleteCookieFromLibrary(id: string) {
     const cookie = cloudState.cookies.find((item) => item.id === id);
-    const profiles = cloudState.profiles.map((profile) =>
-      profile.cookie_id === id ? {...profile, cookie_id: null, cookie_mode: 'paste' as const} : profile);
-    const ok = await saveCloudState({
-      ...cloudState,
-      profiles,
-      cookies: cloudState.cookies.filter((item) => item.id !== id),
+    // The FK nulls profiles.cookie_set_id server-side, but nothing puts those
+    // profiles back into 'paste' mode -- that stays an explicit write, one per
+    // profile that actually referenced this set.
+    const referencing = cloudState.profiles.filter((profile) => profile.cookie_id === id);
+    const ok = await withDb(async (activeOrgId) => {
+      await db.cookieSets.remove(activeOrgId, id);
+      for (const profile of referencing) {
+        await db.profiles.update(activeOrgId, profile.id, {cookie_id: null, cookie_mode: 'paste'});
+      }
     });
     if (!ok) {
       return;
     }
+    patchCookies((list) => list.filter((item) => item.id !== id));
+    patchProfiles((list) => list.map((profile) =>
+      profile.cookie_id === id ?
+        {...profile, cookie_id: null, cookie_mode: 'paste' as const} :
+        profile));
     if (profileDraft?.cookie_id === id) {
       setProfileDraft({...profileDraft, cookie_mode: 'paste', cookie_id: ''});
     }
@@ -3744,11 +3825,11 @@ main().catch((error) => {
   }
 
   async function removeExtension(id: string) {
-    await saveCloudState({
-      ...cloudState,
-      shared_extensions: cloudState.shared_extensions.filter(
-          (extension) => extension.id !== id),
-    });
+    const ok = await withDb((activeOrgId) => db.extensions.remove(activeOrgId, id));
+    if (!ok) {
+      return;
+    }
+    patchExtensions((list) => list.filter((extension) => extension.id !== id));
   }
 
   function renderProfilesTab() {
@@ -4114,11 +4195,19 @@ main().catch((error) => {
     return cloudState.built_in_extensions?.[key] !== false;
   }
 
+  // These toggles now live on the organization, not on the individual user, so
+  // one worker cannot silently change what their colleagues' profiles launch
+  // with. The RLS UPDATE policy on organizations requires is_org_admin, which
+  // is why the switches are disabled for plain members rather than failing on
+  // click.
   async function setBuiltInExtensionEnabled(key: keyof BuiltInExtensionToggles, enabled: boolean) {
-    await saveCloudState({
-      ...cloudState,
-      built_in_extensions: {...cloudState.built_in_extensions, [key]: enabled},
-    });
+    const next = {...cloudState.built_in_extensions, [key]: enabled};
+    const ok = await withDb((activeOrgId) =>
+      db.orgs.updateBuiltInExtensions(activeOrgId, next));
+    if (!ok) {
+      return;
+    }
+    setCloudState((current) => ({...current, built_in_extensions: next}));
   }
 
   const BUILT_IN_EXTENSIONS: Array<{key: keyof BuiltInExtensionToggles; name: string; description: string}> = [
@@ -4164,6 +4253,12 @@ main().catch((error) => {
         <div className="panel-title">
           <h2>Built-in extensions</h2>
         </div>
+        {!org.isAdmin && org.orgId && (
+          <p className="empty-state">
+            These apply to everyone in {org.org?.name || 'this organization'}, so only an owner
+            or admin can change them.
+          </p>
+        )}
         {BUILT_IN_EXTENSIONS.map((entry) => (
           <div className="extension-row" key={entry.key}>
             <span>{entry.name}</span>
@@ -4172,6 +4267,7 @@ main().catch((error) => {
               <input
                 type="checkbox"
                 checked={builtInExtensionEnabled(entry.key)}
+                disabled={!org.isAdmin}
                 onChange={(event) => void setBuiltInExtensionEnabled(entry.key, event.target.checked)}
               />
               <span className="switch-track"><span className="switch-thumb" /></span>
@@ -4917,6 +5013,23 @@ main().catch((error) => {
             <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
           </div>
           <div className="actions">
+            {/* Only shown when the user is actually in more than one firm --
+                the common case is one org, chosen silently. */}
+            {org.orgs.length > 1 && (
+              <label className="field">
+                <span>Organization</span>
+                <select
+                  value={org.orgId || ''}
+                  onChange={(event) => org.setOrgId(event.target.value)}
+                >
+                  {org.orgs.map((membership) => (
+                    <option key={membership.org.id} value={membership.org.id}>
+                      {membership.org.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {renderTopAction()}
           </div>
         </header>
@@ -5574,4 +5687,10 @@ main().catch((error) => {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+// OrgProvider owns the auth subscription and resolves which organization's data
+// App should show, so it has to sit above App rather than inside it.
+createRoot(document.getElementById('root')!).render(
+    <OrgProvider>
+      <App />
+    </OrgProvider>,
+);
