@@ -109,6 +109,9 @@ export type ArgusProfile = {
 export type ArgusFolder = {
   id: string;
   name: string;
+  // A key into FOLDER_ICONS (src/data/folderIcons.ts) -- never a URL or markup,
+  // so an unknown value can only ever downgrade to the plain folder glyph.
+  icon?: string;
   created_at?: string;
 };
 

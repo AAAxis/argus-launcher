@@ -52,6 +52,11 @@ export type ProfileRow = {
   cookie_import_url: string | null;
   cookie_import_name: string | null;
   cookie_import_count: number | null;
+  // The login for whatever account the profile is signed into, plaintext -- the
+  // same treatment proxies.password already gets. Added 2026-08-03; before that
+  // the editor had both fields and the mappers silently dropped them.
+  email: string | null;
+  password: string | null;
 };
 
 export type ProxyRow = {
@@ -78,6 +83,7 @@ export type FolderRow = {
   name: string | null;
   parent_id: string | null;
   created_at: string;
+  icon: string | null;
 };
 
 // `cookies` holds the cookie payload itself and is unused by the launcher

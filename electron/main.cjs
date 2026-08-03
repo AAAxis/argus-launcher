@@ -1,4 +1,4 @@
-const {app, BrowserWindow, dialog, ipcMain, nativeImage, shell} = require('electron');
+const {app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell} = require('electron');
 const {autoUpdater} = require('electron-updater');
 const {spawn, spawnSync} = require('node:child_process');
 const crypto = require('node:crypto');
@@ -9,6 +9,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
+const {resolveFavicon} = require('./favicons.cjs');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
 // Two shapes, and nothing else is honoured:
@@ -24,6 +25,10 @@ const {pathToFileURL} = require('node:url');
 // to bind the automation API port, stranding the user on "not ready" instead of
 // focusing the window they already had.
 const DEEP_LINK_SCHEME = 'argus';
+
+// Must track --surface in src/styles.css: this is what the native window paints
+// behind the renderer, so a mismatch shows as a flash on launch and resize.
+const WINDOW_BG = {light: '#f7f7f6', dark: '#1c1b19'};
 
 // Deep links can arrive before there is a window to send them to -- on macOS
 // 'open-url' routinely fires before whenReady. Hold them until the renderer
@@ -873,6 +878,10 @@ function createWindow() {
     minWidth: 980,
     minHeight: 620,
     icon: icon || undefined,
+    // Painted before the renderer loads. Without it the shell is white, which
+    // flashes hard against a dark UI on every cold start. The renderer corrects
+    // this via argus:set-theme once it knows the user's actual preference.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -2168,6 +2177,101 @@ ipcMain.handle('argus:open-external', async (_event, url) => {
   return true;
 });
 
+// Bookmark favicons. Resolved in the main process so the renderer never issues
+// the cross-origin requests itself, and cached on disk by host -- see
+// electron/favicons.cjs for why this does not use a third-party icon service.
+ipcMain.handle('argus:bookmark-favicon', async (_event, url) => {
+  if (typeof url !== 'string' || !url) return null;
+  try {
+    return await resolveFavicon(path.join(app.getPath('userData'), 'Favicons'), url);
+  } catch (error) {
+    console.log('[favicon] resolve failed:', error && error.message);
+    return null;
+  }
+});
+
+// Takes the user's *preference*, not the resolved theme. That distinction
+// matters: nativeTheme.themeSource also drives prefers-color-scheme inside the
+// renderer, so pinning it to 'light'/'dark' while the user is on "System" would
+// stop matchMedia from ever firing again and the app would no longer follow
+// macOS appearance changes. Passing 'system' through keeps that live.
+ipcMain.handle('argus:set-theme', async (_event, preference) => {
+  nativeTheme.themeSource =
+    preference === 'dark' || preference === 'light' ? preference : 'system';
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light);
+  }
+  return true;
+});
+
+// Open-at-login, for the General section of Settings.
+//
+// getLoginItemSettings() is the source of truth rather than anything this app
+// stores: the user can remove the entry from System Settings (or the Startup
+// tab on Windows) without telling us, and a mirrored copy in localStorage would
+// then show a toggle that disagrees with the OS. Every set reads back.
+//
+// In development this registers the Electron binary rather than Argus Launcher,
+// which is harmless but confusing, so the renderer is told whether this build is
+// packaged and disables the row when it isn't.
+ipcMain.handle('argus:get-login-item', async () => {
+  const settings = app.getLoginItemSettings();
+  return {openAtLogin: Boolean(settings.openAtLogin), packaged: app.isPackaged};
+});
+
+ipcMain.handle('argus:set-login-item', async (_event, enabled) => {
+  app.setLoginItemSettings({openAtLogin: Boolean(enabled), openAsHidden: false});
+  const settings = app.getLoginItemSettings();
+  return {openAtLogin: Boolean(settings.openAtLogin), packaged: app.isPackaged};
+});
+
+// Where a profile's browser data actually lands.
+//
+// The renderer cannot work this out itself: it hands launchProfile() a path that
+// may be relative (Windows) or absolute (macOS), and only this process knows
+// what a relative one resolves against -- see resolveProfileUserDataDir. Passing
+// the renderer's own root string back through the same function means Settings
+// shows the real destination rather than a plausible-looking guess.
+ipcMain.handle('argus:resolve-profile-root', async (_event, root) => {
+  const resolved = resolveProfileUserDataDir(
+      typeof root === 'string' && root ? root : 'ArgysProfiles');
+  let exists = false;
+  try {
+    exists = fs.existsSync(resolved);
+  } catch {
+    // An unreadable parent directory is itself worth showing as "not created
+    // yet" rather than crashing the settings dialog.
+  }
+  return {path: resolved, exists};
+});
+
+// Reveals a directory in Finder/Explorer. showItemInFolder selects the item in
+// its *parent*, which for a directory means the user lands one level up looking
+// at it -- right for a "Show in Finder" button next to a path.
+ipcMain.handle('argus:reveal-path', async (_event, target) => {
+  if (typeof target !== 'string' || !target) {
+    return {ok: false, error: 'No path'};
+  }
+  try {
+    if (!fs.existsSync(target)) {
+      return {ok: false, error: 'That folder does not exist yet.'};
+    }
+    shell.showItemInFolder(target);
+    return {ok: true};
+  } catch (error) {
+    return {ok: false, error: errorDetail(error)};
+  }
+});
+
+// While on "System", the window background has to track the OS too -- the
+// renderer re-themes itself off matchMedia, but nothing else would repaint the
+// native shell behind it.
+nativeTheme.on('updated', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light);
+  }
+});
+
 ipcMain.handle('argus:update-status', async () => {
   return publicUpdateState();
 });
@@ -2184,12 +2288,12 @@ ipcMain.handle('argus:api-status', async () => {
   return publicApiState();
 });
 
-ipcMain.handle('argus:list-api-keys', async () => {
-  return publicAutomationKeys();
+ipcMain.handle('argus:list-api-keys', async (_event, ownerUserId) => {
+  return publicAutomationKeys(typeof ownerUserId === 'string' ? ownerUserId : null);
 });
 
-ipcMain.handle('argus:create-api-key', async (_event, {name, folderScope}) => {
-  return createAutomationKey(name, folderScope);
+ipcMain.handle('argus:create-api-key', async (_event, {name, folderScope, ownerUserId, orgId, integrationId}) => {
+  return createAutomationKey(name, folderScope, {ownerUserId, orgId, integrationId});
 });
 
 ipcMain.handle('argus:revoke-api-key', async (_event, id) => {
@@ -2213,6 +2317,65 @@ function openclawConfigPath() {
   return path.join(app.getPath('home'), '.openclaw', 'openclaw.json');
 }
 
+function cursorConfigPath() {
+  return path.join(app.getPath('home'), '.cursor', 'mcp.json');
+}
+
+function integrationConfigPath(integrationId) {
+  if (integrationId === 'claude-code') return claudeConfigPath();
+  if (integrationId === 'codex') return codexConfigPath();
+  if (integrationId === 'openclaw') return openclawConfigPath();
+  if (integrationId === 'cursor') return cursorConfigPath();
+  return null;
+}
+
+// A venv's interpreter is at Scripts\python.exe on Windows and bin/python
+// everywhere else. This was hardcoded to the Windows layout in all three
+// config writers, so every config written on macOS or Linux named an
+// interpreter that does not exist and the MCP server failed to start.
+function bridgePython(dir) {
+  return process.platform === 'win32' ?
+    path.join(dir, '.venv', 'Scripts', 'python.exe') :
+    path.join(dir, '.venv', 'bin', 'python');
+}
+
+// Where argus-hive-bridge lives. Overridable because there is no way to guess
+// a checkout location; the renderer offers a file picker for the same reason.
+function defaultBridgePath() {
+  return process.env.ARGUS_BRIDGE_PATH ||
+    path.join(app.getPath('home'), 'argus-hive-bridge');
+}
+
+const CODEX_ARGUS_HEADER = '[mcp_servers.argus]';
+
+// The [mcp_servers.argus] table runs from its header to the next top-level
+// section or EOF. Shared by the writer and the remover so they cannot disagree
+// about where this app's own table ends.
+function codexArgusSection(existing) {
+  const start = existing.indexOf(CODEX_ARGUS_HEADER);
+  if (start === -1) {
+    return null;
+  }
+  const afterHeader = existing.slice(start + CODEX_ARGUS_HEADER.length);
+  const next = afterHeader.match(/\n\[(?!mcp_servers\.argus\.)/);
+  const end = next ?
+    start + CODEX_ARGUS_HEADER.length + next.index + 1 :
+    existing.length;
+  return {start, end};
+}
+
+function readJsonConfig(configPath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Missing or unreadable -- treat as empty, exactly as the writers do.
+  }
+  return {};
+}
+
 function applyClaudeCodeConfig(dir, token, base) {
   const configPath = claudeConfigPath();
   let config = {};
@@ -2231,7 +2394,7 @@ function applyClaudeCodeConfig(dir, token, base) {
     // `uv` isn't guaranteed to be on PATH for whatever spawns this process
     // (confirmed: it wasn't even installed on this machine), while the venv
     // itself already has argus_hive_bridge installed and proven working.
-    command: path.join(dir, '.venv', 'Scripts', 'python.exe'),
+    command: bridgePython(dir),
     args: ['-m', 'argus_hive_bridge.mcp_server'],
     env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
   };
@@ -2251,7 +2414,7 @@ function applyCodexConfig(dir, token, base) {
   // Same reasoning as applyClaudeCodeConfig: point at the venv's own Python
   // instead of `uv run` -- uv isn't confirmed present on PATH for whatever
   // spawns this, the venv already works.
-  const escapedPython = path.join(dir, '.venv', 'Scripts', 'python.exe').replace(/\\/g, '\\\\');
+  const escapedPython = bridgePython(dir).replace(/\\/g, '\\\\');
   const block = [
     '[mcp_servers.argus]',
     `command = "${escapedPython}"`,
@@ -2296,7 +2459,23 @@ function applyOpenClawConfig(dir, token, base) {
   config.mcp = (config.mcp && typeof config.mcp === 'object') ? config.mcp : {};
   config.mcp.servers = (config.mcp.servers && typeof config.mcp.servers === 'object') ? config.mcp.servers : {};
   config.mcp.servers.argus = {
-    command: path.join(dir, '.venv', 'Scripts', 'python.exe'),
+    command: bridgePython(dir),
+    args: ['-m', 'argus_hive_bridge.mcp_server'],
+    env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
+  };
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return configPath;
+}
+
+// Cursor reads a global MCP registry at ~/.cursor/mcp.json with the same
+// mcpServers shape Claude Code uses.
+function applyCursorConfig(dir, token, base) {
+  const configPath = cursorConfigPath();
+  fs.mkdirSync(path.dirname(configPath), {recursive: true});
+  const config = readJsonConfig(configPath);
+  config.mcpServers = (config.mcpServers && typeof config.mcpServers === 'object') ? config.mcpServers : {};
+  config.mcpServers.argus = {
+    command: bridgePython(dir),
     args: ['-m', 'argus_hive_bridge.mcp_server'],
     env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
   };
@@ -2315,10 +2494,113 @@ ipcMain.handle('argus:apply-integration-config', async (_event, {integrationId, 
     if (integrationId === 'openclaw') {
       return {ok: true, path: applyOpenClawConfig(dir, token, base)};
     }
+    if (integrationId === 'cursor') {
+      return {ok: true, path: applyCursorConfig(dir, token, base)};
+    }
     return {ok: false, error: `No auto-apply available for ${integrationId}`};
   } catch (error) {
     return {ok: false, error: error.message};
   }
+});
+
+// Does the target tool's config actually carry our MCP server right now?
+//
+// A key existing is not the same thing as being connected: the key lives in
+// this app's own store, while the wiring lives in a file the user (or another
+// tool) can edit or delete at any time, and revoking a key never removed the
+// block it was written into. The Integrations tab needs both facts.
+ipcMain.handle('argus:integration-status', async (_event, {integrationId, dir}) => {
+  const configPath = integrationConfigPath(integrationId);
+  const bridgePath = dir || defaultBridgePath();
+  const status = {
+    configPath,
+    hasEntry: false,
+    bridgeExists: false,
+    pythonExists: false,
+    pythonPath: bridgePython(bridgePath),
+  };
+  try {
+    status.bridgeExists = fs.existsSync(bridgePath);
+    status.pythonExists = fs.existsSync(status.pythonPath);
+  } catch {
+    // Unreadable path -- reported as missing, which is what the UI needs.
+  }
+  if (!configPath) {
+    // Hive has no local config of its own; the token in its .env is the wiring.
+    return status;
+  }
+  try {
+    if (integrationId === 'codex') {
+      status.hasEntry = codexArgusSection(fs.readFileSync(configPath, 'utf8')) !== null;
+    } else if (integrationId === 'openclaw') {
+      status.hasEntry = Boolean(readJsonConfig(configPath).mcp?.servers?.argus);
+    } else {
+      status.hasEntry = Boolean(readJsonConfig(configPath).mcpServers?.argus);
+    }
+  } catch {
+    // No config file yet -- not connected, which is already the default.
+  }
+  return status;
+});
+
+// The other half of connecting. Without this, disconnecting left the tool
+// pointed at a revoked token: it would keep trying to start the MCP server and
+// keep failing, with nothing in the UI to explain why.
+ipcMain.handle('argus:remove-integration-config', async (_event, {integrationId}) => {
+  const configPath = integrationConfigPath(integrationId);
+  if (!configPath) {
+    return {ok: true, path: null};
+  }
+  try {
+    if (!fs.existsSync(configPath)) {
+      return {ok: true, path: configPath};
+    }
+    if (integrationId === 'codex') {
+      const existing = fs.readFileSync(configPath, 'utf8');
+      const section = codexArgusSection(existing);
+      if (section) {
+        const next = existing.slice(0, section.start) + existing.slice(section.end);
+        fs.writeFileSync(configPath, next.replace(/\n{3,}/g, '\n\n'));
+      }
+    } else if (integrationId === 'openclaw') {
+      const config = readJsonConfig(configPath);
+      if (config.mcp?.servers?.argus) {
+        delete config.mcp.servers.argus;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      }
+    } else {
+      const config = readJsonConfig(configPath);
+      if (config.mcpServers?.argus) {
+        delete config.mcpServers.argus;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      }
+    }
+    return {ok: true, path: configPath};
+  } catch (error) {
+    return {ok: false, error: error.message};
+  }
+});
+
+// The renderer offers this as the default in the connect dialog and lets the
+// user override it with a directory picker.
+ipcMain.handle('argus:default-bridge-path', async () => {
+  return defaultBridgePath();
+});
+
+// The OS directory chooser -- Finder on macOS, File Explorer on Windows.
+// Seeded with whatever the field already holds so it opens where the user is
+// looking; createDirectory lets them make the checkout folder from the sheet.
+ipcMain.handle('argus:select-bridge-folder', async (_event, current) => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select the argus-hive-bridge folder',
+    defaultPath: typeof current === 'string' && current ? current : defaultBridgePath(),
+    buttonLabel: 'Use this folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+  return result.filePaths[0];
 });
 
 ipcMain.handle('argus:check-for-updates', async () => {
@@ -2541,7 +2823,16 @@ function saveAutomationKeys(keys) {
 
 // folderScope: null grants every folder; an array (possibly empty) grants
 // only those folder ids.
-function createAutomationKey(name, folderScope) {
+//
+// ownerUserId/orgId/integrationId are what make a key attributable. The store
+// is per-install, so without an owner every account signed in on this machine
+// saw every other account's keys -- and because the Integrations tab decided
+// "connected" by matching key.name against the integration's display name, a
+// key left behind by a previous account made the card read Connected for a
+// brand-new one that had connected nothing. integrationId replaces that name
+// match: it is set only by the connect flow, so a hand-made key called
+// "Claude Code" can no longer masquerade as a connection.
+function createAutomationKey(name, folderScope, meta = {}) {
   const token = crypto.randomBytes(24).toString('hex');
   const key = {
     id: crypto.randomUUID(),
@@ -2549,6 +2840,9 @@ function createAutomationKey(name, folderScope) {
     tokenHash: hashToken(token),
     tokenPreview: token.slice(-4),
     folderScope: Array.isArray(folderScope) ? folderScope : null,
+    ownerUserId: typeof meta.ownerUserId === 'string' ? meta.ownerUserId : null,
+    orgId: typeof meta.orgId === 'string' ? meta.orgId : null,
+    integrationId: typeof meta.integrationId === 'string' ? meta.integrationId : null,
     createdAt: new Date().toISOString(),
     lastUsedAt: null,
   };
@@ -2569,8 +2863,14 @@ function revokeAutomationKey(id) {
   return true;
 }
 
-function publicAutomationKeys() {
-  return loadAutomationKeys().map(({tokenHash, ...rest}) => rest);
+// Keys this user owns, plus any that predate ownership being recorded. The
+// unowned ones are surfaced -- flagged, and never able to satisfy a connection
+// check -- rather than hidden, because they still grant access to this
+// machine's API and hiding them would leave no way to revoke them.
+function publicAutomationKeys(ownerUserId) {
+  return loadAutomationKeys()
+      .filter((key) => !key.ownerUserId || key.ownerUserId === ownerUserId)
+      .map(({tokenHash, ...rest}) => ({...rest, legacy: !rest.ownerUserId}));
 }
 
 // Resolves the caller's key from its Authorization header, or null if

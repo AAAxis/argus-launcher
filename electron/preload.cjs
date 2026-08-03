@@ -2,13 +2,26 @@ const {contextBridge, ipcRenderer} = require('electron');
 
 contextBridge.exposeInMainWorld('argusNative', {
   launchProfile: (payload, extraArgs) => ipcRenderer.invoke('argus:launch-profile', payload, extraArgs),
-  listApiKeys: () => ipcRenderer.invoke('argus:list-api-keys'),
-  createApiKey: (name, folderScope) => ipcRenderer.invoke('argus:create-api-key', {name, folderScope}),
+  listApiKeys: (ownerUserId) => ipcRenderer.invoke('argus:list-api-keys', ownerUserId),
+  createApiKey: (name, folderScope, meta) =>
+    ipcRenderer.invoke('argus:create-api-key', {name, folderScope, ...(meta || {})}),
   revokeApiKey: (id) => ipcRenderer.invoke('argus:revoke-api-key', id),
   applyIntegrationConfig: (integrationId, dir, token, base) =>
     ipcRenderer.invoke('argus:apply-integration-config', {integrationId, dir, token, base}),
+  integrationStatus: (integrationId, dir) =>
+    ipcRenderer.invoke('argus:integration-status', {integrationId, dir}),
+  removeIntegrationConfig: (integrationId) =>
+    ipcRenderer.invoke('argus:remove-integration-config', {integrationId}),
+  defaultBridgePath: () => ipcRenderer.invoke('argus:default-bridge-path'),
+  selectBridgeFolder: (current) => ipcRenderer.invoke('argus:select-bridge-folder', current),
   checkProxy: (proxy) => ipcRenderer.invoke('argus:check-proxy', proxy),
   openExternal: (url) => ipcRenderer.invoke('argus:open-external', url),
+  bookmarkFavicon: (url) => ipcRenderer.invoke('argus:bookmark-favicon', url),
+  setTheme: (preference) => ipcRenderer.invoke('argus:set-theme', preference),
+  getLoginItem: () => ipcRenderer.invoke('argus:get-login-item'),
+  setLoginItem: (enabled) => ipcRenderer.invoke('argus:set-login-item', enabled),
+  resolveProfileRoot: (root) => ipcRenderer.invoke('argus:resolve-profile-root', root),
+  revealPath: (target) => ipcRenderer.invoke('argus:reveal-path', target),
   onDeepLink: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:deep-link', listener);

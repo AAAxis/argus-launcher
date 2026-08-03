@@ -9,6 +9,9 @@
 //   2. every mutation touches exactly one row. There is no read-modify-write of
 //      an array anywhere, which is what makes two workers editing different
 //      profiles structurally unable to clobber each other.
+// One exception to rule 1: `account` is the signed-in user's own record, which
+// belongs to a person rather than to a tenant, so its functions take no orgId.
+export * as account from './account';
 export * as bookmarks from './bookmarks';
 export * as cookieSets from './cookieSets';
 export * as extensions from './extensions';

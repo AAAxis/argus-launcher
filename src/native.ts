@@ -106,6 +106,13 @@ export type ApiState = {
   error: string | null;
 };
 
+export type LoginItemState = {
+  openAtLogin: boolean;
+  // False in a dev run (`npm run dev`), where the login item would point at the
+  // Electron binary rather than at Argus Launcher.
+  packaged: boolean;
+};
+
 export type ApiKey = {
   id: string;
   name: string;
@@ -113,8 +120,29 @@ export type ApiKey = {
   // null means every folder (full access); an array (possibly empty) is an
   // explicit allow-list of folder ids.
   folderScope: string[] | null;
+  // Who created it. The key store is per-install, so this is the only thing
+  // separating one signed-in account's keys from another's on a shared machine.
+  ownerUserId: string | null;
+  orgId: string | null;
+  // Set only by the Integrations connect flow. A key created by hand on the API
+  // tab has none, which is what stops a key merely *named* "Claude Code" from
+  // reading as a live connection.
+  integrationId: string | null;
+  // Predates ownership being recorded: still listed so it can be revoked, never
+  // counted as a connection.
+  legacy: boolean;
   createdAt: string;
   lastUsedAt: string | null;
+};
+
+// What the target tool's config says right now, as opposed to what this app's
+// key store says. Both have to agree before an integration is really connected.
+export type IntegrationStatus = {
+  configPath: string | null;
+  hasEntry: boolean;
+  bridgeExists: boolean;
+  pythonExists: boolean;
+  pythonPath: string;
 };
 
 type ArgusNative = {
@@ -133,8 +161,14 @@ type ArgusNative = {
   // automation API (see AUTOMATION_KEYS_PATH in main.cjs). Raw token is only
   // ever returned from createApiKey, at creation time -- only its hash is
   // persisted, so it can't be recovered later.
-  listApiKeys?(): Promise<ApiKey[]>;
-  createApiKey?(name: string, folderScope: string[] | null): Promise<ApiKey & {token: string}>;
+  // Takes the signed-in user's id: the store is shared by every account that
+  // has ever signed in on this machine, so the filtering has to happen here.
+  listApiKeys?(ownerUserId: string | null): Promise<ApiKey[]>;
+  createApiKey?(
+    name: string,
+    folderScope: string[] | null,
+    meta?: {ownerUserId?: string | null; orgId?: string | null; integrationId?: string | null},
+  ): Promise<ApiKey & {token: string}>;
   revokeApiKey?(id: string): Promise<{revoked: boolean}>;
   // Writes the MCP server registration directly into the target tool's own
   // config file (~/.claude.json or ~/.codex/config.toml) instead of handing
@@ -146,11 +180,42 @@ type ArgusNative = {
     token: string,
     base: string,
   ): Promise<{ok: boolean; path?: string; error?: string}>;
+  // Reads the target tool's config back. Needed because applyIntegrationConfig
+  // is fire-and-forget: nothing else notices if the user later edits or deletes
+  // the block it wrote.
+  integrationStatus?(integrationId: string, dir: string | null): Promise<IntegrationStatus>;
+  // Deletes the argus entry this app wrote. Pairs with revokeApiKey -- revoking
+  // alone leaves the tool pointed at a dead token.
+  removeIntegrationConfig?(integrationId: string): Promise<{ok: boolean; path?: string | null; error?: string}>;
+  defaultBridgePath?(): Promise<string>;
+  // Opens the OS directory chooser, seeded with `current` so it starts where
+  // the user is already pointing. Null when they cancel.
+  selectBridgeFolder?(current: string | null): Promise<string | null>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
   // Opens a page in the user's real browser. The main process only honours
   // https: URLs on hosts we own (plus localhost in dev), so a rejected URL
   // resolves false rather than throwing.
   openExternal?(url: string): Promise<boolean>;
+  // Resolves a bookmark's favicon to a data: URI, fetched from the site itself
+  // and cached on disk by host. Null when the site exposes no usable icon --
+  // the bookmark card falls back to a letter monogram.
+  bookmarkFavicon?(url: string): Promise<string | null>;
+  // Keeps the native window chrome in step with the in-app theme, so the shell
+  // does not paint light behind a dark renderer. Takes the preference, not the
+  // resolved theme -- 'system' must stay 'system' in the main process or
+  // prefers-color-scheme stops updating in the renderer.
+  setTheme?(preference: 'system' | 'light' | 'dark'): Promise<boolean>;
+  // Open-at-login, read from and written to the OS. `packaged` is false in a
+  // dev run, where the entry would register the Electron binary rather than the
+  // app, so Settings shows the row disabled instead of lying about it.
+  getLoginItem?(): Promise<LoginItemState>;
+  setLoginItem?(enabled: boolean): Promise<LoginItemState>;
+  // Turns the renderer's profile-data root into the absolute path this process
+  // will actually use. A relative root resolves against the app's userData
+  // directory, which only the main process knows -- see resolveProfileUserDataDir
+  // in electron/main.cjs.
+  resolveProfileRoot?(root: string): Promise<{path: string; exists: boolean}>;
+  revealPath?(target: string): Promise<{ok: boolean; error?: string}>;
   // argus:// deep links. `auth` carries the PKCE authorization code back from
   // Google-via-Supabase; `open` just means "focus the app" and carries nothing.
   // Call deepLinkReady() after subscribing -- links that arrived during a cold

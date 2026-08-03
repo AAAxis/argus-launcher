@@ -58,7 +58,17 @@ Get-CimInstance Win32_Process |
 - Direct connection is disabled for profiles. Saving or launching a profile requires a
   valid proxy.
 - Fingerprint controls belong in the profile edit dialog under `Edit fingerprint`, not in
-  the main profiles table/view.
+  the main profiles table/view. **One exception: the platform.** It is on the main form of
+  the profile dialog as `<PlatformPicker>`, because it decides what every other fingerprint
+  field is allowed to be — picking it re-rolls the GPU, CPU, screen and media-device set via
+  `fingerprintPatchForOs`. Buried two dialogs deep, every profile silently shipped as
+  Windows 11. The same component renders inside `Edit fingerprint`, so there is still only
+  one control writing `fingerprint_os`.
+- Only `windows`, `macos` and `linux` are fully implemented browser-side
+  (`argus_ua.cc` `LookupPreset`). `Android` and `iOS` get a user-agent string but no
+  UA-Client-Hints override, so they still report a desktop platform and `Sec-CH-UA-Mobile:
+  ?0`; the picker says so under those two cards. `Windows 11` and `Windows 10` are the same
+  `windows` preset and the same `Windows NT 10.0` UA — the distinction is presentational.
 - Argys Browser launch must open a launcher-provided local home file or a real profile
   start URL. It must not open Supabase login, `localhost`, `127.0.0.1`,
   `argus-launcher`, or `about:blank`.

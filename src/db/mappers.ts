@@ -83,6 +83,8 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     status: undef(row.status),
     color: undef(row.color),
     tags: undef(row.tags),
+    email: undef(row.email),
+    password: undef(row.password),
     folder_id: row.folder_id,
     proxy_id: row.proxy_id,
     proxy_mode: undef(row.proxy_mode) as ProxyMode | undefined,
@@ -121,6 +123,8 @@ export function profileToRow(orgId: string, profile: ArgusProfile): Insert<Profi
     fingerprint: (profile.fingerprint || {}) as Record<string, unknown>,
     status: profile.status ?? null,
     tags: profile.tags ?? [],
+    email: profile.email ?? null,
+    password: profile.password ?? null,
     start_urls: startUrl ? [startUrl] : [],
     command_line_switches: switchesToArray(profile.command_line_switches),
     color: profile.color ?? null,
@@ -151,6 +155,12 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
   }
   if ('tags' in patch) {
     row.tags = patch.tags ?? [];
+  }
+  if ('email' in patch) {
+    row.email = patch.email ?? null;
+  }
+  if ('password' in patch) {
+    row.password = patch.password ?? null;
   }
   if ('folder_id' in patch) {
     row.folder_id = patch.folder_id ?? null;
@@ -240,6 +250,7 @@ export function rowToFolder(row: FolderRow): ArgusFolder {
   return {
     id: row.id,
     name: row.name || '',
+    icon: undef(row.icon),
     created_at: undef(row.created_at),
   };
 }

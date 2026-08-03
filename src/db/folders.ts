@@ -10,7 +10,7 @@ export async function list(orgId: string): Promise<ArgusFolder[]> {
   }
   const {data, error} = await client
       .from('folders')
-      .select('id,org_id,name,parent_id,created_at')
+      .select('id,org_id,name,parent_id,created_at,icon')
       .eq('org_id', orgId)
       .order('created_at', {ascending: true});
   raise(error, 'folders.list');
@@ -25,19 +25,23 @@ export async function create(orgId: string, folder: ArgusFolder): Promise<void> 
     id: folder.id,
     org_id: orgId,
     name: folder.name,
+    icon: folder.icon ?? null,
     created_at: folder.created_at || new Date().toISOString(),
   });
   raise(error, 'folders.create');
 }
 
-export async function rename(orgId: string, id: string, name: string): Promise<void> {
+// Was rename(orgId, id, name). It edits two columns now, and a function called
+// `rename` that also sets the icon would be lying about what it does.
+export async function update(
+    orgId: string, id: string, patch: {name?: string; icon?: string | null}): Promise<void> {
   const client = requireClient();
   const {error} = await client
       .from('folders')
-      .update({name})
+      .update(patch)
       .eq('org_id', orgId)
       .eq('id', id);
-  raise(error, 'folders.rename');
+  raise(error, 'folders.update');
 }
 
 // Profiles in this folder are moved to "All profiles" by the FK's

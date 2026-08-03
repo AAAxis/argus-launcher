@@ -1,29 +1,226 @@
+/* Design tokens. These deliberately mirror the landing site's vocabulary
+ * (landing/app/globals.css) so the marketing site and the desktop app finally
+ * share one palette -- warm paper in light, warm charcoal in dark. The accent
+ * is ink rather than a hue, so it inverts with the theme (see --accent below).
+ * The surface ladder is paper (sunken: sidebar, code blocks) <
+ * surface (the app background and modals) < raised (cards, inputs, tables).
+ *
+ * Nothing below this block may hardcode a colour: the dark theme is a straight
+ * token swap, so any literal that escapes stays light and looks broken. */
 :root {
-  --ink: #1e1d1a;
-  --ink-soft: #6e6a63;
+  color-scheme: light;
+
+  --paper: #f5f2f0;
+  --surface: #f7f7f6;
+  --raised: #ffffff;
+  --hover: #f0ecea;
+  --selected: #eeeae8;
+
+  --ink: #20201d;
+  --ink-soft: #6b6862;
   --ink-faint: #918c82;
-  --paper: #fbfaf8;
-  --surface: #ffffff;
-  --surface-sunken: #f0ede7;
-  --border: #ded8cc;
-  --border-soft: #ece6da;
-  --accent: #171613;
-  --accent-2: #2563eb;
-  --danger: #d53c32;
-  --danger-bg: #fff1ef;
-  --radius: 10px;
-  --radius-lg: 14px;
+
+  --border: #e4dfdc;
+  --border-soft: #eeeae7;
+
+  /* The accent is ink, not a hue: near-black in light, near-white in dark. It
+   * fills every primary control, so it inverts with the theme rather than
+   * staying one colour across both. --accent-strong is the pressed/hover step
+   * (further from the surface, not a different hue); --accent-ink is whatever
+   * has to stay legible on top of a filled accent surface. */
+  --accent: #1a1a19;
+  --accent-strong: #000000;
+  --accent-ink: #ffffff;
+
+  /* The sidebar selection is a deeper beige than the rail, so it reads as
+   * pressed in rather than floating. The sidebar ramp runs paper > hover >
+   * active, each step a shade deeper. It deliberately does not take the accent:
+   * a solid ink chip in the rail would out-shout the content area. */
+  --nav-active-bg: #eeeae8;
+
+  --success: #2e9e5b;
+  --danger: #c5453c;
+  --danger-strong: #a5322a;
+  --danger-bg: #fdf2f1;
+
+  /* Profile status pills. Each needs its own fill/border/ink triple because the
+   * light tints are far too pale to survive on a charcoal background. */
+  --status-active-bg: #eefaf1;
+  --status-active-border: #37a862;
+  --status-active-ink: #1e7a45;
+  --status-warmup-bg: #fff7e6;
+  --status-warmup-border: #d9932a;
+  --status-warmup-ink: #92600f;
+  --status-ban-bg: var(--danger-bg);
+  --status-ban-border: var(--danger);
+  --status-ban-ink: var(--danger);
+  --status-review-bg: #f0edfc;
+  --status-review-border: #7c5cd6;
+  --status-review-ink: #5c3fb0;
+
+  /* HTTP verb chips on the API tab. Conventional hues, so they are their own
+   * scale rather than being forced through the brand palette -- but muted, and
+   * tinted rather than filled: four saturated blocks in a column of endpoints
+   * out-shout the paths they are labelling, which are the part being read.
+   * Each verb needs a fill/border/ink triple because a tint light enough to sit
+   * under dark text is invisible on a charcoal surface. */
+  --method-get-bg: #eef2fb;
+  --method-get-border: #cbd8f0;
+  --method-get-ink: #2f5bb7;
+  --method-post-bg: #edf6f0;
+  --method-post-border: #c6e2d2;
+  --method-post-ink: #2c7a52;
+  --method-patch-bg: #fbf3e6;
+  --method-patch-border: #ecdcbd;
+  --method-patch-ink: #8a6318;
+  --method-delete-bg: #fbeeed;
+  --method-delete-border: #f0cfcc;
+  --method-delete-ink: #a8443d;
+
+  /* The six colours a profile can be tagged with (see lib/profileColors.ts).
+   * Same construction as the verb chips above and for the same reason: a
+   * profile's colour is drawn as a filled avatar with its initials on top, so it
+   * needs an ink that survives the fill, and a fill pale enough not to out-shout
+   * the name beside it. The old palette was six saturated literals shared by
+   * both themes -- fine in neither. Written out rather than aliased onto the
+   * verb chips they are drawn from: the two scales happen to agree today, and
+   * retuning GET should not silently recolour every blue profile. */
+  --profile-slate-bg: #edeae7;
+  --profile-slate-border: #ddd7d2;
+  --profile-slate-ink: #57534e;
+  --profile-blue-bg: #eef2fb;
+  --profile-blue-border: #cbd8f0;
+  --profile-blue-ink: #2f5bb7;
+  --profile-green-bg: #edf6f0;
+  --profile-green-border: #c6e2d2;
+  --profile-green-ink: #2c7a52;
+  --profile-violet-bg: #f0edfc;
+  --profile-violet-border: #d5cbf3;
+  --profile-violet-ink: #5c3fb0;
+  --profile-red-bg: #fbeeed;
+  --profile-red-border: #f0cfcc;
+  --profile-red-ink: #a8443d;
+  --profile-amber-bg: #fbf3e6;
+  --profile-amber-border: #ecdcbd;
+  --profile-amber-ink: #8a6318;
+
+  --switch-thumb: #ffffff;
+  --scrim: rgba(23, 22, 19, 0.4);
+
+  --radius: 9px;
+  --radius-lg: 12px;
   --shadow-xs: 0 1px 2px rgba(30, 29, 26, 0.05);
   --shadow-sm: 0 2px 8px rgba(30, 29, 26, 0.06), 0 1px 2px rgba(30, 29, 26, 0.04);
   --shadow-md: 0 8px 24px rgba(30, 29, 26, 0.10), 0 2px 6px rgba(30, 29, 26, 0.05);
   --shadow-lg: 0 24px 60px rgba(23, 22, 19, 0.22), 0 4px 12px rgba(23, 22, 19, 0.08);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+
+  /* Two control heights for the whole app: the default, and a compact one for
+   * pagination. Everything else was drifting between 36/40/42px. */
+  --control-h: 36px;
+  --control-h-sm: 32px;
+
+  /* A data: URI cannot resolve currentColor, so the select chevron is a token
+   * with one stroke baked per theme. Geometry matches lucide's ChevronDown so
+   * it sits consistently next to the lucide icons used everywhere else. */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%236b6862' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  /* Bundled by Vite. Used as a mask rather than an image -- see .brand-mark. */
+  --argus-mark: url("./assets/argus-mark.png");
+
   color: var(--ink);
-  background: var(--paper);
+  background: var(--surface);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 15px;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Warm charcoal rather than pure black, to keep the brand's paper warmth in the
+ * dark. Stamped onto <html> by src/theme.tsx (and by the pre-paint script in
+ * index.html, so the window never flashes light before React boots). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #171615;
+  --surface: #1c1b19;
+  --raised: #242220;
+  --hover: #211f1d;
+  --selected: #100f0e;
+
+  --ink: #ece9e6;
+  --ink-soft: #a39d97;
+  --ink-faint: #8a847e;
+
+  --border: #34312e;
+  --border-soft: #2a2825;
+
+  --accent: #f2f0ed;
+  --accent-strong: #ffffff;
+  --accent-ink: #17161a;
+
+  --nav-active-bg: #100f0e;
+
+  --success: #46c47c;
+  --danger: #e2706a;
+  --danger-strong: #f0908a;
+  --danger-bg: #2a1a18;
+
+  --status-active-bg: #16281d;
+  --status-active-border: #3d8f5e;
+  --status-active-ink: #6cd396;
+  --status-warmup-bg: #2b2214;
+  --status-warmup-border: #a37a2c;
+  --status-warmup-ink: #e0b062;
+  --status-ban-bg: var(--danger-bg);
+  --status-ban-border: #a8524c;
+  --status-ban-ink: #f0908a;
+  --status-review-bg: #221c33;
+  --status-review-border: #6b57a8;
+  --status-review-ink: #b9a6e8;
+
+  --method-get-bg: #1b2436;
+  --method-get-border: #2c3d5c;
+  --method-get-ink: #8fb0e8;
+  --method-post-bg: #17281f;
+  --method-post-border: #2a4536;
+  --method-post-ink: #7cc39a;
+  --method-patch-bg: #2a2214;
+  --method-patch-border: #45381f;
+  --method-patch-ink: #d3a768;
+  --method-delete-bg: #2c1c1b;
+  --method-delete-border: #4a2f2d;
+  --method-delete-ink: #e0908b;
+
+  --profile-slate-bg: #2b2825;
+  --profile-slate-border: #403b36;
+  --profile-slate-ink: #b8b1aa;
+  --profile-blue-bg: #1b2436;
+  --profile-blue-border: #2c3d5c;
+  --profile-blue-ink: #8fb0e8;
+  --profile-green-bg: #17281f;
+  --profile-green-border: #2a4536;
+  --profile-green-ink: #7cc39a;
+  --profile-violet-bg: #221c33;
+  --profile-violet-border: #3b3057;
+  --profile-violet-ink: #b9a6e8;
+  --profile-red-bg: #2c1c1b;
+  --profile-red-border: #4a2f2d;
+  --profile-red-ink: #e0908b;
+  --profile-amber-bg: #2a2214;
+  --profile-amber-border: #45381f;
+  --profile-amber-ink: #d3a768;
+
+  --switch-thumb: #d8d3c8;
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50), 0 2px 6px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.66), 0 4px 12px rgba(0, 0, 0, 0.44);
+
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23a39d97' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 * {
@@ -44,14 +241,14 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(30, 29, 26, 0.16);
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(30, 29, 26, 0.28);
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
   background-clip: padding-box;
 }
 
@@ -66,7 +263,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
-  outline: 2px solid var(--accent-2);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -74,29 +271,30 @@ button {
   align-items: center;
   background: var(--accent);
   border: 0;
-  border-radius: 8px;
-  color: white;
+  border-radius: 7px;
+  color: var(--accent-ink);
   cursor: pointer;
   display: inline-flex;
   font-weight: 700;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 16px;
-  transition: transform 0.12s var(--ease), box-shadow 0.12s var(--ease), background-color 0.12s var(--ease), opacity 0.12s var(--ease);
+  gap: 7px;
+  min-height: var(--control-h);
+  padding: 0 14px;
+  transition: box-shadow 0.12s var(--ease), background-color 0.12s var(--ease), opacity 0.12s var(--ease);
 }
 
+/* Buttons do not move on hover. A control that lifts under the cursor makes a
+ * dense toolbar feel unstable and, at the edges, walks itself out from under
+ * the pointer. The shadow carries the feedback on its own. */
 button:not(:disabled):hover {
   box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
 }
 
 button:not(:disabled):active {
-  transform: translateY(0);
   box-shadow: none;
 }
 
 button.ghost {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   color: var(--ink);
 }
@@ -106,21 +304,21 @@ button.danger {
 }
 
 .login-shell {
-  background: radial-gradient(circle at 50% 0%, #f4f1ea 0%, var(--paper) 55%);
+  background: radial-gradient(circle at 50% 0%, var(--paper) 0%, var(--surface) 55%);
   display: grid;
   min-height: 100vh;
   place-items: center;
 }
 
 .login-panel {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   display: grid;
   gap: 14px;
   max-width: 420px;
-  padding: 40px 36px;
+  padding: 32px 28px;
   text-align: center;
   width: min(420px, calc(100vw - 40px));
 }
@@ -130,49 +328,109 @@ button.danger {
   justify-self: center;
 }
 
-.login-panel input,
-select,
-textarea {
-  background: white;
+/* One canonical text input, the same way `select` below is canonical.
+ *
+ * These six properties used to be copy-pasted into .field input, .login-panel
+ * input, .table-toolbar input and textarea, which meant an <input> written
+ * anywhere else -- a search box, an inline rename in Settings -- fell back to
+ * the raw browser control and looked broken next to the buttons beside it. The
+ * scoped rules below now carry only what is genuinely local to them (width,
+ * max-width, monospace paths).
+ *
+ * Deliberately typed rather than bare `input`: checkboxes and radios are drawn
+ * by .switch / .checkbox-confirm and must not inherit a 36px pill. */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="number"],
+input[type="tel"],
+input[type="url"] {
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--ink);
-  min-height: 42px;
-  padding: 0 14px;
+  min-height: var(--control-h);
+  padding: 0 12px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+/* Focus is the border warming to the accent plus a soft ring, not the platform
+ * outline -- the outline squares off the 8px corners it draws around. */
+input[type="text"]:focus-visible,
+input[type="email"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="search"]:focus-visible,
+input[type="number"]:focus-visible,
+input[type="tel"]:focus-visible,
+input[type="url"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* One canonical select. Every dropdown in the app inherits from here: the
+ * native macOS arrow is replaced by the themed chevron token, and padding-right
+ * reserves room for it so long folder/status names ellipsize instead of running
+ * underneath the arrow. */
+select {
+  appearance: none;
+  background-color: var(--raised);
+  background-image: var(--chevron);
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  min-height: var(--control-h);
+  padding: 0 34px 0 10px;
+  text-overflow: ellipsis;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+textarea {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 12px 14px;
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
 .status-select.status-active {
-  background: #eefaf1;
-  border-color: #37a862;
-  color: #1e7a45;
+  background-color: var(--status-active-bg);
+  border-color: var(--status-active-border);
+  color: var(--status-active-ink);
   font-weight: 700;
 }
 
 .status-select.status-warmup {
-  background: #fff7e6;
-  border-color: #d9932a;
-  color: #92600f;
+  background-color: var(--status-warmup-bg);
+  border-color: var(--status-warmup-border);
+  color: var(--status-warmup-ink);
   font-weight: 700;
 }
 
 .status-select.status-ban {
-  background: var(--danger-bg);
-  border-color: var(--danger);
-  color: var(--danger);
+  background-color: var(--status-ban-bg);
+  border-color: var(--status-ban-border);
+  color: var(--status-ban-ink);
   font-weight: 700;
 }
 
 .status-select.status-review {
-  background: #f0edfc;
-  border-color: #7c5cd6;
-  color: #5c3fb0;
+  background-color: var(--status-review-bg);
+  border-color: var(--status-review-border);
+  color: var(--status-review-ink);
   font-weight: 700;
 }
 
 .login-panel input:focus-visible {
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
   outline: none;
 }
 
@@ -197,7 +455,7 @@ textarea {
 .login-links .link {
   background: none;
   border: none;
-  color: var(--accent-2);
+  color: var(--accent);
   cursor: pointer;
   font: inherit;
   margin-top: 0;
@@ -234,7 +492,7 @@ textarea {
 
 .google-button {
   align-items: center;
-  background: white;
+  background: var(--raised);
   border: 1px solid var(--border);
   color: var(--ink);
   display: flex;
@@ -244,12 +502,12 @@ textarea {
 }
 
 .google-button:hover:not(:disabled) {
-  background: #f7f6f3;
+  background: var(--hover);
 }
 
 .login-divider {
   align-items: center;
-  color: #6e6a63;
+  color: var(--ink-soft);
   display: flex;
   font-size: 12px;
   gap: 12px;
@@ -266,9 +524,13 @@ textarea {
   color: var(--danger);
 }
 
+/* The browser default (2em) is far heavier than anything else on the page once
+ * the base size stepped down, so the page title is set explicitly. */
 .login-panel h1,
 .loading-state h1,
 .topbar h1 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
@@ -276,7 +538,7 @@ textarea {
 .loading-state p,
 .topbar p,
 .panel p {
-  color: #6e6a63;
+  color: var(--ink-soft);
   margin: 0;
 }
 
@@ -293,9 +555,9 @@ textarea {
 
 .spinner {
   animation: spin 0.8s linear infinite;
-  border: 3px solid #ded8cc;
+  border: 3px solid var(--border);
   border-radius: 999px;
-  border-top-color: #171613;
+  border-top-color: var(--ink);
   height: 36px;
   width: 36px;
 }
@@ -318,31 +580,48 @@ button:disabled .btn-spin {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 236px 1fr;
   height: 100vh;
 }
 
 .sidebar {
-  background: var(--surface-sunken);
+  background: var(--paper);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   height: 100vh;
   overflow-y: auto;
-  padding: 28px 18px;
+  padding: 20px 12px 16px;
 }
 
+/* Horizontal padding matches `nav button` below so the mark's left edge lines
+ * up with the tab labels. The rule underneath gives it its own band instead of
+ * sitting 6px off the first tab. */
 .brand {
-  font-size: 21px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  margin: 0 0 6px;
-  padding: 0 6px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  margin: 0 0 14px;
+  padding: 0 12px 14px;
+}
+
+/* The source art is black-on-white with no alpha, so it is used as a mask and
+ * filled with the ink token -- that way it inverts with the theme instead of
+ * stamping a white plate into a dark sidebar. */
+.brand-mark {
+  background-color: var(--ink);
+  display: block;
+  height: 28px;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 28px;
 }
 
 nav {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 nav button {
@@ -350,21 +629,42 @@ nav button {
   box-shadow: none;
   color: var(--ink-soft);
   font-weight: 650;
+  gap: 10px;
   justify-content: flex-start;
+  padding: 0 12px;
   position: relative;
-  transition: background-color 0.12s var(--ease), color 0.12s var(--ease);
+  transition: background-color 0.12s var(--ease), color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
-nav button:hover {
-  background: rgba(23, 22, 19, 0.05);
+nav button svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  transition: color 0.12s var(--ease);
+}
+
+/* Needs :not(:disabled) to outrank the global `button:not(:disabled):hover`,
+ * which would otherwise drop its shadow onto a flat nav rail. */
+nav button:not(:disabled):hover {
+  background: var(--hover);
   box-shadow: none;
   color: var(--ink);
-  transform: none;
 }
 
+nav button:hover svg {
+  color: var(--ink-soft);
+}
+
+/* The rule sits on the trailing edge, echoing the coloured line the landing
+/* Selection is carried by fill alone: a deeper beige than the rail, so the tab
+ * reads as pressed into the sidebar rather than pasted on top of it. */
 nav button.active {
-  background: var(--surface);
-  box-shadow: var(--shadow-xs), 3px 0 0 var(--accent) inset;
+  background: var(--nav-active-bg);
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+nav button.active svg {
   color: var(--ink);
 }
 
@@ -409,93 +709,633 @@ nav button.active {
 }
 
 .update-progress {
-  background: rgba(30, 29, 26, 0.10);
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
   border-radius: 999px;
   height: 5px;
   overflow: hidden;
 }
 
 .update-progress span {
-  background: var(--accent-2);
+  background: var(--accent);
   display: block;
   height: 100%;
 }
 
+/* Pinned to the bottom of the rail. A hairline is all it needs -- the row below
+ * reads as one more nav item, so giving it a deep padded band of its own was
+ * what made it look bolted on. */
 .account {
   border-top: 1px solid var(--border);
   display: grid;
-  gap: 12px;
   margin-top: auto;
-  padding-top: 18px;
+  padding-top: 10px;
 }
 
+/* Geometry copied from `nav button` on purpose: this is the last row of the
+ * rail and was the only one shaped like a different control -- taller,
+ * full-bleed, and with its hover explicitly cancelled.
+ *
+ * The third track is the settings gear. It is deliberately not a nested button:
+ * the whole row already opens Settings, and a button inside a button is invalid
+ * anyway. It is an affordance that appears on hover, not a second control. */
 .account-row {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) 15px;
 }
 
 .account-trigger {
   background: transparent;
+  border-radius: 8px;
   color: var(--ink);
   justify-content: stretch;
-  min-height: 44px;
-  padding: 0;
+  min-height: var(--control-h);
+  padding: 0 12px;
   text-align: left;
 }
 
-.account-trigger:hover {
-  background: transparent;
+/* :not(:disabled) to outrank the global button hover, exactly as `nav button`
+ * does -- a row in a flat rail takes no shadow. */
+.account-trigger:not(:disabled):hover {
+  background: var(--hover);
   box-shadow: none;
-  transform: none;
+}
+
+.account-gear {
+  color: var(--ink-faint);
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+}
+
+/* Keyboard users get it too: the row is focusable, so focus has to reveal the
+ * same affordance hover does. */
+.account-trigger:hover .account-gear,
+.account-trigger:focus-visible .account-gear {
+  opacity: 1;
 }
 
 .account span,
 .avatar {
   align-items: center;
   border-radius: 999px;
-  color: white;
+  color: var(--accent-ink);
   display: inline-flex;
   font-weight: 800;
-  height: 38px;
   justify-content: center;
-  width: 38px;
+}
+
+/* Two scales, so they can no longer be one rule: 38px is the profiles table's,
+ * 24px is the sidebar's -- sized against the 16px lucide glyphs in the nav rows
+ * directly above it rather than against the table. */
+.avatar {
+  height: 32px;
+  width: 32px;
+}
+
+.account span,
+.account-avatar {
+  height: 24px;
+  width: 24px;
 }
 
 .account span {
   background: var(--accent);
+  font-size: 11px;
+}
+
+/* Provider profile picture, same circle as the initials fallback it replaces.
+ * no-referrer on the element keeps Google's CDN from 403ing. */
+.account-avatar {
+  background: var(--paper);
+  border-radius: 999px;
+  object-fit: cover;
 }
 
 .account strong {
+  font-size: 13px;
+  font-weight: 650;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account button {
+/* ── Settings dialog ────────────────────────────────────────────────────────
+ * Two panes: a category rail on sunken paper, and one section at a time on the
+ * modal surface. Sized to fit the window's own 980x620 minimum (see
+ * electron/main.cjs) so the rail never has to collapse.
+ *
+ * It does not reuse .profile-modal: that one is a single scrolling column with
+ * uniform padding, and here the rail must not scroll with the panel. */
+.settings-dialog {
+  animation: modal-in 0.16s var(--ease);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  height: min(620px, calc(100vh - 56px));
+  overflow: hidden;
+  width: min(880px, calc(100vw - 56px));
+}
+
+.settings-rail {
+  background: var(--paper);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 18px 10px;
+}
+
+.settings-rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-rail-group h4 {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+/* Same rail vocabulary as the main sidebar -- transparent until hovered, a
+ * deeper beige when selected, never the accent. A solid ink chip in a 208px
+ * column would out-shout the section it is labelling. */
+.settings-rail button {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.settings-rail button svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+.settings-rail button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.settings-rail button.active {
+  background: var(--nav-active-bg);
+  color: var(--ink);
+}
+
+.settings-rail button.active svg {
+  color: var(--ink);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Sticky-by-structure rather than by position: the header is a flex sibling of
+ * the scrolling body, so the section title and the close button stay put while
+ * the rows move under them. */
+.settings-panel-header {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 18px 14px 22px;
+}
+
+.settings-panel-header h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.settings-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px 24px;
+}
+
+.settings-panel:focus-visible {
+  outline: none;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-group h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+/* A row, not a stacked block: label and explanation on the left, the control on
+ * the right, hairline between. Inherited from the settings modal this dialog
+ * replaces -- the shape was right, it was the container that was wrong. */
+.settings-row {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px 0;
+}
+
+.settings-group h3 + .settings-row,
+.settings-group > .settings-row:first-child {
+  border-top: 0;
+}
+
+/* For a control too big for the right-hand track -- the theme cards, the update
+ * panel, a full-width path. The label stacks above it. */
+.settings-row.wide {
+  align-items: stretch;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-row-label h4 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 2px;
+}
+
+.settings-row-label p,
+.settings-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.settings-hint {
+  margin-top: 6px;
+}
+
+.settings-row-control {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/* Stacked, not inline: a wide row's control is followed by hints and panels
+ * that belong under it rather than beside it. */
+.settings-row.wide .settings-row-control {
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* The inline rename fields (display name, workspace name). They take the
+ * canonical input's shape and swap the fill for the sunken tone: these sit
+ * loose on the panel with no field label or form chrome around them, so on a
+ * near-white surface a --raised control has nothing to read against. */
+.settings-row-control input[type="text"] {
+  background: var(--paper);
+  min-width: 200px;
+}
+
+.settings-value {
+  color: var(--ink-soft);
+  font-size: 13px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-error {
+  border-top: 1px solid var(--border-soft);
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+  padding: 10px 22px;
+}
+
+/* ── Account identity block ── */
+.settings-identity {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  padding-bottom: 16px;
+}
+
+.settings-identity-avatar {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: var(--accent-ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 20px;
+  font-weight: 800;
+  height: 56px;
   justify-content: center;
+  object-fit: cover;
+  width: 56px;
+}
+
+img.settings-identity-avatar {
+  background: var(--paper);
+}
+
+.settings-identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-identity-text strong {
+  font-size: 15px;
+}
+
+.settings-identity-text span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-identity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+/* The file input behind "Change picture". Not display:none -- a hidden input
+ * cannot be clicked programmatically in every engine, and it must stay
+ * focusable for keyboard users. */
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* ── Plan ── */
+.settings-plan {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.settings-plan-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.settings-plan-status {
+  background: var(--status-active-bg);
+  border: 1px solid var(--status-active-border);
+  border-radius: 999px;
+  color: var(--status-active-ink);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 8px;
+  padding: 2px 8px;
+  text-transform: capitalize;
+  vertical-align: 3px;
+}
+
+/* A cancelled subscription is still active until the period ends, so it is
+ * warned about rather than shown as an error. */
+.settings-plan-status.ending {
+  background: var(--status-warmup-bg);
+  border-color: var(--status-warmup-border);
+  color: var(--status-warmup-ink);
+}
+
+.settings-plan p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.settings-plan-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Usage meters ── */
+.settings-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.settings-meter-numbers {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.settings-meter strong {
+  font-size: 15px;
+}
+
+.settings-meter span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.settings-meter-track {
+  background: var(--border-soft);
+  border-radius: 999px;
+  height: 5px;
+  overflow: hidden;
   width: 100%;
 }
 
-.settings-modal {
-  gap: 20px;
+.settings-meter-track span {
+  background: var(--accent);
+  display: block;
+  height: 100%;
+  transition: width 0.2s var(--ease);
 }
 
-.settings-section {
-  display: grid;
-  gap: 14px;
+.settings-meter-track span.full {
+  background: var(--danger);
 }
 
-.settings-section h3 {
-  font-size: 15px;
-  margin: 0 0 4px;
+/* ── Paths ── */
+.settings-path {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
 }
 
-.settings-section p {
+.settings-path code {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
   color: var(--ink-soft);
-  margin: 0;
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Theme previews ──
+ * Three cards, each a small drawing of the app in that theme. The colours are
+ * inline styles from AppearanceSection, which is the one place in this app
+ * allowed to name a colour: a light preview has to stay light while the dialog
+ * around it is dark. */
+.theme-choices {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+
+.theme-choice {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 8px 6px;
+}
+
+.theme-choice:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.theme-choice.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+.theme-preview {
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  display: flex;
+  height: 72px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.theme-preview-panel {
+  display: flex;
+  flex: 1 1 0;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px;
+}
+
+/* Split down the middle for "System": each half is a full panel, clipped. */
+.theme-preview.split .theme-preview-panel {
+  flex: 0 0 50%;
+}
+
+.theme-preview-rail {
+  border-radius: 3px;
+  display: flex;
+  flex: 0 0 22%;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 4px;
+}
+
+.theme-preview-rail i {
+  border-radius: 2px;
+  display: block;
+  height: 3px;
+  width: 100%;
+}
+
+.theme-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 2px;
+}
+
+.theme-preview-body i {
+  border-radius: 2px;
+  display: block;
+  height: 4px;
+  width: 100%;
+}
+
+/* Which way "System" is resolving right now, so the card is not a riddle. */
+.theme-preview-resolved {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  bottom: 5px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+  left: 50%;
+  padding: 1px 6px;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.theme-choice-label {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 4px;
+  justify-content: center;
 }
 
 .extension-add-modal {
@@ -520,10 +1360,10 @@ nav button.active {
 .content {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   height: 100vh;
   overflow-y: auto;
-  padding: 32px;
+  padding: 24px;
 }
 
 .content > .topbar {
@@ -551,7 +1391,7 @@ nav button.active {
 
 .table-wrap,
 .panel {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
@@ -562,31 +1402,55 @@ nav button.active {
   gap: 10px;
 }
 
+/* Look comes from the canonical input; the toolbar only makes it taller, wider
+ * and capped, so a search box reads as the toolbar's primary control. */
 .table-toolbar input {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
   min-height: 40px;
   max-width: 320px;
   padding: 0 14px;
-  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
   width: 100%;
 }
 
 .table-toolbar select {
-  background: var(--surface);
+  background-color: var(--raised);
   border: 1px solid var(--border);
   border-radius: 8px;
-  min-height: 40px;
-  min-width: 160px;
-  padding: 0 12px;
+  min-height: var(--control-h);
+  min-width: 180px;
 }
 
-.table-toolbar input:focus-visible,
-.table-toolbar select:focus-visible {
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
-  outline: none;
+/* The folder picker carries the selected folder's icon. A native <option> can
+ * never render one, so it is overlaid on the select and the select's left
+ * padding is opened up to make room -- the same trick the chevron on the right
+ * already uses. */
+.folder-select {
+  display: inline-flex;
+  position: relative;
+}
+
+.folder-select select {
+  padding-left: 34px;
+}
+
+.folder-select-icon {
+  color: var(--ink-soft);
+  left: 11px;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* The folder name in a table cell, with its icon. */
+.folder-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.folder-label svg {
+  color: var(--ink-faint);
+  flex: none;
 }
 
 table {
@@ -597,7 +1461,7 @@ table {
 th,
 td {
   border-bottom: 1px solid var(--border-soft);
-  padding: 14px 16px;
+  padding: 10px 14px;
   text-align: left;
 }
 
@@ -614,7 +1478,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: rgba(30, 29, 26, 0.025);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 
 tbody tr:last-child td {
@@ -640,11 +1504,15 @@ td.platform-cell {
 }
 
 tr.selected {
-  background: #f8f4ed;
+  background: var(--hover);
 }
 
+/* 10% of a cyan accent read clearly against white; 10% of ink reads as a barely
+ * visible grey, so the checked row needs a deeper mix now that the accent is
+ * ink. Still a tint rather than --hover, so a checked row stays distinguishable
+ * from the merely hovered one above it. */
 tr.row-checked {
-  background: #eef2ff;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .launch {
@@ -662,16 +1530,15 @@ td:last-child {
   box-shadow: none;
   color: var(--ink-soft);
   justify-content: center;
-  min-height: 36px;
+  min-height: 32px;
   padding: 0;
-  width: 36px;
+  width: 32px;
 }
 
 .icon-button:hover {
-  background: var(--surface-sunken);
+  background: var(--paper);
   box-shadow: none;
   color: var(--accent);
-  transform: none;
 }
 
 .danger-icon {
@@ -680,7 +1547,7 @@ td:last-child {
 
 .danger-icon:hover {
   background: var(--danger-bg);
-  color: #b92f27;
+  color: var(--danger-strong);
 }
 
 .split {
@@ -692,21 +1559,21 @@ td:last-child {
 .card-grid {
   align-content: start;
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
 .data-card {
   align-items: center;
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
   color: var(--ink);
   display: flex;
   justify-content: space-between;
-  min-height: 112px;
-  padding: 18px;
+  min-height: 96px;
+  padding: 14px;
   position: relative;
   text-decoration: none;
   transition: box-shadow 0.14s var(--ease), border-color 0.14s var(--ease), transform 0.14s var(--ease);
@@ -717,6 +1584,7 @@ td:last-child {
 }
 
 .data-card.selected {
+  background: color-mix(in srgb, var(--accent) 6%, var(--raised));
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
@@ -770,11 +1638,12 @@ td:last-child {
 }
 
 .pagination-controls select {
-  background: var(--surface);
+  background-color: var(--raised);
+  background-position: right 9px center;
   border: 1px solid var(--border);
   border-radius: 8px;
-  min-height: 36px;
-  padding: 0 10px;
+  min-height: var(--control-h-sm);
+  padding: 0 32px 0 10px;
 }
 
 .pagination-controls button {
@@ -794,13 +1663,19 @@ td:last-child {
   transform: translateY(-2px);
 }
 
+/* Clipped for the same reason the <p> below it is. Without this a long title --
+ * and a bookmark saved with no name takes the url as its title -- overflowed
+ * its track and painted straight over the card's action buttons. */
 .data-card h2 {
-  font-size: 18px;
+  font-size: 15px;
   margin: 0 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-card p {
-  color: #6e6a63;
+  color: var(--ink-soft);
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -808,17 +1683,98 @@ td:last-child {
 }
 
 .data-card span {
-  background: #f0ede7;
+  background: var(--paper);
   border-radius: 999px;
-  color: #6e6a63;
+  color: var(--ink-soft);
   font-weight: 800;
   padding: 7px 10px;
+}
+
+/* Two rows, not one. As a single row the url shared its track with the title,
+ * the favicon and the action pair, which in the narrowest grid column left it
+ * about 50px -- so `https://www.instagram.com/` rendered as `htt...`. Giving it
+ * the full card width is the only way it fits at every column width.
+ *
+ *   [icon] [title.................] [actions]
+ *   [url...............................]
+ *
+ * Every text cell still needs min-width: 0. Grid items default to min-width:
+ * auto, so without it a long unbreakable title grows its own track and paints
+ * over the buttons -- the same failure the old flex layout had, and the reason
+ * the previous comment here insisted on it for the text column. */
+.bookmark-card {
+  align-items: center;
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  min-height: 76px;
+  row-gap: 2px;
+}
+
+.bookmark-card > .bookmark-favicon {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* The shared .data-card h2 margin is for single-row cards; here the row-gap
+ * already separates the title from the url. */
+.bookmark-card > h2 {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+  min-width: 0;
+}
+
+.bookmark-card > p {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+/* Held out of the flow until the card is hovered or something inside it takes
+ * focus. The space stays reserved either way, so revealing them cannot reflow
+ * the title next to them. */
+.bookmark-card-actions {
+  grid-column: 3;
+  grid-row: 1;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+}
+
+.bookmark-card:hover .bookmark-card-actions,
+.bookmark-card:focus-within .bookmark-card-actions {
+  opacity: 1;
+}
+
+/* Scoped through .bookmark-card because the generic `.data-card span` pill rule
+ * is (0,1,1) and would otherwise win over a bare class on the monogram span,
+ * dragging back its 999px radius and 7px/10px padding. */
+.bookmark-card .bookmark-favicon {
+  border-radius: 7px;
+  flex: 0 0 auto;
+  height: 28px;
+  object-fit: contain;
+  width: 28px;
+}
+
+/* Shown when a site exposes no favicon at all. Matches the monogram the
+ * injected browser home page draws for the same bookmark. */
+.bookmark-card .bookmark-monogram {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: center;
+  padding: 0;
 }
 
 .data-card-actions {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: 4px;
 }
 
 .proxy-card-main {
@@ -835,8 +1791,8 @@ td:last-child {
 }
 
 .proxy-badge.assigned {
-  background: #e9f7ee;
-  color: #1a7f3c;
+  background: var(--status-active-bg);
+  color: var(--status-active-ink);
 }
 
 .proxy-badge.unassigned {
@@ -860,7 +1816,7 @@ td:last-child {
 
 .data-card .proxy-flag {
   align-items: center;
-  background: var(--surface-sunken);
+  background: var(--paper);
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   color: var(--ink);
@@ -893,12 +1849,91 @@ button:disabled {
 }
 
 .link-card:hover {
-  border-color: #171613;
+  border-color: var(--ink);
 }
 
 .empty-state {
-  color: #6e6a63;
+  color: var(--ink-soft);
   margin: 0;
+}
+
+/* ── Empty states ───────────────────────────────────────────────────────────
+ * Two sizes of the same block. The small one sits in a table cell under headers
+ * that are still worth showing (a filter matched nothing, Trash is empty); the
+ * `hero` one replaces the table, its headers and the toolbar entirely, for a
+ * workspace that has no profiles at all. Both are centred on the column rather
+ * than on the row, which is why the wrapper -- not the cell -- does the
+ * centring: a <td> that is one of nine cannot centre itself across the table. */
+.table-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 auto;
+  max-width: 380px;
+  padding: 26px 0;
+  text-align: center;
+}
+
+.table-empty.hero {
+  max-width: 440px;
+  padding: 64px 0;
+}
+
+.table-empty-icon {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  height: 48px;
+  justify-content: center;
+  margin-bottom: 6px;
+  width: 48px;
+}
+
+.table-empty.hero .table-empty-icon {
+  height: 68px;
+  margin-bottom: 10px;
+  width: 68px;
+}
+
+.table-empty h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.table-empty.hero h2 {
+  font-size: 19px;
+}
+
+.table-empty p {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.table-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* The hero state is the only content on the screen, so its container stops
+ * being a table shell: no inner border to box the message in. */
+.table-wrap-empty {
+  display: grid;
+  place-items: center;
+}
+
+/* A row holding one of these is not a data row -- no hairline under it, and the
+ * cell's own padding would fight the block's. */
+.empty-row-tr td {
+  border-bottom: 0;
+  padding: 0;
 }
 
 .api-panel {
@@ -916,7 +1951,7 @@ button:disabled {
 }
 
 .import-panel code {
-  background: var(--surface-sunken);
+  background: var(--paper);
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
@@ -935,7 +1970,7 @@ button:disabled {
 }
 
 .import-summary {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
@@ -946,7 +1981,7 @@ button:disabled {
 }
 
 .api-summary {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
@@ -968,7 +2003,7 @@ button:disabled {
 }
 
 .summary-item span {
-  color: #6e6a63;
+  color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -976,10 +2011,10 @@ button:disabled {
 
 .summary-item code,
 .summary-item input {
-  background: #fbfaf8;
-  border: 1px solid #ded8cc;
+  background: var(--paper);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #1e1d1a;
+  color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   padding: 8px 9px;
@@ -1006,9 +2041,9 @@ button:disabled {
 
 .api-note {
   align-items: center;
-  background: #f0ede7;
+  background: var(--paper);
   border-radius: 10px;
-  color: #6e6a63;
+  color: var(--ink-soft);
   display: flex;
   font-size: 13px;
   gap: 10px;
@@ -1027,7 +2062,7 @@ button:disabled {
 }
 
 .api-group {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
@@ -1035,14 +2070,14 @@ button:disabled {
 }
 
 .api-group h2 {
-  border-bottom: 1px solid #ded8cc;
-  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
   margin: 0;
   padding: 12px 14px;
 }
 
 .endpoint {
-  border-top: 1px solid #ece6da;
+  border-top: 1px solid var(--border-soft);
   padding: 12px 14px;
 }
 
@@ -1050,37 +2085,51 @@ button:disabled {
   border-top: 0;
 }
 
+/* Last track is a 32px icon button rather than an `auto` text button. That
+ * returned about 50px to the path and label, both of which ellipsize and were
+ * truncating well before they needed to. */
 .endpoint-head {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: 66px minmax(180px, 1fr) minmax(160px, 1.2fr) auto;
+  grid-template-columns: 58px minmax(160px, 1fr) minmax(150px, 1.2fr) 32px;
   min-width: 0;
 }
 
 .method {
-  border-radius: 7px;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 900;
-  padding: 5px 8px;
+  border-radius: 5px;
+  border-style: solid;
+  border-width: 1px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 5px;
   text-align: center;
+  text-transform: uppercase;
 }
 
 .method.get {
-  background: #2563eb;
+  background: var(--method-get-bg);
+  border-color: var(--method-get-border);
+  color: var(--method-get-ink);
 }
 
 .method.post {
-  background: #16a34a;
+  background: var(--method-post-bg);
+  border-color: var(--method-post-border);
+  color: var(--method-post-ink);
 }
 
 .method.patch {
-  background: #b45309;
+  background: var(--method-patch-bg);
+  border-color: var(--method-patch-border);
+  color: var(--method-patch-ink);
 }
 
 .method.delete {
-  background: #dc2626;
+  background: var(--method-delete-bg);
+  border-color: var(--method-delete-border);
+  color: var(--method-delete-ink);
 }
 
 .path {
@@ -1095,42 +2144,202 @@ button:disabled {
 }
 
 .endpoint-label {
-  color: #6e6a63;
-  font-size: 13px;
+  color: var(--ink-soft);
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Sits in the 32px track at the end of an endpoint row. Squared off rather than
+ * the .icon-button default so it reads as part of the row, not a floating
+ * control, and only resolves on hover. */
+.endpoint-copy {
+  color: var(--ink-faint);
+  justify-self: end;
+  min-height: 28px;
+  width: 28px;
+}
+
+.endpoint-copy:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* Copied state: green, and held long enough to be read. */
+.endpoint-copy.copied,
+.endpoint-copy.copied:hover {
+  background: transparent;
+  color: var(--success);
+}
+
 .copy-button {
-  background: #fff;
-  border: 1px solid #ded8cc;
-  color: #1e1d1a;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.copy-button.danger {
+  color: var(--danger);
+}
+
+.copy-button.danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+/* The name field and the scope select share a row; the note and the button each
+ * get their own. Previously the input and the Create button were siblings in a
+ * bare .endpoint, so the button sat flush against the field with no label on
+ * either and no indication of what scope the key would get. */
+.key-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  padding: 14px;
+}
+
+.key-form .field-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  grid-column: 1 / -1;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.key-form-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+/* Path field and its picker on one row. This borrowed .field-hint at first,
+ * which is a text style with no grid at all, so the button wrapped onto its own
+ * line directly under the input. */
+.path-picker {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.path-picker input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.path-picker button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.agent-prompts {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.agent-prompts p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.agent-prompt-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Mark, name, then the copy/check state on the trailing edge. */
+.agent-prompt-buttons button {
   min-height: 32px;
-  padding: 0 12px;
+}
+
+.agent-prompt-buttons button svg:last-child {
+  color: var(--ink-faint);
+}
+
+/* Six tracks rather than the endpoint row's four: mark, name, token tail,
+ * scope, last used, revoke. */
+.key-row-head {
+  grid-template-columns:
+    18px minmax(90px, 1fr) 62px minmax(80px, 1fr) minmax(84px, 1fr) auto;
+}
+
+/* Carries the same brand mark the integration card and the connect dialog use,
+ * so a key created by a connection is recognisable as that tool's at a glance.
+ * A hand-made key falls back to a generic key glyph. */
+.key-mark {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.key-name {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Predates keys recording an owner, so it belongs to no account in particular
+ * and never counts as a connection. Flagged rather than hidden: it still grants
+ * access to this machine's API, so it has to remain revocable. */
+.key-legacy {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+.empty-row {
+  color: var(--ink-faint);
+  font-size: 13px;
+  margin: 0;
 }
 
 .endpoint pre {
-  background: #fbfaf8;
-  border: 1px solid #ded8cc;
+  background: var(--paper);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #1e1d1a;
+  color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
-  margin: 10px 0 0 76px;
+  margin: 10px 0 0 68px;
   overflow-x: auto;
   padding: 10px;
   white-space: pre-wrap;
 }
 
+/* Inverted against the page rather than accent-filled: a full-width cyan bar
+ * fights the sidebar's accent line for attention, and the toast is transient. */
 .toast {
   animation: toast-in 0.18s var(--ease);
-  background: var(--accent);
+  background: var(--ink);
   border-radius: 10px;
   bottom: 20px;
   box-shadow: var(--shadow-md);
-  color: #fff;
+  color: var(--surface);
   font-weight: 800;
   left: 50%;
   padding: 10px 14px;
@@ -1148,54 +2357,276 @@ button:disabled {
 
 .integration-grid {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
 .integration-card {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px;
+  gap: 8px;
+  padding: 14px;
 }
 
 .integration-card-head {
   align-items: center;
-  color: var(--accent);
+  color: var(--ink);
   display: flex;
   gap: 8px;
+}
+
+/* Height and width come from the inline size the component passes, so the mark
+ * always matches the Lucide glyph standing in for the integrations that have no
+ * brand asset. These are the fallbacks. */
+.integration-logo {
+  flex: 0 0 auto;
+  height: 20px;
+  object-fit: contain;
+  width: 20px;
+}
+
+/* Single-colour marks only read on the background they were drawn for, and the
+ * two we have were drawn for opposite ones: Codex's is #111 and vanishes on a
+ * dark surface, Cursor's is #edecec and vanishes on a light one. So each names
+ * the theme it has to be inverted in rather than sharing one "monochrome" flag.
+ * Marks that carry their own colour name neither and are left alone. */
+:root[data-theme="dark"] .integration-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+:root:not([data-theme="dark"]) .integration-logo.invert-on-light {
+  filter: invert(1);
+}
+
+/* The whole-tab empty state. `.empty-state` above is the one-line muted note
+ * used when a filter matched nothing; this is the other case -- the collection
+ * is genuinely empty and the screen has to say what the thing is for. It
+ * replaces the toolbar and pager rather than sitting under them, so it centres
+ * on the panel and caps its measure instead of running the full width. */
+.tab-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 auto;
+  max-width: 620px;
+  padding: 56px 0 40px;
+  text-align: center;
+  width: 100%;
+}
+
+.tab-empty-mark {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  color: var(--ink-faint);
+  display: flex;
+  height: 56px;
+  justify-content: center;
+  margin-bottom: 4px;
+  width: 56px;
+}
+
+.tab-empty h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.tab-empty > p {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0 0 6px;
+  max-width: 400px;
+}
+
+/* A button that reads as a link: for the secondary way back to something the
+ * user dismissed, which must not compete with the primary action above it. */
+.link-button {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: auto;
+  padding: 4px 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-button:not(:disabled):hover {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.provider-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 22px;
+  text-align: left;
+  width: 100%;
+}
+
+/* Same eyebrow as a settings group heading, with a hairline running out to the
+ * dismiss button so the section reads as a divider rather than a second title
+ * competing with "No proxies yet". */
+.provider-strip-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.provider-strip-head h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.provider-strip-head::before {
+  content: '';
+  background: var(--border);
+  flex: 1;
+  height: 1px;
+  order: 2;
+}
+
+.provider-strip-head .icon-button {
+  order: 3;
+}
+
+.provider-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+/* .integration-card at a smaller scale. Kept separate rather than sharing the
+ * class: these are outbound links, not connectable things, and the two should
+ * be free to drift. */
+.provider-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.provider-card-head {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+}
+
+.provider-card-head svg,
+.provider-card-head .integration-logo {
+  flex: 0 0 auto;
+  height: 20px;
+  width: 20px;
+}
+
+.provider-card h4 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.provider-kinds {
+  color: var(--ink-faint);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.provider-card p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.provider-card button {
+  margin-top: auto;
+  min-height: var(--control-h-sm);
+}
+
+/* The result of "Test connection" in the proxy editor, spanning both form
+ * columns under the fields it describes. Shaped like .api-note; the state
+ * carries in the colour rather than an extra icon-plus-label row. */
+.proxy-modal .profile-form .proxy-test-result {
+  align-items: center;
+  border-radius: 10px;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  grid-column: 1 / -1;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.proxy-test-result svg,
+.proxy-test-result .proxy-flag {
+  flex: 0 0 auto;
+}
+
+.proxy-test-result.ok {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.proxy-test-result.failed {
+  background: var(--danger-bg);
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .status-pill {
   align-items: center;
   align-self: flex-start;
-  color: #16a34a;
+  color: var(--success);
   display: flex;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   gap: 6px;
 }
 
+/* "Not connected" is a real state and worth saying out loud -- the card used to
+ * show nothing at all, so a card that had simply never been connected looked
+ * identical to one whose status had not loaded. */
+.status-pill.is-idle {
+  color: var(--ink-faint);
+}
+
 .status-dot {
-  background: #22c55e;
+  background: var(--success);
   border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 28%, transparent);
   display: inline-block;
   height: 8px;
   width: 8px;
 }
 
 .integration-card h2 {
-  font-size: 16px;
+  font-size: 15px;
   margin: 0;
 }
 
 .integration-card p {
-  color: #6e6a63;
+  color: var(--ink-soft);
   flex: 1;
   font-size: 13px;
   line-height: 1.4;
@@ -1203,13 +2634,100 @@ button:disabled {
 }
 
 .integration-card > button {
-  align-self: flex-start;
-  background: var(--accent);
-  border: 0;
-  border-radius: 8px;
-  color: #fff;
-  min-height: 34px;
+  align-self: stretch;
+  justify-content: center;
+  min-height: 32px;
   padding: 0 14px;
+}
+
+.integration-card > button:not(.ghost):hover {
+  background: var(--accent-strong);
+}
+
+/* Header is a mark, a name and a one-line description; everything else in the
+ * dialog is a labelled block, so it gets its own row shape. */
+.integration-modal-title {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.integration-modal-title h2 {
+  margin: 0;
+}
+
+.integration-modal-title p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+/* Said before anything is touched. The old flow created a key and edited a file
+ * in the user's home directory on a single unexplained click. */
+.integration-steps h3 {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.integration-steps ol {
+  color: var(--ink-soft);
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* The concrete facts the steps refer to: which file, which API, which key. */
+.integration-facts {
+  background: var(--paper);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.integration-facts > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.integration-facts span {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.integration-facts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Destructive action sits left, away from the confirming one on the right. */
+.integration-modal-actions {
+  gap: 8px;
+}
+
+.integration-modal-actions .ghost.danger {
+  color: var(--danger);
+  margin-right: auto;
+}
+
+.integration-modal-actions .ghost.danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
 }
 
 .integration-card .endpoint {
@@ -1224,12 +2742,12 @@ button:disabled {
 }
 
 .apply-status-ok {
-  color: #16a34a;
+  color: var(--success);
   font-size: 13px;
 }
 
 .apply-status-error {
-  color: #dc2626;
+  color: var(--danger);
   font-size: 13px;
 }
 
@@ -1238,10 +2756,10 @@ button:disabled {
 }
 
 .snippet-block pre {
-  background: #fbfaf8;
+  background: var(--paper);
   border: 1px solid var(--border);
   border-radius: 8px;
-  color: #1e1d1a;
+  color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
@@ -1255,7 +2773,7 @@ button:disabled {
 
 .snippet-copy {
   align-items: center;
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 6px;
   display: flex;
@@ -1280,7 +2798,7 @@ button:disabled {
 }
 
 .panel-subsection {
-  border-top: 1px solid #ece6da;
+  border-top: 1px solid var(--border-soft);
   margin-top: 20px;
   padding-top: 20px;
 }
@@ -1294,7 +2812,7 @@ textarea {
 }
 
 .extension-row {
-  border-top: 1px solid #ece6da;
+  border-top: 1px solid var(--border-soft);
   display: grid;
   gap: 4px;
   grid-template-columns: 1fr auto;
@@ -1306,14 +2824,14 @@ textarea {
 }
 
 .extension-row small {
-  color: #6e6a63;
+  color: var(--ink-soft);
   grid-column: 1;
 }
 
 .extension-row button {
   align-self: center;
   background: transparent;
-  color: #d53c32;
+  color: var(--danger);
   grid-column: 2;
   grid-row: 1 / span 2;
   min-height: 34px;
@@ -1322,7 +2840,7 @@ textarea {
 
 .message,
 .status {
-  color: #6e6a63;
+  color: var(--ink-soft);
 }
 
 .toast-stack {
@@ -1337,11 +2855,11 @@ textarea {
 
 .status-toast {
   animation: toast-in 0.18s var(--ease);
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  color: #6e6a63;
+  color: var(--ink-soft);
   font-size: 13px;
   max-width: 360px;
   padding: 12px 16px;
@@ -1350,7 +2868,7 @@ textarea {
 .update-toast {
   align-items: flex-start;
   animation: toast-in 0.18s var(--ease);
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -1377,7 +2895,7 @@ textarea {
 
 .modal-backdrop {
   align-items: center;
-  background: rgba(23, 22, 19, 0.4);
+  background: var(--scrim);
   backdrop-filter: blur(3px);
   display: flex;
   inset: 0;
@@ -1403,16 +2921,16 @@ textarea {
 
 .profile-modal {
   animation: modal-in 0.16s var(--ease);
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   display: grid;
-  gap: 18px;
+  gap: 14px;
   max-height: calc(100vh - 56px);
   max-width: 1380px;
   overflow: auto;
-  padding: 22px;
+  padding: 18px;
   width: min(1380px, calc(100vw - 56px));
 }
 
@@ -1422,7 +2940,7 @@ textarea {
 }
 
 .changelog-notes {
-  background: var(--paper);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   font-family: inherit;
@@ -1465,20 +2983,21 @@ textarea {
 }
 
 .cookie-picker-row:hover {
-  background: #f4f0e6;
+  background: var(--hover);
 }
 
 .cookie-picker-row.active {
-  background: var(--ink);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--ink);
 }
 
 .cookie-picker-row.active small {
-  color: #ded8cc;
+  color: var(--ink-soft);
 }
 
 .cookie-picker-row small {
-  color: #6e6a63;
+  color: var(--ink-soft);
   flex-shrink: 0;
 }
 
@@ -1535,7 +3054,7 @@ textarea {
 }
 
 .switch-track {
-  background: #ded8cc;
+  background: var(--border);
   border-radius: 999px;
   display: block;
   height: 22px;
@@ -1545,11 +3064,11 @@ textarea {
 }
 
 .switch input:checked + .switch-track {
-  background: var(--ink);
+  background: var(--accent);
 }
 
 .switch-thumb {
-  background: #fff;
+  background: var(--switch-thumb);
   border-radius: 50%;
   box-shadow: var(--shadow-sm);
   height: 18px;
@@ -1582,12 +3101,12 @@ textarea {
 }
 
 .profile-modal h2 {
-  font-size: 24px;
+  font-size: 20px;
   margin: 0 0 4px;
 }
 
 .profile-modal p {
-  color: #6e6a63;
+  color: var(--ink-soft);
   margin: 0;
 }
 
@@ -1613,7 +3132,7 @@ textarea {
 }
 
 .profile-summary {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   box-shadow: var(--shadow-xs);
@@ -1628,7 +3147,7 @@ textarea {
 
 .summary-heading {
   align-items: center;
-  border-bottom: 1px solid #e8e1d7;
+  border-bottom: 1px solid var(--border-soft);
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -1636,14 +3155,14 @@ textarea {
 }
 
 .summary-heading h3 {
-  font-size: 18px;
+  font-size: 16px;
   letter-spacing: 0.08em;
   margin: 0;
   text-transform: uppercase;
 }
 
 .summary-heading button {
-  color: #2563eb;
+  color: var(--accent);
   font-size: 12px;
   min-height: 34px;
   text-transform: uppercase;
@@ -1661,12 +3180,12 @@ textarea {
 }
 
 .summary-row strong {
-  color: #1e1d1a;
+  color: var(--ink);
   font-weight: 850;
 }
 
 .summary-row span {
-  color: #787169;
+  color: var(--ink-soft);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1678,9 +3197,9 @@ textarea {
 }
 
 .summary-tags em {
-  border: 1px solid #2563eb;
+  border: 1px solid var(--accent);
   border-radius: 6px;
-  color: #2563eb;
+  color: var(--accent);
   font-size: 12px;
   font-style: normal;
   padding: 2px 8px;
@@ -1692,7 +3211,7 @@ textarea {
 }
 
 .summary-lines i {
-  color: #787169;
+  color: var(--ink-soft);
   font-style: normal;
   overflow-wrap: anywhere;
 }
@@ -1710,32 +3229,41 @@ textarea {
   grid-column: 1 / -1;
 }
 
-.field span {
-  color: #6e6a63;
+/* Sentence case at 650, matching .settings-row-label h4 -- the settings dialog
+ * is the app's reference for what a form label looks like, and every other
+ * dialog was still shouting in 900-weight uppercase at it. inline-flex so the
+ * label can carry a 14px glyph without it sitting on the text baseline. */
+.field > span {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
   font-size: 12px;
-  font-weight: 900;
-  text-transform: uppercase;
+  font-weight: 650;
+  gap: 6px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
+/* The glyph is quieter than the word it labels: at full --ink-soft a column of
+ * twelve icons reads as a second list running down the form. */
+.field > span > svg {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+/* A field's control fills its column; everything else about how it looks comes
+ * from the canonical input/select/textarea rules at the top of this file. */
 .field input,
 .field select,
 .field textarea {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--ink);
-  min-height: 42px;
-  padding: 0 12px;
-  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
   width: 100%;
 }
 
-.field input:focus-visible,
-.field select:focus-visible,
-.field textarea:focus-visible {
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
-  outline: none;
+/* The canonical select indents 10px; inside a field it matches the input beside
+ * it at 12px, and gives the right side back to the chevron. */
+.field select {
+  padding-left: 12px;
+  padding-right: 38px;
 }
 
 .field textarea {
@@ -1749,7 +3277,7 @@ textarea {
 }
 
 .segmented {
-  background: var(--surface-sunken);
+  background: var(--paper);
   border-radius: 9px;
   display: inline-flex;
   gap: 2px;
@@ -1769,16 +3297,111 @@ textarea {
 }
 
 .segmented button.active {
-  background: var(--ink);
-  color: var(--surface);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 .field-hint {
-  color: #6e6a63;
+  color: var(--ink-soft);
   font-size: 12px;
   font-weight: 500;
   margin: 0;
   text-transform: none;
+}
+
+/* ── Platform picker ────────────────────────────────────────────────────────
+ * Six cards instead of the dropdown this replaces. auto-fit rather than a fixed
+ * six columns: the same control renders in the 1380px profile dialog and in the
+ * 920px fingerprint one, and it wraps to two rows in the narrow case instead of
+ * squeezing six labels to nothing. */
+.platform-choices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.platform-choice {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  gap: 7px;
+  min-height: 0;
+  padding: 12px 8px;
+  position: relative;
+}
+
+.platform-choice:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.platform-choice.active {
+  background: var(--raised);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+.platform-choice-label {
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* Tucked into the corner rather than added to the column: a fourth stacked
+ * element would make the selected card taller than its neighbours. */
+.platform-choice-check {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+
+/* The brand marks are raw <svg> rather than lucide components, so they need the
+ * inline-flex box lucide gives its icons for free -- without it they sit on the
+ * text baseline and drag the card's centre line down. */
+.platform-mark {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+/* ── Folder icon picker ─────────────────────────────────────────────────────
+ * Square cells rather than the platform picker's labelled cards: twelve glyphs
+ * with twelve captions under them would out-weigh the name field they sit
+ * beside. The caption lives in the tooltip and the accessible name. */
+.icon-choices {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(38px, 1fr));
+}
+
+.icon-choice {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 0;
+  height: 38px;
+  padding: 0;
+}
+
+.icon-choice:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.icon-choice.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
 }
 
 .proxy-picker {
@@ -1799,11 +3422,11 @@ textarea {
 }
 
 .select-action button {
-  min-height: 42px;
+  min-height: var(--control-h);
 }
 
 .form-section {
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   display: grid;
@@ -1838,7 +3461,7 @@ textarea {
 }
 
 .file-row > span {
-  color: #716b62;
+  color: var(--ink-soft);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1857,12 +3480,20 @@ textarea {
 }
 
 .form-section h3 {
-  font-size: 16px;
+  align-items: center;
+  display: flex;
+  font-size: 15px;
+  gap: 7px;
   margin: 0 0 4px;
 }
 
+.form-section h3 svg {
+  color: var(--ink-faint);
+  flex: none;
+}
+
 .form-section p {
-  color: #6e6a63;
+  color: var(--ink-soft);
   margin: 0;
 }
 
@@ -1881,36 +3512,205 @@ textarea {
 .color-row {
   align-items: center;
   display: flex;
-  gap: 9px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
+/* Filled with its own token triple via an inline style (the six presets are
+ * data, not six rules -- and a custom hex could never be a class). The border
+ * is always the colour's own, so an unselected swatch still reads as a chip
+ * rather than a floating dot; selection is the ring plus the check, not a
+ * border swap that would fight the fill. */
 .swatch {
-  border: 2px solid transparent;
+  align-items: center;
+  border: 1px solid transparent;
   border-radius: 999px;
-  min-height: 28px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-height: 0;
   padding: 0;
+  transition: box-shadow 0.12s var(--ease), transform 0.12s var(--ease);
   width: 28px;
 }
 
-.swatch.active {
-  border-color: #171613;
-  box-shadow: 0 0 0 2px #fbfaf8 inset;
+.swatch:not(:disabled):hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
-.color-row input[type="color"] {
-  min-height: 32px;
-  padding: 2px;
-  width: 42px;
+.swatch.active {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+.swatch:focus-visible {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  outline: none;
+}
+
+/* The custom-colour chip. The native control is the whole chip: it is stretched
+ * over it and made invisible rather than hidden, because display:none takes it
+ * out of the click target the label is pointing at. */
+.swatch-custom {
+  background: var(--raised);
+  border-color: var(--border);
+  color: var(--ink-soft);
+  position: relative;
+}
+
+.swatch-custom input[type="color"] {
+  border: 0;
+  cursor: pointer;
+  height: 100%;
+  left: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.swatch-custom:focus-within {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
 }
 
 .modal-actions {
-  border-top: 1px solid #ded8cc;
+  border-top: 1px solid var(--border);
   justify-content: flex-end;
   padding-top: 16px;
 }
 
 .modal-actions .danger {
   margin-right: auto;
+}
+
+/* ── Tag chips ──────────────────────────────────────────────────────────────
+ * Looks like the canonical text input from the outside -- same fill, border,
+ * radius and focus ring -- but it is a wrapper around a borderless input, so
+ * the chips sit inside the box with the caret rather than above it. */
+.tag-input {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: var(--control-h);
+  padding: 5px 8px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+.tag-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.tag-input input {
+  background: transparent;
+  border: 0;
+  flex: 1;
+  min-height: 24px;
+  min-width: 120px;
+  padding: 0 2px;
+}
+
+.tag-input input:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.tag-chip {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  padding: 3px 4px 3px 8px;
+}
+
+.tag-chip button {
+  align-items: center;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 0;
+  height: 16px;
+  padding: 0;
+  width: 16px;
+}
+
+.tag-chip button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--danger);
+}
+
+/* ── Profiles walkthrough ───────────────────────────────────────────────────
+ * A single column: a figure, then the paragraph it illustrates. Sized between
+ * small-modal and the default so three sentences do not run to one line. */
+.intro-modal {
+  width: min(560px, 100vw - 56px);
+}
+
+.intro-body {
+  display: grid;
+  gap: 14px;
+}
+
+.intro-body p {
+  color: var(--ink-soft);
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* Reserved at 16:10 so the real screenshots drop in without moving the text
+ * under them. Dashed and labelled while it is empty, so it reads as "a picture
+ * goes here" rather than as an image that failed to load. */
+.intro-figure {
+  align-items: center;
+  aspect-ratio: 16 / 10;
+  background: var(--paper);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+}
+
+.intro-figure span {
+  font-size: 12px;
+  max-width: 280px;
+}
+
+/* Left-aligned against the Back/Next pair, the same way a footer's delete
+ * button is. */
+.intro-dots {
+  display: flex;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.intro-dots span {
+  background: var(--border);
+  border-radius: 999px;
+  height: 6px;
+  transition: background-color 0.12s var(--ease), width 0.12s var(--ease);
+  width: 6px;
+}
+
+.intro-dots span.active {
+  background: var(--accent);
+  width: 16px;
 }
 
 .check-field {
@@ -1925,6 +3725,6 @@ textarea {
 }
 
 .check-field span {
-  color: #1e1d1a;
+  color: var(--ink);
   font-weight: 800;
 }

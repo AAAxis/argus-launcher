@@ -1,0 +1,75 @@
+import React from 'react';
+import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
+import {Apple, Monitor} from 'lucide-react';
+import {AndroidMark, IosMark, UbuntuMark, WindowsMark} from './PlatformMarks';
+import type {Integration} from '../../data/integrations';
+
+// Renders a real flag SVG (bundled, so it never depends on the OS having a
+// color-emoji font with flag glyphs -- Regional Indicator Symbol emoji looked
+// right in theory but rendered as two boxed letters on this user's Windows
+// build even with an explicit emoji font-family). Falls back to the bare
+// 2-letter code as text if it's not a recognized ISO code.
+export function FlagIcon({countryCode}: {countryCode?: string}) {
+  const code = countryCode?.trim().toUpperCase();
+  const Flag = code && /^[A-Z]{2}$/.test(code) ?
+    (CountryFlagIcons as Record<string, React.FC<React.SVGProps<SVGSVGElement>>>)[code] :
+    undefined;
+  if (Flag) {
+    return <Flag className="flag-svg" />;
+  }
+  return <>{code || '--'}</>;
+}
+
+// Maps a fingerprint OS preset (see osPresets) to its platform mark. Five of
+// the six used to collapse into two glyphs, because lucide has no brand logos
+// -- PlatformMarks.tsx supplies the missing four, and macOS keeps lucide's own
+// <Apple> rather than a hand-traced logo. Anything unrecognized falls back to a
+// dimmed <Monitor> rather than rendering nothing.
+export function PlatformIcon({os, size = 16}: {os?: string; size?: number}) {
+  const label = os || 'Unknown';
+  const Mark = PLATFORM_MARKS[os || ''];
+  if (Mark) {
+    return (
+      <span className="platform-mark" role="img" aria-label={label} title={label}>
+        <Mark size={size} />
+      </span>
+    );
+  }
+  return <Monitor size={size} aria-label={label} opacity={0.4}><title>{label}</title></Monitor>;
+}
+
+const PLATFORM_MARKS: Record<string, ({size}: {size?: number}) => React.ReactElement> = {
+  'Windows 11': WindowsMark,
+  'Windows 10': WindowsMark,
+  'macOS': ({size}) => <Apple size={size} />,
+  'Ubuntu': UbuntuMark,
+  'Android': AndroidMark,
+  'iOS': IosMark,
+};
+
+// An integration's brand mark, or its Lucide stand-in when there is no asset.
+// Shared by the integration cards, the connect dialog and the key list so all
+// three agree on how a given tool is drawn.
+export function IntegrationMark({integration, size = 20}: {integration: Integration; size?: number}) {
+  const Icon = integration.icon;
+  if (!integration.logo) {
+    return <Icon size={size} />;
+  }
+  const className = integration.invertOn ?
+    `integration-logo invert-on-${integration.invertOn}` :
+    'integration-logo';
+  return <img alt="" className={className} src={integration.logo} style={{height: size, width: size}} />;
+}
+
+// Google's mark, inline. Lucide has no brand icons and their guidelines require
+// the official four-colour G on a sign-in button.
+export function GoogleMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.34A9 9 0 0 0 9 18z" />
+      <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.94H.96a9 9 0 0 0 0 8.12l3-2.34z" />
+      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.94l3 2.34C4.68 5.16 6.66 3.58 9 3.58z" />
+    </svg>
+  );
+}

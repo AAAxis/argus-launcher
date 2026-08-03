@@ -1,0 +1,127 @@
+import {useEffect, useState} from 'react';
+import {native} from '../native';
+import type {ApiState, ResourceState, UpdateState} from '../native';
+import type {Toast} from './useToast';
+
+// The three main-process status channels all follow one shape: ask once at
+// mount, then subscribe. Written once here instead of three near-identical
+// effects.
+function useSubscribedState<T>(
+    get: (() => Promise<T>) | undefined,
+    subscribe: ((listener: (value: T) => void) => () => void) | undefined) {
+  const [value, setValue] = useState<T | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void get?.().then((next) => {
+      if (!cancelled) {
+        setValue(next);
+      }
+    });
+    const unsubscribe = subscribe?.((next) => setValue(next));
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+    // The native bridge is a module singleton; these never change identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return [value, setValue] as const;
+}
+
+// Whether the bundled browser and the local automation API are ready. The app
+// shell blocks on both -- a launch with either missing fails in a way the user
+// cannot act on.
+export function useResourceStatus(toast: Toast) {
+  const [resourceState, setResourceState] = useSubscribedState<ResourceState>(
+      native?.getResourceStatus?.bind(native), native?.onResourceState?.bind(native));
+  const [apiState] = useSubscribedState<ApiState>(
+      native?.getApiStatus?.bind(native), native?.onApiState?.bind(native));
+
+  const {updateMessage, setMessage} = toast;
+  useEffect(() => {
+    if (resourceState?.browserStatus === 'downloading') {
+      const percent = resourceState.progress?.percent ? ` ${resourceState.progress.percent}%` : '';
+      setMessage(`Downloading Argus Browser${percent}`);
+    } else if (resourceState?.browserStatus === 'installing') {
+      setMessage('Installing Argus Browser');
+    } else if (resourceState?.browserStatus === 'ready') {
+      // Only clear our own progress line -- another action's toast may have
+      // landed in the meantime and is not ours to wipe.
+      updateMessage((current) =>
+        current.startsWith('Downloading Argus Browser') || current === 'Installing Argus Browser' ?
+          '' :
+          current);
+    } else if (resourceState?.browserStatus === 'error') {
+      setMessage(resourceState.error || 'Failed to download Argus Browser');
+    }
+  }, [resourceState, setMessage, updateMessage]);
+
+  return {
+    resourceState,
+    apiState,
+    retryBrowserDownload: () => void native?.downloadBrowserResource?.().then(setResourceState),
+  };
+}
+
+// Launcher self-update: the status the main process reports, the three actions
+// the user can take, and which version they have dismissed the corner toast
+// for. Dismissal is per-version on purpose -- closing it should not hide a
+// later, different update forever.
+export function useUpdater(toast: Toast) {
+  const [updateState, setUpdateState] = useSubscribedState<UpdateState>(
+      native?.getUpdateStatus?.bind(native), native?.onUpdateState?.bind(native));
+  const [busy, setBusy] = useState(false);
+  const [dismissedVersion, setDismissedVersion] = useState('');
+
+  async function run(action: 'check' | 'download' | 'install') {
+    try {
+      setBusy(true);
+      if (action === 'check') {
+        const state = await native?.checkForUpdates?.();
+        if (state) {
+          setUpdateState(state);
+        }
+      } else if (action === 'download') {
+        const state = await native?.downloadUpdate?.();
+        if (state) {
+          setUpdateState(state);
+        }
+      } else {
+        const result = await native?.installUpdate?.();
+        if (result && !result.ok) {
+          toast.setMessage(result.error || 'Update is not ready to install');
+        }
+      }
+    } catch (error) {
+      toast.setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return {updateState, busy, run, dismissedVersion, setDismissedVersion};
+}
+
+export function updateStatusLabel(state: UpdateState | null) {
+  if (!state) {
+    return 'Checking updater';
+  }
+  switch (state.status) {
+    case 'disabled':
+      return 'Packaged builds only';
+    case 'checking':
+      return 'Checking for updates';
+    case 'available':
+      return `Version ${state.updateInfo?.version || 'available'} ready`;
+    case 'downloading':
+      return `Downloading ${Math.round(state.progress?.percent || 0)}%`;
+    case 'downloaded':
+      return `Version ${state.updateInfo?.version || ''} downloaded`;
+    case 'not-available':
+      return 'Up to date';
+    case 'error':
+      return state.error || 'Update check failed';
+    default:
+      return 'Ready to check';
+  }
+}

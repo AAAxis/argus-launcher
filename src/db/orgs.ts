@@ -38,6 +38,23 @@ export async function listMyOrgs(): Promise<OrgMembership[]> {
       }));
 }
 
+// How many seats the org is using, for the usage meter in Settings. RLS on
+// org_members exposes every member of an org you belong to, so this counts the
+// whole team rather than just you -- which is the number seat_limit is compared
+// against by trg_seat_limit on insert.
+export async function countMembers(orgId: string): Promise<number> {
+  const client = optionalClient();
+  if (!client) {
+    return 0;
+  }
+  const {count, error} = await client
+      .from('org_members')
+      .select('user_id', {count: 'exact', head: true})
+      .eq('org_id', orgId);
+  raise(error, 'orgs.countMembers');
+  return count || 0;
+}
+
 export async function getOrg(orgId: string): Promise<ArgusOrg | null> {
   const client = optionalClient();
   if (!client) {
