@@ -12,6 +12,15 @@ import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensio
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
+// Where the account pages live. Registration, Google sign-in and password
+// reset are all web-only -- the launcher does the email+password grant and
+// nothing else -- so the sign-in screen links out to these.
+//
+// The main process independently allowlists which hosts it will open, so
+// pointing this at some other origin does not widen what can be launched.
+const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined)?.replace(/\/+$/, '') ||
+  'https://www.browserargus.com';
+
 type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'integrations' | 'api';
 
 type ApiEndpoint = {
@@ -1703,9 +1712,14 @@ function App() {
   // owns the auth subscription.
   const org = useOrg();
   const orgId = org.orgId;
-  const [email, setEmail] = useState('holylabsltd@gmail.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
+  // Sign-in gets its own error/busy state rather than reusing `message`: that
+  // one is the app-wide toast and self-clears after 5s (see below), which on a
+  // login form means a wrong-password error silently disappears mid-read.
+  const [signInError, setSignInError] = useState('');
+  const [signInBusy, setSignInBusy] = useState(false);
   const [message, setMessage] = useState('');
   // Auto-dismiss the floating status-toast after a few seconds -- as an
   // inline footer this never needed a timer, but a floating corner banner
@@ -2812,20 +2826,37 @@ function App() {
     }));
   }
 
-  async function signIn() {
+  async function signIn(event?: React.FormEvent) {
+    event?.preventDefault();
+    if (signInBusy) {
+      return;
+    }
     if (!supabase) {
-      setMessage('Supabase env is missing in .env');
+      setSignInError('Supabase env is missing in .env');
       return;
     }
-    // OrgProvider's onAuthStateChange picks the session up from here, resolves
-    // the user's organizations (bootstrapping one if they have none) and the
-    // orgId effect above loads the data.
-    const {error} = await supabase.auth.signInWithPassword({email, password});
-    if (error) {
-      setMessage(error.message);
-      return;
+    setSignInBusy(true);
+    setSignInError('');
+    try {
+      // OrgProvider's onAuthStateChange picks the session up from here, resolves
+      // the user's organizations (bootstrapping one if they have none) and the
+      // orgId effect above loads the data.
+      const {error} = await supabase.auth.signInWithPassword({email, password});
+      if (error) {
+        setSignInError(error.message);
+        return;
+      }
+      setPassword('');
+    } finally {
+      setSignInBusy(false);
     }
-    setPassword('');
+  }
+
+  // Registration, Google sign-in and password reset all live on the web -- the
+  // launcher only ever does the email+password grant. Anything opened here goes
+  // to the real browser via the main process, which allowlists the host.
+  function openAccountPage(pathname: string) {
+    void native?.openExternal?.(`${SITE_URL}${pathname}`);
   }
 
   async function signOut() {
@@ -2853,8 +2884,8 @@ function App() {
 
   function apiExampleScript() {
     return `#!/usr/bin/env node
-// Argys Anty Browser API example.
-// Keep Argys Anty open and signed in while running this script.
+// Argus Launcher Browser API example.
+// Keep Argus Launcher open and signed in while running this script.
 
 const BASE_URL = ${JSON.stringify(API_BASE_URL)};
 // Create a key in Settings -> API and paste it here. Keys are only shown
@@ -3028,7 +3059,7 @@ main().catch((error) => {
             setMessage('');
             setErrorDialog({
               title: 'Launch blocked',
-              detail: 'Native proxy checker is not available. Restart Argys Anty and try again.',
+              detail: 'Native proxy checker is not available. Restart Argus Launcher and try again.',
             });
             return;
           }
@@ -3466,7 +3497,7 @@ main().catch((error) => {
 
   async function pickImportCsv() {
     if (!native?.selectImportCsv) {
-      setMessage('Native CSV picker is not available. Restart Argys Anty and try again.');
+      setMessage('Native CSV picker is not available. Restart Argus Launcher and try again.');
       return;
     }
     const result = await native.selectImportCsv();
@@ -3907,7 +3938,7 @@ main().catch((error) => {
 
   async function checkProxyOnce(proxy: ArgusProxy) {
     if (!native?.checkProxy) {
-      setMessage('Native proxy checker is not available. Restart Argys Anty and try again.');
+      setMessage('Native proxy checker is not available. Restart Argus Launcher and try again.');
       return;
     }
     setCheckingProxyId(proxy.id);
@@ -4013,7 +4044,7 @@ main().catch((error) => {
       return;
     }
     if (!native?.saveTextFile) {
-      setMessage('Native file export is not available. Restart Argys Anty and try again.');
+      setMessage('Native file export is not available. Restart Argus Launcher and try again.');
       return;
     }
     const header = ['name', 'type', 'host', 'port', 'username', 'password', 'country', 'country_code'];
@@ -4062,7 +4093,7 @@ main().catch((error) => {
       return;
     }
     if (!native?.saveTextFile) {
-      setMessage('Native file export is not available. Restart Argys Anty and try again.');
+      setMessage('Native file export is not available. Restart Argus Launcher and try again.');
       return;
     }
     const header = [
@@ -4126,7 +4157,7 @@ main().catch((error) => {
   async function matchCookiesToProfiles(
       folderPath: string, targetProfileIds: string[] | null): Promise<{matched: number; total: number}> {
     if (!native?.matchCookieFiles) {
-      throw new Error('Native cookie import is not available. Restart Argys Anty and try again.');
+      throw new Error('Native cookie import is not available. Restart Argus Launcher and try again.');
     }
     const targetIds = targetProfileIds ? new Set(targetProfileIds) : null;
     const isTarget = (profile: ArgusProfile) => !profile.deleted_at && (!targetIds || targetIds.has(profile.id));
@@ -4164,7 +4195,7 @@ main().catch((error) => {
       return;
     }
     if (!native?.selectCookieFolder || !native?.matchCookieFiles) {
-      setMessage('Native cookie import is not available. Restart Argys Anty and try again.');
+      setMessage('Native cookie import is not available. Restart Argus Launcher and try again.');
       return;
     }
     const folderPath = await native.selectCookieFolder();
@@ -4265,7 +4296,7 @@ main().catch((error) => {
   // URL, never the extension's files directly.
   async function addExtensionFromFolder() {
     if (!native?.selectExtensionFolder || !native?.zipExtensionFolder) {
-      setMessage('Native folder picker is not available. Restart Argys Anty and try again.');
+      setMessage('Native folder picker is not available. Restart Argus Launcher and try again.');
       return;
     }
     const folderPath = await native.selectExtensionFolder();
@@ -4362,7 +4393,7 @@ main().catch((error) => {
       return;
     }
     if (!native?.selectCookieFile) {
-      setMessage('Native cookie file picker is not available. Restart Argys Anty and try again.');
+      setMessage('Native cookie file picker is not available. Restart Argus Launcher and try again.');
       return;
     }
     try {
@@ -4424,7 +4455,7 @@ main().catch((error) => {
   // of a profile id.
   async function addCookieToLibrary() {
     if (!native?.selectCookieFile) {
-      setMessage('Native cookie file picker is not available. Restart Argys Anty and try again.');
+      setMessage('Native cookie file picker is not available. Restart Argus Launcher and try again.');
       return;
     }
     try {
@@ -5802,7 +5833,7 @@ main().catch((error) => {
     return (
       <main className="login-shell">
         <LoadingState
-          label={startupFailed ? 'Argys Anty is not ready' : 'Preparing Argys Anty'}
+          label={startupFailed ? 'Argus Launcher is not ready' : 'Preparing Argus Launcher'}
           detail={startupDetail}
           failed={startupFailed}
           onRetry={browserFailed ? () => void native?.downloadBrowserResource?.().then(setResourceState) : undefined}
@@ -5816,12 +5847,44 @@ main().catch((error) => {
       <main className="login-shell">
         <section className="login-panel">
           <Shield size={34} />
-          <h1>Sign in to Argys Anty</h1>
+          <h1>Sign in to Argus Launcher</h1>
           <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
-          <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
-          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
-          <button onClick={signIn}>Sign in</button>
-          {message && <span className="message">{message}</span>}
+          <form className="login-form" onSubmit={signIn}>
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Email"
+              type="email"
+              autoComplete="username"
+              autoFocus
+              required
+            />
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+            <button type="submit" disabled={signInBusy}>
+              {signInBusy ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+          {signInError && <span className="message error">{signInError}</span>}
+          <div className="login-links">
+            <button type="button" className="link" onClick={() => openAccountPage('/signup')}>
+              Create an account
+            </button>
+            <span aria-hidden="true">·</span>
+            <button type="button" className="link" onClick={() => openAccountPage('/forgot-password')}>
+              Forgot password?
+            </button>
+          </div>
+          <p className="login-note">
+            Signing up with Google? Set a password on the web afterwards — the launcher signs
+            in with email and password only.
+          </p>
         </section>
       </main>
     );
@@ -5830,7 +5893,7 @@ main().catch((error) => {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand">Argys Anty</div>
+        <div className="brand">Argus Launcher</div>
         <nav>
           {tabs.map((tab) => (
             <button
@@ -5854,7 +5917,7 @@ main().catch((error) => {
         <header className="topbar">
           <div>
             <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
-            <p>Argys Anty owns cloud data. Argys Browser starts as a separate anonymous process.</p>
+            <p>Argus Launcher owns cloud data. Argys Browser starts as a separate anonymous process.</p>
           </div>
           <div className="actions">
             {/* Only shown when the user is actually in more than one firm --
@@ -6293,7 +6356,7 @@ main().catch((error) => {
                 <h2>{proxyDraft.id ? 'Edit proxy' : proxyDraftSource === 'profile' ? 'Name your proxy' : 'Add proxy'}</h2>
                 <p>{proxyDraftSource === 'profile' ?
                   'Create a proxy and assign it to this profile.' :
-                  'Proxy settings are stored in Argys Anty and assigned to profiles on launch.'}</p>
+                  'Proxy settings are stored in Argus Launcher and assigned to profiles on launch.'}</p>
               </div>
               <button className="icon-button" aria-label="Close" onClick={closeProxyDraft}><X size={18} /></button>
             </header>

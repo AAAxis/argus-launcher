@@ -37,7 +37,7 @@
   },
   "build": {
     "appId": "com.argys.anty",
-    "productName": "Argys Anty",
+    "productName": "Argus Launcher",
     "buildVersion": "1.0.26.0",
     "icon": "assets/app.icns",
     "artifactName": "Argys-Anty-${version}-${os}-${arch}.${ext}",

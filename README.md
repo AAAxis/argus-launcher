@@ -1,18 +1,18 @@
-# Argys Anty
+# Argus Launcher
 
 **The control plane for anonymous, disposable browser identities.**
 
-Argys Anty is the desktop app that manages everything about your browser
+Argus Launcher is the desktop app that manages everything about your browser
 profiles — proxies, cookies, extensions, fingerprints — without ever letting
 that data touch the browser session itself. Every profile it launches starts
 from zero: no shared state, no cross-contamination, no fingerprint leakage
-between identities. The browser only ever sees what Argys Anty hands it at
+between identities. The browser only ever sees what Argus Launcher hands it at
 launch time, and nothing more.
 
 We built it because every other multi-profile browser tool we tried made the
 same mistake: mixing management state (accounts, proxy pools, saved cookies)
 into the same process as the actual browsing session. That's a liability, not
-a feature. Argys Anty keeps them apart on purpose.
+a feature. Argus Launcher keeps them apart on purpose.
 
 ## What it does
 
@@ -32,30 +32,30 @@ a feature. Argys Anty keeps them apart on purpose.
 
 ## Architecture: two processes, one boundary
 
-Argys Anty is one half of a deliberate two-process design:
+Argus Launcher is one half of a deliberate two-process design:
 
 ```
-┌─────────────────────┐        launch payload        ┌──────────────────────┐
-│      Argys Anty      │ ─────────────────────────────▶│    Argys Browser      │
-│  (this repo, open      │   (proxy, fingerprint,       │  (proprietary,        │
-│   source)              │    cookies, extensions)       │   closed source)      │
+┌───────────────────────┐        launch payload         ┌───────────────────────┐
+│    Argus Launcher     │ ─────────────────────────────▶│    Argys Browser      │
+│  (this repo, open     │   (proxy, fingerprint,        │  (proprietary,        │
+│   source)             │    cookies, extensions)       │   closed source)      │
 │                       │                               │                       │
 │  owns:                │                               │  owns:                │
-│  · account/session      │                               │  · profile runtime    │
-│  · cloud-synced        │                               │  · proxy application  │
-│    profiles/proxies/   │                               │  · extension loading  │
-│    cookies/folders     │                               │  · fingerprint flags  │
-│  · API tokens          │                               │  · session cookies    │
-└─────────────────────┘                               └──────────────────────┘
+│  · account/session    │                               │  · profile runtime    │
+│  · cloud-synced       │                               │  · proxy application  │
+│    profiles/proxies/  │                               │  · extension loading  │
+│    cookies/folders    │                               │  · fingerprint flags  │
+│  · API tokens         │                               │  · session cookies    │
+└───────────────────────┘                               └───────────────────────┘
 ```
 
-Argys Anty never embeds browser UI, and Argys Browser never signs in to an
+Argus Launcher never embeds browser UI, and Argys Browser never signs in to an
 account or shows any management surface. Each browser session is handed
 exactly one launch payload and nothing else — it doesn't know your account
 exists.
 
 Argys Browser is our proprietary anti-detect Chromium engine — it's closed
-source and distributed as a compiled binary that Argys Anty downloads and
+source and distributed as a compiled binary that Argus Launcher downloads and
 launches on demand. This repo is the entire open-source surface of the
 product: the control plane, the UI, and the launch orchestration.
 

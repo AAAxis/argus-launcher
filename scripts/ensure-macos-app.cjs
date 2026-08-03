@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const sourceApp = path.join(root, 'node_modules/electron/dist/Electron.app');
-const targetApp = path.join(os.homedir(), 'Applications/Argys Anty.app');
+const targetApp = path.join(os.homedir(), 'Applications/Argus Launcher.app');
 const targetContents = path.join(targetApp, 'Contents');
 const targetResources = path.join(targetContents, 'Resources');
 const plistPath = path.join(targetContents, 'Info.plist');
@@ -42,8 +42,8 @@ fs.mkdirSync(path.dirname(targetApp), {recursive: true});
 fs.cpSync(sourceApp, targetApp, {recursive: true, verbatimSymlinks: true});
 
 let plist = fs.readFileSync(plistPath, 'utf8');
-plist = replacePlistString(plist, 'CFBundleName', 'Argys Anty');
-plist = replacePlistString(plist, 'CFBundleDisplayName', 'Argys Anty');
+plist = replacePlistString(plist, 'CFBundleName', 'Argus Launcher');
+plist = replacePlistString(plist, 'CFBundleDisplayName', 'Argus Launcher');
 plist = replacePlistString(plist, 'CFBundleIdentifier', 'com.argys.anty');
 plist = replacePlistString(plist, 'CFBundleIconFile', 'app');
 fs.writeFileSync(plistPath, plist);

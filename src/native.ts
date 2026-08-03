@@ -147,6 +147,10 @@ type ArgusNative = {
     base: string,
   ): Promise<{ok: boolean; path?: string; error?: string}>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
+  // Opens a page in the user's real browser. The main process only honours
+  // https: URLs on hosts we own (plus localhost in dev), so a rejected URL
+  // resolves false rather than throwing.
+  openExternal?(url: string): Promise<boolean>;
   getUpdateStatus?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;

@@ -336,7 +336,7 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
     .catch((e) => console.error('setPanelBehavior failed:', e));
 }
 
-// Argys Anty (the Argus launcher) now bundles this extension for EVERY
+// Argus Launcher (the Argus launcher) now bundles this extension for EVERY
 // profile (so the toolbar icon/manual toggle is always available), but only
 // wants it to auto-connect on launch when the user actually picked "Free
 // Proxy" mode -- never alongside a real assigned proxy (a second, competing

@@ -1,4 +1,4 @@
-# launcher/ — Argys Anty
+# launcher/ — Argus Launcher
 
 Electron + React + Vite desktop app. The **control plane**: everything to do with
 accounts, cloud state, billing, and deciding what a browser session gets handed.

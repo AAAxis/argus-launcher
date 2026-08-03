@@ -1,4 +1,4 @@
-const {app, BrowserWindow, dialog, ipcMain, nativeImage} = require('electron');
+const {app, BrowserWindow, dialog, ipcMain, nativeImage, shell} = require('electron');
 const {autoUpdater} = require('electron-updater');
 const {spawn, spawnSync} = require('node:child_process');
 const crypto = require('node:crypto');
@@ -10,9 +10,9 @@ const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 
-app.setName('Argys Anty');
+app.setName('Argus Launcher');
 app.setAboutPanelOptions({
-  applicationName: 'Argys Anty',
+  applicationName: 'Argus Launcher',
   applicationVersion: app.getVersion(),
   credits: 'Developed by Dmitry Polskoy\nhttps://www.linkedin.com/in/dmitry-polskoy-a46103177/',
   website: 'https://www.linkedin.com/in/dmitry-polskoy-a46103177/',
@@ -744,7 +744,7 @@ function createWindow() {
     app.dock?.setIcon(nativeImage.createFromPath(icon));
   }
   const win = new BrowserWindow({
-    title: 'Argys Anty',
+    title: 'Argus Launcher',
     width: 1180,
     height: 760,
     minWidth: 980,
@@ -1842,7 +1842,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
         ok: false,
         error: `Proxy ${payload.proxy.host}:${payload.proxy.port} did not respond` +
           `${proxyCheck.error ? ` (${proxyCheck.error})` : ''}. Fix the proxy in ` +
-          'Argys Anty and try again.',
+          'Argus Launcher and try again.',
       };
     }
   }
@@ -1972,6 +1972,47 @@ ipcMain.handle('argus:launch-profile', async (_event, payload, extraArgs) => {
 
 ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
   return checkProxy(proxy);
+});
+
+// The renderer can ask us to open a page in the user's real browser -- used by
+// the sign-in screen for "create an account" and "forgot password", which live
+// on the web rather than in the launcher.
+//
+// openExternal hands the string to the OS, so an unfiltered renderer-supplied
+// value is a command-injection surface (file:, and on Windows anything the
+// shell knows how to run). Only ever pass through https: URLs on a host we own.
+const EXTERNAL_URL_HOSTS = new Set([
+  'browserargus.com',
+  'www.browserargus.com',
+]);
+
+function externalUrlAllowed(raw) {
+  if (typeof raw !== 'string' || raw.length > 2048) {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  // Dev only: the landing site runs on plain http at localhost, so without this
+  // the sign-in links are untestable before deploy. Never widened in a build.
+  if (process.env.ARGUS_LAUNCHER_DEV === '1' &&
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
+    return true;
+  }
+  return parsed.protocol === 'https:' && EXTERNAL_URL_HOSTS.has(parsed.hostname);
+}
+
+ipcMain.handle('argus:open-external', async (_event, url) => {
+  if (!externalUrlAllowed(url)) {
+    console.log('[open-external] refused:', typeof url === 'string' ? url.slice(0, 120) : typeof url);
+    return false;
+  }
+  await shell.openExternal(url);
+  return true;
 });
 
 ipcMain.handle('argus:update-status', async () => {
@@ -2732,7 +2773,7 @@ function isLoopbackRedirectUri(value) {
 // Standard "loopback OAuth" pattern used by CLI tools (gh, gcloud, aws) when
 // there's no hosted authorization server: the client (e.g. Hive, running on
 // this same machine) opens this URL in a real browser, the user approves
-// inside Argys Anty itself, and Anty redirects back to the client's own
+// inside Argus Launcher itself, and Anty redirects back to the client's own
 // local callback with a short-lived one-time code. /v1/oauth/token then
 // exchanges that code for the actual key -- so the long-lived token never
 // sits in a URL/browser history, only the disposable code does.
@@ -2753,7 +2794,7 @@ function handleOAuthAuthorize(req, res, parsedUrl) {
     return;
   }
   if (!mainWindow) {
-    sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+    sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
     return;
   }
   mainWindow.show();
@@ -2763,7 +2804,7 @@ function handleOAuthAuthorize(req, res, parsedUrl) {
   // give it real time instead of the usual short automation timeout.
   const timeout = setTimeout(() => {
     pendingAutomationRequests.delete(requestId);
-    sendJson(res, 504, {status: false, msg: 'Timed out waiting for approval in Argys Anty'});
+    sendJson(res, 504, {status: false, msg: 'Timed out waiting for approval in Argus Launcher'});
   }, 5 * 60 * 1000);
   pendingAutomationRequests.set(requestId, {res, timeout, redirectUri, state});
   mainWindow.webContents.send('argus:oauth-authorize-request', {
@@ -2863,13 +2904,13 @@ function startAutomationApiServer() {
     }
     if (req.method === 'GET' && parsedUrl.pathname === '/v1/profiles') {
       if (!mainWindow) {
-        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
         return;
       }
       const requestId = crypto.randomUUID();
       const timeout = setTimeout(() => {
         pendingAutomationRequests.delete(requestId);
-        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
+        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argus Launcher to respond'});
       }, AUTOMATION_REQUEST_TIMEOUT_MS);
       pendingAutomationRequests.set(requestId, {res, timeout});
       mainWindow.webContents.send('argus:list-profiles-request', {
@@ -2881,13 +2922,13 @@ function startAutomationApiServer() {
     }
     if (req.method === 'GET' && parsedUrl.pathname === '/v1/proxies') {
       if (!mainWindow) {
-        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
         return;
       }
       const requestId = crypto.randomUUID();
       const timeout = setTimeout(() => {
         pendingAutomationRequests.delete(requestId);
-        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
+        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argus Launcher to respond'});
       }, AUTOMATION_REQUEST_TIMEOUT_MS);
       pendingAutomationRequests.set(requestId, {res, timeout});
       mainWindow.webContents.send('argus:list-proxies-request', {requestId});
@@ -2939,7 +2980,7 @@ function startAutomationApiServer() {
         return;
       }
       if (!mainWindow) {
-        sendJson(res, 503, {status: false, msg: 'Argys Anty window is not open'});
+        sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
         return;
       }
       const isPushLocal = parsedUrl.pathname === '/v1/cookies/push-local';
@@ -3075,7 +3116,7 @@ function startAutomationApiServer() {
       const requestId = crypto.randomUUID();
       const timeout = setTimeout(() => {
         pendingAutomationRequests.delete(requestId);
-        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argys Anty to respond'});
+        sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argus Launcher to respond'});
       }, AUTOMATION_REQUEST_TIMEOUT_MS);
       pendingAutomationRequests.set(requestId, isLaunchAutomation ?
         {res, timeout, cdpPort, profileId: payload.profileId, keyId: key.id} :

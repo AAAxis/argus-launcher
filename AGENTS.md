@@ -1,4 +1,4 @@
-# Argys Anty Agent Notes
+# Argus Launcher Agent Notes
 
 Handoff memory for agent sessions working on the launcher.
 
@@ -9,11 +9,11 @@ Start with `../ARGUS.md` (the tree map) and `LAUNCHER.md` (this folder in detail
 
 Two separate apps/processes:
 
-- **Argys Anty** — Electron launcher/manager, this folder (`E:\argus\launcher`).
+- **Argus Launcher** — Electron launcher/manager, this folder (`E:\argus\launcher`).
 - **Argys Browser** — Chromium-based anonymous browser (`E:\argus\browser\src`), built
   and installed separately.
 
-Do not run the launcher dashboard inside Argys Browser. Argys Anty owns Supabase login,
+Do not run the launcher dashboard inside Argys Browser. Argus Launcher owns Supabase login,
 profiles, proxies, folders, statuses, bookmarks, shared extensions, API docs/tokens,
 billing, and launch payloads. Argys Browser must stay anonymous and should only receive a
 profile runtime payload from the launcher.

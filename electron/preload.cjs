@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('argusNative', {
   applyIntegrationConfig: (integrationId, dir, token, base) =>
     ipcRenderer.invoke('argus:apply-integration-config', {integrationId, dir, token, base}),
   checkProxy: (proxy) => ipcRenderer.invoke('argus:check-proxy', proxy),
+  openExternal: (url) => ipcRenderer.invoke('argus:open-external', url),
   getUpdateStatus: () => ipcRenderer.invoke('argus:update-status'),
   checkForUpdates: () => ipcRenderer.invoke('argus:check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('argus:download-update'),
