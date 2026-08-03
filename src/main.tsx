@@ -1706,6 +1706,19 @@ function updateStatusLabel(state: UpdateState | null) {
   return 'Ready to check';
 }
 
+// Google's mark, inline. Lucide has no brand icons and their guidelines require
+// the official four-colour G on a sign-in button.
+function GoogleMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.34A9 9 0 0 0 9 18z" />
+      <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.94H.96a9 9 0 0 0 0 8.12l3-2.34z" />
+      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.94l3 2.34C4.68 5.16 6.66 3.58 9 3.58z" />
+    </svg>
+  );
+}
+
 function App() {
   // Which tenant we are looking at. Every src/db call below takes this id
   // explicitly; OrgProvider resolves it from the user's org_members rows and
@@ -2852,12 +2865,98 @@ function App() {
     }
   }
 
-  // Registration, Google sign-in and password reset all live on the web -- the
-  // launcher only ever does the email+password grant. Anything opened here goes
+  // Registration and password reset live on the web. Anything opened here goes
   // to the real browser via the main process, which allowlists the host.
   function openAccountPage(pathname: string) {
     void native?.openExternal?.(`${SITE_URL}${pathname}`);
   }
+
+  // Google sign-in, PKCE style (RFC 8252). We ask Supabase for the authorize
+  // URL rather than letting it navigate (skipBrowserRedirect), open that in the
+  // user's real browser, and Supabase redirects back to argus://auth?code=...
+  // once Google approves. The code_verifier that matches this request stays in
+  // this renderer's storage and is never sent anywhere, so the code in the deep
+  // link is useless to anyone who intercepts it.
+  async function signInWithGoogle() {
+    if (signInBusy) {
+      return;
+    }
+    if (!supabase) {
+      setSignInError('Supabase env is missing in .env');
+      return;
+    }
+    if (!native?.openExternal) {
+      setSignInError('Google sign-in needs the desktop app shell. Restart Argus Launcher and try again.');
+      return;
+    }
+    setSignInBusy(true);
+    setSignInError('');
+    try {
+      const {data, error} = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {redirectTo: 'argus://auth', skipBrowserRedirect: true},
+      });
+      if (error) {
+        setSignInError(error.message);
+        return;
+      }
+      if (!data?.url) {
+        setSignInError('Could not start Google sign-in.');
+        return;
+      }
+      const opened = await native.openExternal(data.url);
+      if (!opened) {
+        setSignInError('Could not open your browser to finish signing in.');
+        return;
+      }
+      setSignInError('Finish signing in with Google in your browser…');
+    } catch (caught) {
+      setSignInError(caught instanceof Error ? caught.message : 'Google sign-in failed.');
+    } finally {
+      setSignInBusy(false);
+    }
+  }
+
+  // The other half of the flow: the main process hands us whatever came back
+  // through argus://. Exchanging the code establishes the session, and
+  // OrgProvider's onAuthStateChange takes it from there (including bootstrapping
+  // an org for a brand-new account), so there is nothing else to do here.
+  useEffect(() => {
+    if (!native?.onDeepLink) {
+      return;
+    }
+    const unsubscribe = native.onDeepLink((payload) => {
+      // Action only -- never the payload, which carries an authorization code.
+      console.log('[deep-link] renderer received:', payload.action);
+      if (payload.action !== 'auth') {
+        return;
+      }
+      if (payload.error) {
+        setSignInError(payload.error);
+        return;
+      }
+      if (!payload.code || !supabase) {
+        return;
+      }
+      setSignInBusy(true);
+      setSignInError('');
+      supabase.auth.exchangeCodeForSession(payload.code)
+          .then(({error}) => {
+            if (error) {
+              console.log('[deep-link] code exchange failed:', error.message);
+              setSignInError(error.message);
+            }
+          })
+          .catch((caught: unknown) => {
+            setSignInError(caught instanceof Error ? caught.message : 'Could not complete Google sign-in.');
+          })
+          .finally(() => setSignInBusy(false));
+    });
+    // Tells the main process we are listening, so a link that arrived during a
+    // cold start gets replayed instead of dropped.
+    void native.deepLinkReady?.();
+    return unsubscribe;
+  }, []);
 
   async function signOut() {
     await supabase?.auth.signOut();
@@ -5849,6 +5948,13 @@ main().catch((error) => {
           <Shield size={34} />
           <h1>Sign in to Argus Launcher</h1>
           <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
+          <button type="button" className="google-button" onClick={signInWithGoogle} disabled={signInBusy}>
+            <GoogleMark />
+            Continue with Google
+          </button>
+          <div className="login-divider">
+            <span />or<span />
+          </div>
           <form className="login-form" onSubmit={signIn}>
             <input
               value={email}
@@ -5881,10 +5987,6 @@ main().catch((error) => {
               Forgot password?
             </button>
           </div>
-          <p className="login-note">
-            Signing up with Google? Set a password on the web afterwards — the launcher signs
-            in with email and password only.
-          </p>
         </section>
       </main>
     );

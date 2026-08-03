@@ -41,6 +41,14 @@
     "buildVersion": "1.0.26.0",
     "icon": "assets/app.icns",
     "artifactName": "Argys-Anty-${version}-${os}-${arch}.${ext}",
+    "protocols": [
+      {
+        "name": "Argus Launcher",
+        "schemes": [
+          "argus"
+        ]
+      }
+    ],
     "directories": {
       "output": "release"
     },

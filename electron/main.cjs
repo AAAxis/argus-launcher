@@ -10,6 +10,129 @@ const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 
+// ── argus:// deep links ──────────────────────────────────────────────────────
+// Two shapes, and nothing else is honoured:
+//   argus://auth?code=...  the PKCE authorization code coming back from Google
+//                          via Supabase. Exchanged in the renderer, which is
+//                          the only place the matching code_verifier exists.
+//   argus://open           just focus (or start) the app. Carries no credential.
+//
+// The single-instance lock below is load-bearing, not hygiene: on Windows and
+// Linux a deep link is delivered as argv to the ALREADY RUNNING instance via
+// 'second-instance', which never fires without the lock. It also fixes a real
+// bug -- without it a second launch starts a whole second app that then fails
+// to bind the automation API port, stranding the user on "not ready" instead of
+// focusing the window they already had.
+const DEEP_LINK_SCHEME = 'argus';
+
+// Deep links can arrive before there is a window to send them to -- on macOS
+// 'open-url' routinely fires before whenReady. Hold them until the renderer
+// says it is listening, then replay.
+let deepLinkQueue = [];
+let deepLinkReady = false;
+
+function parseDeepLink(raw) {
+  if (typeof raw !== 'string' || !raw.startsWith(`${DEEP_LINK_SCHEME}://`)) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  // URL puts the first path segment in `hostname` for custom schemes.
+  const action = parsed.hostname;
+  if (action === 'auth') {
+    const code = parsed.searchParams.get('code');
+    const error = parsed.searchParams.get('error_description') || parsed.searchParams.get('error');
+    if (code) {
+      return {action: 'auth', code};
+    }
+    return {action: 'auth', error: error || 'Sign-in was cancelled or failed.'};
+  }
+  if (action === 'open') {
+    return {action: 'open'};
+  }
+  return null;
+}
+
+function focusMainWindow() {
+  if (!mainWindow) {
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function handleDeepLink(raw) {
+  const payload = parseDeepLink(raw);
+  if (!payload) {
+    // Do not log the raw URL: on the auth path it carries an authorization code.
+    console.log('[deep-link] ignored an unrecognised argus:// URL');
+    return;
+  }
+  focusMainWindow();
+  if (payload.action === 'open') {
+    return;
+  }
+  if (!deepLinkReady || !mainWindow) {
+    deepLinkQueue.push(payload);
+    return;
+  }
+  mainWindow.webContents.send('argus:deep-link', payload);
+}
+
+function flushDeepLinkQueue() {
+  if (!deepLinkReady || !mainWindow) {
+    return;
+  }
+  const pending = deepLinkQueue;
+  deepLinkQueue = [];
+  for (const payload of pending) {
+    mainWindow.webContents.send('argus:deep-link', payload);
+  }
+}
+
+function deepLinkFromArgv(argv) {
+  return (argv || []).find((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_SCHEME}://`)) || null;
+}
+
+// In dev the executable is Electron itself, so the scheme has to be registered
+// against that binary plus the app path -- otherwise the OS hands argus:// to a
+// bare Electron with no project and nothing happens.
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  // A copy is already running. Hand it whatever we were launched with and quit
+  // -- 'second-instance' fires over there.
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    focusMainWindow();
+    const link = deepLinkFromArgv(argv);
+    if (link) {
+      handleDeepLink(link);
+    }
+  });
+}
+
+// macOS delivers deep links here rather than through argv.
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
 app.setName('Argus Launcher');
 app.setAboutPanelOptions({
   applicationName: 'Argus Launcher',
@@ -758,9 +881,14 @@ function createWindow() {
     },
   });
   mainWindow = win;
+  // A fresh renderer has not subscribed yet; it re-arms this via
+  // argus:deep-link-ready. Without the reset, a link arriving during a reload
+  // would be sent into a window that is not listening and lost.
+  deepLinkReady = false;
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null;
+      deepLinkReady = false;
     }
   });
 
@@ -1986,6 +2114,20 @@ const EXTERNAL_URL_HOSTS = new Set([
   'www.browserargus.com',
 ]);
 
+// Google sign-in starts at the Supabase project's authorize endpoint, so that
+// has to be openable too. The project URL lives in VITE_SUPABASE_URL, which is
+// a renderer-side value -- Vite inlines it into the bundle and this process
+// never loads .env -- so it cannot be read here to build an exact-host rule.
+//
+// Instead of hardcoding a project id that would silently stop matching if the
+// project changed, allow Supabase's authorize endpoint and nothing else: the
+// path must be exactly /auth/v1/authorize. That is narrow enough that the worst
+// a bad caller could do is open some other project's Google consent screen.
+function isSupabaseAuthorizeUrl(parsed) {
+  return parsed.hostname.endsWith('.supabase.co') &&
+    parsed.pathname === '/auth/v1/authorize';
+}
+
 function externalUrlAllowed(raw) {
   if (typeof raw !== 'string' || raw.length > 2048) {
     return false;
@@ -2003,8 +2145,19 @@ function externalUrlAllowed(raw) {
       (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
     return true;
   }
-  return parsed.protocol === 'https:' && EXTERNAL_URL_HOSTS.has(parsed.hostname);
+  if (parsed.protocol !== 'https:') {
+    return false;
+  }
+  return EXTERNAL_URL_HOSTS.has(parsed.hostname) || isSupabaseAuthorizeUrl(parsed);
 }
+
+// The renderer calls this once it has subscribed to argus:deep-link. Anything
+// that arrived before then (a cold start straight from a deep link) is replayed.
+ipcMain.handle('argus:deep-link-ready', async () => {
+  deepLinkReady = true;
+  flushDeepLinkQueue();
+  return true;
+});
 
 ipcMain.handle('argus:open-external', async (_event, url) => {
   if (!externalUrlAllowed(url)) {
@@ -3249,6 +3402,13 @@ app.whenReady().then(() => {
   configureAutoUpdater();
   createWindow();
   void ensureBrowserResource({manual: false});
+  // Cold start from a deep link on Windows/Linux: the URL is in our own argv
+  // rather than arriving via 'second-instance'. macOS uses 'open-url', which
+  // may already have queued something by now.
+  const initialLink = deepLinkFromArgv(process.argv);
+  if (initialLink) {
+    handleDeepLink(initialLink);
+  }
 });
 app.whenReady().then(startAutomationApiServer);
 

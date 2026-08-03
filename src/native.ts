@@ -151,6 +151,14 @@ type ArgusNative = {
   // https: URLs on hosts we own (plus localhost in dev), so a rejected URL
   // resolves false rather than throwing.
   openExternal?(url: string): Promise<boolean>;
+  // argus:// deep links. `auth` carries the PKCE authorization code back from
+  // Google-via-Supabase; `open` just means "focus the app" and carries nothing.
+  // Call deepLinkReady() after subscribing -- links that arrived during a cold
+  // start are queued in the main process and replayed on that signal.
+  onDeepLink?(
+    callback: (payload: {action: 'auth'; code?: string; error?: string} | {action: 'open'}) => void,
+  ): () => void;
+  deepLinkReady?(): Promise<boolean>;
   getUpdateStatus?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;

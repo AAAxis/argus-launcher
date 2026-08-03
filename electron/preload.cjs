@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('argusNative', {
     ipcRenderer.invoke('argus:apply-integration-config', {integrationId, dir, token, base}),
   checkProxy: (proxy) => ipcRenderer.invoke('argus:check-proxy', proxy),
   openExternal: (url) => ipcRenderer.invoke('argus:open-external', url),
+  onDeepLink: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:deep-link', listener);
+    return () => ipcRenderer.removeListener('argus:deep-link', listener);
+  },
+  deepLinkReady: () => ipcRenderer.invoke('argus:deep-link-ready'),
   getUpdateStatus: () => ipcRenderer.invoke('argus:update-status'),
   checkForUpdates: () => ipcRenderer.invoke('argus:check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('argus:download-update'),
