@@ -92,7 +92,8 @@ none, shows a header switcher when they have several, and persists the choice in
 again on window focus (throttled to 10s) so a second worker's changes arrive without a
 restart.
 
-Still in `src/main.tsx`: `signIn()` / `signOut()` (Supabase email+password), and
+Still in `src/main.tsx`: `requestCode()` / `verifyCode()` / `signOut()` (Supabase email OTP,
+plus `signInWithGoogle()` over PKCE), and
 `tokenForEmail()` — **not a real token**, a client-side FNV-1a hash of the email, so anyone
 who knows an email can compute that user's "API token". Replaced in `prompts/07`.
 

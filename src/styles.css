@@ -210,6 +210,28 @@ textarea {
   color: var(--accent);
 }
 
+/* The resend button spends its first minute disabled by the OTP cooldown, and
+   an underlined accent-coloured control that ignores clicks reads as broken. */
+.login-links .link:disabled {
+  color: var(--ink-soft);
+  cursor: default;
+  text-decoration: none;
+}
+
+/* The one-line hint under the email step, rather than a link pair. */
+.login-links .hint {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Six digits are read back character by character, so give them room. */
+.login-panel input.otp-code {
+  font-size: 18px;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
 .google-button {
   align-items: center;
   background: white;

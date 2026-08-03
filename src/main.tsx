@@ -12,14 +12,83 @@ import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, BuiltInExtensio
 import {useAsyncAction} from './useAsyncAction';
 import './styles.css';
 
-// Where the account pages live. Registration, Google sign-in and password
-// reset are all web-only -- the launcher does the email+password grant and
-// nothing else -- so the sign-in screen links out to these.
+// Where the account pages live. Two uses: the sign-in screen links out to
+// registration and password reset, and Google sign-in redirects back through
+// /auth/desktop here so the OAuth flow ends on a page the browser can render
+// rather than stranding the user on a spinning tab.
+//
+// In dev this still points at production unless VITE_SITE_URL is set; point it
+// at http://localhost:3000 to exercise the hand-off against a local site.
 //
 // The main process independently allowlists which hosts it will open, so
 // pointing this at some other origin does not widen what can be launched.
 const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined)?.replace(/\/+$/, '') ||
   'https://www.browserargus.com';
+
+// Supabase's per-address cooldown between sending one code and the next.
+const OTP_RESEND_COOLDOWN_MS = 60_000;
+// Must match Auth -> Providers -> Email -> Email OTP Length in the dashboard.
+const OTP_CODE_LENGTH = 6;
+// Must not outlive Email OTP Expiration, or we restore a step whose code is dead.
+const OTP_MAX_AGE_MS = 10 * 60_000;
+
+// A code request that has not been completed yet. Quitting the launcher used to
+// throw this away, so reopening it meant retyping the email and getting refused
+// by the 60s cooldown -- a dead end that did not exist with passwords, since the
+// code sitting in the user's inbox is still perfectly valid.
+const PENDING_OTP_KEY = 'argus.pendingOtp';
+
+type PendingOtp = {email: string; resendAt: number; sentAt: number};
+
+function readPendingOtp(): PendingOtp | null {
+  try {
+    const raw = window.localStorage.getItem(PENDING_OTP_KEY);
+    if (!raw) {
+      return null;
+    }
+    const pending = JSON.parse(raw) as PendingOtp;
+    if (!pending?.email || Date.now() - pending.sentAt > OTP_MAX_AGE_MS) {
+      window.localStorage.removeItem(PENDING_OTP_KEY);
+      return null;
+    }
+    return pending;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingOtp(pending: PendingOtp | null): void {
+  try {
+    if (pending) {
+      window.localStorage.setItem(PENDING_OTP_KEY, JSON.stringify(pending));
+    } else {
+      window.localStorage.removeItem(PENDING_OTP_KEY);
+    }
+  } catch {
+    // Private-mode / disabled storage: sign-in still works for this run.
+  }
+}
+
+// GoTrue answers a mistyped code, an expired code and an unknown address with
+// the same error on purpose, so one sentence has to cover all three. Switch on
+// `code` -- the messages are prose, not API.
+function describeAuthError(error: {code?: string; message: string}): string {
+  switch (error.code) {
+    case 'otp_expired':
+      return 'That code is not valid, or it has expired. Check it and try again, or send a new one.';
+    case 'over_email_send_rate_limit':
+      return 'Too many codes requested. Wait a minute and try again.';
+    case 'over_request_rate_limit':
+      return 'Too many attempts. Try again in a few minutes.';
+    case 'validation_failed':
+    case 'email_address_invalid':
+      return 'That email address does not look right.';
+    case 'otp_disabled':
+      return 'Email sign-in is unavailable right now. Please use Continue with Google.';
+    default:
+      return error.message;
+  }
+}
 
 type TabId = 'profiles' | 'proxies' | 'cookies' | 'bookmarks' | 'extensions' | 'integrations' | 'api';
 
@@ -1726,13 +1795,41 @@ function App() {
   const org = useOrg();
   const orgId = org.orgId;
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
+  // Passwordless sign-in is two steps: ask for a code, then enter it.
+  const [otpStep, setOtpStep] = useState<'email' | 'code'>('email');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpNotice, setOtpNotice] = useState('');
+  const [otpResendAt, setOtpResendAt] = useState(0);
+  const [otpCooldown, setOtpCooldown] = useState(0);
   // Sign-in gets its own error/busy state rather than reusing `message`: that
   // one is the app-wide toast and self-clears after 5s (see below), which on a
-  // login form means a wrong-password error silently disappears mid-read.
+  // login form means a wrong-code error silently disappears mid-read -- exactly
+  // when the user is squinting at six digits trying to spot the typo.
   const [signInError, setSignInError] = useState('');
   const [signInBusy, setSignInBusy] = useState(false);
+  // Counts the resend button down. Supabase enforces the same window per
+  // address server-side, so this only mirrors what the API will allow.
+  useEffect(() => {
+    if (!otpResendAt) {
+      return;
+    }
+    const tick = () => setOtpCooldown(Math.max(0, Math.ceil((otpResendAt - Date.now()) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [otpResendAt]);
+  // Pick a half-finished sign-in back up after a quit or a reload, so the code
+  // already sitting in the user's inbox is still usable.
+  useEffect(() => {
+    const pending = readPendingOtp();
+    if (!pending) {
+      return;
+    }
+    setEmail(pending.email);
+    setOtpResendAt(pending.resendAt);
+    setOtpStep('code');
+  }, []);
   const [message, setMessage] = useState('');
   // Auto-dismiss the floating status-toast after a few seconds -- as an
   // inline footer this never needed a timer, but a floating corner banner
@@ -2839,7 +2936,51 @@ function App() {
     }));
   }
 
-  async function signIn(event?: React.FormEvent) {
+  // Step 1. There is no separate "register" any more: Supabase creates the
+  // account on the first code request, so this one form is both sign-up and
+  // sign-in. That also means it answers identically for an address that exists
+  // and one that does not, which is the point -- the old form leaked which
+  // emails were registered.
+  async function requestCode(event?: React.FormEvent) {
+    event?.preventDefault();
+    if (signInBusy) {
+      return;
+    }
+    if (!supabase) {
+      setSignInError('Supabase env is missing in .env');
+      return;
+    }
+    const address = email.trim().toLowerCase();
+    setSignInBusy(true);
+    setSignInError('');
+    setOtpNotice('');
+    try {
+      const {error} = await supabase.auth.signInWithOtp({
+        email: address,
+        options: {shouldCreateUser: true},
+      });
+      if (error) {
+        setSignInError(describeAuthError(error));
+        return;
+      }
+      const sentAt = Date.now();
+      const pending: PendingOtp = {email: address, resendAt: sentAt + OTP_RESEND_COOLDOWN_MS, sentAt};
+      writePendingOtp(pending);
+      setEmail(address);
+      setOtpResendAt(pending.resendAt);
+      setOtpStep('code');
+      setOtpNotice(`Code sent to ${address}.`);
+    } finally {
+      setSignInBusy(false);
+    }
+  }
+
+  // Step 2. Unlike the Google path, this is not PKCE: POST /verify hands back a
+  // session directly, so there is no code to exchange and no deep link in play.
+  // OrgProvider's onAuthStateChange picks the session up from here, resolves the
+  // user's organizations (bootstrapping one if they have none) and the orgId
+  // effect above loads the data.
+  async function verifyCode(event?: React.FormEvent) {
     event?.preventDefault();
     if (signInBusy) {
       return;
@@ -2850,33 +2991,57 @@ function App() {
     }
     setSignInBusy(true);
     setSignInError('');
+    setOtpNotice('');
     try {
-      // OrgProvider's onAuthStateChange picks the session up from here, resolves
-      // the user's organizations (bootstrapping one if they have none) and the
-      // orgId effect above loads the data.
-      const {error} = await supabase.auth.signInWithPassword({email, password});
+      // type 'email' is load-bearing: a new account's code lives in
+      // confirmation_token and an existing account's in recovery_token, and
+      // 'email' is the only value that resolves to whichever one applies.
+      const {error} = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: otpCode.trim(),
+        type: 'email',
+      });
       if (error) {
-        setSignInError(error.message);
+        // Leave the input alone -- people fix one digit.
+        setSignInError(describeAuthError(error));
         return;
       }
-      setPassword('');
+      writePendingOtp(null);
+      setOtpCode('');
     } finally {
       setSignInBusy(false);
     }
   }
 
-  // Registration and password reset live on the web. Anything opened here goes
-  // to the real browser via the main process, which allowlists the host.
+  function backToEmailStep() {
+    setOtpStep('email');
+    setOtpCode('');
+    setSignInError('');
+    setOtpNotice('');
+    writePendingOtp(null);
+    // otpResendAt is deliberately left alone: the cooldown is enforced per
+    // address by Supabase, so pretending it reset would just produce a 429.
+  }
+
+  // Billing lives on the web dashboard -- there is nothing to link out to for
+  // sign-in any more, since codes and Google both complete inside the launcher.
+  // Anything opened here goes to the real browser via the main process, which
+  // allowlists the host.
   function openAccountPage(pathname: string) {
     void native?.openExternal?.(`${SITE_URL}${pathname}`);
   }
 
   // Google sign-in, PKCE style (RFC 8252). We ask Supabase for the authorize
   // URL rather than letting it navigate (skipBrowserRedirect), open that in the
-  // user's real browser, and Supabase redirects back to argus://auth?code=...
-  // once Google approves. The code_verifier that matches this request stays in
-  // this renderer's storage and is never sent anywhere, so the code in the deep
-  // link is useless to anyone who intercepts it.
+  // user's real browser, and Supabase redirects back through the website once
+  // Google approves. The code_verifier that matches this request stays in this
+  // renderer's storage and is never sent anywhere, so the code that comes back
+  // is useless to anyone who intercepts it.
+  //
+  // We redirect to /auth/desktop rather than straight to argus://auth because a
+  // custom scheme is not a page: the OS handler fires, but the browser tab is
+  // left on a URL it cannot render and spins forever -- even when sign-in
+  // succeeded. /auth/desktop is a real page that forwards the code onward.
   async function signInWithGoogle() {
     if (signInBusy) {
       return;
@@ -2894,7 +3059,7 @@ function App() {
     try {
       const {data, error} = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {redirectTo: 'argus://auth', skipBrowserRedirect: true},
+        options: {redirectTo: `${SITE_URL}/auth/desktop`, skipBrowserRedirect: true},
       });
       if (error) {
         setSignInError(error.message);
@@ -2921,6 +3086,16 @@ function App() {
   // through argus://. Exchanging the code establishes the session, and
   // OrgProvider's onAuthStateChange takes it from there (including bootstrapping
   // an org for a brand-new account), so there is nothing else to do here.
+  //
+  // Codes we have already tried. An authorization code is strictly single-use:
+  // auth-js drops the stored code_verifier on both the success and the failure
+  // path, so a second exchange of the same code always fails -- and used to do
+  // it loudly, with a library message about SSR frameworks that means nothing
+  // to someone looking at a desktop app. The user gets a repeat delivery
+  // whenever they reload the hand-off tab or re-accept the browser's "Open
+  // Argus Launcher?" prompt, which is common enough to be the normal case.
+  const attemptedAuthCodes = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!native?.onDeepLink) {
       return;
@@ -2938,13 +3113,23 @@ function App() {
       if (!payload.code || !supabase) {
         return;
       }
+      if (attemptedAuthCodes.current.has(payload.code)) {
+        console.log('[deep-link] ignoring an already-used authorization code');
+        return;
+      }
+      attemptedAuthCodes.current.add(payload.code);
       setSignInBusy(true);
       setSignInError('');
       supabase.auth.exchangeCodeForSession(payload.code)
           .then(({error}) => {
             if (error) {
-              console.log('[deep-link] code exchange failed:', error.message);
-              setSignInError(error.message);
+              console.log('[deep-link] code exchange failed:', error.code || error.message);
+              // The verifier is gone because this sign-in was already completed,
+              // or because signing out cleared it. Either way the fix is the
+              // same and it is not what the library's message says it is.
+              setSignInError(error.code === 'pkce_code_verifier_not_found' ?
+                  'That sign-in link was already used. Click Continue with Google to start again.' :
+                  error.message);
             }
           })
           .catch((caught: unknown) => {
@@ -2963,6 +3148,13 @@ function App() {
     setCloudState(defaultState);
     setSelectedId(null);
     setSelectedFolderId('');
+    // Otherwise the next sign-in starts on the code step, waiting for a code
+    // that belongs to the session we just ended.
+    writePendingOtp(null);
+    setOtpStep('email');
+    setOtpCode('');
+    setOtpNotice('');
+    setSignInError('');
   }
 
   function authHeader() {
@@ -5517,6 +5709,13 @@ main().catch((error) => {
             </div>
             <button className="ghost" onClick={signOut}>Sign out</button>
           </section>
+          <section className="settings-section">
+            <div>
+              <h3>Billing</h3>
+              <p>Plans, invoices and payment details live on the web dashboard.</p>
+            </div>
+            <button className="ghost" onClick={() => openAccountPage('/dashboard')}>Manage billing</button>
+          </section>
         </section>
       </div>
     );
@@ -5946,47 +6145,77 @@ main().catch((error) => {
       <main className="login-shell">
         <section className="login-panel">
           <Shield size={34} />
-          <h1>Sign in to Argus Launcher</h1>
-          <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
-          <button type="button" className="google-button" onClick={signInWithGoogle} disabled={signInBusy}>
-            <GoogleMark />
-            Continue with Google
-          </button>
-          <div className="login-divider">
-            <span />or<span />
-          </div>
-          <form className="login-form" onSubmit={signIn}>
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="Email"
-              type="email"
-              autoComplete="username"
-              autoFocus
-              required
-            />
-            <input
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-            <button type="submit" disabled={signInBusy}>
-              {signInBusy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
-          {signInError && <span className="message error">{signInError}</span>}
-          <div className="login-links">
-            <button type="button" className="link" onClick={() => openAccountPage('/signup')}>
-              Create an account
-            </button>
-            <span aria-hidden="true">·</span>
-            <button type="button" className="link" onClick={() => openAccountPage('/forgot-password')}>
-              Forgot password?
-            </button>
-          </div>
+          {otpStep === 'email' ? (
+            <>
+              <h1>Sign in to Argus Launcher</h1>
+              <p>Cloud account required for profiles, proxies, bookmarks, and shared extensions.</p>
+              <button type="button" className="google-button" onClick={signInWithGoogle} disabled={signInBusy}>
+                <GoogleMark />
+                Continue with Google
+              </button>
+              <div className="login-divider">
+                <span />or<span />
+              </div>
+              <form className="login-form" onSubmit={requestCode}>
+                <input
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="Email"
+                  type="email"
+                  autoComplete="username"
+                  autoFocus
+                  required
+                />
+                <button type="submit" disabled={signInBusy}>
+                  {signInBusy ? 'Sending…' : 'Email me a code'}
+                </button>
+              </form>
+              {signInError && <span className="message error">{signInError}</span>}
+              <div className="login-links">
+                <span className="hint">No password needed — entering your email creates your account.</span>
+              </div>
+            </>
+          ) : (
+            // Google and the divider are deliberately absent here: offering a
+            // second way in halfway through one flow is how people end up with
+            // two half-finished attempts and neither completed.
+            <>
+              <h1>Check your email</h1>
+              <p>We sent a {OTP_CODE_LENGTH}-digit code to {email}.</p>
+              <form className="login-form" onSubmit={verifyCode}>
+                <input
+                  className="otp-code"
+                  value={otpCode}
+                  onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, OTP_CODE_LENGTH))}
+                  placeholder={`${OTP_CODE_LENGTH}-digit code`}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={OTP_CODE_LENGTH}
+                  autoFocus
+                  required
+                />
+                <button type="submit" disabled={signInBusy}>
+                  {signInBusy ? 'Verifying…' : 'Verify and sign in'}
+                </button>
+              </form>
+              {signInError && <span className="message error">{signInError}</span>}
+              {!signInError && otpNotice && <span className="message">{otpNotice}</span>}
+              <div className="login-links">
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => void requestCode()}
+                  disabled={signInBusy || otpCooldown > 0}
+                >
+                  {otpCooldown > 0 ? `Resend code (${otpCooldown}s)` : 'Resend code'}
+                </button>
+                <span aria-hidden="true">·</span>
+                <button type="button" className="link" onClick={backToEmailStep}>
+                  Use a different email
+                </button>
+              </div>
+            </>
+          )}
         </section>
       </main>
     );

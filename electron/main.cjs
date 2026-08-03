@@ -2102,9 +2102,9 @@ ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
   return checkProxy(proxy);
 });
 
-// The renderer can ask us to open a page in the user's real browser -- used by
-// the sign-in screen for "create an account" and "forgot password", which live
-// on the web rather than in the launcher.
+// The renderer can ask us to open a page in the user's real browser -- used for
+// the web-only billing dashboard, and for the Google authorize URL that starts
+// desktop sign-in.
 //
 // openExternal hands the string to the OS, so an unfiltered renderer-supplied
 // value is a command-injection surface (file:, and on Windows anything the
