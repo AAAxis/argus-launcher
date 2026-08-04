@@ -12,6 +12,7 @@ import {useCloudData} from './useCloudData';
 import {useCookieActions} from './useCookieActions';
 import {useLibraryActions} from './useLibraryActions';
 import {useProfileActions} from './useProfileActions';
+import {useAutomationActions} from './useAutomationActions';
 import {useProxyActions} from './useProxyActions';
 import type {Toast} from '../hooks/useToast';
 import type {WorkspaceCore} from './core';
@@ -20,6 +21,7 @@ import type {CloudData} from './useCloudData';
 import type {CookieActions} from './useCookieActions';
 import type {LibraryActions} from './useLibraryActions';
 import type {ProfileActions} from './useProfileActions';
+import type {AutomationActions} from './useAutomationActions';
 import type {ProxyActions} from './useProxyActions';
 
 export type WorkspaceValue = {
@@ -29,6 +31,7 @@ export type WorkspaceValue = {
   proxies: ProxyActions;
   library: LibraryActions;
   cookies: CookieActions;
+  automations: AutomationActions;
   // Which profile row is highlighted. Lives here rather than in the Profiles
   // tab because deletes and saves have to keep it pointing at something real.
   selectedProfileId: string | null;
@@ -84,6 +87,10 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   const profiles = useProfileActions(core, proxies);
   const library = useLibraryActions(core);
   const cookies = useCookieActions(core);
+  // Takes orgId and the sign-in state directly rather than through core: run
+  // records are written by whoever is signed in, and a run that starts while
+  // signed out has to buffer to disk instead of failing.
+  const automations = useAutomationActions(core, orgId, Boolean(org.userId));
 
   const {load, reset} = data;
   const {setMessage} = toast;
@@ -161,6 +168,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     proxies,
     library,
     cookies,
+    automations,
     selectedProfileId,
     setSelectedProfileId,
     checkingProxyId,

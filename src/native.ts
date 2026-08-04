@@ -1,4 +1,12 @@
-import type {ArgusProfile, ArgusProxy, RuntimeFingerprint, SharedExtension} from './types';
+import type {
+  ArgusAutomation,
+  ArgusProfile,
+  ArgusProxy,
+  AutomationRun,
+  RuntimeFingerprint,
+  SharedExtension,
+} from './types';
+import type {AutomationVars, RunLogEntry, RunTrigger} from './automations/types';
 
 export type ProxyConfig = {
   id?: string;
@@ -260,6 +268,51 @@ type ArgusNative = {
   // in electron/main.cjs.
   resolveProfileRoot?(root: string): Promise<{path: string; exists: boolean}>;
   revealPath?(target: string): Promise<{ok: boolean; error?: string}>;
+
+  // ── automation runs ──────────────────────────────────────────────────────
+  // The renderer owns the data and this process owns the session, so a run
+  // starts by handing over a fully resolved automation plus a cdpUrl, and
+  // progress comes back through onAutomationRunEvent.
+  //
+  // The renderer cannot allocate its own port (no node:net) and must not hold
+  // the CDP socket (a closed window would abandon a browser mid-run), which is
+  // what splits the work across this boundary at all.
+  reserveCdpPort?(): Promise<number>;
+  // Where a profile's debugging endpoint is, or null. Resolves from this
+  // process's own launch record first and then from Chromium's
+  // DevToolsActivePort file, so a session survives restarting the launcher.
+  resolveProfileCdp?(profileId: string): Promise<{
+    running: boolean;
+    cdpUrl?: string;
+    pid?: number | null;
+    error?: string;
+  }>;
+  // Returns as soon as the run is registered, NOT when it finishes: a real run
+  // is minutes long, so anything that awaited completion would look like a hang.
+  startAutomationRun?(payload: {
+    automation: ArgusAutomation;
+    profile: ArgusProfile;
+    trigger: RunTrigger;
+    cdpUrl: string;
+    vars?: AutomationVars;
+  }): Promise<{ok: boolean; runId?: string; error?: string; status?: number}>;
+  cancelAutomationRun?(runId: string): Promise<{ok: boolean}>;
+  // Runs in flight right now, so a window that reopens mid-run rejoins it
+  // rather than showing nothing.
+  activeAutomationRuns?(): Promise<AutomationRun[]>;
+  readRunScreenshot?(runId: string, name: string): Promise<string | null>;
+  // The crash buffer: runs that reached a terminal status on disk but may never
+  // have been written to Supabase, because the window was closed or the user
+  // was signed out when they finished.
+  pendingAutomationRuns?(): Promise<AutomationRun[]>;
+  markAutomationRunFlushed?(runId: string): Promise<{ok: boolean}>;
+  onAutomationRunEvent?(
+    callback: (event:
+      | {type: 'started'; runId: string; run: AutomationRun}
+      | {type: 'log'; runId: string; entry: RunLogEntry}
+      | {type: 'finished'; runId: string; run: AutomationRun}) => void,
+  ): () => void;
+
   // argus:// deep links. `auth` carries the PKCE authorization code back from
   // Google-via-Supabase; `open` just means "focus the app" and carries nothing.
   // Call deepLinkReady() after subscribing -- links that arrived during a cold

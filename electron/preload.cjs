@@ -25,6 +25,27 @@ contextBridge.exposeInMainWorld('argusNative', {
   setLoginItem: (enabled) => ipcRenderer.invoke('argus:set-login-item', enabled),
   resolveProfileRoot: (root) => ipcRenderer.invoke('argus:resolve-profile-root', root),
   revealPath: (target) => ipcRenderer.invoke('argus:reveal-path', target),
+
+  // ── automation runs ──────────────────────────────────────────────────────
+  // These are the runner's own IPC and deliberately do not go through the
+  // HTTP-forwarding request/result pattern below: nothing here is answering a
+  // loopback API call, so there is no requestId to match back.
+  reserveCdpPort: () => ipcRenderer.invoke('argus:reserve-cdp-port'),
+  resolveProfileCdp: (profileId) =>
+    ipcRenderer.invoke('argus:resolve-profile-cdp', {profileId}),
+  startAutomationRun: (payload) => ipcRenderer.invoke('argus:start-automation-run', payload),
+  cancelAutomationRun: (runId) => ipcRenderer.invoke('argus:cancel-automation-run', {runId}),
+  activeAutomationRuns: () => ipcRenderer.invoke('argus:active-automation-runs'),
+  readRunScreenshot: (runId, name) =>
+    ipcRenderer.invoke('argus:read-run-screenshot', {runId, name}),
+  pendingAutomationRuns: () => ipcRenderer.invoke('argus:pending-automation-runs'),
+  markAutomationRunFlushed: (runId) =>
+    ipcRenderer.invoke('argus:mark-automation-run-flushed', {runId}),
+  onAutomationRunEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:automation-run-event', listener);
+    return () => ipcRenderer.removeListener('argus:automation-run-event', listener);
+  },
   onDeepLink: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:deep-link', listener);

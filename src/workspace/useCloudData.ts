@@ -16,7 +16,8 @@ import {repairProxyAssignments} from '../lib/proxies';
 import {trashCutoffIso} from '../lib/trash';
 import type {Toast} from '../hooks/useToast';
 import type {
-  ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, CloudState, SharedBookmark, SharedExtension,
+  ArgusAutomation, ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, CloudState, SharedBookmark,
+  SharedExtension,
 } from '../types';
 
 export type CloudData = ReturnType<typeof useCloudData>;
@@ -77,6 +78,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setState((current) => ({...current, shared_extensions: fn(current.shared_extensions)})),
     bookmarks: (fn: (list: SharedBookmark[]) => SharedBookmark[]) =>
       setState((current) => ({...current, shared_bookmarks: fn(current.shared_bookmarks)})),
+    automations: (fn: (list: ArgusAutomation[]) => ArgusAutomation[]) =>
+      setState((current) => ({...current, automations: fn(current.automations)})),
   };
 
   // One parallel read per table instead of five sequential selects against one

@@ -12,6 +12,8 @@ const {pathToFileURL} = require('node:url');
 const {resolveFavicon} = require('./favicons.cjs');
 const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
+const automationRunner = require('./automation/runner.cjs');
+const automationStore = require('./automation/store.cjs');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
 // Two shapes, and nothing else is honoured:
@@ -3283,6 +3285,86 @@ function killAutomationLaunch(profileId) {
   return true;
 }
 
+// ── automation runs ─────────────────────────────────────────────────────────
+//
+// The division of labour, and why it is this way round:
+//
+//   the renderer  owns the data. It resolves the automation and the profile,
+//                 builds the launch payload, and writes every run record to
+//                 Supabase. This process still holds no Supabase credentials.
+//   this process  owns the session. It allocates the debugging port, holds the
+//                 CDP socket for the life of the run, and kills what it
+//                 started. The renderer is a window, and window-all-closed does
+//                 not quit on macOS -- a closed window mid-run would otherwise
+//                 abandon a browser that is still being driven.
+//
+// So a run starts with the renderer handing over a fully resolved automation
+// and a cdpUrl, and progress comes back as events.
+
+function sendRunEvent(event) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('argus:automation-run-event', event);
+  }
+}
+
+ipcMain.handle('argus:reserve-cdp-port', async () => {
+  // The renderer has no node:net, so port allocation lives here even though
+  // the launch it belongs to is driven from there.
+  return getFreePort();
+});
+
+// Where a profile's debugging endpoint is, or null. Same two-tier resolution
+// the HTTP API uses, so a run can attach to a session this process did not
+// start -- including one adopted from DevToolsActivePort after a restart.
+ipcMain.handle('argus:resolve-profile-cdp', async (_event, {profileId}) => {
+  try {
+    return await resolveProfileCdp(profileId);
+  } catch (error) {
+    return {running: false, error: error?.message || String(error)};
+  }
+});
+
+ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
+  try {
+    const runId = await automationRunner.start({
+      app,
+      automation: payload.automation,
+      profile: payload.profile,
+      trigger: payload.trigger || 'manual',
+      cdpUrl: payload.cdpUrl,
+      vars: payload.vars,
+      onEvent: sendRunEvent,
+    });
+    return {ok: true, runId};
+  } catch (error) {
+    // 409 (this profile is busy) and 429 (too many runs) are answers, not
+    // crashes -- the caller shows them as a message rather than a failure.
+    return {ok: false, error: error?.message || String(error), status: error?.status || 500};
+  }
+});
+
+ipcMain.handle('argus:cancel-automation-run', async (_event, {runId}) => {
+  return {ok: automationRunner.cancel(runId)};
+});
+
+// A run that is in flight right now, so a reopened window can rejoin one that
+// started before it mounted rather than showing nothing.
+ipcMain.handle('argus:active-automation-runs', async () => automationRunner.activeRuns());
+
+ipcMain.handle('argus:read-run-screenshot', async (_event, {runId, name}) => {
+  return automationStore.readScreenshot(app, runId, name);
+});
+
+// The crash buffer. Runs that reached a terminal status on disk but may never
+// have been written to Supabase -- because the window was closed, or the user
+// was signed out, when they finished.
+ipcMain.handle('argus:pending-automation-runs', async () => automationStore.pendingRuns(app));
+
+ipcMain.handle('argus:mark-automation-run-flushed', async (_event, {runId}) => {
+  automationStore.markFlushed(app, runId);
+  return {ok: true};
+});
+
 ipcMain.on('argus:bulk-match-cookies-result', (_event, {requestId, result, error}) => {
   const pending = pendingAutomationRequests.get(requestId);
   if (!pending) {
@@ -4088,6 +4170,19 @@ app.whenReady().then(() => {
   }
 });
 app.whenReady().then(startAutomationApiServer);
+
+// Run artifacts are PNGs, so they get a shorter life than the 30-day Trash
+// contract rows do. Deferred off the startup path: this walks a directory that
+// grows with use, and nothing waits on the result.
+app.whenReady().then(() => {
+  setTimeout(() => {
+    try {
+      automationStore.sweep(app);
+    } catch {
+      // A sweep that cannot run is not worth a startup failure.
+    }
+  }, 10000).unref();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
