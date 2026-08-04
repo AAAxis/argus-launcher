@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('argusNative', {
   reserveCdpPort: () => ipcRenderer.invoke('argus:reserve-cdp-port'),
   resolveProfileCdp: (profileId) =>
     ipcRenderer.invoke('argus:resolve-profile-cdp', {profileId}),
+  waitForCdp: (port, timeoutMs) =>
+    ipcRenderer.invoke('argus:wait-for-cdp', {port, timeoutMs}),
   startAutomationRun: (payload) => ipcRenderer.invoke('argus:start-automation-run', payload),
   cancelAutomationRun: (runId) => ipcRenderer.invoke('argus:cancel-automation-run', {runId}),
   activeAutomationRuns: () => ipcRenderer.invoke('argus:active-automation-runs'),

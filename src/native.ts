@@ -287,6 +287,15 @@ type ArgusNative = {
     pid?: number | null;
     error?: string;
   }>;
+  // Waits for a port this process handed out to start answering. The on-launch
+  // trigger needs it: the browser takes a moment to bind the port after being
+  // spawned with it, so resolving immediately would report "not open" for a
+  // window that is opening.
+  waitForCdp?(port: number, timeoutMs?: number): Promise<{
+    ok: boolean;
+    cdpUrl?: string;
+    error?: string;
+  }>;
   // Returns as soon as the run is registered, NOT when it finishes: a real run
   // is minutes long, so anything that awaited completion would look like a hang.
   startAutomationRun?(payload: {

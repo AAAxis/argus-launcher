@@ -1,7 +1,7 @@
 import {useState} from 'react';
 import {
   Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
-  Tag, Terminal, Trash2, UserRound,
+  Tag, Terminal, Trash2, UserRound, Workflow,
 } from 'lucide-react';
 import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {BusyButton} from '../ui/BusyButton';
@@ -52,6 +52,7 @@ export function ProfileModal({
 }: ProfileModalProps) {
   const {data, toast, profiles, statusOptions, tagOptions} = useWorkspace();
   const state = data.state;
+  const automations = state.automations;
   const {run, isPending} = useAsyncAction();
   const [fingerprintOpen, setFingerprintOpen] = useState(false);
   // While the proxy combobox has focus it shows what the user is typing; when
@@ -387,6 +388,25 @@ export function ProfileModal({
                 onChange={(event) => set({start_url: event.target.value})}
               />
               <StartPageChips value={draft.start_url} onPick={(start_url) => set({start_url})} />
+            </Field>
+
+            <Field
+              label="Run on launch"
+              icon={<Workflow size={14} />}
+              hint={draft.automation_id ?
+                'Opens a DevTools port for this launch only, so the workflow can drive it.' :
+                'Runs an automation automatically once this profile is open.'}
+              wide
+            >
+              <select
+                value={draft.automation_id}
+                onChange={(event) => set({automation_id: event.target.value})}
+              >
+                <option value="">Nothing</option>
+                {automations.map((automation) => (
+                  <option key={automation.id} value={automation.id}>{automation.name}</option>
+                ))}
+              </select>
             </Field>
 
             <Field label="Account email" icon={<AtSign size={14} />} wide>

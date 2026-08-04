@@ -226,9 +226,54 @@ export function useProfileActions(
       // several seconds of silence between clicking Launch and either the
       // window opening or an error dialog.
       toast.setMessage(`Launching ${target.name}`);
-      const result = await native.launchProfile(buildLaunchPayload(target, proxy, state));
+
+      // The debugging port is opened ONLY when something is going to drive this
+      // session. An always-on --remote-debugging-port would be a real
+      // anti-detect regression: the port is connectable by any local process,
+      // and CDP attachment is observable from the page. So a profile with no
+      // automation attached launches exactly as it did before, with no extra
+      // switches at all.
+      const attached = target.automation_id ?
+        state.automations.find((item) => item.id === target.automation_id) :
+        null;
+      const cdpPort = attached ? await native.reserveCdpPort?.() : undefined;
+      const extraArgs = cdpPort ?
+        [`--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*'] :
+        [];
+
+      const result = await native.launchProfile(
+          buildLaunchPayload(target, proxy, state), extraArgs);
       if (result.ok) {
         toast.setMessage(`Launched ${target.name}`);
+        if (attached && cdpPort) {
+          // Deliberately not awaited: a run is minutes long and the Launch
+          // button must not sit spinning for it. Failures surface as a toast
+          // and as a `failed` row in the history, never as a stuck button.
+          //
+          // The run is started here rather than through automations.run()
+          // because the profile is already open -- run() would resolve the
+          // session first and, finding the port still binding, report a window
+          // that is opening as "not open". Persistence is unaffected: the
+          // record is written by whoever is listening to run events, which is
+          // useAutomationRuns regardless of who started it.
+          void (async () => {
+            const ready = await native.waitForCdp?.(cdpPort, 20000);
+            if (!ready?.ok || !ready.cdpUrl) {
+              toast.fail(`Couldn't run ${attached.name}`,
+                  ready?.error || 'The browser never answered on its debugging port.');
+              return;
+            }
+            const started = await native.startAutomationRun?.({
+              automation: attached,
+              profile: target,
+              trigger: 'launch',
+              cdpUrl: ready.cdpUrl,
+            });
+            if (started && !started.ok) {
+              toast.fail(`Couldn't run ${attached.name}`, started.error || 'The run did not start.');
+            }
+          })();
+        }
       } else {
         toast.fail(`Couldn't launch ${target.name}`,
             result.error || 'Launch failed for an unknown reason.');

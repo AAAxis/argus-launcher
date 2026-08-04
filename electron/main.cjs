@@ -3324,6 +3324,21 @@ ipcMain.handle('argus:resolve-profile-cdp', async (_event, {profileId}) => {
   }
 });
 
+// Waits for a port this process handed out to start answering.
+//
+// The on-launch trigger needs this: the profile has just been spawned with
+// --remote-debugging-port and the browser takes a second or two to bind it, so
+// resolving the session immediately would find nothing and the run would report
+// "not open" for a window that is opening.
+ipcMain.handle('argus:wait-for-cdp', async (_event, {port, timeoutMs}) => {
+  try {
+    await waitForCdpReady(port, Math.min(Number(timeoutMs) || 20000, 60000));
+    return {ok: true, cdpUrl: `http://127.0.0.1:${port}`};
+  } catch (error) {
+    return {ok: false, error: error?.message || String(error)};
+  }
+});
+
 ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
   try {
     const runId = await automationRunner.start({

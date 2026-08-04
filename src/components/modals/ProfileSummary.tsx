@@ -44,6 +44,11 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
       draft.proxy_mode === 'direct' ? 'Direct' : 'Free Proxy'],
     ['Proxy', proxy?.name || (draft.proxy_id ? 'Selected proxy' : 'No proxy')],
     ['Start page', draft.start_url.trim() || 'Shared bookmarks home'],
+    // Listed because it changes what Launch does -- and because it is the one
+    // setting that makes a launch open a DevTools port, which someone auditing
+    // a profile's footprint needs to be able to see without opening a dropdown.
+    ['On launch', data.state.automations.find(
+        (item) => item.id === draft.automation_id)?.name || 'Nothing'],
   ];
 
   const fingerprintRows: Row[] = [

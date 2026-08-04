@@ -44,6 +44,8 @@ export type ProfileDraft = {
   proxy_link: string;
   tags: string;
   start_url: string;
+  // Which automation runs when this profile launches, or '' for none.
+  automation_id: string;
   cookie_import_path: string;
   cookie_import_url: string;
   cookie_import_name: string;
@@ -138,6 +140,7 @@ export function newProfileDraft(): ProfileDraft {
     proxy_link: '',
     tags: '',
     start_url: '',
+    automation_id: '',
     cookie_import_path: '',
     cookie_import_url: '',
     cookie_import_name: '',
@@ -190,6 +193,7 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     proxy_link: '',
     tags: profile.tags?.join(', ') || '',
     start_url: profile.start_url || '',
+    automation_id: profile.automation_id || '',
     cookie_import_path: profile.cookie_import_path || '',
     cookie_import_url: profile.cookie_import_url || '',
     cookie_import_name: profile.cookie_import_name || '',
@@ -284,6 +288,7 @@ export function profileFromDraft(draft: ProfileDraft, createdAt?: string): Argus
     // extra tags straight back to the database on the next save.
     tags: normalizeTags(tagsFromDraft(draft.tags)),
     start_url: draft.start_url.trim() || null,
+    automation_id: draft.automation_id || null,
     cookie_import_path: draft.cookie_import_path.trim() || null,
     cookie_import_url: draft.cookie_import_url.trim() || null,
     cookie_import_name: draft.cookie_import_name.trim() || null,
