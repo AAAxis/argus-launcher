@@ -287,6 +287,15 @@ type ArgusNative = {
     pid?: number | null;
     error?: string;
   }>;
+  // A per-launch credential for the generated start page, which is a file://
+  // document with no key of its own. It authorizes running one of the listed
+  // automations against this profile on this port, and nothing else.
+  mintRunToken?(
+    profileId: string,
+    profileName: string,
+    cdpPort: number,
+    automations: Array<{id: string; name: string; steps: unknown[]}>,
+  ): Promise<string>;
   // Waits for a port this process handed out to start answering. The on-launch
   // trigger needs it: the browser takes a moment to bind the port after being
   // spawned with it, so resolving immediately would report "not open" for a

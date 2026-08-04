@@ -93,7 +93,13 @@ export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null)
 
 export function anonymousHomeHtml(
     profile: ArgusProfile, bookmarks: SharedBookmark[], proxy: ArgusProxy | null,
-    engine: SearchEngine) {
+    engine: SearchEngine,
+    // What this launch may run from its own start page, and the credential for
+    // asking. Both come from buildLaunchPayload; omitted (the default) means no
+    // tiles and no token in the file at all -- which is what an ordinary launch
+    // with nothing attached and nothing pinned gets.
+    automations: Array<{id: string; name: string}> = [],
+    run: {port: number; token: string} | null = null) {
   const safeName = escapeHtml(profile.name || 'Profile');
   const proxyStatus = homeProxyStatus(profile, proxy);
   const badgeClass = proxyStatus.ok ? 'badge ok' : 'badge fail';
@@ -121,6 +127,16 @@ export function anonymousHomeHtml(
         return `<a class="bookmark" href="${safeUrl}" title="${safeUrl}">${mark}<strong>${title}</strong></a>`;
       })
       .join('');
+  // Same .grid/.bookmark/.mark boxes the bookmarks use, so a tile is the same
+  // size and shape as its neighbours -- these are buttons rather than links
+  // because they post back instead of navigating. data-state drives the tint;
+  // the id is an opaque handle the launcher already knows.
+  const automationTiles = run ? automations
+      .map((automation) => {
+        const name = escapeHtml(automation.name || 'Automation');
+        return `<button type="button" class="bookmark automation" data-id="${escapeHtml(automation.id)}" data-state="idle" title="${name}"><span class="mark">&#9654;</span><strong>${name}</strong></button>`;
+      })
+      .join('') : '';
   return `<!doctype html>
 <html>
 <head>
@@ -168,6 +184,14 @@ p{margin:0;color:#716b62;font-size:13px}
    black outline, which shouted on every pass of the mouse. */
 .bookmark{display:grid;justify-items:center;gap:8px;padding:14px 8px 12px;border-radius:12px;text-decoration:none;color:inherit;background:transparent}
 .bookmark:hover{background:#f2eee8}
+/* Tiles are <button>, so they need the anchor's typography back, and a state
+   tint that says what happened without a toast this page has no room for. */
+.section-label{margin:26px 0 6px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8a8178}
+.bookmark.automation{border:0;font:inherit;cursor:pointer;background:transparent;text-align:center}
+.bookmark.automation[data-state=running]{background:#efe7d8;cursor:progress}
+.bookmark.automation[data-state=done]{background:#e2efe4}
+.bookmark.automation[data-state=failed]{background:#f6e3df}
+.bookmark.automation .mark{font-size:15px}
 .mark{width:46px;height:46px;border-radius:13px;background:#fff;border:1px solid #e9e2d6;color:#716b62;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800}
 .bookmark .favicon{width:26px;height:26px;border-radius:8px;object-fit:contain}
 /* 650, not the browser default 700 the strong element carries: at 12px on a
@@ -190,8 +214,50 @@ p{margin:0;color:#716b62;font-size:13px}
 <div class="suggest" id="suggest" hidden></div>
 </div>
 ${bookmarkItems ? `<section class="grid">${bookmarkItems}</section>` : '<p class="empty">No shared bookmarks yet.</p>'}
+${automationTiles ? `<h2 class="section-label">Automations</h2><section class="grid automations">${automationTiles}</section>` : ''}
 </main>
 <script>
+/* Automation tiles. Same constraint as the search logic below: this document is
+   written to disk and loaded from file://, so the behaviour has to travel
+   inside it.
+
+   RUN.token authorizes exactly one thing -- run one of the automations listed
+   above, against this profile, on this launch's debugging port. It cannot
+   create, edit or delete anything and it cannot supply its own steps, because
+   the request carries an id and the workflow is looked up in the launcher.
+
+   It is a plain constant on purpose: not in the URL, not in localStorage, not
+   in a <meta> tag. Those are the three places a later navigation to a hostile
+   page could plausibly reach; a closure variable in a file:// document is not
+   readable across origins, and the browser does not run with
+   --allow-file-access-from-files (checked before this shipped). */
+${run ? `(function () {
+  var RUN = ${JSON.stringify(run)};
+  var tiles = document.querySelectorAll('.bookmark.automation');
+  Array.prototype.forEach.call(tiles, function (tile) {
+    tile.addEventListener('click', function () {
+      if (tile.dataset.state === 'running') { return; }
+      tile.dataset.state = 'running';
+      fetch('http://127.0.0.1:' + RUN.port + '/v1/automations/run-from-page', {
+        method: 'POST',
+        /* Required by the launcher: a cross-origin <form> POST cannot set it,
+           so a hostile page has to send a preflight that is never answered. */
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({runToken: RUN.token, automationId: tile.dataset.id})
+      }).then(function (r) {
+        return r.json().then(function (d) { return {ok: r.ok, body: d}; });
+      }).then(function (result) {
+        /* The launcher answers identically for every refusal, so there is
+           nothing more specific to say here than that it did not start. */
+        tile.dataset.state = result.ok && result.body.status ? 'done' : 'failed';
+        setTimeout(function () { tile.dataset.state = 'idle'; }, 4000);
+      }).catch(function () {
+        tile.dataset.state = 'failed';
+        setTimeout(function () { tile.dataset.state = 'idle'; }, 4000);
+      });
+    });
+  });
+}());` : ''}
 /* A copy of looksLikeUrl/resolveQuery from lib/searchEngines.ts, not an import.
    This document is written to disk and loaded from file:// -- it has no module
    graph and no bundler, so the logic has to travel inside it. If the heuristic

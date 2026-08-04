@@ -14,6 +14,7 @@ const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
 const automationRunner = require('./automation/runner.cjs');
 const automationStore = require('./automation/store.cjs');
+const {createRunTokens, handleRunFromPage} = require('./automation/run-token.cjs');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
 // Two shapes, and nothing else is honoured:
@@ -1749,7 +1750,14 @@ function writeHomeFile(payload) {
   const homeDir = path.join(root, 'ArgysHome');
   ensureDirectoryPath(homeDir);
   const homePath = path.join(homeDir, 'home.html');
-  fs.writeFileSync(homePath, html);
+  // 0600 because this file can carry a run token (see mintRunToken). It is a
+  // small real improvement regardless: the generated page also names the
+  // profile and its proxy, and there was no reason for it to be world-readable.
+  //
+  // Not a security boundary on its own -- a process running as this user
+  // already wins, and automation-keys.json sits nearby granting strictly more.
+  // It just stops the token being the easiest thing on the disk to read.
+  fs.writeFileSync(homePath, html, {mode: 0o600});
   return pathToFileURL(homePath).toString();
 }
 
@@ -3260,6 +3268,9 @@ function maySeeAutomationSession(key, session) {
 }
 
 function killAutomationLaunch(profileId) {
+  // The token is only good for a live session; outliving one would leave a
+  // credential on disk that still works against whatever opens next.
+  runTokens.dropForProfile(profileId);
   const tracked = automationLaunches.get(profileId);
   if (!tracked) {
     return false;
@@ -3306,6 +3317,18 @@ function sendRunEvent(event) {
     mainWindow.webContents.send('argus:automation-run-event', event);
   }
 }
+
+// ── start-page run tokens ───────────────────────────────────────────────────
+//
+// The store and the endpoint live in ./automation/run-token.cjs so their
+// refusal paths can be tested against the real code rather than a copy --
+// scripts/verify-run-token.mjs drives exactly that module. See its header for
+// what a token does and does not authorize.
+const runTokens = createRunTokens();
+
+ipcMain.handle('argus:mint-run-token',
+    async (_event, {profileId, profileName, cdpPort, automations}) =>
+      runTokens.mint({profileId, profileName, cdpPort, automations}));
 
 ipcMain.handle('argus:reserve-cdp-port', async () => {
   // The renderer has no node:net, so port allocation lives here even though
@@ -3684,6 +3707,32 @@ function handleOAuthAuthorize(req, res, parsedUrl) {
   });
 }
 
+// Runs one of a launch's own automations, asked for by that launch's start page.
+// The authorization and the refusal semantics live in run-token.cjs; this is
+// only the part that needs the runner and the session.
+function runFromPage(req, res) {
+  handleRunFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    startRun: async (entry, automation) => {
+      const session = await resolveProfileCdp(entry.profileId);
+      const cdpUrl = session.running && session.cdpUrl ?
+        session.cdpUrl :
+        `http://127.0.0.1:${entry.cdpPort}`;
+      return automationRunner.start({
+        app,
+        automation,
+        profile: {id: entry.profileId, name: entry.profileName || ''},
+        trigger: 'start-page',
+        cdpUrl,
+        onEvent: sendRunEvent,
+      });
+    },
+  });
+}
+
 function handleOAuthTokenExchange(req, res) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -3764,6 +3813,14 @@ function startAutomationApiServer() {
     }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/oauth/token') {
       handleOAuthTokenExchange(req, res);
+      return;
+    }
+
+    // Above the bearer gate on purpose: the caller is a file:// page, which has
+    // no key and must never be given one. It authenticates with a per-launch run
+    // token instead -- see runTokens for what that does and does not authorize.
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/run-from-page') {
+      runFromPage(req, res);
       return;
     }
 
@@ -4197,6 +4254,13 @@ app.whenReady().then(() => {
       // A sweep that cannot run is not worth a startup failure.
     }
   }, 10000).unref();
+});
+
+// Tokens live in memory only -- they are never written to automation-keys.json
+// and never logged -- so quitting is already the end of them. Cleared
+// explicitly so a future change that persists this map has to think about it.
+app.on('will-quit', () => {
+  runTokens.clear();
 });
 
 app.on('window-all-closed', () => {

@@ -244,8 +244,22 @@ export function useProfileActions(
       const cdpPort = attached ? await native.reserveCdpPort?.() : undefined;
       const extraArgs = cdpPort ? [`--remote-debugging-port=${cdpPort}`] : [];
 
+      // The token only exists when a port does. An ordinary launch carries no
+      // credential in its home.html at all.
+      const tiles = cdpPort ?
+        state.automations.filter((item) => item.pinned || item.id === target.automation_id) :
+        [];
+      const runToken = cdpPort && tiles.length > 0 ?
+        await native.mintRunToken?.(target.id, target.name, cdpPort, tiles) :
+        '';
+      // The port comes from the running server rather than a second copy of the
+      // constant: AUTOMATION_API_PORT lives in main.cjs, and a hardcoded 39219
+      // here would be one more place to get wrong if it ever moves.
+      const apiPort = runToken ? (await native.getApiStatus?.())?.port : 0;
+      const startPage = runToken && apiPort ? {port: apiPort, token: runToken} : null;
+
       const result = await native.launchProfile(
-          buildLaunchPayload(target, proxy, state), extraArgs);
+          buildLaunchPayload(target, proxy, state, startPage), extraArgs);
       if (result.ok) {
         toast.setMessage(`Launched ${target.name}`);
         if (attached && cdpPort) {
