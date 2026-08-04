@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const {resolveFavicon} = require('./favicons.cjs');
+const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
@@ -1956,7 +1957,11 @@ function killStaleProfileProcess(profileId) {
         'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
         'Start-Sleep -Milliseconds 500';
       spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {windowsHide: true});
-    } else if (process.platform === 'linux') {
+    } else {
+      // macOS included: the per-profile wrapper .app does its own pkill before
+      // spawning, so the launch path never needed this here -- but closing a
+      // session adopted from DevToolsActivePort (no pid, because this process
+      // did not spawn it) has no other way to reach the window.
       spawnSync('pkill', ['-f', marker]);
     }
   } catch {
@@ -2390,307 +2395,385 @@ ipcMain.handle('argus:revoke-api-key', async (_event, id) => {
   return {revoked: revokeAutomationKey(id)};
 });
 
-// Writes the argus-hive-bridge MCP server registration directly into the
-// config file each tool reads at startup, instead of making the user
-// copy/paste it -- every CLI-command form of this we tried
-// (`claude mcp add`, `claude mcp add-json`) turned out to be unreliable on
-// Windows, and file-editing has no shell argument-passing to go wrong.
-function claudeConfigPath() {
-  return path.join(app.getPath('home'), '.claude.json');
-}
-
-function codexConfigPath() {
-  return path.join(app.getPath('home'), '.codex', 'config.toml');
-}
-
-function openclawConfigPath() {
-  return path.join(app.getPath('home'), '.openclaw', 'openclaw.json');
-}
-
-function cursorConfigPath() {
-  return path.join(app.getPath('home'), '.cursor', 'mcp.json');
-}
-
-function integrationConfigPath(integrationId) {
-  if (integrationId === 'claude-code') return claudeConfigPath();
-  if (integrationId === 'codex') return codexConfigPath();
-  if (integrationId === 'openclaw') return openclawConfigPath();
-  if (integrationId === 'cursor') return cursorConfigPath();
-  return null;
-}
-
-// A venv's interpreter is at Scripts\python.exe on Windows and bin/python
-// everywhere else. This was hardcoded to the Windows layout in all three
-// config writers, so every config written on macOS or Linux named an
-// interpreter that does not exist and the MCP server failed to start.
-function bridgePython(dir) {
-  return process.platform === 'win32' ?
-    path.join(dir, '.venv', 'Scripts', 'python.exe') :
-    path.join(dir, '.venv', 'bin', 'python');
-}
-
-// Where argus-hive-bridge lives. Overridable because there is no way to guess
-// a checkout location; the renderer offers a file picker for the same reason.
-function defaultBridgePath() {
-  return process.env.ARGUS_BRIDGE_PATH ||
-    path.join(app.getPath('home'), 'argus-hive-bridge');
-}
-
-const CODEX_ARGUS_HEADER = '[mcp_servers.argus]';
-
-// The [mcp_servers.argus] table runs from its header to the next top-level
-// section or EOF. Shared by the writer and the remover so they cannot disagree
-// about where this app's own table ends.
-function codexArgusSection(existing) {
-  const start = existing.indexOf(CODEX_ARGUS_HEADER);
-  if (start === -1) {
-    return null;
-  }
-  const afterHeader = existing.slice(start + CODEX_ARGUS_HEADER.length);
-  const next = afterHeader.match(/\n\[(?!mcp_servers\.argus\.)/);
-  const end = next ?
-    start + CODEX_ARGUS_HEADER.length + next.index + 1 :
-    existing.length;
-  return {start, end};
-}
-
-function readJsonConfig(configPath) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed;
-    }
-  } catch {
-    // Missing or unreadable -- treat as empty, exactly as the writers do.
-  }
-  return {};
-}
-
-function applyClaudeCodeConfig(dir, token, base) {
-  const configPath = claudeConfigPath();
-  let config = {};
-  try {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch {
-    // Missing or unreadable -- start fresh. We only ever touch mcpServers.
-  }
-  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-    config = {};
-  }
-  config.mcpServers = (config.mcpServers && typeof config.mcpServers === 'object') ? config.mcpServers : {};
-  config.mcpServers.argus = {
-    type: 'stdio',
-    // Point straight at the bridge's own venv Python rather than `uv run` --
-    // `uv` isn't guaranteed to be on PATH for whatever spawns this process
-    // (confirmed: it wasn't even installed on this machine), while the venv
-    // itself already has argus_hive_bridge installed and proven working.
-    command: bridgePython(dir),
-    args: ['-m', 'argus_hive_bridge.mcp_server'],
-    env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
-  };
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  return configPath;
-}
-
-function applyCodexConfig(dir, token, base) {
-  const configPath = codexConfigPath();
-  fs.mkdirSync(path.dirname(configPath), {recursive: true});
-  let existing = '';
-  try {
-    existing = fs.readFileSync(configPath, 'utf8');
-  } catch {
-    // No config yet -- fine, we're creating it.
-  }
-  // Same reasoning as applyClaudeCodeConfig: point at the venv's own Python
-  // instead of `uv run` -- uv isn't confirmed present on PATH for whatever
-  // spawns this, the venv already works.
-  const escapedPython = bridgePython(dir).replace(/\\/g, '\\\\');
-  const block = [
-    '[mcp_servers.argus]',
-    `command = "${escapedPython}"`,
-    'args = ["-m", "argus_hive_bridge.mcp_server"]',
-    '',
-    '[mcp_servers.argus.env]',
-    `ARGYS_API_TOKEN = "${token}"`,
-    `ARGYS_API_BASE = "${base}"`,
-    '',
-  ].join('\n');
-  // Text-based section replace/append -- no TOML library here, and this app
-  // only ever touches its own [mcp_servers.argus] table, so "find this exact
-  // header, cut to the next top-level [section] or EOF, splice in the new
-  // block" is safe without one.
-  const headerIndex = existing.indexOf('[mcp_servers.argus]');
-  if (headerIndex === -1) {
-    const separator = existing.trim().length > 0 ? '\n\n' : '';
-    fs.writeFileSync(configPath, existing.replace(/\s*$/, '') + separator + block);
-  } else {
-    const afterHeader = existing.slice(headerIndex + '[mcp_servers.argus]'.length);
-    const nextSectionMatch = afterHeader.match(/\n\[(?!mcp_servers\.argus\.)/);
-    const sectionEnd = nextSectionMatch ?
-      headerIndex + '[mcp_servers.argus]'.length + nextSectionMatch.index + 1 :
-      existing.length;
-    fs.writeFileSync(configPath, existing.slice(0, headerIndex) + block + existing.slice(sectionEnd));
-  }
-  return configPath;
-}
-
-function applyOpenClawConfig(dir, token, base) {
-  const configPath = openclawConfigPath();
-  fs.mkdirSync(path.dirname(configPath), {recursive: true});
-  let config = {};
-  try {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch {
-    // Missing or unreadable -- start fresh. We only ever touch mcp.servers.
-  }
-  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-    config = {};
-  }
-  config.mcp = (config.mcp && typeof config.mcp === 'object') ? config.mcp : {};
-  config.mcp.servers = (config.mcp.servers && typeof config.mcp.servers === 'object') ? config.mcp.servers : {};
-  config.mcp.servers.argus = {
-    command: bridgePython(dir),
-    args: ['-m', 'argus_hive_bridge.mcp_server'],
-    env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
-  };
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  return configPath;
-}
-
-// Cursor reads a global MCP registry at ~/.cursor/mcp.json with the same
-// mcpServers shape Claude Code uses.
-function applyCursorConfig(dir, token, base) {
-  const configPath = cursorConfigPath();
-  fs.mkdirSync(path.dirname(configPath), {recursive: true});
-  const config = readJsonConfig(configPath);
-  config.mcpServers = (config.mcpServers && typeof config.mcpServers === 'object') ? config.mcpServers : {};
-  config.mcpServers.argus = {
-    command: bridgePython(dir),
-    args: ['-m', 'argus_hive_bridge.mcp_server'],
-    env: {ARGYS_API_TOKEN: token, ARGYS_API_BASE: base},
-  };
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  return configPath;
-}
-
-ipcMain.handle('argus:apply-integration-config', async (_event, {integrationId, dir, token, base}) => {
-  try {
-    if (integrationId === 'claude-code') {
-      return {ok: true, path: applyClaudeCodeConfig(dir, token, base)};
-    }
-    if (integrationId === 'codex') {
-      return {ok: true, path: applyCodexConfig(dir, token, base)};
-    }
-    if (integrationId === 'openclaw') {
-      return {ok: true, path: applyOpenClawConfig(dir, token, base)};
-    }
-    if (integrationId === 'cursor') {
-      return {ok: true, path: applyCursorConfig(dir, token, base)};
-    }
-    return {ok: false, error: `No auto-apply available for ${integrationId}`};
-  } catch (error) {
-    return {ok: false, error: error.message};
-  }
-});
-
-// Does the target tool's config actually carry our MCP server right now?
+// ── Integrations: wiring agent tools to the bundled MCP server ───────────────
 //
-// A key existing is not the same thing as being connected: the key lives in
-// this app's own store, while the wiring lives in a file the user (or another
-// tool) can edit or delete at any time, and revoking a key never removed the
-// block it was written into. The Integrations tab needs both facts.
-ipcMain.handle('argus:integration-status', async (_event, {integrationId, dir}) => {
-  const configPath = integrationConfigPath(integrationId);
-  const bridgePath = dir || defaultBridgePath();
-  const status = {
-    configPath,
-    hasEntry: false,
-    bridgeExists: false,
-    pythonExists: false,
-    pythonPath: bridgePython(bridgePath),
-  };
-  try {
-    status.bridgeExists = fs.existsSync(bridgePath);
-    status.pythonExists = fs.existsSync(status.pythonPath);
-  } catch {
-    // Unreadable path -- reported as missing, which is what the UI needs.
-  }
-  if (!configPath) {
-    // Hive has no local config of its own; the token in its .env is the wiring.
-    return status;
-  }
-  try {
-    if (integrationId === 'codex') {
-      status.hasEntry = codexArgusSection(fs.readFileSync(configPath, 'utf8')) !== null;
-    } else if (integrationId === 'openclaw') {
-      status.hasEntry = Boolean(readJsonConfig(configPath).mcp?.servers?.argus);
-    } else {
-      status.hasEntry = Boolean(readJsonConfig(configPath).mcpServers?.argus);
-    }
-  } catch {
-    // No config file yet -- not connected, which is already the default.
-  }
-  return status;
-});
+// The registration each tool reads at startup is written straight into its own
+// config file rather than handed over as a snippet to paste -- every
+// CLI-command form of this we tried (`claude mcp add`, `claude mcp add-json`)
+// proved unreliable on Windows, and editing the file has no shell
+// argument-passing to go wrong. The per-tool file shapes live in
+// electron/integrations.cjs.
+//
+// What we point those configs at is this app itself. `electron/mcp/server.cjs`
+// ships inside the asar and is started through the launcher's own binary with
+// ELECTRON_RUN_AS_NODE=1, so connecting installs nothing. Until this change the
+// configs named `<checkout>/.venv/bin/python -m argus_hive_bridge.mcp_server`
+// -- a Python package that is not in this repo, cannot be obtained, and was
+// therefore missing on every machine. Every "connected" tool was in fact
+// pointed at an interpreter that does not exist.
 
-// The other half of connecting. Without this, disconnecting left the tool
-// pointed at a revoked token: it would keep trying to start the MCP server and
-// keep failing, with nothing in the UI to explain why.
-ipcMain.handle('argus:remove-integration-config', async (_event, {integrationId}) => {
-  const configPath = integrationConfigPath(integrationId);
-  if (!configPath) {
-    return {ok: true, path: null};
-  }
+// process.execPath is the running executable: the .app binary when packaged,
+// and the dev bundle's binary under `npm run dev`. Both are stable paths a
+// child process can be spawned from.
+//
+// This depends on Electron's `runAsNode` fuse, which is enabled by default and
+// which electron-builder does not touch. If anyone ever disables it, every
+// integration breaks silently -- argus:verify-integration is what will say so.
+function mcpServerCommand() {
+  return process.execPath;
+}
+
+// Deliberately NOT unpacked from the asar. `require('ws')` resolves by walking
+// up the literal path, so a script at app.asar.unpacked/electron/mcp/ cannot
+// see app.asar/node_modules and fails with "Cannot find module 'ws'". Verified
+// both ways.
+function mcpServerScriptPath() {
+  return path.join(app.getAppPath(), 'electron', 'mcp', 'server.cjs');
+}
+
+function mcpSpawnSpec(token) {
+  return {
+    command: mcpServerCommand(),
+    args: [mcpServerScriptPath()],
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      // Blanked rather than omitted: an inherited --require or --inspect writes
+      // to stdout, and anything on the MCP server's stdout that is not a
+      // protocol frame breaks every client that talks to it.
+      NODE_OPTIONS: '',
+      ARGYS_API_TOKEN: token,
+      ARGYS_API_BASE: apiState.url || `http://127.0.0.1:${AUTOMATION_API_PORT}`,
+      ARGUS_LAUNCHER_VERSION: app.getVersion(),
+    },
+  };
+}
+
+// Does this entry point at the server this build ships? Used to tell a live
+// connection from one left behind by an older install (or by the Python
+// bridge), which look identical if you only ask "is there an entry".
+function entryIsCurrent(entry) {
+  return entry.hasEntry &&
+    entry.command === mcpServerCommand() &&
+    Array.isArray(entry.args) &&
+    entry.args[0] === mcpServerScriptPath();
+}
+
+ipcMain.handle('argus:apply-integration-config', async (_event, {integrationId, token}) => {
   try {
-    if (!fs.existsSync(configPath)) {
-      return {ok: true, path: configPath};
+    if (integrations.isManual(integrationId)) {
+      return {ok: false, error: `No auto-apply available for ${integrationId}`};
     }
-    if (integrationId === 'codex') {
-      const existing = fs.readFileSync(configPath, 'utf8');
-      const section = codexArgusSection(existing);
-      if (section) {
-        const next = existing.slice(0, section.start) + existing.slice(section.end);
-        fs.writeFileSync(configPath, next.replace(/\n{3,}/g, '\n\n'));
-      }
-    } else if (integrationId === 'openclaw') {
-      const config = readJsonConfig(configPath);
-      if (config.mcp?.servers?.argus) {
-        delete config.mcp.servers.argus;
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      }
-    } else {
-      const config = readJsonConfig(configPath);
-      if (config.mcpServers?.argus) {
-        delete config.mcpServers.argus;
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      }
-    }
+    const configPath = integrations.applyIntegrationConfig({
+      integrationId,
+      home: app.getPath('home'),
+      platform: process.platform,
+      spawn: mcpSpawnSpec(token),
+    });
     return {ok: true, path: configPath};
   } catch (error) {
     return {ok: false, error: error.message};
   }
 });
 
-// The renderer offers this as the default in the connect dialog and lets the
-// user override it with a directory picker.
-ipcMain.handle('argus:default-bridge-path', async () => {
-  return defaultBridgePath();
+// A key existing is not the same thing as being connected: the key lives in
+// this app's own store, while the wiring lives in a file the user (or another
+// tool) can edit or delete at any time, and revoking a key never removed the
+// block it was written into. The Integrations tab needs both facts, plus
+// whether the tool is on this machine at all.
+ipcMain.handle('argus:integration-status', async (_event, {integrationId}) => {
+  const home = app.getPath('home');
+  const manual = integrations.isManual(integrationId);
+  const entry = manual ?
+    {configPath: null, hasEntry: false, command: null, args: []} :
+    integrations.readIntegrationEntry({integrationId, home, platform: process.platform});
+  return {
+    configPath: entry.configPath,
+    manual,
+    // Hive and the generic card have nothing to detect -- treat them as
+    // present so the UI never labels them "not installed".
+    installed: manual || integrations.detectTool(integrationId, home, process.platform),
+    hasEntry: entry.hasEntry,
+    entryIsCurrent: entryIsCurrent(entry),
+    stale: integrations.isStaleEntry(entry),
+    commandExists: Boolean(entry.command) && fs.existsSync(entry.command),
+    apiReady: apiState.status === 'ready',
+  };
 });
 
-// The OS directory chooser -- Finder on macOS, File Explorer on Windows.
-// Seeded with whatever the field already holds so it opens where the user is
-// looking; createDirectory lets them make the checkout folder from the sheet.
-ipcMain.handle('argus:select-bridge-folder', async (_event, current) => {
-  const result = await dialog.showOpenDialog({
-    title: 'Select the argus-hive-bridge folder',
-    defaultPath: typeof current === 'string' && current ? current : defaultBridgePath(),
-    buttonLabel: 'Use this folder',
-    properties: ['openDirectory', 'createDirectory'],
-  });
-  if (result.canceled || !result.filePaths[0]) {
-    return null;
+// Which agent tools are on this machine, in one call, so the tab can label
+// every card on load instead of firing one IPC per integration.
+ipcMain.handle('argus:detect-integrations', async () => {
+  const home = app.getPath('home');
+  const detected = {};
+  for (const integrationId of Object.keys(integrations.TOOLS)) {
+    detected[integrationId] = integrations.detectTool(integrationId, home, process.platform);
   }
-  return result.filePaths[0];
+  return detected;
+});
+
+// The other half of connecting. Without this, disconnecting left the tool
+// pointed at a revoked token: it would keep trying to start the MCP server and
+// keep failing, with nothing in the UI to explain why.
+ipcMain.handle('argus:remove-integration-config', async (_event, {integrationId}) => {
+  try {
+    if (integrations.isManual(integrationId)) {
+      return {ok: true, path: null};
+    }
+    return {
+      ok: true,
+      path: integrations.removeIntegrationConfig({
+        integrationId,
+        home: app.getPath('home'),
+        platform: process.platform,
+      }),
+    };
+  } catch (error) {
+    return {ok: false, error: error.message};
+  }
+});
+
+// Repoints a stale entry at the server this build ships, keeping the token that
+// is already in the file. The key is still valid -- it lives in this app's own
+// store and the old Python bridge authenticated with it exactly the same way --
+// so there is nothing for the user to re-approve and no new key to mint.
+//
+// Returns needsKey when the token in the file is gone or revoked: minting a
+// replacement needs ownerUserId/orgId, which only the renderer knows, so that
+// case has to go back to the normal connect flow.
+ipcMain.handle('argus:repair-integration', async (_event, {integrationId}) => {
+  try {
+    if (integrations.isManual(integrationId)) {
+      return {ok: false, error: `Nothing to repair for ${integrationId}`};
+    }
+    const home = app.getPath('home');
+    const entry = integrations.readIntegrationEntry({
+      integrationId, home, platform: process.platform,
+    });
+    if (!entry.hasEntry) {
+      return {ok: false, needsKey: true};
+    }
+    const token = entry.env?.ARGYS_API_TOKEN;
+    if (!token) {
+      return {ok: false, needsKey: true};
+    }
+    const known = loadAutomationKeys().some((key) => key.tokenHash === hashToken(token));
+    if (!known) {
+      return {ok: false, needsKey: true};
+    }
+    return {
+      ok: true,
+      path: integrations.applyIntegrationConfig({
+        integrationId,
+        home,
+        platform: process.platform,
+        spawn: mcpSpawnSpec(token),
+      }),
+    };
+  } catch (error) {
+    return {ok: false, error: error.message};
+  }
+});
+
+// ── Verification ─────────────────────────────────────────────────────────────
+// Actually starts what the config file says to start and speaks MCP to it.
+//
+// Everything cheaper than this -- "a key exists", "the file has an entry" --
+// can be true while the integration is completely dead, which is exactly the
+// state this app used to report as Connected. Reading command/args back out of
+// the config rather than from what we meant to write is the point: it is the
+// only way to catch a hand-edited entry, an older install's path, or a build
+// with the runAsNode fuse disabled.
+
+const VERIFY_TIMEOUT_MS = 12000;
+
+function verifyHandshake(entry) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(entry.command, entry.args, {
+        env: {...process.env, ...entry.env, ELECTRON_RUN_AS_NODE: '1'},
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (error) {
+      resolve({ok: false, detail: `Could not start the MCP server: ${error.message}`});
+      return;
+    }
+    let out = '';
+    let err = '';
+    let settled = false;
+    const responses = new Map();
+
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      try {
+        child.kill();
+      } catch {
+        // Already gone.
+      }
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      finish({ok: false, detail: 'No response from the MCP server within 12 seconds.'});
+    }, VERIFY_TIMEOUT_MS);
+
+    child.on('error', (error) => {
+      finish({
+        ok: false,
+        detail: error.code === 'ENOENT' ?
+          `Could not start the MCP server: ${entry.command} was not found.` :
+          `Could not start the MCP server: ${error.message}`,
+      });
+    });
+    child.on('exit', (code) => {
+      // The signature of a disabled runAsNode fuse, a moved app, or a server
+      // that threw on load.
+      finish({
+        ok: false,
+        detail: `The MCP server exited (code ${code}) before answering.` +
+          (err.trim() ? ` Its output: ${err.trim().slice(-400)}` : ''),
+      });
+    });
+    child.stderr.on('data', (chunk) => {
+      err = `${err}${chunk}`.slice(-8192);
+    });
+    child.stdout.on('data', (chunk) => {
+      out += chunk;
+      let newline = out.indexOf('\n');
+      while (newline !== -1) {
+        const line = out.slice(0, newline).trim();
+        out = out.slice(newline + 1);
+        if (line) {
+          try {
+            const message = JSON.parse(line);
+            responses.set(message.id, message);
+          } catch {
+            // Anything unparseable on stdout is fatal for every MCP client, so
+            // it is worth naming precisely rather than timing out.
+            finish({
+              ok: false,
+              detail: `The MCP server printed non-protocol output on stdout: ${line.slice(0, 200)}`,
+            });
+            return;
+          }
+        }
+        newline = out.indexOf('\n');
+      }
+      const init = responses.get(1);
+      const tools = responses.get(2);
+      const call = responses.get(3);
+      if (init && init.error) {
+        finish({ok: false, detail: `initialize failed: ${init.error.message}`});
+        return;
+      }
+      if (init && tools && call) {
+        const names = (tools.result?.tools || []).map((tool) => tool.name);
+        if (!names.length) {
+          finish({ok: false, detail: 'The MCP server started but exposes no tools.'});
+          return;
+        }
+        finish({
+          ok: true,
+          serverInfo: init.result?.serverInfo || null,
+          protocolVersion: init.result?.protocolVersion || null,
+          toolCount: names.length,
+          // The only check that proves key, API and renderer are all wired: it
+          // goes all the way through to real profile data.
+          callOk: call.result ? call.result.isError !== true : false,
+          callDetail: call.result?.content?.[0]?.text || call.error?.message || '',
+        });
+      }
+    });
+
+    const send = (message) => {
+      try {
+        child.stdin.write(`${JSON.stringify(message)}\n`);
+      } catch {
+        // The exit handler reports it.
+      }
+    };
+    send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: {name: 'argus-launcher-verify', version: app.getVersion()},
+      },
+    });
+    send({jsonrpc: '2.0', method: 'notifications/initialized'});
+    send({jsonrpc: '2.0', id: 2, method: 'tools/list', params: {}});
+    send({jsonrpc: '2.0', id: 3, method: 'tools/call',
+      params: {name: 'argus_list_profiles', arguments: {}}});
+  });
+}
+
+ipcMain.handle('argus:verify-integration', async (_event, {integrationId}) => {
+  const home = app.getPath('home');
+  const checks = [];
+  const add = (id, label, ok, detail) => checks.push({id, label, ok, detail: detail || ''});
+
+  add('api', 'Local API is running', apiState.status === 'ready',
+      apiState.status === 'ready' ?
+        apiState.url :
+        `The local automation API is ${apiState.status || 'not running'}.`);
+
+  if (integrations.isManual(integrationId)) {
+    return {ok: checks.every((check) => check.ok), checks};
+  }
+
+  const entry = integrations.readIntegrationEntry({
+    integrationId, home, platform: process.platform,
+  });
+  add('config', 'Config carries the argus server', entry.hasEntry,
+      entry.hasEntry ? entry.configPath : `${entry.configPath} has no argus entry.`);
+  if (!entry.hasEntry) {
+    return {ok: false, checks};
+  }
+
+  const commandExists = Boolean(entry.command) && fs.existsSync(entry.command);
+  add('binary', 'Command exists', commandExists,
+      commandExists ? entry.command :
+        `${entry.command} does not exist — the app may have been moved or reinstalled.`);
+
+  const script = entry.args?.[0];
+  // fs.existsSync sees inside the asar in the main process, which is where the
+  // script lives -- so this is a real check, not a false pass.
+  const scriptExists = Boolean(script) && fs.existsSync(script);
+  add('script', 'Server script exists', scriptExists,
+      scriptExists ? script : `The MCP server script is missing at ${script}.`);
+
+  if (!commandExists || !scriptExists) {
+    return {ok: false, checks};
+  }
+
+  // Codex's TOML is read back for command only, so its env is not available
+  // here; fall back to a freshly built spec's env for the handshake. The
+  // handshake is still against the command the file actually names.
+  const handshake = await verifyHandshake({
+    command: entry.command,
+    args: entry.args,
+    env: entry.env || {},
+  });
+  add('handshake', 'MCP server responds', handshake.ok,
+      handshake.ok ?
+        `${handshake.serverInfo?.name || 'argus'} ${handshake.serverInfo?.version || ''}`.trim() :
+        handshake.detail);
+  if (!handshake.ok) {
+    return {ok: false, checks};
+  }
+  add('tools', 'Tools available', handshake.toolCount > 0,
+      `${handshake.toolCount} tools`);
+  add('endToEnd', 'Can reach your profiles', handshake.callOk,
+      handshake.callOk ? 'Listed profiles successfully.' : handshake.callDetail);
+
+  return {ok: checks.every((check) => check.ok), checks};
 });
 
 ipcMain.handle('argus:check-for-updates', async () => {
@@ -3075,12 +3158,96 @@ function waitForCdpReady(port, timeoutMs) {
   });
 }
 
+// Is anything actually answering CDP on this port? Both resolution paths below
+// have to ask, because both can be pointing at a browser that has since died:
+// automationLaunches survives a crashed child, and DevToolsActivePort survives
+// a SIGKILL.
+function cdpAlive(port) {
+  return new Promise((resolve) => {
+    const req = http.get({host: '127.0.0.1', port, path: '/json/version', timeout: 1200}, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+// Where a running profile's debugging endpoint is, without the MCP server (or
+// anything else) having to remember it.
+//
+// Two tiers, because tracking alone is not enough: automationLaunches lives in
+// this process, so restarting Anty used to strand every open session -- the
+// browser was still there, still debuggable, and nothing could find it again.
+// Chromium writes the port it actually bound into DevToolsActivePort inside the
+// profile's own user-data-dir, which outlives us.
+async function resolveProfileCdp(profileId) {
+  const tracked = automationLaunches.get(profileId);
+  if (tracked && await cdpAlive(tracked.port)) {
+    return {
+      running: true,
+      cdpUrl: `http://127.0.0.1:${tracked.port}`,
+      pid: tracked.pid,
+      launchedByKeyId: tracked.launchedByKeyId,
+    };
+  }
+  if (tracked) {
+    // Stale entry -- the window is gone. Drop it so close-automation does not
+    // later try to kill a pid that has been recycled.
+    automationLaunches.delete(profileId);
+  }
+  try {
+    const dir = resolveProfileUserDataDir(path.join('ArgysProfiles', profileId));
+    const port = Number(fs.readFileSync(path.join(dir, 'DevToolsActivePort'), 'utf8')
+        .split('\n')[0].trim());
+    if (port > 0 && await cdpAlive(port)) {
+      // Re-adopt it, with no pid: we did not spawn this one, so close-automation
+      // must not claim it belongs to any particular key.
+      automationLaunches.set(profileId, {pid: null, port, launchedByKeyId: null});
+      return {running: true, cdpUrl: `http://127.0.0.1:${port}`, pid: null, launchedByKeyId: null};
+    }
+  } catch {
+    // No file, unreadable, or nothing listening -- not running.
+  }
+  return {running: false, cdpUrl: null, pid: null, launchedByKeyId: null};
+}
+
+// May this key see (drive, close, re-adopt) this running session?
+//
+// A full-access key may see anything. A folder-scoped key may only see what it
+// launched itself -- this process cannot tell which folder a profile is in
+// (that lives in the renderer), so "did you start it" is the check that can be
+// made here, and it is the conservative one.
+//
+// Consequence worth knowing: a session adopted from DevToolsActivePort after an
+// Anty restart has no launchedByKeyId, so a scoped key cannot re-adopt even its
+// own earlier session and must relaunch. Denying by default is the right way
+// round -- the alternative lets a narrowly-scoped integration reach a profile
+// outside its folder.
+function maySeeAutomationSession(key, session) {
+  if (key.folderScope === null) {
+    return true;
+  }
+  return Boolean(session.launchedByKeyId) && session.launchedByKeyId === key.id;
+}
+
 function killAutomationLaunch(profileId) {
   const tracked = automationLaunches.get(profileId);
   if (!tracked) {
     return false;
   }
   automationLaunches.delete(profileId);
+  // A session adopted from DevToolsActivePort after an Anty restart has no pid
+  // -- we never spawned it. Fall back to the profile-marker kill the launch
+  // path already uses, rather than killing pid null (which on POSIX signals the
+  // whole process group, i.e. this app).
+  if (!tracked.pid) {
+    killStaleProfileProcess(profileId);
+    return true;
+  }
   try {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/pid', String(tracked.pid), '/T', '/F'], {stdio: 'ignore'});
@@ -3532,6 +3699,7 @@ function startAutomationApiServer() {
          parsedUrl.pathname !== '/v1/profiles/update-fingerprint' &&
          parsedUrl.pathname !== '/v1/profiles/launch-automation' &&
          parsedUrl.pathname !== '/v1/profiles/close-automation' &&
+         parsedUrl.pathname !== '/v1/profiles/cdp' &&
          parsedUrl.pathname !== '/v1/monitoring/report')) {
       sendJson(res, 404, {status: false, msg: 'Not found'});
       return;
@@ -3560,6 +3728,28 @@ function startAutomationApiServer() {
           return;
         }
         sendJson(res, 200, {status: true, closed: killAutomationLaunch(payload.profileId)});
+        return;
+      }
+      // Where a running profile's CDP endpoint is. Answered entirely in this
+      // process -- no renderer round trip -- so it stays available while the
+      // window is busy, and so an MCP server can hold no session state at all.
+      if (parsedUrl.pathname === '/v1/profiles/cdp') {
+        if (!payload.profileId || typeof payload.profileId !== 'string') {
+          sendJson(res, 400, {status: false, msg: 'profileId is required'});
+          return;
+        }
+        const session = await resolveProfileCdp(payload.profileId);
+        if (session.running && !maySeeAutomationSession(key, session)) {
+          sendJson(res, 403, {status: false, msg: 'This key did not launch that profile'});
+          return;
+        }
+        sendJson(res, 200, {
+          status: true,
+          profileId: payload.profileId,
+          running: session.running,
+          cdpUrl: session.cdpUrl,
+          pid: session.pid,
+        });
         return;
       }
       if (!mainWindow) {
@@ -3689,6 +3879,32 @@ function startAutomationApiServer() {
       }
       let cdpPort = null;
       if (isLaunchAutomation) {
+        // Launching a profile that is already open used to kill the live window
+        // and relaunch it on a fresh port -- spawnProfile calls
+        // killStaleProfileProcess deliberately, because Chromium's
+        // single-instance handoff otherwise swallows --remote-debugging-port.
+        // For a script that is holding a session open, that turned a harmless
+        // second call into "my browser just closed". Hand back the running
+        // session instead, and keep the destructive path behind relaunch:true.
+        const existing = await resolveProfileCdp(payload.profileId);
+        if (existing.running && !payload.relaunch) {
+          if (!maySeeAutomationSession(key, existing)) {
+            sendJson(res, 403, {status: false, msg: 'This key did not launch that profile'});
+            return;
+          }
+          sendJson(res, 200, {
+            status: true,
+            profileId: payload.profileId,
+            cdpUrl: existing.cdpUrl,
+            pid: existing.pid,
+            reused: true,
+          });
+          return;
+        }
+        if (existing.running && !maySeeAutomationSession(key, existing)) {
+          sendJson(res, 403, {status: false, msg: 'This key did not launch that profile'});
+          return;
+        }
         try {
           cdpPort = await getFreePort();
         } catch (error) {

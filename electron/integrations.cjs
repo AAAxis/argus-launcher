@@ -237,6 +237,45 @@ function tomlString(value) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+function unescapeToml(value) {
+  return value.replace(/\\(.)/g, '$1');
+}
+
+// Readers for exactly the three things codexBlock writes, and nothing more.
+// Enough to tell a current entry from a stale one and to recover the token on
+// repair; this is not a TOML parser and must not be used as one.
+function tomlValue(body, key) {
+  const match = new RegExp(`^\\s*${key}\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"`, 'm').exec(body);
+  return match ? unescapeToml(match[1]) : null;
+}
+
+function tomlArray(body, key) {
+  const match = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(body);
+  if (!match) {
+    return [];
+  }
+  return [...match[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((item) => unescapeToml(item[1]));
+}
+
+// The [mcp_servers.argus.env] subtable runs from its header to the end of the
+// section codexSection already bounded, so a plain key = "value" sweep of the
+// tail is enough.
+function tomlEnvTable(body) {
+  const header = body.indexOf(`[mcp_servers.${SERVER_KEY}.env]`);
+  if (header === -1) {
+    return {};
+  }
+  const env = {};
+  const tail = body.slice(header);
+  for (const line of tail.split('\n').slice(1)) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"/.exec(line);
+    if (match) {
+      env[match[1]] = unescapeToml(match[2]);
+    }
+  }
+  return env;
+}
+
 function codexBlock(spawn) {
   const lines = [
     CODEX_HEADER,
@@ -333,10 +372,10 @@ function removeIntegrationConfig({integrationId, home, platform}) {
 function readIntegrationEntry({integrationId, home, platform}) {
   const tool = TOOLS[integrationId];
   if (!tool) {
-    return {configPath: null, hasEntry: false, command: null, args: []};
+    return {configPath: null, hasEntry: false, command: null, args: [], env: {}};
   }
   const configPath = tool.configPath(home, platform);
-  const miss = {configPath, hasEntry: false, command: null, args: []};
+  const miss = {configPath, hasEntry: false, command: null, args: [], env: {}};
   try {
     if (tool.format === 'toml') {
       const existing = fs.readFileSync(configPath, 'utf8');
@@ -345,12 +384,12 @@ function readIntegrationEntry({integrationId, home, platform}) {
         return miss;
       }
       const body = existing.slice(section.start, section.end);
-      const command = /^\s*command\s*=\s*"((?:[^"\\]|\\.)*)"/m.exec(body);
       return {
         configPath,
         hasEntry: true,
-        command: command ? command[1].replace(/\\(.)/g, '$1') : null,
-        args: [],
+        command: tomlValue(body, 'command'),
+        args: tomlArray(body, 'args'),
+        env: tomlEnvTable(body),
       };
     }
     let node = readJsonConfig(configPath);
@@ -369,6 +408,7 @@ function readIntegrationEntry({integrationId, home, platform}) {
       hasEntry: true,
       command: typeof entry.command === 'string' ? entry.command : null,
       args: Array.isArray(entry.args) ? entry.args : [],
+      env: entry.env && typeof entry.env === 'object' ? entry.env : {},
     };
   } catch {
     // No config file yet -- not connected, which `miss` already says.

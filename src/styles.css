@@ -2962,7 +2962,138 @@ tbody tr.empty-row-tr:hover {
 .integration-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* The tab groups by what a tool is (coding agent, automation runtime, set up by
+ * hand) rather than listing ten cards flat. The third group is not a lesser
+ * tier -- it is the honest one: those have no config file this app can write,
+ * so they hand over a snippet instead of pretending to wire themselves up. */
+.integration-section {
+  display: grid;
+  gap: 10px;
+}
+
+.integration-section h3 {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Status of the thing every integration depends on, stated once at the top
+ * rather than repeated on ten cards. */
+.integration-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.integration-bar code {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.integration-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-faint);
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  padding: 0 10px;
+}
+
+.integration-search input {
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-size: 13px;
+  height: var(--control-h-sm);
+  outline: none;
+  width: 190px;
+}
+
+/* One line under the description carrying whichever fact matters for the card's
+ * current state: the key and when it was last used, or the single reason it is
+ * not simply connected. Fixed height so cards in a row stay aligned whether or
+ * not they have something to say. */
+.integration-card-meta {
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 32px;
+}
+
+.integration-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.integration-card-actions > button {
+  flex: 1;
+  justify-content: center;
+  min-height: 32px;
+}
+
+.integration-card.is-attention {
+  border-color: color-mix(in srgb, var(--status-warmup-ink) 40%, var(--border));
+}
+
+/* Per-check results from a real handshake, not one blended verdict: "not ready"
+ * tells a user nothing about which of five independent things to go and fix. */
+.integration-checks {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.integration-checks li {
+  align-items: flex-start;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.integration-checks li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.integration-checks li span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.integration-checks li.is-ok > svg {
+  color: var(--success);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.integration-checks li.is-bad > svg {
+  color: var(--danger);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.integration-tools {
+  color: var(--ink-soft);
+  display: grid;
+  font-size: 13px;
+  gap: 4px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .integration-card {
@@ -3262,6 +3393,20 @@ tbody tr.empty-row-tr:hover {
  * identical to one whose status had not loaded. */
 .status-pill.is-idle {
   color: var(--ink-faint);
+}
+
+/* The third state, and the one that mattered most to add: a key exists but the
+ * wiring behind it is broken. It used to be indistinguishable from Connected,
+ * which is how a tool that failed to start the server on every launch still
+ * showed a green dot. Amber, not red -- it is fixable in one click, not an
+ * error the user caused. */
+.status-pill.is-warn {
+  color: var(--status-warmup-ink);
+}
+
+.status-pill.is-warn .status-dot {
+  background: currentcolor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentcolor 25%, transparent);
 }
 
 .status-dot {

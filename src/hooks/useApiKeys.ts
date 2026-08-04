@@ -6,9 +6,8 @@
 // cleared, which is why signing in as a new account still showed the previous
 // one's keys, and with them its integrations as Connected.
 import {useCallback, useEffect, useState} from 'react';
-import {API_BASE_URL} from '../data/apiDocs';
 import {native} from '../native';
-import type {ApiKey, ApiState, IntegrationStatus} from '../native';
+import type {ApiKey, ApiState, IntegrationStatus, IntegrationVerification} from '../native';
 import type {Integration, IntegrationId} from '../data/integrations';
 import type {ArgusFolder} from '../types';
 
@@ -81,6 +80,13 @@ export function useApiKeys(userId: string | null, orgId: string | null) {
 
 export type IntegrationsState = ReturnType<typeof useIntegrations>;
 
+// How a card reads. Derived from three independent facts, because any one of
+// them can be true while the integration is dead: this app has a key, the
+// tool's config carries our entry, and that entry points at something that
+// still exists. Reporting on the key alone is what used to show Connected for a
+// tool that failed to start the server on every launch.
+export type ConnectionState = 'connected' | 'attention' | 'idle';
+
 export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   // Which integration's dialog is open, '' for none.
   const [openId, setOpenId] = useState<IntegrationId | ''>('');
@@ -88,43 +94,104 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   const [busyId, setBusyId] = useState<IntegrationId | ''>('');
   const [results, setResults] = useState<Partial<Record<IntegrationId, {ok: boolean; message: string}>>>({});
   const [tokens, setTokens] = useState<Partial<Record<IntegrationId, string>>>({});
-  const [testResult, setTestResult] = useState<{ok: boolean; message: string} | null>(null);
+  const [verification, setVerification] = useState<IntegrationVerification | null>(null);
   // What each tool's config file says right now, as opposed to what this app's
   // key store says. Filled by refreshStatus.
   const [configs, setConfigs] = useState<Partial<Record<IntegrationId, IntegrationStatus>>>({});
-  // Where argus-hive-bridge lives. Was a hardcoded Windows path
-  // (C:\Users\dima\argus-hive-bridge) that could not be right on any other
-  // machine; now seeded from the main process and overridable in the dialog.
-  const [bridgePath, setBridgePath] = useState('');
+  // Which tools look present on this machine. Advisory -- it never gates
+  // connecting, only the label on an unconnected card.
+  const [detected, setDetected] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    void native?.defaultBridgePath?.().then((resolved) => {
-      if (resolved) {
-        setBridgePath(resolved);
-      }
-    });
-  }, []);
-
-  async function refreshStatus(integrationId: IntegrationId) {
+  const refreshStatus = useCallback(async (integrationId: IntegrationId) => {
     if (!native?.integrationStatus) {
       return null;
     }
-    const status = await native.integrationStatus(integrationId, bridgePath || null);
+    const status = await native.integrationStatus(integrationId);
     setConfigs((prev) => ({...prev, [integrationId]: status}));
     return status;
+  }, []);
+
+  // Loads every card's real state at once, so the tab is honest on arrival
+  // rather than only after a dialog is opened.
+  const refreshAll = useCallback(async (ids: IntegrationId[]) => {
+    const [statuses, found] = await Promise.all([
+      Promise.all(ids.map(async (id) => [id, await native?.integrationStatus?.(id)] as const)),
+      native?.detectIntegrations?.() ?? Promise.resolve({}),
+    ]);
+    setConfigs((prev) => {
+      const next = {...prev};
+      for (const [id, status] of statuses) {
+        if (status) {
+          next[id] = status;
+        }
+      }
+      return next;
+    });
+    setDetected(found || {});
+  }, []);
+
+  // Connected needs all three facts to agree. Anything short of that with a key
+  // present is "needs attention" -- never silently Connected.
+  function stateFor(integration: Integration): ConnectionState {
+    const hasKey = apiKeys.keysFor(integration.id).length > 0;
+    const config = configs[integration.id];
+    if (!hasKey) {
+      return 'idle';
+    }
+    if (config?.manual) {
+      return 'connected';
+    }
+    if (!config) {
+      // Status not loaded yet -- don't claim either way.
+      return 'attention';
+    }
+    return config.hasEntry && config.entryIsCurrent && config.commandExists ?
+      'connected' :
+      'attention';
+  }
+
+  // Why a card is not simply Connected, in the user's terms. One line, naming
+  // the thing to do about it.
+  function reasonFor(integration: Integration): string {
+    const config = configs[integration.id];
+    const hasKey = apiKeys.keysFor(integration.id).length > 0;
+    if (!hasKey) {
+      if (config && !config.installed) {
+        return 'Not found on this machine';
+      }
+      return config?.installed ? 'Detected on this machine' : '';
+    }
+    if (!config) {
+      return 'Checking…';
+    }
+    if (!config.hasEntry) {
+      return `${config.configPath || integration.configLabel} no longer has the argus entry`;
+    }
+    if (config.stale || !config.commandExists) {
+      return 'Points at a server that is not installed — repair it';
+    }
+    if (!config.entryIsCurrent) {
+      return 'Points at an older install — repair it';
+    }
+    if (!config.apiReady) {
+      return 'The local API is not running';
+    }
+    return '';
   }
 
   function open(integration: Integration) {
     setOpenId(integration.id);
     setScope('');
-    setTestResult(null);
+    setVerification(null);
     void refreshStatus(integration.id);
   }
 
-  // Creates the key and writes the target tool's config in one step, but only
-  // after the dialog has shown which file it will touch and let the user narrow
-  // the folder scope. Hive gets the raw token revealed instead, since it has no
-  // config file of its own for Anty to write.
+  // Mints a scoped key and writes the tool's config in one step. Nothing to
+  // install and no path to supply: the config points at the MCP server bundled
+  // in this app, started through the launcher's own binary.
+  //
+  // The two manual integrations get the raw token revealed instead, because
+  // they have no config file for this app to write.
   async function connect(integration: Integration) {
     if (!native?.createApiKey) {
       return;
@@ -137,27 +204,51 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
           {ownerUserId: apiKeys.userId, orgId: apiKeys.orgId, integrationId: integration.id},
       );
       await apiKeys.refresh();
-      if (integration.id === 'hive') {
+      if (integration.category === 'manual') {
         setTokens((prev) => ({...prev, [integration.id]: created.token}));
         setResults((prev) => ({
           ...prev,
           [integration.id]: {
             ok: true,
-            message: 'Copy this into argus-hive-bridge/.env as ARGYS_API_TOKEN -- shown once.',
+            message: 'Copy this into your client as ARGYS_API_TOKEN — it is shown once.',
           },
         }));
+        await refreshStatus(integration.id);
         return;
       }
       if (!native.applyIntegrationConfig) {
         return;
       }
-      const result = await native.applyIntegrationConfig(
-          integration.id, bridgePath, created.token, API_BASE_URL);
+      const result = await native.applyIntegrationConfig(integration.id, created.token);
       setResults((prev) => ({
         ...prev,
         [integration.id]: result.ok ?
-          {ok: true, message: `Wrote ${result.path} -- restart ${integration.name} to use it.`} :
+          {ok: true, message: `Wrote ${result.path}. ${integration.restartLabel} to pick it up.`} :
           {ok: false, message: result.error || 'Failed to write config'},
+      }));
+      await refreshStatus(integration.id);
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  // Repoints a stale entry at this build's server, keeping the key that is
+  // already in the file. Falls back to a full connect when that key is gone --
+  // minting a new one needs the owner ids only this side knows.
+  async function repair(integration: Integration) {
+    setBusyId(integration.id);
+    try {
+      const result = await native?.repairIntegration?.(integration.id);
+      if (result?.needsKey) {
+        setBusyId('');
+        await connect(integration);
+        return;
+      }
+      setResults((prev) => ({
+        ...prev,
+        [integration.id]: result?.ok ?
+          {ok: true, message: `Updated ${result.path}. ${integration.restartLabel} to pick it up.`} :
+          {ok: false, message: result?.error || 'Could not repair this connection'},
       }));
       await refreshStatus(integration.id);
     } finally {
@@ -178,6 +269,7 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
       await apiKeys.refresh();
       await refreshStatus(integration.id);
       setTokens((prev) => ({...prev, [integration.id]: ''}));
+      setVerification(null);
       setResults((prev) => ({
         ...prev,
         [integration.id]: {
@@ -190,40 +282,26 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     }
   }
 
-  // Checks the three things that can independently be wrong: the local API is
-  // up, the config still carries our entry, and the bridge's interpreter is
-  // actually where the config says it is.
+  // Actually starts the configured server and speaks MCP to it, in the main
+  // process. Everything cheaper than this can pass while the integration is
+  // dead -- which is the state this tab used to report as Connected.
   async function test(integration: Integration) {
     setBusyId(integration.id);
-    setTestResult(null);
+    setVerification(null);
     try {
-      const status = await refreshStatus(integration.id);
-      const problems: string[] = [];
-      if (apiState?.status !== 'ready') {
-        problems.push(`the local API is ${apiState?.status || 'not running'}`);
-      }
-      if (integration.id !== 'hive' && status && !status.hasEntry) {
-        problems.push(`${integration.configLabel} has no argus entry`);
-      }
-      if (status && !status.bridgeExists) {
-        problems.push(`no bridge checkout at ${bridgePath}`);
-      } else if (status && !status.pythonExists) {
-        problems.push(`no interpreter at ${status.pythonPath} -- create the venv first`);
-      }
-      setTestResult(problems.length === 0 ?
-        {ok: true, message: 'All checks passed.'} :
-        {ok: false, message: `Not ready: ${problems.join('; ')}.`});
+      await refreshStatus(integration.id);
+      const result = await native?.verifyIntegration?.(integration.id);
+      setVerification(result || {
+        ok: false,
+        checks: [{
+          id: 'native',
+          label: 'Argus Launcher',
+          ok: false,
+          detail: 'Verification is only available in the desktop app.',
+        }],
+      });
     } finally {
       setBusyId('');
-    }
-  }
-
-  // Opens the native directory chooser in the main process (Finder on macOS,
-  // File Explorer on Windows), seeded with whatever is in the field.
-  async function pickBridgeFolder() {
-    const picked = await native?.selectBridgeFolder?.(bridgePath || null);
-    if (picked) {
-      setBridgePath(picked);
     }
   }
 
@@ -233,14 +311,16 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     setResults({});
     setTokens({});
     setConfigs({});
+    setVerification(null);
     setOpenId('');
   }
 
   return {
     openId, setOpenId,
     scope, setScope,
-    busyId, results, tokens, testResult, configs,
-    bridgePath, setBridgePath, pickBridgeFolder,
-    open, connect, disconnect, test, reset,
+    busyId, results, tokens, verification, configs, detected,
+    apiState,
+    open, connect, disconnect, repair, test, reset,
+    refreshStatus, refreshAll, stateFor, reasonFor,
   };
 }

@@ -6,14 +6,17 @@ contextBridge.exposeInMainWorld('argusNative', {
   createApiKey: (name, folderScope, meta) =>
     ipcRenderer.invoke('argus:create-api-key', {name, folderScope, ...(meta || {})}),
   revokeApiKey: (id) => ipcRenderer.invoke('argus:revoke-api-key', id),
-  applyIntegrationConfig: (integrationId, dir, token, base) =>
-    ipcRenderer.invoke('argus:apply-integration-config', {integrationId, dir, token, base}),
-  integrationStatus: (integrationId, dir) =>
-    ipcRenderer.invoke('argus:integration-status', {integrationId, dir}),
+  applyIntegrationConfig: (integrationId, token) =>
+    ipcRenderer.invoke('argus:apply-integration-config', {integrationId, token}),
+  integrationStatus: (integrationId) =>
+    ipcRenderer.invoke('argus:integration-status', {integrationId}),
   removeIntegrationConfig: (integrationId) =>
     ipcRenderer.invoke('argus:remove-integration-config', {integrationId}),
-  defaultBridgePath: () => ipcRenderer.invoke('argus:default-bridge-path'),
-  selectBridgeFolder: (current) => ipcRenderer.invoke('argus:select-bridge-folder', current),
+  repairIntegration: (integrationId) =>
+    ipcRenderer.invoke('argus:repair-integration', {integrationId}),
+  verifyIntegration: (integrationId) =>
+    ipcRenderer.invoke('argus:verify-integration', {integrationId}),
+  detectIntegrations: () => ipcRenderer.invoke('argus:detect-integrations'),
   checkProxy: (proxy) => ipcRenderer.invoke('argus:check-proxy', proxy),
   openExternal: (url) => ipcRenderer.invoke('argus:open-external', url),
   bookmarkFavicon: (url) => ipcRenderer.invoke('argus:bookmark-favicon', url),

@@ -11,7 +11,7 @@ import {ProxiesTab} from './components/tabs/ProxiesTab';
 import {CookiesTab} from './components/tabs/CookiesTab';
 import {StartPageTab} from './components/tabs/StartPageTab';
 import {ExtensionsTab} from './components/tabs/ExtensionsTab';
-import {IntegrationsTab} from './components/tabs/SimpleTabs';
+import {IntegrationsTab} from './components/tabs/IntegrationsTab';
 import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
 import {CookieSetModal} from './components/modals/CookieSetModal';
 import {ProfileDeleteModal, ProxyDeleteModal, ErrorModal} from './components/modals/ConfirmModals';
@@ -418,7 +418,13 @@ export function App() {
       case 'extensions':
         return <ExtensionsTab onAddExtension={() => editors.setExtensionAddOpen(true)} />;
       case 'integrations':
-        return <IntegrationsTab apiKeys={apiKeys} onOpen={integrations.open} />;
+        return (
+          <IntegrationsTab
+            apiKeys={apiKeys}
+            integrations={integrations}
+            onOpen={integrations.open}
+          />
+        );
       case 'api':
         return (
           <ApiTab

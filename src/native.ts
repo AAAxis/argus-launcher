@@ -141,13 +141,39 @@ export type ApiKey = {
 };
 
 // What the target tool's config says right now, as opposed to what this app's
-// key store says. Both have to agree before an integration is really connected.
+// key store says. Both have to agree before an integration is really connected
+// -- a key can exist while the config entry has been deleted, and an entry can
+// exist while pointing at something that no longer runs.
 export type IntegrationStatus = {
   configPath: string | null;
+  // Hive and the generic MCP card have no config file for us to write; they
+  // connect by showing the user a snippet instead.
+  manual: boolean;
+  // Whether the tool itself looks present on this machine. Advisory only --
+  // never used to block connecting, because a false negative would make a
+  // working install unconnectable.
+  installed: boolean;
   hasEntry: boolean;
-  bridgeExists: boolean;
-  pythonExists: boolean;
-  pythonPath: string;
+  // The entry names the server this build ships, rather than an older install's
+  // path or the Python bridge that no longer exists.
+  entryIsCurrent: boolean;
+  stale: boolean;
+  commandExists: boolean;
+  apiReady: boolean;
+};
+
+// One row per thing that can independently be broken, so the dialog can say
+// which step failed instead of one blended verdict.
+export type IntegrationCheck = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type IntegrationVerification = {
+  ok: boolean;
+  checks: IntegrationCheck[];
 };
 
 type ArgusNative = {
@@ -176,26 +202,32 @@ type ArgusNative = {
   ): Promise<ApiKey & {token: string}>;
   revokeApiKey?(id: string): Promise<{revoked: boolean}>;
   // Writes the MCP server registration directly into the target tool's own
-  // config file (~/.claude.json or ~/.codex/config.toml) instead of handing
-  // back a snippet to copy/paste -- see applyClaudeCodeConfig/applyCodexConfig
-  // in main.cjs for why (every CLI-command form proved unreliable on Windows).
+  // config file (~/.claude.json, ~/.codex/config.toml, ...) instead of handing
+  // back a snippet to copy/paste -- see electron/integrations.cjs for why
+  // (every CLI-command form proved unreliable on Windows). What it points at is
+  // the server bundled in this app, so connecting installs nothing.
   applyIntegrationConfig?(
     integrationId: string,
-    dir: string,
     token: string,
-    base: string,
   ): Promise<{ok: boolean; path?: string; error?: string}>;
   // Reads the target tool's config back. Needed because applyIntegrationConfig
   // is fire-and-forget: nothing else notices if the user later edits or deletes
   // the block it wrote.
-  integrationStatus?(integrationId: string, dir: string | null): Promise<IntegrationStatus>;
+  integrationStatus?(integrationId: string): Promise<IntegrationStatus>;
   // Deletes the argus entry this app wrote. Pairs with revokeApiKey -- revoking
   // alone leaves the tool pointed at a dead token.
   removeIntegrationConfig?(integrationId: string): Promise<{ok: boolean; path?: string | null; error?: string}>;
-  defaultBridgePath?(): Promise<string>;
-  // Opens the OS directory chooser, seeded with `current` so it starts where
-  // the user is already pointing. Null when they cancel.
-  selectBridgeFolder?(current: string | null): Promise<string | null>;
+  // Repoints a stale entry at this build's server, keeping the token already in
+  // the file. needsKey means that token is gone or revoked, so the caller has
+  // to run the normal connect flow (which needs an owner id only it knows).
+  repairIntegration?(
+    integrationId: string,
+  ): Promise<{ok: boolean; path?: string; needsKey?: boolean; error?: string}>;
+  // Actually starts what the config says to start and speaks MCP to it. The
+  // only check that can tell a live integration from a dead one.
+  verifyIntegration?(integrationId: string): Promise<IntegrationVerification>;
+  // Which agent tools look present on this machine, in one call.
+  detectIntegrations?(): Promise<Record<string, boolean>>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
   // Opens a page in the user's real browser. The main process only honours
   // https: URLs on hosts we own (plus localhost in dev), so a rejected URL
