@@ -94,6 +94,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
   // Trash is excluded because the limit trigger excludes it too: a soft-deleted
   // profile only counts against the plan again once it is restored.
   const profileCount = data.state.profiles.filter((profile) => !profile.deleted_at).length;
+  // No deleted_at filter: automations are hard-deleted, so every row in state
+  // is a live one counting against the cap.
+  const automationCount = data.state.automations.length;
 
   // RLS restricts UPDATE on organizations to is_org_admin, and db.orgs.rename
   // asks for the row back so a member's attempt surfaces as an error instead of
@@ -172,6 +175,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
               <PlanUsageSection
                 onOpenSite={props.onOpenSite}
                 profileCount={profileCount}
+                automationCount={automationCount}
               />
             )}
             {active === 'appearance' && <AppearanceSection />}

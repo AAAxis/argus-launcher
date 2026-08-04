@@ -6,6 +6,7 @@
 import {History, Play, Trash2, Workflow} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {EmptyState} from '../ui/EmptyState';
+import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ArgusAutomation, AutomationRun} from '../../types';
 
@@ -30,9 +31,16 @@ export function AutomationsTab({onEdit, onNew, onHistory}: {
   onNew: () => void;
   onHistory: (automation: ArgusAutomation) => void;
 }) {
-  const {data, automations, profiles: _profiles, selectedProfileId} = useWorkspace();
+  const {data, automations, selectedProfileId} = useWorkspace();
+  const org = useOrg();
   const {state} = data;
   const list = state.automations;
+  // UX only, never security: trg_automation_limit is the real gate and
+  // describeDbError turns its exception into the same sentence. This just says
+  // it before the click rather than after. null means unlimited, matching
+  // profile_limit's convention.
+  const limit = org.org?.automation_limit ?? 0;
+  const atCap = limit !== null && list.length >= limit;
 
   // The newest run per automation, from whatever this session has seen. Older
   // history lives in the database and is opened explicitly -- see onHistory.
@@ -58,7 +66,13 @@ export function AutomationsTab({onEdit, onNew, onHistory}: {
             'fill a form, read something back. Attach one to a profile and it runs ' +
             'when that profile launches.'}
         >
-          <button className="primary" onClick={onNew}>New automation</button>
+          {atCap ? (
+            <p className="field-hint">
+              Your plan doesn't include any automations. Upgrade on the website to add one.
+            </p>
+          ) : (
+            <button className="primary" onClick={onNew}>New automation</button>
+          )}
         </EmptyState>
       </section>
     );

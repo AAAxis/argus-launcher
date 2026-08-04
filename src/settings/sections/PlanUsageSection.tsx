@@ -15,6 +15,7 @@ import {SettingsGroup, SettingsRow, SettingsValue} from '../rows';
 
 type Props = {
   profileCount: number;
+  automationCount: number;
   onOpenSite: (pathname: string) => void;
 };
 
@@ -43,7 +44,7 @@ function Meter({used, limit}: {used: number; limit: number | null}) {
   );
 }
 
-export function PlanUsageSection({profileCount, onOpenSite}: Props) {
+export function PlanUsageSection({profileCount, automationCount, onOpenSite}: Props) {
   const org = useOrg();
   const [seats, setSeats] = useState<number | null>(null);
 
@@ -109,6 +110,13 @@ export function PlanUsageSection({profileCount, onOpenSite}: Props) {
           description="Profiles in Trash don't count against the limit until you restore them."
         >
           <Meter used={profileCount} limit={org.org?.profile_limit ?? null} />
+        </SettingsRow>
+
+        <SettingsRow
+          label="Automations"
+          description="Saved workflows. Runs are unlimited; this is how many you can keep."
+        >
+          <Meter used={automationCount} limit={org.org?.automation_limit ?? null} />
         </SettingsRow>
 
         <SettingsRow label="Members" description="People who can sign in to this workspace.">

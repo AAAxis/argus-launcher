@@ -504,13 +504,24 @@ export function App() {
             <button onClick={editors.newProfile}><UserPlus size={18} /> Add profile</button>
           </>
         );
-      case 'automations':
+      case 'automations': {
+        // UX only. trg_automation_limit is the real gate; describeDbError turns
+        // its exception into the same sentence if this ever disagrees.
+        const limit = org.org?.automation_limit ?? 0;
+        const atCap = limit !== null && data.state.automations.length >= limit;
         return (
-          <button onClick={() =>
-            setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}>
+          <button
+            disabled={atCap}
+            title={atCap ?
+              'Your plan doesn\'t include any more automations.' :
+              'Create an automation'}
+            onClick={() =>
+              setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}
+          >
             <Plus size={18} /> New automation
           </button>
         );
+      }
       case 'proxies':
         return (
           <>

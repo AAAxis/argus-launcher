@@ -177,6 +177,31 @@ on top of it; `../prompts/07-api-tokens.md` replaces it with real hashed tokens.
 Never hardcode a token in this file. If one ever ends up here, treat it as compromised
 and rotate it immediately.
 
+## Automations
+
+**Never `upsert` an automation.** `trg_automation_limit` is BEFORE INSERT, and
+Postgres fires those for `insert ... on conflict do update` even down the
+conflict path — so an upsert used to *edit* a workflow fails whenever the org
+sits at its cap. `src/db/automations.ts` splits create/replace for this reason,
+exactly as `src/db/profiles.ts` does.
+
+**The step catalogue is `electron/automation/step-schema.json`, not TypeScript.**
+Nothing compiles `electron/`, so a TS catalogue would be maintained twice by
+hand. `src/automations/schema.ts` pins the JSON to the `StepType` union in both
+directions; adding a step means a JSON entry, a union member and an executor,
+and the editor needs no change at all. Do not "simplify" that binding into a
+cast — a cast on the right-hand side satisfies the annotation and checks
+nothing.
+
+**`evaluate.script` is never interpolated.** Splicing user data into source is
+injection, and a `{{ }}` inside real JavaScript would be silently rewritten.
+Values reach a script through `args`, which are interpolated and passed as a
+JSON-encoded argument.
+
+**Do not add `--remote-allow-origins`.** It used to be `*` on every automation
+launch, which let any web page reach the CDP socket. Our clients send no
+`Origin` and Chromium accepts that.
+
 ## Verification Checklist
 
 Before handing back UI/app changes:
@@ -187,5 +212,12 @@ npm run typecheck
 npm run build
 ```
 
-Both must be clean. There is no test suite. Then restart the app and click through the
+Both must be clean. There is no test suite, but there are two end-to-end
+verification scripts, and anything touching the runner or the start-page token
+should run them:
+
+```
+node scripts/verify-automation.mjs   # drives a real browser through a workflow
+node scripts/verify-run-token.mjs    # the start-page endpoint's refusal paths
+``` Then restart the app and click through the
 path you changed.
