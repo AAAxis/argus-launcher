@@ -6015,3 +6015,342 @@ td.cookie-value-cell input:focus {
   gap: 4px;
   white-space: nowrap;
 }
+
+/* ── Automations ─────────────────────────────────────────────────────────────
+ * The step list borrows the surface tokens the rest of the app uses rather
+ * than inventing a palette: a step row is a .data-card at rest and gains its
+ * own border only when expanded, so a list of twenty does not read as twenty
+ * competing boxes. */
+
+.automations-tab {
+  padding: 24px;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.automation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--raised);
+}
+
+.automation-card-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.automation-card-head p {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.automation-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.automation-card-run {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.automation-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  align-items: center;
+}
+
+.automation-card-actions > button:first-child {
+  margin-right: auto;
+}
+
+/* ── The step list ── */
+
+.automation-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* One indent per nesting level, with a rule down the left so a loop body is
+ * visibly inside its loop rather than merely after it. */
+.automation-steps.nested {
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+
+.automation-steps-empty {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.automation-step {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.automation-step.is-off {
+  opacity: 0.55;
+}
+
+.automation-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.automation-step-handle {
+  cursor: grab;
+  color: var(--ink-soft);
+  display: inline-flex;
+}
+
+.automation-step-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink-soft);
+  display: inline-flex;
+}
+
+.automation-step-index {
+  min-width: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.automation-step-kind {
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* The generated summary is the one thing that must survive a narrow window,
+ * so it takes the slack and truncates rather than wrapping the row. */
+.automation-step-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.automation-step-enabled {
+  display: inline-flex;
+}
+
+.automation-step-body {
+  padding: 4px 12px 14px 40px;
+  border-top: 1px solid var(--line);
+}
+
+.automation-step-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.automation-step-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.automation-step-advanced summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.automation-step-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.automation-nested {
+  margin-top: 6px;
+}
+
+.automation-nested-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.automation-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Add-step menu ── */
+
+.automation-add-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+.automation-add-menu button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.automation-add-menu .automation-add-cancel {
+  border-style: dashed;
+  color: var(--ink-soft);
+}
+
+/* ── Key/value and condition editors ── */
+
+.automation-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.automation-kv-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+}
+
+.automation-condition {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.automation-problems {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--danger, #b4402f);
+  font-size: 12px;
+}
+
+.automation-json textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Run log ── */
+
+.run-log-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 16px;
+  min-height: 360px;
+}
+
+.run-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid var(--line);
+  padding-right: 12px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.run-log-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.run-log-entry.is-active {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.run-log-entry-meta,
+.run-log-entry-time {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.run-log-detail {
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.run-log-lines {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+/* Indentation is inline (padding-left from the entry's path depth), so the
+ * log lines up with the editor's nesting without a class per level. */
+.run-log-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.run-log-line-path {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  min-width: 46px;
+}
+
+.run-log-line-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-log-line-ms {
+  color: var(--ink-soft);
+}
+
+.run-log-shot {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}

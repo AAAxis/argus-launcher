@@ -2,6 +2,7 @@
 // gate in front of both. Everything with real logic behind it lives in
 // workspace/ (data and mutations), hooks/ (effects) or components/.
 import {useEffect, useState} from 'react';
+import type {ArgusAutomation} from './types';
 import {BookOpen, Plus, Upload, UserPlus} from 'lucide-react';
 import {SignIn} from './components/SignIn';
 import {Sidebar, Topbar, UpdateToast} from './components/Shell';
@@ -10,9 +11,12 @@ import {ProfilesTab} from './components/tabs/ProfilesTab';
 import {ProxiesTab} from './components/tabs/ProxiesTab';
 import {CookiesTab} from './components/tabs/CookiesTab';
 import {StartPageTab} from './components/tabs/StartPageTab';
+import {AutomationsTab} from './components/tabs/AutomationsTab';
 import {ExtensionsTab} from './components/tabs/ExtensionsTab';
 import {IntegrationsTab} from './components/tabs/IntegrationsTab';
 import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
+import {AutomationModal} from './components/modals/AutomationModal';
+import {RunLogModal} from './components/modals/RunLogModal';
 import {CookieSetModal} from './components/modals/CookieSetModal';
 import {ProfileDeleteModal, ProxyDeleteModal, ErrorModal} from './components/modals/ConfirmModals';
 import {BookmarkModal, FolderModal, ProxyModal, StatusModal} from './components/modals/EditorModals';
@@ -82,6 +86,12 @@ export function App() {
   // Unlike the profiles one this is never shown unprompted -- there is no
   // "seen" flag for it, only the About button on the Cookies tab.
   const [cookieIntroOpen, setCookieIntroOpen] = useState(false);
+  // The automation being edited, and whether it already exists -- create and
+  // replace are separate writes on purpose (see src/db/automations.ts), so the
+  // dialog has to carry which one this is rather than infer it.
+  const [automationDraft, setAutomationDraft] =
+    useState<{automation: ArgusAutomation; exists: boolean} | null>(null);
+  const [historyFor, setHistoryFor] = useState<ArgusAutomation | null>(null);
   const [revealedKey, setRevealedKey] = useState<{name: string; token: string} | null>(null);
 
   useAutomationBridge(workspace);
@@ -308,6 +318,17 @@ export function App() {
           }}
         />
       )}
+      {automationDraft && (
+        <AutomationModal
+          automation={automationDraft.automation}
+          exists={automationDraft.exists}
+          onClose={() => setAutomationDraft(null)}
+          onSave={(next) => workspace.automations.save(next, automationDraft.exists)}
+        />
+      )}
+      {historyFor && (
+        <RunLogModal automation={historyFor} onClose={() => setHistoryFor(null)} />
+      )}
       {editors.cookieSetOpen && (
         <CookieSetModal
           cookie={editors.cookieSetOpen}
@@ -415,6 +436,14 @@ export function App() {
             onEditBookmark={editors.editBookmark}
           />
         );
+      case 'automations':
+        return (
+          <AutomationsTab
+            onNew={() => setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}
+            onEdit={(automation) => setAutomationDraft({automation, exists: true})}
+            onHistory={setHistoryFor}
+          />
+        );
       case 'extensions':
         return <ExtensionsTab onAddExtension={() => editors.setExtensionAddOpen(true)} />;
       case 'integrations':
@@ -474,6 +503,13 @@ export function App() {
             </button>
             <button onClick={editors.newProfile}><UserPlus size={18} /> Add profile</button>
           </>
+        );
+      case 'automations':
+        return (
+          <button onClick={() =>
+            setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}>
+            <Plus size={18} /> New automation
+          </button>
         );
       case 'proxies':
         return (
