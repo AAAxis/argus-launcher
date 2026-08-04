@@ -155,17 +155,18 @@ function findExecutable(names, home, platform) {
 // only ever used in sentences the user reads, so drift shows up as odd wording
 // rather than as broken behaviour.
 //
-// ── `detect`: the three kinds of evidence, and why each row differs ──────────
+// ── `detect`: the kinds of evidence, and why each row differs ────────────────
 // This used to be one shared rule -- "any of these paths exists" -- with the
 // tool's own dot-directory in the list. That rule reported Cursor and Windsurf
-// as installed on a machine that has neither: ~/.cursor is left behind by
-// anything that ever wrote a rules file, ~/.codeium by the VS Code extension,
-// ~/.gemini by unrelated Google tooling, and -- worst of all -- ~/.cursor,
-// ~/.codeium/windsurf and Code/User are directories THIS app creates when it
-// writes the config. Detection that counts our own footprint can only ever
-// answer yes.
+// as installed on a machine that has neither. Dot-directories outlive the
+// software that made them and are shared with software that has nothing to do
+// with it: ~/.gemini held only Antigravity's data on the machine this was found
+// on, and Code/User held a settings.json with no VS Code anywhere. Worse,
+// ~/.cursor, ~/.codeium/windsurf and Code/User are directories THIS app creates
+// when it writes the config -- detection that counts our own footprint can only
+// ever answer yes.
 //
-// So the evidence is now per tool and of three named kinds:
+// So the evidence is now per tool, and of named kinds:
 //
 //   apps   The application bundle or installed executable. For the GUI editors
 //          this is the only signal that survives an uninstall honestly: the
@@ -179,6 +180,8 @@ function findExecutable(names, home, platform) {
 //          directories (see findExecutable). A hit is a real file on disk and
 //          so proves presence; a miss proves nothing, because a double-clicked
 //          .app inherits launchd's minimal PATH.
+//   ownDir A whole directory this app can account for, used by OpenClaw alone
+//          and explained on that row.
 const TOOLS = {
   'claude-code': {
     name: 'Claude Code',

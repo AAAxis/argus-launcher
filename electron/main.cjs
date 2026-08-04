@@ -2738,8 +2738,8 @@ ipcMain.handle('argus:verify-integration', async (_event, {integrationId}) => {
     add('tool', `${tool ? tool.name : integrationId} is on this machine`, found.found,
         found.found ?
           found.evidence :
-          `Nothing here looks like ${tool ? tool.name : integrationId}. ` +
-            'The settings below are still written and will work as soon as you install it.');
+          `Nothing on this machine looks like ${tool ? tool.name : integrationId}. ` +
+            'The settings this app wrote are still correct — install it and they start working.');
   }
 
   add('api', 'Local API is running', apiState.status === 'ready',
@@ -3894,6 +3894,11 @@ function startAutomationApiServer() {
         const result = await checkProxy({
           host: payload.host,
           port: payload.port,
+          // Without this the check always dialled http:// -- proxyUrl() picks
+          // socks5h purely off `type`, so every socks5-only proxy tested
+          // through the automation API reported dead while the same proxy
+          // checked fine from the Proxies tab, which does pass it.
+          type: typeof payload.type === 'string' ? payload.type : undefined,
           username: typeof payload.username === 'string' ? payload.username : undefined,
           password: typeof payload.password === 'string' ? payload.password : undefined,
         });
@@ -3990,6 +3995,7 @@ function startAutomationApiServer() {
           proxyId: typeof payload.proxyId === 'string' ? payload.proxyId : '',
           proxyHost: typeof payload.proxyHost === 'string' ? payload.proxyHost : '',
           proxyPort: Number.isInteger(payload.proxyPort) ? payload.proxyPort : 0,
+          allowedFolders: key.folderScope,
         });
       } else if (isGetProfile) {
         mainWindow.webContents.send('argus:get-profile-request', {
@@ -4014,6 +4020,7 @@ function startAutomationApiServer() {
           requestId,
           profileId: payload.profileId,
           fields,
+          allowedFolders: key.folderScope,
         });
       } else if (isDeleteProfile) {
         mainWindow.webContents.send('argus:delete-profile-request', {
@@ -4027,6 +4034,7 @@ function startAutomationApiServer() {
           requestId,
           profileId: payload.profileId,
           fingerprint: payload.fingerprint,
+          allowedFolders: key.folderScope,
         });
       } else if (isLaunchAutomation) {
         mainWindow.webContents.send('argus:launch-automation-request', {

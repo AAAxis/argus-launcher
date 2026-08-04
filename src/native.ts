@@ -322,7 +322,14 @@ type ArgusNative = {
     error?: string,
   ): void;
   onAssignProfileProxyRequest?(
-    callback: (payload: {requestId: string; profileId: string; proxyId?: string; proxyHost?: string; proxyPort?: number}) => void,
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      proxyId?: string;
+      proxyHost?: string;
+      proxyPort?: number;
+      allowedFolders: string[] | null;
+    }) => void,
   ): () => void;
   sendAssignProfileProxyResult?(
     requestId: string,
@@ -402,6 +409,9 @@ type ArgusNative = {
       requestId: string;
       profileId: string;
       fields: Partial<Pick<ArgusProfile, 'name' | 'tags' | 'status' | 'color' | 'folder_id' | 'email' | 'password'>>;
+      // null grants every folder; an array is the allow-list this key may
+      // write to. Both ends of a folder move are checked against it.
+      allowedFolders: string[] | null;
     }) => void,
   ): () => void;
   sendUpdateProfileResult?(
@@ -428,7 +438,12 @@ type ArgusNative = {
   // POST /v1/profiles/update-fingerprint: merges the given fields into the
   // profile's existing fingerprint object rather than replacing it wholesale.
   onUpdateFingerprintRequest?(
-    callback: (payload: {requestId: string; profileId: string; fingerprint: Record<string, unknown>}) => void,
+    callback: (payload: {
+      requestId: string;
+      profileId: string;
+      fingerprint: Record<string, unknown>;
+      allowedFolders: string[] | null;
+    }) => void,
   ): () => void;
   sendUpdateFingerprintResult?(
     requestId: string,

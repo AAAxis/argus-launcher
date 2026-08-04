@@ -42,6 +42,16 @@ export type Integration = {
   // tools reads its MCP config at process start and there is no reload signal
   // we can send, so this is always some form of "restart it".
   restartLabel: string;
+  // Where that tool shows its MCP servers, so the user can confirm from the
+  // other side instead of taking this app's word for it. Deliberately per-tool:
+  // a generic "check its MCP settings" sends people hunting through preferences,
+  // and the one thing they want after a restart is the sentence that ends the
+  // question. Where a tool has a literal command for it, the command is quoted.
+  confirmLabel: string;
+  // Only for `category: 'manual'` -- the shape of the thing the user pastes.
+  // Hive reads environment variables out of its own .env; a generic MCP client
+  // wants the server block. Same key either way, two very different files.
+  manualFormat?: 'env' | 'mcp';
 };
 
 // Ordered as they appear on the tab. Claude Code first because it is the one
@@ -56,6 +66,7 @@ export const INTEGRATIONS: Integration[] = [
     logo: claudeCodeLogo,
     configLabel: '~/.claude.json',
     restartLabel: 'Restart Claude Code',
+    confirmLabel: 'Then run /mcp in any project — argus should be in the list.',
   },
   {
     id: 'codex',
@@ -67,6 +78,7 @@ export const INTEGRATIONS: Integration[] = [
     invertOn: 'dark',
     configLabel: '~/.codex/config.toml',
     restartLabel: 'Restart Codex',
+    confirmLabel: 'Codex reads its MCP servers at startup — ask it what tools it has and the argus ones should be there.',
   },
   {
     id: 'cursor',
@@ -78,6 +90,7 @@ export const INTEGRATIONS: Integration[] = [
     invertOn: 'light',
     configLabel: '~/.cursor/mcp.json',
     restartLabel: 'Reload Cursor',
+    confirmLabel: 'Then open Cursor Settings → MCP: argus should be listed and switched on.',
   },
   {
     id: 'gemini-cli',
@@ -87,6 +100,7 @@ export const INTEGRATIONS: Integration[] = [
     icon: Code,
     configLabel: '~/.gemini/settings.json',
     restartLabel: 'Restart Gemini CLI',
+    confirmLabel: 'Then run /mcp — argus should be in the list.',
   },
   {
     id: 'windsurf',
@@ -96,6 +110,7 @@ export const INTEGRATIONS: Integration[] = [
     icon: Wind,
     configLabel: '~/.codeium/windsurf/mcp_config.json',
     restartLabel: 'Reload Windsurf',
+    confirmLabel: 'Then open Cascade’s plugin panel: argus should be listed there.',
   },
   {
     id: 'vscode',
@@ -105,6 +120,7 @@ export const INTEGRATIONS: Integration[] = [
     icon: PanelsTopLeft,
     configLabel: 'Code/User/mcp.json',
     restartLabel: 'Reload VS Code',
+    confirmLabel: 'Then switch Chat to Agent mode and open the tools picker — the argus tools should be listed.',
   },
   {
     id: 'zed',
@@ -114,6 +130,7 @@ export const INTEGRATIONS: Integration[] = [
     icon: Code,
     configLabel: '~/.config/zed/settings.json',
     restartLabel: 'Restart Zed',
+    confirmLabel: 'Then check the agent panel’s settings: argus should appear under context servers.',
   },
   {
     id: 'openclaw',
@@ -124,6 +141,7 @@ export const INTEGRATIONS: Integration[] = [
     logo: openclawLogo,
     configLabel: '~/.openclaw/openclaw.json',
     restartLabel: 'Restart OpenClaw',
+    confirmLabel: 'It loads its config at startup — argus should show up among its tools.',
   },
   {
     id: 'hive',
@@ -133,6 +151,8 @@ export const INTEGRATIONS: Integration[] = [
     icon: Hexagon,
     configLabel: 'its own .env',
     restartLabel: 'Restart Hive',
+    confirmLabel: 'Hive reads the .env at startup — its first sweep will use this key.',
+    manualFormat: 'env',
   },
   {
     id: 'other',
@@ -142,6 +162,8 @@ export const INTEGRATIONS: Integration[] = [
     icon: Plug,
     configLabel: 'whatever your client reads',
     restartLabel: 'Restart your client',
+    confirmLabel: 'Your client should list argus among its MCP servers once it is back up.',
+    manualFormat: 'mcp',
   },
 ];
 

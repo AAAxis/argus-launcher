@@ -2997,6 +2997,101 @@ tbody tr.empty-row-tr:hover {
   font-size: 12px;
 }
 
+/* Pushed to the right of the URL and left of the search: with ten cards across
+ * three sections, "how much of this is live" is otherwise a counting exercise
+ * the user has to do by eye every time they arrive. */
+.integration-bar-count {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── "How these keys work" ──────────────────────────────────────────────────
+ * A <details>, not a paragraph and not a dialog. The answer to "what do I do
+ * with a key" is the same for all ten tools and about five lines long: ten
+ * copies of it inside the dialogs would be noise, and a permanent block above
+ * the grid would put prose between the user and the thing they came for on
+ * every visit after the first. Folded, it costs one line. */
+.integration-guide {
+  background: var(--paper);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.integration-guide summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  gap: 10px;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+/* The default marker is a triangle in the flow that shoves the icon and label
+ * sideways; the caret below is drawn at the end instead, where it does not
+ * fight the leading glyph for the start of the line. */
+.integration-guide summary::-webkit-details-marker {
+  display: none;
+}
+
+.integration-guide summary::after {
+  border-bottom: 1.5px solid currentcolor;
+  border-right: 1.5px solid currentcolor;
+  content: '';
+  height: 6px;
+  margin-left: auto;
+  opacity: 0.6;
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.12s var(--ease);
+  width: 6px;
+}
+
+.integration-guide[open] summary::after {
+  transform: rotate(-135deg) translate(-2px, -2px);
+}
+
+/* The same disclosure serves the dialog, where it folds away the tool list once
+ * a connection exists. There it sits among the labelled sections, so its
+ * summary takes their eyebrow rather than staying sentence case. */
+.integration-modal .integration-guide summary {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.integration-guide summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.integration-guide-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.integration-guide-body p {
+  line-height: 1.5;
+  margin: 0;
+  max-width: 78ch;
+}
+
+/* The pointer onwards, not a second copy of the API tab. Dimmer than the
+ * explanation above it: it is where to go next, not part of the answer. */
+.integration-guide-more {
+  color: var(--ink-faint);
+}
+
+/* The facts block inside the guide sits on --paper already, so it needs its own
+ * edge rather than its usual fill to stay a distinct object. */
+.integration-guide .integration-facts {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+}
+
 .integration-search {
   align-items: center;
   background: var(--raised);
@@ -3019,15 +3114,50 @@ tbody tr.empty-row-tr:hover {
   width: 190px;
 }
 
-/* One line under the description carrying whichever fact matters for the card's
- * current state: the key and when it was last used, or the single reason it is
- * not simply connected. Fixed height so cards in a row stay aligned whether or
- * not they have something to say. */
+/* Under the description, carrying whichever fact matters for the card's current
+ * state: the key this connection runs on, or the single reason it is not simply
+ * connected. Fixed height so cards in a row stay aligned whether or not they
+ * have something to say.
+ *
+ * Two rows now rather than one run-on line. The key's name is the thing an
+ * audit ("what can reach my profiles") is conducted in, so it gets a line of
+ * its own instead of being the first clause of a sentence that ends in a
+ * timestamp. */
 .integration-card-meta {
   color: var(--ink-faint);
+  display: grid;
   font-size: 12px;
+  gap: 2px;
   line-height: 1.4;
-  min-height: 32px;
+  min-height: 36px;
+}
+
+.integration-card-key {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.integration-card-key svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+/* The name is user-supplied by way of the tool's own display name, so it is the
+ * one part that can run long enough to push the token tail off the card. */
+.integration-card-key-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integration-card-key code {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .integration-card-actions {
@@ -3039,6 +3169,13 @@ tbody tr.empty-row-tr:hover {
   flex: 1;
   justify-content: center;
   min-height: 32px;
+}
+
+/* The one button on a card that must not look like half the decision: it opens
+ * the explanation, next to a Connect that does the thing. Sized to its label
+ * rather than to half the card. */
+.integration-card-actions > .integration-card-more {
+  flex: 0 0 auto;
 }
 
 .integration-card.is-attention {
@@ -3464,12 +3601,105 @@ tbody tr.empty-row-tr:hover {
 
 /* Said before anything is touched. The old flow created a key and edited a file
  * in the user's home directory on a single unexplained click. */
-.integration-steps h3 {
+/* Flex rather than block: the key section's heading carries a glyph, and a
+ * baseline-aligned inline SVG next to a 12px uppercase label sits a pixel low
+ * every time. */
+.integration-steps h3,
+.integration-next h3,
+.integration-secret h3 {
+  align-items: center;
+  display: flex;
   font-size: 12px;
   font-weight: 900;
+  gap: 6px;
   letter-spacing: 0.04em;
   margin: 0 0 8px;
   text-transform: uppercase;
+}
+
+/* The section that answers "and now what". Every one of these tools reads its
+ * config at process start, so there is always exactly one thing left for the
+ * user to do, and it is never the same thing twice -- a CLI restarts, an editor
+ * reloads, a missing tool gets installed. Given a left rule and the accent so it
+ * reads as the instruction rather than as the third paragraph of a dialog. */
+.integration-next {
+  border-left: 2px solid var(--accent);
+  padding-left: 12px;
+}
+
+.integration-next p {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── The key ────────────────────────────────────────────────────────────────
+ * The credential this whole screen exists to hand out, on the screen that hands
+ * it out. It used to live only on the API tab, as a row named after a tool with
+ * no way back to that tool. */
+.integration-key-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
+.integration-key-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.integration-key-actions button {
+  min-height: var(--control-h-sm);
+}
+
+/* Only ever shown when a machine carries more than one key for one tool, which
+ * reissue no longer creates but older builds could. It is a live credential
+ * either way, so it is named rather than hidden. */
+.integration-key-extra {
+  color: var(--ink-faint);
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.4;
+  min-width: 180px;
+}
+
+/* Two audiences and the first one's answer is "nothing" -- which is worth a
+ * sentence, because a user who has just been shown a credential assumes there
+ * is a step left for them, and for eight of these ten there is not. */
+.integration-usage {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.integration-usage + .integration-facts,
+.integration-facts + .integration-usage {
+  margin-top: 8px;
+}
+
+/* ── The one-time secret ────────────────────────────────────────────────────
+ * Only the two manual integrations reach this: everywhere else the token goes
+ * straight into a config file and the user never needs to see it. */
+.integration-secret {
+  display: grid;
+  gap: 8px;
+}
+
+.integration-secret h3 {
+  margin: 0;
+}
+
+.integration-secret p {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .integration-steps ol {
@@ -3513,6 +3743,16 @@ tbody tr.empty-row-tr:hover {
   white-space: nowrap;
 }
 
+/* Five short label/value pairs -- name, tail, scope, created, last used -- are
+ * a column half a dialog tall and mostly whitespace. Wrapped into as many
+ * columns as fit, they read as one block of facts about one key. The single-
+ * column default stays for the rows whose values are file paths, which have no
+ * business being 140px wide. */
+.integration-facts.is-columns {
+  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
 /* Destructive action sits left, away from the confirming one on the right. */
 .integration-modal-actions {
   gap: 8px;
@@ -3549,6 +3789,15 @@ tbody tr.empty-row-tr:hover {
   font-size: 13px;
 }
 
+/* The third tone, for the thing that is neither: settings written correctly for
+ * a tool that is not on this machine. Green would read as "done", amber as
+ * "you broke something", and it is neither -- it is simply the truth about
+ * where things stand, and the missing half is not the user's mistake. */
+.apply-status-note {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
 .snippet-block {
   position: relative;
 }
@@ -3567,6 +3816,32 @@ tbody tr.empty-row-tr:hover {
   padding: 12px 84px 12px 12px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* The block holding a value that will never be shown again. It arrives into a
+ * dialog that already contains two other slabs of monospace, so it draws one
+ * accent ring as it appears and then settles -- enough to say "this one, now",
+ * not a permanent alarm around a successful outcome. */
+.snippet-block.is-fresh pre {
+  animation: secret-ring 1.6s var(--ease) 1;
+  border-color: var(--accent);
+}
+
+@keyframes secret-ring {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+/* Nothing is lost without the animation: the accent border above is the part
+ * that carries the meaning, and it is static. */
+@media (prefers-reduced-motion: reduce) {
+  .snippet-block.is-fresh pre {
+    animation: none;
+  }
 }
 
 .snippet-copy {

@@ -9,19 +9,31 @@
 // "A key exists" used to be enough to print Connected, which it is not: the
 // wiring lives in a file another tool can edit, and it can point at something
 // that no longer exists. `integrations.stateFor` is the only thing that decides.
+//
+// The second rule, added later: the key a connection runs on is part of the
+// connection and belongs on the screen that owns it. It used to exist only on
+// the API tab, where it appeared as a row named after a tool with no way back
+// to that tool -- so the question "where are my keys, and what do I do with
+// one" had no answer anywhere on this screen. The card now carries the key's
+// identity, and the disclosure below the bar answers the second half once for
+// all ten of them rather than ten times over.
 import {useEffect, useMemo, useState} from 'react';
-import {Plug, Search, TriangleAlert} from 'lucide-react';
+import {Clock, KeyRound, Plug, Search, TriangleAlert, Unplug} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
+import {EmptyState} from '../ui/EmptyState';
 import {IntegrationMark} from '../ui/icons';
 import {CATEGORY_LABELS, CATEGORY_ORDER, INTEGRATIONS} from '../../data/integrations';
+import {API_BASE_URL} from '../../data/apiDocs';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {Integration, IntegrationId} from '../../data/integrations';
 import type {ApiKeys, IntegrationsState} from '../../hooks/useApiKeys';
 
 const ALL_IDS = INTEGRATIONS.map((integration) => integration.id);
 
-// "2 minutes ago" beats a date here: the question a user has is "is this thing
-// actually being used", and a timestamp from today reads as noise.
+// "2 minutes ago" beats a date here: the question a card answers is "is this
+// thing actually being used", and a timestamp from today reads as noise. The
+// dialog prints real dates instead -- it is the place you go to audit a key,
+// and "3h ago" is not something you can compare against a calendar.
 function sinceLabel(iso: string | null): string {
   if (!iso) {
     return '';
@@ -53,8 +65,23 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
   const config = integrations.configs[integration.id];
   const busy = integrations.busyId === integration.id;
   const key = apiKeys.keysFor(integration.id)[0];
+  const manual = integration.category === 'manual';
   const needsRepair = state === 'attention' && Boolean(config?.hasEntry) &&
     (config?.stale || !config?.commandExists || !config?.entryIsCurrent);
+  // Detection is never a gate -- it can be wrong, and a wrong "no" must not
+  // make a working install unconnectable. It changes the wording instead, so
+  // the click is a deliberate one rather than a surprise.
+  const undetected = Boolean(config) && !config?.manual && !config?.installed;
+  // Three different promises, and the button has to keep whichever it makes.
+  // "Set up…" ends in an ellipsis because it opens a dialog rather than doing
+  // the thing; "Set up anyway" answers the "not found on this machine" line
+  // directly above it.
+  let connectLabel = 'Connect';
+  if (manual) {
+    connectLabel = 'Set up…';
+  } else if (undetected) {
+    connectLabel = 'Set up anyway';
+  }
 
   return (
     <div className={`integration-card is-${state}`}>
@@ -65,18 +92,49 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
         {state === 'attention' && (
           <span className="status-pill is-warn"><TriangleAlert size={12} />Needs attention</span>
         )}
+        {/* Muted rather than amber: nothing is broken and there is nothing to
+            fix here -- the tool simply is not on this machine, so calling this
+            Connected would be the lie this state exists to remove. */}
+        {state === 'awaiting-tool' && (
+          <span className="status-pill is-idle"><Clock size={12} />Waiting for {integration.name}</span>
+        )}
+        {/* Said out loud rather than left blank. A card with no pill at all is
+            indistinguishable from one whose status has not loaded yet, and this
+            is the state nine of the ten cards are in on a first visit. */}
+        {state === 'idle' && (
+          <span className="status-pill is-idle"><Unplug size={12} />Not connected</span>
+        )}
       </div>
       <p>{integration.description}</p>
 
+      {/* Any card with a key prints that key: it is the thing a user arrives on
+          this tab looking for, and it exists in every state but idle. Name
+          first, because the name is what the API tab's list and any audit of
+          "what can reach my profiles" is conducted in.
+          The second line is whichever of the two matters. A healthy connection
+          has no reason left to give, so it gets the scope and the last use; a
+          card that needs attention gives up those two for the one sentence
+          naming what to do -- printing "All folders · used 2h ago" over a
+          connection that is broken is worse than printing nothing. */}
       <div className="integration-card-meta">
-        {state === 'connected' && key ? (
-          <span>
-            {`key ·${key.tokenPreview} · ${apiKeys.describeScope(key, data.state.folders)}`}
-            {key.lastUsedAt ? ` · ${sinceLabel(key.lastUsedAt)}` : ''}
-          </span>
+        {key ? (
+          <>
+            <span className="integration-card-key">
+              <KeyRound size={12} />
+              <span className="integration-card-key-name" title={key.name}>{key.name}</span>
+              <code>&middot;{key.tokenPreview}</code>
+            </span>
+            <span>
+              {reason || `${apiKeys.describeScope(key, data.state.folders)}${
+                key.lastUsedAt ? ` · ${sinceLabel(key.lastUsedAt)}` : ' · never used'}`}
+            </span>
+          </>
         ) : <span>{reason}</span>}
       </div>
 
+      {/* Never more than two, and the second is always the quiet one. Repair
+          only ever accompanies Manage (it needs a key and a broken entry, which
+          is the attention state); Connect only ever accompanies Details. */}
       <div className="integration-card-actions">
         {needsRepair && (
           <BusyButton
@@ -88,14 +146,35 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
           </BusyButton>
         )}
         {state === 'idle' ? (
-          <BusyButton
-            busy={busy}
-            busyLabel="Connecting…"
-            className={needsRepair ? 'ghost' : ''}
-            onClick={() => void integrations.connect(integration)}
-          >
-            Connect
-          </BusyButton>
+          <>
+            {/* The two manual cards never connect from here. Their whole
+                connect flow is "here is a token, shown once, paste it
+                somewhere" -- and that token only has a surface in the dialog,
+                so minting it from the card would burn a one-time secret onto a
+                screen that has nowhere to print it. */}
+            <BusyButton
+              busy={busy}
+              busyLabel="Connecting…"
+              onClick={() => {
+                if (manual) {
+                  onOpen(integration);
+                  return;
+                }
+                void integrations.connect(integration);
+              }}
+            >
+              {connectLabel}
+            </BusyButton>
+            {/* The dialog was unreachable from an unconnected card: the only
+                button on it connected, so everything that dialog says about
+                what is about to be written, and the folder scoping it offers,
+                could only be read after the writing had happened. */}
+            {!manual && (
+              <button className="ghost integration-card-more" onClick={() => onOpen(integration)}>
+                Details
+              </button>
+            )}
+          </>
         ) : (
           <button className="ghost" onClick={() => onOpen(integration)}>Manage</button>
         )}
@@ -124,13 +203,19 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
     if (!needle) {
       return INTEGRATIONS;
     }
+    // The id is in the haystack so that "vscode" finds VS Code and "gemini"
+    // finds the CLI -- the two names a user is most likely to type are the ones
+    // the display name spells differently.
     return INTEGRATIONS.filter((integration) =>
       integration.name.toLowerCase().includes(needle) ||
+      integration.id.toLowerCase().includes(needle) ||
       integration.description.toLowerCase().includes(needle));
   }, [query]);
 
   const apiState = integrations.apiState;
   const apiReady = apiState?.status === 'ready';
+  const connectedCount = INTEGRATIONS
+      .filter((integration) => integrations.stateFor(integration) === 'connected').length;
 
   return (
     <section className="api-panel">
@@ -139,10 +224,17 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
           <span className="status-dot" />
           {apiReady ? 'Local API ready' : `Local API ${apiState?.status || 'not running'}`}
         </span>
-        <code>{apiState?.url || 'http://127.0.0.1:39219'}</code>
+        <code>{apiState?.url || API_BASE_URL}</code>
+        {/* The one number worth carrying at the top: with ten cards spread over
+            three sections, "how much of this is actually live" is otherwise a
+            counting exercise. */}
+        <span className="integration-bar-count">
+          {connectedCount} of {INTEGRATIONS.length} connected
+        </span>
         <label className="integration-search">
           <Search size={15} />
           <input
+            aria-label="Search integrations"
             placeholder="Search integrations"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -150,15 +242,70 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
         </label>
       </section>
 
+      {/* The pill above states the fact; this states what the fact means. A
+          stopped API is the one condition under which every card on this tab is
+          decoration, and the pill alone never said so. */}
+      {!apiReady && (
+        <p className="apply-status-note">
+          Until the local API is running, nothing here can reach your profiles.
+          {apiState?.error ?
+            ` It reported: ${apiState.error}` :
+            ' It starts with the app — reopening Argus Launcher is usually enough.'}
+        </p>
+      )}
+
       <section className="api-note">
         <Plug size={18} />
         <span>
-          Connecting lets a tool drive your profiles: launch, navigate, read,
-          screenshot, close. The MCP server ships inside this app, so there is
-          nothing to install — each card shows the file it writes and lets you
-          narrow the key to one folder first.
+          Connecting mints an API key scoped to the folders you choose and writes
+          it into that tool's own config, so the tool can launch, navigate, read
+          and screenshot your profiles. The MCP server ships inside this app —
+          there is nothing to install.
         </span>
       </section>
+
+      {/* Folded away by default and open in one click. The answer to "what do I
+          do with a key" is four lines long and the same for all ten tools, so
+          it is neither worth ten repetitions inside the dialogs nor worth
+          standing permanently between the user and the cards. */}
+      <details className="integration-guide">
+        <summary>
+          <KeyRound size={15} />
+          How these keys work
+        </summary>
+        <div className="integration-guide-body">
+          <p>
+            For every tool above you never touch the key yourself: connecting
+            writes it into that tool's config file and the tool sends it on every
+            call. It is shown on the card so you can see what exists, what it can
+            reach, and revoke it.
+          </p>
+          <div className="integration-facts is-columns">
+            <div>
+              <span>Base URL</span>
+              <code>{API_BASE_URL}</code>
+            </div>
+            <div>
+              <span>Every /v1/* request</span>
+              <code>Authorization: Bearer &lt;key&gt;</code>
+            </div>
+          </div>
+          <p>
+            The base URL is loopback: it answers on this machine and is not
+            reachable from anywhere else, so the key never leaves it either.
+          </p>
+          <p>
+            A connected agent does not use that URL directly — it calls the MCP
+            tools by name (list profiles, launch, navigate, screenshot). Plain
+            HTTP is for everything that is not an MCP client: your own scripts,
+            a cron job, a CI step.
+          </p>
+          <p className="integration-guide-more">
+            Every endpoint with a curl example, plus keys you can make by hand
+            for those scripts, are on the <strong>API</strong> tab.
+          </p>
+        </div>
+      </details>
 
       {CATEGORY_ORDER.map((category) => {
         const inCategory = matched.filter((integration) => integration.category === category);
@@ -183,7 +330,18 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
         );
       })}
 
-      {!matched.length && <p className="empty-state">No integration matches “{query}”.</p>}
+      {/* The search can only ever empty this tab, never the install itself --
+          so the way out is the way back, and the block says so rather than
+          leaving a lone grey sentence where ten cards were. */}
+      {!matched.length && (
+        <EmptyState
+          icon={<Search size={20} />}
+          title={`Nothing matches “${query}”`}
+          body={`All ${INTEGRATIONS.length} integrations are still here — this is only the filter.`}
+        >
+          <button className="ghost" onClick={() => setQuery('')}>Clear search</button>
+        </EmptyState>
+      )}
     </section>
   );
 }

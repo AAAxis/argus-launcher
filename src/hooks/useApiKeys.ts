@@ -80,12 +80,19 @@ export function useApiKeys(userId: string | null, orgId: string | null) {
 
 export type IntegrationsState = ReturnType<typeof useIntegrations>;
 
-// How a card reads. Derived from three independent facts, because any one of
+// How a card reads. Derived from four independent facts, because any one of
 // them can be true while the integration is dead: this app has a key, the
-// tool's config carries our entry, and that entry points at something that
-// still exists. Reporting on the key alone is what used to show Connected for a
-// tool that failed to start the server on every launch.
-export type ConnectionState = 'connected' | 'attention' | 'idle';
+// tool's config carries our entry, that entry points at something that still
+// exists, and the tool it was all written for is actually on this machine.
+// Reporting on the key alone is what used to show Connected for a tool that
+// failed to start the server on every launch.
+//
+// 'awaiting-tool' is the fourth fact's own state, and it is deliberately not
+// 'attention': everything this app controls is correct and there is nothing to
+// repair. Writing the config for a tool you are about to install is a perfectly
+// reasonable thing to have done -- it just cannot be called Connected, because
+// nothing is connected to anything until the tool exists.
+export type ConnectionState = 'connected' | 'attention' | 'awaiting-tool' | 'idle';
 
 export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   // Which integration's dialog is open, '' for none.
@@ -94,7 +101,13 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   const [busyId, setBusyId] = useState<IntegrationId | ''>('');
   const [results, setResults] = useState<Partial<Record<IntegrationId, {ok: boolean; message: string}>>>({});
   const [tokens, setTokens] = useState<Partial<Record<IntegrationId, string>>>({});
-  const [verification, setVerification] = useState<IntegrationVerification | null>(null);
+  // Keyed by integration, like `results` and `configs`. A single slot meant the
+  // checks from the last tool you tested rendered under the next tool's name --
+  // a green "Can reach your profiles" sitting in Cursor's dialog because you
+  // had tested Claude Code a minute earlier. Exactly the kind of borrowed truth
+  // this screen exists to stop telling.
+  const [verifications, setVerifications] =
+    useState<Partial<Record<IntegrationId, IntegrationVerification>>>({});
   // What each tool's config file says right now, as opposed to what this app's
   // key store says. Filled by refreshStatus.
   const [configs, setConfigs] = useState<Partial<Record<IntegrationId, IntegrationStatus>>>({});
@@ -130,8 +143,9 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     setDetected(found || {});
   }, []);
 
-  // Connected needs all three facts to agree. Anything short of that with a key
-  // present is "needs attention" -- never silently Connected.
+  // Connected needs all four facts to agree. Anything short of that with a key
+  // present is "needs attention" or "awaiting tool" -- never silently
+  // Connected.
   function stateFor(integration: Integration): ConnectionState {
     const hasKey = apiKeys.keysFor(integration.id).length > 0;
     const config = configs[integration.id];
@@ -145,9 +159,12 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
       // Status not loaded yet -- don't claim either way.
       return 'attention';
     }
-    return config.hasEntry && config.entryIsCurrent && config.commandExists ?
-      'connected' :
-      'attention';
+    if (!config.hasEntry || !config.entryIsCurrent || !config.commandExists) {
+      return 'attention';
+    }
+    // Our half is sound. Whether any of it is doing anything depends on the
+    // tool being here to read it.
+    return config.installed ? 'connected' : 'awaiting-tool';
   }
 
   // Why a card is not simply Connected, in the user's terms. One line, naming
@@ -157,9 +174,9 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     const hasKey = apiKeys.keysFor(integration.id).length > 0;
     if (!hasKey) {
       if (config && !config.installed) {
-        return 'Not found on this machine';
+        return `${integration.name} was not found on this machine`;
       }
-      return config?.installed ? 'Detected on this machine' : '';
+      return config?.installed ? 'Found on this machine' : '';
     }
     if (!config) {
       return 'Checking…';
@@ -173,6 +190,11 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     if (!config.entryIsCurrent) {
       return 'Points at an older install — repair it';
     }
+    // Said before the API line on purpose: with no tool here, whether our own
+    // API happens to be up is not the user's next move.
+    if (!config.installed) {
+      return `Set up and waiting — install ${integration.name} and it will pick this up`;
+    }
     if (!config.apiReady) {
       return 'The local API is not running';
     }
@@ -182,7 +204,9 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   function open(integration: Integration) {
     setOpenId(integration.id);
     setScope('');
-    setVerification(null);
+    // Clear this tool's own stale result on reopen -- checks from ten minutes
+    // ago describe a machine that may have changed since.
+    setVerifications((prev) => ({...prev, [integration.id]: undefined}));
     void refreshStatus(integration.id);
   }
 
@@ -220,13 +244,24 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
         return;
       }
       const result = await native.applyIntegrationConfig(integration.id, created.token);
+      // Re-read before reporting, so what is said next is what the disk says
+      // and not what we intended. It also settles the one question the old
+      // message quietly assumed the answer to: whether the tool we just wrote
+      // settings for is here to read them.
+      const status = await refreshStatus(integration.id);
+      const missing = Boolean(status) && !status?.manual && !status?.installed;
       setResults((prev) => ({
         ...prev,
         [integration.id]: result.ok ?
-          {ok: true, message: `Wrote ${result.path}. ${integration.restartLabel} to pick it up.`} :
+          {
+            ok: true,
+            message: missing ?
+              `Wrote ${result.path}. ${integration.name} is not on this machine yet — ` +
+                'install it and it will pick this up. Nothing else to do here.' :
+              `Wrote ${result.path}. ${integration.restartLabel} to pick it up.`,
+          } :
           {ok: false, message: result.error || 'Failed to write config'},
       }));
-      await refreshStatus(integration.id);
     } finally {
       setBusyId('');
     }
@@ -256,6 +291,32 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     }
   }
 
+  // The only honest answer to "I lost my key" / "I need the raw value".
+  //
+  // Nothing can hand back an existing token: createAutomationKey persists a
+  // SHA-256 hash and a four-character preview, and that is all there is. So the
+  // recovery path is not recovery at all -- it is replacement. The old keys go
+  // first so that a machine is never left with two live keys for one tool (one
+  // in the config, one orphaned but still granting access), and connect() then
+  // mints the replacement and rewrites the config with it in the same step it
+  // always did.
+  //
+  // Deliberately not folded into connect(): connect() is also what runs on a
+  // card that has never been connected, and revoking there would be a no-op
+  // dressed up as a destructive action.
+  async function reissue(integration: Integration) {
+    setBusyId(integration.id);
+    try {
+      for (const key of apiKeys.keysFor(integration.id)) {
+        await native?.revokeApiKey?.(key.id);
+      }
+      await apiKeys.refresh();
+    } finally {
+      setBusyId('');
+    }
+    await connect(integration);
+  }
+
   // Both halves, in the order that cannot strand the user: config first, then
   // the key. Revoking first would leave the tool pointed at a dead token if the
   // config write then failed.
@@ -269,7 +330,7 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
       await apiKeys.refresh();
       await refreshStatus(integration.id);
       setTokens((prev) => ({...prev, [integration.id]: ''}));
-      setVerification(null);
+      setVerifications((prev) => ({...prev, [integration.id]: undefined}));
       setResults((prev) => ({
         ...prev,
         [integration.id]: {
@@ -287,19 +348,22 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   // dead -- which is the state this tab used to report as Connected.
   async function test(integration: Integration) {
     setBusyId(integration.id);
-    setVerification(null);
+    setVerifications((prev) => ({...prev, [integration.id]: undefined}));
     try {
       await refreshStatus(integration.id);
       const result = await native?.verifyIntegration?.(integration.id);
-      setVerification(result || {
-        ok: false,
-        checks: [{
-          id: 'native',
-          label: 'Argus Launcher',
+      setVerifications((prev) => ({
+        ...prev,
+        [integration.id]: result || {
           ok: false,
-          detail: 'Verification is only available in the desktop app.',
-        }],
-      });
+          checks: [{
+            id: 'native',
+            label: 'Argus Launcher',
+            ok: false,
+            detail: 'Verification is only available in the desktop app.',
+          }],
+        },
+      }));
     } finally {
       setBusyId('');
     }
@@ -311,16 +375,16 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
     setResults({});
     setTokens({});
     setConfigs({});
-    setVerification(null);
+    setVerifications({});
     setOpenId('');
   }
 
   return {
     openId, setOpenId,
     scope, setScope,
-    busyId, results, tokens, verification, configs, detected,
+    busyId, results, tokens, verifications, configs, detected,
     apiState,
-    open, connect, disconnect, repair, test, reset,
+    open, connect, disconnect, repair, reissue, test, reset,
     refreshStatus, refreshAll, stateFor, reasonFor,
   };
 }

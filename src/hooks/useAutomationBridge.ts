@@ -190,7 +190,10 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onAssignProfileProxyRequest,
       native?.sendAssignProfileProxyResult,
-      async ({profileId, proxyId, proxyHost, proxyPort}) => {
+      async ({profileId, proxyId, proxyHost, proxyPort, allowedFolders}) => {
+        if (!await resolveInScope(profileId, allowedFolders)) {
+          return {matched: false, profileId};
+        }
         const proxy = state.proxies.find((item) => proxyId && item.id === proxyId) ||
           state.proxies.find((item) =>
             proxyHost && item.host === proxyHost && (!proxyPort || item.port === proxyPort));
@@ -215,6 +218,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       native?.onGetProfileRequest,
       native?.sendGetProfileResult,
       ({profileId, allowedFolders}) => {
+        requireSignedIn();
         const profile = state.profiles.find((item) => item.id === profileId && !item.deleted_at);
         if (!profile || (allowedFolders && !allowedFolders.includes(profile.folder_id || ''))) {
           return {profile: null};
@@ -226,14 +230,27 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onListProxiesRequest,
       native?.sendListProxiesResult,
-      () => ({
-        proxies: state.proxies.map((proxy) => ({
-          ...proxy,
-          assignedProfileIds: state.profiles
-              .filter((profile) => !profile.deleted_at && profile.proxy_id === proxy.id)
-              .map((profile) => profile.id),
-        })),
-      }),
+      () => {
+        requireSignedIn();
+        return {
+          // Credentials are deliberately not returned. This used to spread the
+          // whole row, so a single list call put every proxy username and
+          // password the account owns into the caller's context in clear text --
+          // and for an MCP client that context is an LLM's transcript, which is
+          // logged, and which the user cannot unsend. Nothing a caller does with
+          // this list needs them: proxies are assigned to profiles by id, and
+          // argus_check_proxy takes credentials as explicit arguments for
+          // testing a proxy that has not been saved yet. `hasCredentials` keeps
+          // the one fact that was actually useful.
+          proxies: state.proxies.map(({username, password, ...proxy}) => ({
+            ...proxy,
+            hasCredentials: Boolean(username || password),
+            assignedProfileIds: state.profiles
+                .filter((profile) => !profile.deleted_at && profile.proxy_id === proxy.id)
+                .map((profile) => profile.id),
+          })),
+        };
+      },
       cloud);
 
   useChannel(
@@ -291,12 +308,52 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       },
       cloud);
 
+  // Signed out is not the same as "this account has no profiles", and from the
+  // outside the two used to be indistinguishable: this bridge is mounted above
+  // the sign-in gate in App.tsx, so with no session every list answered 200
+  // with an empty array and a caller would reasonably conclude the account was
+  // empty and stop. Failing loudly is the only honest answer.
+  function requireSignedIn() {
+    if (!data.orgId) {
+      throw new Error('Argus Launcher is signed out. Sign in to use the automation API.');
+    }
+  }
+
+  // allowedFolders is an authorization gate, not a display filter, so every
+  // path it guards has to re-read where the profile lives *now* rather than
+  // trusting this window's render cache -- the same reasoning the delete path
+  // below already documents.
+  //
+  // Three write paths took no scope at all until this existed: update,
+  // assign-proxy and update-fingerprint. Since folder_id is one of the settable
+  // fields, a key scoped to one folder could move any profile in the account
+  // into that folder and then read and launch it entirely legitimately. The
+  // scope was a read filter, not a boundary.
+  async function resolveInScope(profileId: string, allowedFolders?: string[] | null) {
+    if (!data.orgId) {
+      throw new Error('No organization is selected yet.');
+    }
+    const latest = await db.profiles.list(data.orgId);
+    const target = latest.find((item) => item.id === profileId && !item.deleted_at);
+    if (!target || (allowedFolders && !allowedFolders.includes(target.folder_id || ''))) {
+      return null;
+    }
+    return target;
+  }
+
   useChannel(
       native?.onUpdateProfileRequest,
       native?.sendUpdateProfileResult,
-      async ({profileId, fields}) => {
-        const existing = state.profiles.find((item) => item.id === profileId);
+      async ({profileId, fields, allowedFolders}) => {
+        const existing = await resolveInScope(profileId, allowedFolders);
         if (!existing) {
+          return {matched: false, profileId};
+        }
+        // Both ends of a move have to be in scope. Checking only the source
+        // would let a scoped key relocate its own profiles into a folder it has
+        // no rights to, which is the same escape in the other direction.
+        if (allowedFolders && 'folder_id' in fields &&
+            !allowedFolders.includes(fields.folder_id || '')) {
           return {matched: false, profileId};
         }
         // An agent posting eight tags gets five, on the same terms as the
@@ -355,8 +412,8 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onUpdateFingerprintRequest,
       native?.sendUpdateFingerprintResult,
-      async ({profileId, fingerprint}) => {
-        const target = state.profiles.find((item) => item.id === profileId);
+      async ({profileId, fingerprint, allowedFolders}) => {
+        const target = await resolveInScope(profileId, allowedFolders);
         if (!target) {
           return {matched: false, profileId};
         }
@@ -372,13 +429,16 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onListProfilesRequest,
       native?.sendListProfilesResult,
-      ({folder, allowedFolders}) => ({
-        profiles: state.profiles
-            .filter((profile) => !profile.deleted_at)
-            .filter((profile) => !folder || profile.folder_id === folder)
-            .filter((profile) => !allowedFolders || allowedFolders.includes(profile.folder_id || ''))
-            .map((profile) => ({id: profile.id, name: profile.name})),
-      }),
+      ({folder, allowedFolders}) => {
+        requireSignedIn();
+        return {
+          profiles: state.profiles
+              .filter((profile) => !profile.deleted_at)
+              .filter((profile) => !folder || profile.folder_id === folder)
+              .filter((profile) => !allowedFolders || allowedFolders.includes(profile.folder_id || ''))
+              .map((profile) => ({id: profile.id, name: profile.name})),
+        };
+      },
       cloud);
 
   // Unlike the manual Launch button this skips the interactive pre-check/retry

@@ -76,11 +76,20 @@ const TOOLS = [
   },
   {
     name: 'argus_launch_profile',
+    // Two earlier sentences here were simply untrue, and a false statement in a
+    // tool description is worse than no statement: the model plans around it.
+    // "The browser session is anonymous" is wrong whenever the profile has a
+    // cookie set assigned, which is a normal setup. And a claim that a proxy is
+    // always required is wrong too -- proxy_mode is 'assigned' | 'direct' |
+    // 'free_proxy', and only the first requires one.
     description:
       'Open a profile in the Argus browser, ready for automation. If it is ' +
       'already open this returns the existing session rather than restarting ' +
       'it; pass relaunch=true to force a fresh window (which closes the current ' +
-      'one). The browser session is anonymous — never pass it credentials.',
+      'one). A profile set to use an assigned proxy needs that proxy to be ' +
+      'working before it will launch. The session carries whatever identity the ' +
+      'profile already holds, including its cookies — do not send it anything ' +
+      'the profile is not meant to have.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -111,7 +120,10 @@ const TOOLS = [
   },
   {
     name: 'argus_update_profile',
-    description: 'Change a profile\'s name, status, tags, notes, colour or folder.',
+    // `notes` used to be advertised here and silently did nothing -- the route's
+    // field whitelist has no such column, so an agent could report success on a
+    // write that never happened.
+    description: 'Change a profile\'s name, status, tags, colour or folder.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -120,13 +132,25 @@ const TOOLS = [
         status: {type: 'string'},
         tags: {type: 'array', items: {type: 'string'},
           description: 'At most 5; extras are dropped.'},
-        notes: {type: 'string'},
         color: {type: 'string'},
         folderId: {type: 'string'},
       },
       required: ['profileId'],
     },
-    run: async ({api, args}) => text(await api.post('/v1/profiles/update', args)),
+    // Forwards only the declared fields. This used to pass `args` straight
+    // through, and the route also accepts `email` and `password` -- so an agent
+    // that guessed those names could rewrite a profile's stored credentials
+    // through a tool whose schema never mentions them. Anything undeclared is
+    // dropped here rather than relied on being rejected downstream.
+    run: async ({api, args}) => {
+      const patch = {profileId: args.profileId};
+      for (const field of ['name', 'status', 'tags', 'color', 'folderId']) {
+        if (args[field] !== undefined) {
+          patch[field] = args[field];
+        }
+      }
+      return text(await api.post('/v1/profiles/update', patch));
+    },
   },
   {
     name: 'argus_list_proxies',
@@ -137,8 +161,8 @@ const TOOLS = [
   {
     name: 'argus_assign_proxy',
     description:
-      'Put a profile on a proxy from the library. A profile must have a valid ' +
-      'proxy before it can launch — direct connection is not allowed.',
+      'Put a profile on a proxy from the library. A profile whose proxy mode is ' +
+      '"assigned" needs a working proxy before it will launch.',
     inputSchema: {
       type: 'object',
       properties: {profileId: {type: 'string'}, proxyId: {type: 'string'}},
@@ -159,11 +183,18 @@ const TOOLS = [
         port: {type: 'number'},
         username: {type: 'string'},
         password: {type: 'string'},
-        type: {type: 'string', description: 'http or socks5.'},
+        type: {type: 'string', description: 'http or socks5. Defaults to http.'},
       },
       required: ['host', 'port'],
     },
-    run: async ({api, args}) => text(await api.post('/v1/proxies/check', args)),
+    // Declared fields only, for the same reason as argus_update_profile.
+    run: async ({api, args}) => text(await api.post('/v1/proxies/check', {
+      host: args.host,
+      port: args.port,
+      type: args.type,
+      username: args.username,
+      password: args.password,
+    })),
   },
   {
     name: 'argus_list_tabs',
