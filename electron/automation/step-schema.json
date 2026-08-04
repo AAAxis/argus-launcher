@@ -1,0 +1,184 @@
+{
+  "goto": {
+    "label": "Go to",
+    "icon": "globe",
+    "summary": "Go to {url}",
+    "cdp": ["Page"],
+    "fields": [
+      {"key": "url", "kind": "text", "label": "URL", "required": true, "interpolate": true,
+       "placeholder": "https://example.com"},
+      {"key": "waitUntil", "kind": "select", "label": "Wait until", "default": "load",
+       "options": ["load", "domcontentloaded"]}
+    ]
+  },
+  "waitFor": {
+    "label": "Wait for",
+    "icon": "hourglass",
+    "summary": "Wait for {for}",
+    "cdp": ["Runtime", "Page"],
+    "fields": [
+      {"key": "for", "kind": "select", "label": "Condition", "required": true, "default": "selector",
+       "options": ["selector", "selectorGone", "url", "text"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"for": ["selector", "selectorGone"]}},
+      {"key": "url", "kind": "text", "label": "URL contains", "interpolate": true,
+       "showWhen": {"for": "url"}},
+      {"key": "text", "kind": "text", "label": "Page contains text", "interpolate": true,
+       "showWhen": {"for": "text"}}
+    ]
+  },
+  "click": {
+    "label": "Click",
+    "icon": "mouse-pointer-click",
+    "summary": "Click {selector}",
+    "cdp": ["Runtime", "Input"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
+       "interpolate": true},
+      {"key": "nth", "kind": "number", "label": "Match index", "min": 0,
+       "hint": "Zero-based. Leave empty for the first match."}
+    ]
+  },
+  "type": {
+    "label": "Type",
+    "icon": "keyboard",
+    "summary": "Type into {selector}",
+    "cdp": ["Runtime", "Input"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
+       "interpolate": true},
+      {"key": "text", "kind": "text", "label": "Text", "required": true, "interpolate": true,
+       "hint": "Supports {{profile.email}} and {{profile.password}}."},
+      {"key": "clear", "kind": "boolean", "label": "Clear the field first", "default": true},
+      {"key": "delayMs", "kind": "number", "label": "Per-key delay (ms)", "min": 0, "max": 1000,
+       "hint": "Set this to send real key events instead of one paste-shaped insert."},
+      {"key": "pressEnter", "kind": "boolean", "label": "Press Enter afterwards"}
+    ]
+  },
+  "scroll": {
+    "label": "Scroll",
+    "icon": "mouse",
+    "summary": "Scroll to {to}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "to", "kind": "select", "label": "Scroll to", "required": true, "default": "bottom",
+       "options": ["bottom", "top", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"to": "selector"}}
+    ]
+  },
+  "extract": {
+    "label": "Extract",
+    "icon": "clipboard-list",
+    "summary": "Read {selector} into {into}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
+       "interpolate": true},
+      {"key": "what", "kind": "select", "label": "Read", "default": "text",
+       "options": ["text", "html", "attr", "value"]},
+      {"key": "attr", "kind": "text", "label": "Attribute", "interpolate": true,
+       "showWhen": {"what": "attr"}, "placeholder": "href"},
+      {"key": "all", "kind": "boolean", "label": "All matches (stores an array)"},
+      {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "hint": "Readable afterwards as {{vars.<name>}}."}
+    ]
+  },
+  "evaluate": {
+    "label": "Run script",
+    "icon": "code",
+    "summary": "Run script",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "script", "kind": "textarea", "label": "JavaScript", "required": true,
+       "interpolate": false,
+       "hint": "Runs in the page. Values come in as `vars`, NOT as {{...}} -- templates are never substituted into code."},
+      {"key": "args", "kind": "keyvalue", "label": "Values passed in as `vars`",
+       "interpolate": true},
+      {"key": "into", "kind": "text", "label": "Store result in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}
+    ]
+  },
+  "screenshot": {
+    "label": "Screenshot",
+    "icon": "camera",
+    "summary": "Screenshot",
+    "cdp": ["Page", "DOM"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "hint": "Leave empty to capture the viewport."},
+      {"key": "fullPage", "kind": "boolean", "label": "Full page"}
+    ]
+  },
+  "wait": {
+    "label": "Wait",
+    "icon": "timer",
+    "summary": "Wait",
+    "cdp": [],
+    "fields": [
+      {"key": "ms", "kind": "number", "label": "Fixed wait (ms)", "min": 0, "max": 300000},
+      {"key": "minMs", "kind": "number", "label": "Random wait, minimum (ms)", "min": 0,
+       "max": 300000},
+      {"key": "maxMs", "kind": "number", "label": "Random wait, maximum (ms)", "min": 0,
+       "max": 300000, "hint": "Set min and max instead of a fixed wait to look less mechanical."}
+    ]
+  },
+  "setVar": {
+    "label": "Set variable",
+    "icon": "variable",
+    "summary": "Set {name}",
+    "cdp": [],
+    "fields": [
+      {"key": "name", "kind": "text", "label": "Name", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+      {"key": "value", "kind": "text", "label": "Value", "required": true, "interpolate": true}
+    ]
+  },
+  "httpRequest": {
+    "label": "HTTP request",
+    "icon": "webhook",
+    "summary": "{method} {url}",
+    "cdp": [],
+    "fields": [
+      {"key": "method", "kind": "select", "label": "Method", "default": "GET",
+       "options": ["GET", "POST"]},
+      {"key": "url", "kind": "text", "label": "URL", "required": true, "interpolate": true},
+      {"key": "headers", "kind": "keyvalue", "label": "Headers", "interpolate": true},
+      {"key": "body", "kind": "textarea", "label": "Body", "interpolate": true,
+       "showWhen": {"method": "POST"}},
+      {"key": "into", "kind": "text", "label": "Store response in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
+  },
+  "if": {
+    "label": "If",
+    "icon": "git-branch",
+    "summary": "If {condition.left} {condition.op}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "condition", "kind": "condition", "label": "Condition", "required": true},
+      {"key": "then", "kind": "steps", "label": "Then"},
+      {"key": "else", "kind": "steps", "label": "Otherwise"}
+    ]
+  },
+  "loop": {
+    "label": "Loop",
+    "icon": "repeat",
+    "summary": "Loop {mode}",
+    "cdp": [],
+    "fields": [
+      {"key": "mode", "kind": "select", "label": "Mode", "required": true, "default": "times",
+       "options": ["times", "forEach"]},
+      {"key": "times", "kind": "number", "label": "Repeat count", "min": 1, "max": 1000,
+       "showWhen": {"mode": "times"}},
+      {"key": "items", "kind": "text", "label": "List", "interpolate": true,
+       "showWhen": {"mode": "forEach"}, "placeholder": "{{vars.rows}}",
+       "hint": "A whole-field template resolving to an array. Each item is {{loop.item}}."},
+      {"key": "maxIterations", "kind": "number", "label": "Safety cap", "min": 1, "max": 1000,
+       "default": 100},
+      {"key": "body", "kind": "steps", "label": "Steps"}
+    ]
+  }
+}

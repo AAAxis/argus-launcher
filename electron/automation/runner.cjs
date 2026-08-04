@@ -1,0 +1,407 @@
+// The workflow runner.
+//
+// Lives in the main process, not the renderer. The renderer is a window, and
+// window-all-closed does not quit on macOS, so a closed window would abandon a
+// run with a browser still driving. Main already owns automationLaunches,
+// getFreePort, waitForCdpReady and the kill path; splitting session ownership
+// across the IPC boundary is how you get an orphaned Chromium.
+//
+// Main owns no data, so the division is: the RENDERER hands over a fully
+// resolved automation and profile at start, and the runner streams events back
+// for the renderer to persist. docs/process-boundary.md stays true -- the main
+// process still never talks to Supabase.
+
+const {openPageSession} = require('../cdp-core.cjs');
+const {interpolateStep} = require('./interpolate.cjs');
+const {EXECUTORS, evaluateCondition, sleep, validateSteps} = require('./steps.cjs');
+const store = require('./store.cjs');
+const SCHEMA = require('./step-schema.json');
+
+const DEFAULT_STEP_TIMEOUT_MS = 15000;
+// goto and waitFor wait on the network, not on the DOM.
+const NAV_STEP_TIMEOUT_MS = 30000;
+const DEFAULT_RUN_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_LOOP_ITERATIONS = 1000;
+const MAX_RETRIES = 5;
+const RETRY_BACKOFF_MS = 1000;
+
+// Three concurrent runs, and exactly one per profile.
+//
+// Two runs driving the same window is not a feature, it is a race. The global
+// cap is deliberately not the plan's max_concurrent (5-100): that entitlement
+// is about browser SESSIONS, and conflating them would let an Enterprise org
+// start a hundred Chromiums from one button on someone's laptop.
+const MAX_CONCURRENT_RUNS = 3;
+
+// Caps applied before a record leaves this process. A 1000-iteration loop over
+// six steps would otherwise write a jsonb column nobody can read.
+const MAX_LOG_ENTRIES = 2000;
+const MAX_LOG_CHARS = 256 * 1024;
+
+const NAV_STEPS = new Set(['goto', 'waitFor']);
+
+// runId -> {run, cancel, profileId}
+const active = new Map();
+
+function timeoutIn(ms, label) {
+  return new Promise((_resolve, reject) => {
+    setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+}
+
+function stepTimeout(step) {
+  if (step.timeoutMs && step.timeoutMs > 0) {
+    return step.timeoutMs;
+  }
+  return NAV_STEPS.has(step.type) ? NAV_STEP_TIMEOUT_MS : DEFAULT_STEP_TIMEOUT_MS;
+}
+
+// Renders the schema's summary template against a step, for the log line.
+function summarize(step) {
+  const spec = SCHEMA[step.type];
+  if (step.label) {
+    return step.label;
+  }
+  if (!spec) {
+    return step.type;
+  }
+  return spec.summary.replace(/\{([A-Za-z0-9_.]+)\}/g, (_match, key) => {
+    const value = key.split('.').reduce((acc, part) => (acc ? acc[part] : undefined), step);
+    return value === undefined || value === null ? '' : String(value);
+  }).trim() || spec.label;
+}
+
+class Run {
+  constructor({app, automation, profile, trigger, cdpUrl, vars, onEvent}) {
+    this.app = app;
+    this.automation = automation;
+    this.profile = profile;
+    this.trigger = trigger;
+    this.cdpUrl = cdpUrl;
+    this.onEvent = onEvent || (() => {});
+    this.id = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    this.cancelled = false;
+    this.screenshotIndex = 0;
+    this.logChars = 0;
+    this.truncated = false;
+    this.stepCount = 0;
+    this.vars = {...(automation.variables || {}), ...(vars || {})};
+    this.record = {
+      id: this.id,
+      automation_id: automation.id,
+      automation_name: automation.name || '',
+      profile_id: profile.id,
+      profile_name: profile.name || '',
+      trigger,
+      status: 'running',
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      duration_ms: null,
+      step_count: 0,
+      failed_step_id: null,
+      error: null,
+      vars: {},
+      log: [],
+    };
+  }
+
+  // The interpolation context. Rebuilt per step so {{loop.*}} reflects the
+  // innermost loop and {{vars.*}} reflects everything written so far.
+  context(loop) {
+    return {
+      profile: {
+        id: this.profile.id,
+        name: this.profile.name,
+        email: this.profile.email,
+        password: this.profile.password,
+        status: this.profile.status,
+        tags: this.profile.tags,
+        folder_id: this.profile.folder_id,
+      },
+      vars: this.vars,
+      run: {id: this.id, startedAt: this.record.started_at, trigger: this.trigger},
+      ...(loop ? {loop} : {}),
+    };
+  }
+
+  log(level, message, extra = {}) {
+    if (this.record.log.length >= MAX_LOG_ENTRIES || this.logChars >= MAX_LOG_CHARS) {
+      if (!this.truncated) {
+        this.truncated = true;
+        this.record.log.push({
+          at: new Date().toISOString(),
+          path: '',
+          stepId: '',
+          type: 'run',
+          level: 'warn',
+          message: `Log truncated after ${this.record.log.length} entries`,
+        });
+      }
+      return;
+    }
+    this.logChars += String(message).length;
+    const entry = {at: new Date().toISOString(), level, message, ...extra};
+    this.record.log.push(entry);
+    this.onEvent({type: 'log', runId: this.id, entry});
+  }
+
+  persist() {
+    this.record.vars = this.vars;
+    store.writeRun(this.app, this.record);
+  }
+
+  async saveScreenshot(base64, stepId) {
+    this.screenshotIndex += 1;
+    return store.saveScreenshot(this.app, this.id, this.screenshotIndex, stepId, base64);
+  }
+
+  // Runs one step under its own timeout and error policy. Returns nothing;
+  // throws only when the policy says the run should stop.
+  async runStep(cdp, rawStep, path, loop) {
+    if (this.cancelled) {
+      throw new Error('cancelled');
+    }
+    if (rawStep.enabled === false) {
+      // Logged rather than skipped silently -- a step that vanishes from the
+      // log when disabled is how people lose an afternoon.
+      this.log('info', `Skipped ${summarize(rawStep)}`,
+          {path, stepId: rawStep.id, type: rawStep.type});
+      return;
+    }
+
+    const attempts = rawStep.onError === 'retry' ?
+      Math.min(Number(rawStep.retries) || 1, MAX_RETRIES) + 1 :
+      1;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const startedAt = Date.now();
+      try {
+        // Interpolated per attempt so a retry re-reads variables a previous
+        // step may have changed.
+        const step = interpolateStep(rawStep, this.context(loop), SCHEMA);
+        const result = await this.execute(cdp, step, path, loop);
+        this.stepCount += 1;
+        if (result?.vars) {
+          Object.assign(this.vars, result.vars);
+        }
+        this.log('info', summarize(step), {
+          path,
+          stepId: step.id,
+          type: step.type,
+          durationMs: Date.now() - startedAt,
+          ...(result?.screenshot ? {screenshot: result.screenshot} : {}),
+          ...(result?.vars ? {vars: result.vars} : {}),
+        });
+        return;
+      } catch (error) {
+        if (this.cancelled) {
+          throw new Error('cancelled');
+        }
+        const message = error?.message || String(error);
+        const last = attempt === attempts;
+        if (!last) {
+          this.log('warn', `${summarize(rawStep)} failed (attempt ${attempt}): ${message}`,
+              {path, stepId: rawStep.id, type: rawStep.type, durationMs: Date.now() - startedAt});
+          await sleep(RETRY_BACKOFF_MS);
+          continue;
+        }
+        this.log('error', `${summarize(rawStep)}: ${message}`, {
+          path,
+          stepId: rawStep.id,
+          type: rawStep.type,
+          durationMs: Date.now() - startedAt,
+        });
+        if (rawStep.onError === 'continue') {
+          // The run keeps going but can no longer end `ok` -- see the status
+          // note in 2026-08-05-automations.sql.
+          this.degraded = true;
+          return;
+        }
+        this.record.failed_step_id = rawStep.id;
+        throw error;
+      }
+    }
+  }
+
+  // Dispatches one interpolated step. if/loop are handled here rather than in
+  // steps.cjs because they recurse back into runStep.
+  async execute(cdp, step, path, loop) {
+    if (step.type === 'if') {
+      const taken = await evaluateCondition(cdp, step.condition || {});
+      const branch = taken ? (step.then || []) : (step.else || []);
+      const branchName = taken ? 'then' : 'else';
+      for (let i = 0; i < branch.length; i++) {
+        await this.runStep(cdp, branch[i], `${path}.${branchName}.${i}`, loop);
+      }
+      return undefined;
+    }
+
+    if (step.type === 'loop') {
+      const cap = Math.min(Number(step.maxIterations) || 100, MAX_LOOP_ITERATIONS);
+      let items;
+      if (step.mode === 'forEach') {
+        items = step.items;
+        if (!Array.isArray(items)) {
+          throw new Error('The list to loop over did not resolve to an array');
+        }
+      } else {
+        items = Array.from({length: Math.max(0, Number(step.times) || 0)}, (_, i) => i);
+      }
+      const total = Math.min(items.length, cap);
+      if (items.length > cap) {
+        this.log('warn',
+            `Loop capped at ${cap} of ${items.length} iterations`,
+            {path, stepId: step.id, type: step.type});
+      }
+      for (let index = 0; index < total; index++) {
+        const body = step.body || [];
+        for (let i = 0; i < body.length; i++) {
+          await this.runStep(cdp, body[i], `${path}.body.${i}`, {item: items[index], index});
+        }
+      }
+      return undefined;
+    }
+
+    const executor = EXECUTORS[step.type];
+    if (!executor) {
+      throw new Error(`No executor for step type ${step.type}`);
+    }
+    const timeout = stepTimeout(step);
+    // The race lives here, not inside each executor, so no executor can forget
+    // one. Note the deadline handed to waitFor matches the same budget.
+    return Promise.race([
+      executor({
+        cdp,
+        step,
+        log: (level, message) => this.log(level, message, {path, stepId: step.id, type: step.type}),
+        deadline: Date.now() + timeout,
+        saveScreenshot: (base64) => this.saveScreenshot(base64, step.id),
+      }),
+      timeoutIn(timeout, summarize(step)),
+    ]);
+  }
+
+  finish(status, error) {
+    this.record.status = status;
+    this.record.error = error || null;
+    this.record.finished_at = new Date().toISOString();
+    this.record.duration_ms =
+      new Date(this.record.finished_at).getTime() - new Date(this.record.started_at).getTime();
+    this.record.step_count = this.stepCount;
+    this.record.vars = this.vars;
+    this.persist();
+    this.onEvent({type: 'finished', runId: this.id, run: this.record});
+  }
+}
+
+// Starts a run and resolves as soon as it is registered -- NOT when it
+// finishes. Callers get a runId immediately and follow progress through events.
+//
+// This is not a style choice: AUTOMATION_REQUEST_TIMEOUT_MS is 20s and a real
+// run is minutes, so a route that awaited completion would 504 and look like a
+// hang in the runner rather than a timeout in the bridge.
+async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent}) {
+  const problems = validateSteps(automation.steps || [], SCHEMA);
+  if (problems.length > 0) {
+    throw new Error(`This automation is not valid: ${problems.slice(0, 5).join('; ')}`);
+  }
+  for (const entry of active.values()) {
+    if (entry.profileId === profile.id) {
+      const error = new Error('That profile already has a run in flight');
+      error.status = 409;
+      throw error;
+    }
+  }
+  if (active.size >= MAX_CONCURRENT_RUNS) {
+    const error = new Error(
+        `Too many runs at once (${MAX_CONCURRENT_RUNS} is the limit). Wait for one to finish.`);
+    error.status = 429;
+    throw error;
+  }
+
+  const run = new Run({app, automation, profile, trigger, cdpUrl, vars, onEvent});
+  active.set(run.id, {run, profileId: profile.id});
+  run.persist();
+  onEvent({type: 'started', runId: run.id, run: run.record});
+
+  // Deliberately not awaited.
+  void execute(run);
+  return run.id;
+}
+
+async function execute(run) {
+  let session = null;
+  const budget = Math.min(
+      Number(run.automation.timeout_ms) || DEFAULT_RUN_TIMEOUT_MS,
+      DEFAULT_RUN_TIMEOUT_MS);
+  try {
+    const opened = await openPageSession(run.cdpUrl);
+    session = opened.session;
+    await session.send('Page.enable');
+    await session.send('Runtime.enable');
+
+    // The browser is mid-navigation to its start page when CDP first answers
+    // (writeProfileStartupPrefs points startup at the generated home file), so
+    // without this settle the first goto races the browser's own navigation.
+    await Promise.race([
+      session.once('Page.loadEventFired', 2000).catch(() => undefined),
+      sleep(2000),
+    ]);
+
+    const steps = run.automation.steps || [];
+    await Promise.race([
+      (async () => {
+        for (let i = 0; i < steps.length; i++) {
+          await run.runStep(session, steps[i], String(i), null);
+        }
+      })(),
+      timeoutIn(budget, 'This run'),
+    ]);
+
+    run.finish(run.degraded ? 'partial' : 'ok', null);
+  } catch (error) {
+    const message = error?.message || String(error);
+    if (run.cancelled || message === 'cancelled') {
+      run.finish('cancelled', null);
+    } else {
+      run.finish('failed', message);
+    }
+  } finally {
+    if (session) {
+      session.close();
+    }
+    active.delete(run.id);
+  }
+}
+
+function cancel(runId) {
+  const entry = active.get(runId);
+  if (!entry) {
+    return false;
+  }
+  entry.run.cancelled = true;
+  return true;
+}
+
+function isProfileRunning(profileId) {
+  for (const entry of active.values()) {
+    if (entry.profileId === profileId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function activeRuns() {
+  return Array.from(active.values()).map((entry) => entry.run.record);
+}
+
+module.exports = {
+  MAX_CONCURRENT_RUNS,
+  SCHEMA,
+  activeRuns,
+  cancel,
+  isProfileRunning,
+  start,
+  validateSteps: (steps) => validateSteps(steps, SCHEMA),
+};
