@@ -7,30 +7,27 @@ export const socialBookmarks: SharedBookmark[] = [
   {title: 'Facebook', url: 'https://www.facebook.com/'},
 ];
 
+// `host:port` is not a scheme. `localhost:3000` and `10.0.0.5:8080` both match
+// the generic scheme pattern -- a word, then a colon -- but what follows the
+// colon is a port, and leaving them alone produced hrefs the browser tried to
+// open as a `localhost:` protocol. A real scheme is never followed by a bare
+// port and nothing else.
+function hasScheme(url: string) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) && !/^[a-z0-9.-]+:\d+([/?#]|$)/i.test(url);
+}
+
 export function normalizeBookmarkUrl(url: string) {
   const trimmed = url.trim();
   if (!trimmed) {
     return '';
   }
-  return /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return hasScheme(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
-// What the card shows on its url line. The scheme and a bare `www.` carry no
-// information and cost about half the line -- `https://www.instagram.com/` is
-// 26 characters of which 12 say nothing -- so they are dropped for display
-// only. The card keeps the full url in its title attribute.
-export function displayBookmarkUrl(url: string) {
-  const normalized = normalizeBookmarkUrl(url);
-  try {
-    const parsed = new URL(normalized);
-    const path = parsed.pathname === '/' ? '' : parsed.pathname;
-    return `${parsed.hostname.replace(/^www\./, '')}${path}${parsed.search}`;
-  } catch {
-    // Not parseable as a url -- show whatever the user typed rather than
-    // nothing, since they still need to recognise the row to fix it.
-    return normalized;
-  }
-}
+// displayBookmarkUrl lived here: the url with the scheme and a bare `www.`
+// stripped, for the second line of the old bookmark card. The Start page tile
+// shows a title under the favicon and carries the full url in its title
+// attribute instead, so nothing called it any more.
 
 // The fallback mark when a site exposes no favicon. Shared by the launcher's
 // bookmark card and the injected browser home page so the two agree.

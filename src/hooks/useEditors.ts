@@ -13,7 +13,7 @@ import type {
   BookmarkDraft, FolderDraft, ProfileDraft, ProxyDraft, StatusDraft,
 } from '../drafts';
 import type {ProfileDeleteRequest, ProxyDeleteRequest} from '../components/modals/ConfirmModals';
-import type {ArgusProfile, ArgusProxy, SharedBookmark} from '../types';
+import type {ArgusCookie, ArgusProfile, ArgusProxy, SharedBookmark} from '../types';
 
 export function useEditors() {
   const {data, profiles, setSelectedProfileId} = useWorkspace();
@@ -29,8 +29,16 @@ export function useEditors() {
   const [proxyDeleteRequest, setProxyDeleteRequest] =
     useState<(ProxyDeleteRequest & {onDeleted?: () => void}) | null>(null);
   const [cookiePickerOpen, setCookiePickerOpen] = useState(false);
+  // The set whose cookies are being inspected, and the set being assigned to
+  // profiles. Two separate pieces of state rather than one mode flag: the
+  // inspector's own "Assign to profiles" button opens the second over the
+  // first, and closing it has to leave the inspector standing.
+  const [cookieSetOpen, setCookieSetOpen] = useState<ArgusCookie | null>(null);
+  const [assignCookieSet, setAssignCookieSet] = useState<ArgusCookie | null>(null);
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [proxyImportOpen, setProxyImportOpen] = useState(false);
+  const [bookmarkImportOpen, setBookmarkImportOpen] = useState(false);
 
   return {
     profileDraft,
@@ -100,10 +108,18 @@ export function useEditors() {
 
     cookiePickerOpen,
     setCookiePickerOpen,
+    cookieSetOpen,
+    setCookieSetOpen,
+    assignCookieSet,
+    setAssignCookieSet,
     extensionAddOpen,
     setExtensionAddOpen,
     importOpen,
     setImportOpen,
+    proxyImportOpen,
+    setProxyImportOpen,
+    bookmarkImportOpen,
+    setBookmarkImportOpen,
 
     closeAll: () => {
       setProfileDraft(null);
@@ -115,8 +131,12 @@ export function useEditors() {
       setProfileDeleteRequest(null);
       setProxyDeleteRequest(null);
       setCookiePickerOpen(false);
+      setCookieSetOpen(null);
+      setAssignCookieSet(null);
       setExtensionAddOpen(false);
       setImportOpen(false);
+      setProxyImportOpen(false);
+      setBookmarkImportOpen(false);
     },
   };
 }

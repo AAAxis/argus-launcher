@@ -86,7 +86,7 @@ async function pushLocalCookiesToLauncher() {
       });
     }
   } catch (error) {
-    console.warn('Argys local cookie migration failed', error);
+    console.warn('Argus local cookie migration failed', error);
   }
 }
 
@@ -139,7 +139,7 @@ async function importCookies(cookies) {
       await chrome.cookies.set(details);
       imported++;
     } catch (error) {
-      console.warn('Argys cookie import failed', cookie?.domain, cookie?.name, error);
+      console.warn('Argus cookie import failed', cookie?.domain, cookie?.name, error);
     }
   }
   return {count: imported};

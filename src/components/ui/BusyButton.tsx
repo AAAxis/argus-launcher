@@ -1,5 +1,5 @@
 import {RefreshCw} from 'lucide-react';
-import type {ReactNode} from 'react';
+import type {MouseEvent, ReactNode} from 'react';
 
 // A button whose leading icon becomes a spinner while its action is in flight,
 // optionally swapping the label too. Six call sites had hand-rolled this with
@@ -14,6 +14,8 @@ export function BusyButton({
   type = 'button',
   disabled,
   onClick,
+  title,
+  ariaLabel,
   children,
 }: {
   busy: boolean;
@@ -25,15 +27,26 @@ export function BusyButton({
   className?: string;
   type?: 'button' | 'submit';
   disabled?: boolean;
-  onClick?: () => void;
+  // Takes the event so a busy button inside a clickable table row can
+  // stopPropagation, the same way the plain row-action buttons do. Existing
+  // call sites that ignore it keep type-checking -- a handler may always
+  // declare fewer parameters than it is given.
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  // Both, not either: an icon-only busy button needs the accessible name and
+  // the hover tooltip, and forgetting one of them is the usual way an icon
+  // button ends up unlabelled.
+  title?: string;
+  ariaLabel?: string;
   children?: ReactNode;
 }) {
   return (
     <button
+      aria-label={ariaLabel}
       className={className}
       type={type}
       disabled={busy || disabled}
       onClick={onClick}
+      title={title}
     >
       {busy ? <RefreshCw size={16} className="btn-spin" /> : icon}
       {busy && busyLabel ? busyLabel : children}

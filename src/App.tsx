@@ -2,22 +2,25 @@
 // gate in front of both. Everything with real logic behind it lives in
 // workspace/ (data and mutations), hooks/ (effects) or components/.
 import {useEffect, useState} from 'react';
-import {Plus, Upload, UserPlus} from 'lucide-react';
+import {BookOpen, Plus, Upload, UserPlus} from 'lucide-react';
 import {SignIn} from './components/SignIn';
 import {Sidebar, Topbar, UpdateToast} from './components/Shell';
 import {ApiTab} from './components/tabs/ApiTab';
 import {ProfilesTab} from './components/tabs/ProfilesTab';
 import {ProxiesTab} from './components/tabs/ProxiesTab';
-import {
-  BookmarksTab, CookiesTab, ExtensionsTab, IntegrationsTab,
-} from './components/tabs/SimpleTabs';
+import {CookiesTab} from './components/tabs/CookiesTab';
+import {StartPageTab} from './components/tabs/StartPageTab';
+import {ExtensionsTab} from './components/tabs/ExtensionsTab';
+import {IntegrationsTab} from './components/tabs/SimpleTabs';
+import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
+import {CookieSetModal} from './components/modals/CookieSetModal';
 import {ProfileDeleteModal, ProxyDeleteModal, ErrorModal} from './components/modals/ConfirmModals';
 import {BookmarkModal, FolderModal, ProxyModal, StatusModal} from './components/modals/EditorModals';
 import {IntegrationModal} from './components/modals/IntegrationModal';
 import {
-  CookiePickerModal, ExtensionAddModal, ImportModal,
+  BookmarkImportModal, CookiePickerModal, ExtensionAddModal, ImportModal, ProxyImportModal,
 } from './components/modals/LibraryModals';
-import {ProfileIntroModal} from './components/modals/ProfileIntroModal';
+import {IntroModal} from './components/modals/IntroModal';
 import {ProfileModal} from './components/modals/ProfileModal';
 import {
   ChangelogModal, OAuthApprovalModal, RevealedKeyModal, UpdateControl,
@@ -25,10 +28,14 @@ import {
 import {SettingsDialog} from './settings/SettingsDialog';
 import {BusyButton} from './components/ui/BusyButton';
 import {LoadingState} from './components/ui/LoadingState';
+import {COOKIE_INTRO_STEPS} from './data/cookieIntro';
+import {PROFILE_INTRO_STEPS} from './data/profileIntro';
 import {DEFAULT_FOLDER_ICON} from './data/folderIcons';
+import {DEFAULT_PROFILE_COLOR, normalizeProfileColor} from './lib/profileColors';
 import {findIntegration} from './data/integrations';
 import {SITE_URL} from './lib/auth';
 import {hasSeenProfileIntro, markProfileIntroSeen} from './lib/introSeen';
+import {TRASH_FOLDER_ID} from './lib/trash';
 import {useApiKeys, useIntegrations} from './hooks/useApiKeys';
 import {useAutomationBridge} from './hooks/useAutomationBridge';
 import {
@@ -59,12 +66,22 @@ export function App() {
   const {run, isPending} = useAsyncAction();
 
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
-  // Which folder the Profiles tab is filtered to. Held here rather than in the
-  // tab because creating a folder from the dialog switches the view to it.
+  // Which folder each tab is filtered to. Held here rather than in the tabs
+  // because creating a folder from the dialog switches the view to it.
   const [profileFolderId, setProfileFolderId] = useState('');
+  const [proxyFolderId, setProxyFolderId] = useState('');
+  const [cookieFolderId, setCookieFolderId] = useState('');
+  // What a just-created folder was suggested from -- a tag for a profile
+  // folder, an ISO country code for a proxy one. Held for exactly one hand-off:
+  // the tab opens its move dialog on it, then clears it.
+  const [folderFillTag, setFolderFillTag] = useState('');
+  const [folderFillCountry, setFolderFillCountry] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [introOpen, setIntroOpen] = useState(false);
+  // Unlike the profiles one this is never shown unprompted -- there is no
+  // "seen" flag for it, only the About button on the Cookies tab.
+  const [cookieIntroOpen, setCookieIntroOpen] = useState(false);
   const [revealedKey, setRevealedKey] = useState<{name: string; token: string} | null>(null);
 
   useAutomationBridge(workspace);
@@ -166,11 +183,24 @@ export function App() {
       )}
       {changelogOpen && <ChangelogModal updater={updater} onClose={() => setChangelogOpen(false)} />}
       {introOpen && (
-        <ProfileIntroModal
+        <IntroModal
+          steps={PROFILE_INTRO_STEPS}
           onClose={() => setIntroOpen(false)}
-          onCreateProfile={() => {
+          finishLabel="Create a profile"
+          onFinish={() => {
             setIntroOpen(false);
             editors.newProfile();
+          }}
+        />
+      )}
+      {cookieIntroOpen && (
+        <IntroModal
+          steps={COOKIE_INTRO_STEPS}
+          onClose={() => setCookieIntroOpen(false)}
+          finishLabel="Add a cookie-set"
+          onFinish={() => {
+            setCookieIntroOpen(false);
+            void run('add-cookie-set', addCookieSetFromPicker);
           }}
         />
       )}
@@ -178,6 +208,12 @@ export function App() {
         <ExtensionAddModal onClose={() => editors.setExtensionAddOpen(false)} />
       )}
       {editors.importOpen && <ImportModal onClose={() => editors.setImportOpen(false)} />}
+      {editors.proxyImportOpen && (
+        <ProxyImportModal onClose={() => editors.setProxyImportOpen(false)} />
+      )}
+      {editors.bookmarkImportOpen && (
+        <BookmarkImportModal onClose={() => editors.setBookmarkImportOpen(false)} />
+      )}
       {oauth.request && (
         <OAuthApprovalModal
           request={oauth.request}
@@ -253,7 +289,36 @@ export function App() {
           draft={editors.folderDraft}
           onChange={editors.setFolderDraft}
           onClose={() => editors.setFolderDraft(null)}
-          onCreated={setProfileFolderId}
+          onCreated={(folderId, seed) => {
+            // `seed` is a tag or a country code depending on which library the
+            // draft belongs to, so the kind decides where both values land.
+            if (editors.folderDraft?.kind === 'proxy') {
+              setProxyFolderId(folderId);
+              setFolderFillCountry(seed || '');
+              return;
+            }
+            // Cookie folders are never suggested from anything, so there is no
+            // seed to hand on -- just select the new folder.
+            if (editors.folderDraft?.kind === 'cookie') {
+              setCookieFolderId(folderId);
+              return;
+            }
+            setProfileFolderId(folderId);
+            setFolderFillTag(seed || '');
+          }}
+        />
+      )}
+      {editors.cookieSetOpen && (
+        <CookieSetModal
+          cookie={editors.cookieSetOpen}
+          onClose={() => editors.setCookieSetOpen(null)}
+          onAssign={editors.setAssignCookieSet}
+        />
+      )}
+      {editors.assignCookieSet && (
+        <AssignCookieSetModal
+          cookie={editors.assignCookieSet}
+          onClose={() => editors.setAssignCookieSet(null)}
         />
       )}
       {editors.statusDraft && (
@@ -296,15 +361,60 @@ export function App() {
       case 'proxies':
         return (
           <ProxiesTab
+            folderId={proxyFolderId}
+            onFolderId={setProxyFolderId}
             onAddProxy={editors.newProxy}
+            onImportProxies={() => editors.setProxyImportOpen(true)}
             onEditProxy={(proxy) => editors.editProxy(proxy)}
+            onNewFolder={() => editors.setFolderDraft({
+              kind: 'proxy',
+              name: '',
+              icon: DEFAULT_FOLDER_ICON,
+              color: DEFAULT_PROFILE_COLOR,
+            })}
+            onEditFolder={(folder) => editors.setFolderDraft({
+              id: folder.id,
+              kind: 'proxy',
+              name: folder.name,
+              icon: folder.icon || DEFAULT_FOLDER_ICON,
+              color: normalizeProfileColor(folder.color),
+            })}
+            fillCountry={folderFillCountry}
+            onFillCountryDone={() => setFolderFillCountry('')}
             onRequestDelete={editors.requestDeleteProxies}
           />
         );
       case 'cookies':
-        return <CookiesTab />;
-      case 'bookmarks':
-        return <BookmarksTab onEditBookmark={editors.editBookmark} />;
+        return (
+          <CookiesTab
+            folderId={cookieFolderId}
+            onFolderId={setCookieFolderId}
+            onOpenCookieSet={editors.setCookieSetOpen}
+            onAssignCookieSet={editors.setAssignCookieSet}
+            onNewCookieSet={() => void run('add-cookie-set', addCookieSetFromPicker)}
+            onShowAbout={() => setCookieIntroOpen(true)}
+            onNewFolder={() => editors.setFolderDraft({
+              kind: 'cookie',
+              name: '',
+              icon: DEFAULT_FOLDER_ICON,
+              color: DEFAULT_PROFILE_COLOR,
+            })}
+            onEditFolder={(folder) => editors.setFolderDraft({
+              id: folder.id,
+              kind: 'cookie',
+              name: folder.name,
+              icon: folder.icon || DEFAULT_FOLDER_ICON,
+              color: normalizeProfileColor(folder.color),
+            })}
+          />
+        );
+      case 'startPage':
+        return (
+          <StartPageTab
+            onAddBookmark={editors.newBookmark}
+            onEditBookmark={editors.editBookmark}
+          />
+        );
       case 'extensions':
         return <ExtensionsTab onAddExtension={() => editors.setExtensionAddOpen(true)} />;
       case 'integrations':
@@ -326,12 +436,21 @@ export function App() {
             onFolderId={setProfileFolderId}
             onEditProfile={editors.editProfile}
             onNewProfile={editors.newProfile}
-            onNewFolder={() => editors.setFolderDraft({name: '', icon: DEFAULT_FOLDER_ICON})}
+            onNewFolder={() => editors.setFolderDraft({
+              kind: 'profile',
+              name: '',
+              icon: DEFAULT_FOLDER_ICON,
+              color: DEFAULT_PROFILE_COLOR,
+            })}
             onEditFolder={(folder) => editors.setFolderDraft({
               id: folder.id,
+              kind: 'profile',
               name: folder.name,
               icon: folder.icon || DEFAULT_FOLDER_ICON,
+              color: normalizeProfileColor(folder.color),
             })}
+            fillTag={folderFillTag}
+            onFillTagDone={() => setFolderFillTag('')}
             onRequestDelete={editors.requestDeleteProfiles}
             onShowIntro={() => setIntroOpen(true)}
           />
@@ -351,19 +470,38 @@ export function App() {
           </>
         );
       case 'proxies':
-        return <button onClick={editors.newProxy}><Plus size={18} /> Add proxy</button>;
+        return (
+          <>
+            <button className="ghost" onClick={() => editors.setProxyImportOpen(true)}>
+              <Upload size={18} /> Import
+            </button>
+            <button onClick={editors.newProxy}><Plus size={18} /> Add proxy</button>
+          </>
+        );
       case 'cookies':
         return (
-          <BusyButton
-            busy={isPending('add-cookie-set')}
-            busyLabel="Uploading…"
-            onClick={() => void run('add-cookie-set', addCookieSetFromPicker)}
-          >
-            <Plus size={18} /> Cookie-set
-          </BusyButton>
+          <>
+            <button className="ghost" onClick={() => setCookieIntroOpen(true)}>
+              <BookOpen size={18} /> About
+            </button>
+            <BusyButton
+              busy={isPending('add-cookie-set')}
+              busyLabel="Uploading…"
+              onClick={() => void run('add-cookie-set', addCookieSetFromPicker)}
+            >
+              <Plus size={18} /> Cookie-set
+            </BusyButton>
+          </>
         );
-      case 'bookmarks':
-        return <button onClick={editors.newBookmark}><Plus size={18} /> Bookmark</button>;
+      case 'startPage':
+        // Adding one bookmark is the "+" tile on the page itself, so the top
+        // action is the thing the page has no room for: bringing a whole
+        // browser's worth of bookmarks across.
+        return (
+          <button onClick={() => editors.setBookmarkImportOpen(true)}>
+            <Upload size={18} /> Import bookmarks
+          </button>
+        );
       default:
         return null;
     }
@@ -379,7 +517,11 @@ export function App() {
       if (!selection) {
         return;
       }
-      const entry = await workspace.library.addCookieSet(selection);
+      // Filed into whichever folder the tab is standing in, so adding a set
+      // from inside a folder does not drop it into All and make the user move
+      // it. Trash is a view, not a folder, so it never becomes a destination.
+      const folderId = cookieFolderId === TRASH_FOLDER_ID ? null : cookieFolderId || null;
+      const entry = await workspace.cookies.addCookieSet(selection, {folderId});
       if (entry) {
         toast.setMessage(`Added "${entry.name}" to the cookie library`);
       }

@@ -2,13 +2,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const {launcherIconIcns} = require('../electron/profile-icons.cjs');
+
 const root = path.resolve(__dirname, '..');
 const sourceApp = path.join(root, 'node_modules/electron/dist/Electron.app');
 const targetApp = path.join(os.homedir(), 'Applications/Argus Launcher.app');
 const targetContents = path.join(targetApp, 'Contents');
 const targetResources = path.join(targetContents, 'Resources');
 const plistPath = path.join(targetContents, 'Info.plist');
-const iconSource = path.join(root, 'assets/app.icns');
+// The dev bundle gets the same mark the packaged app ships (see
+// build.mac.icon), so a dev run is not the one place the launcher still wears
+// the browser's tile. Light because a bundle icon on disk cannot follow the
+// app's theme -- the running app re-tiles its own Dock entry from the matching
+// .png, which is the only part of this that can react to dark mode.
+const iconSource = launcherIconIcns(false) || path.join(root, 'assets/app.icns');
 const iconTarget = path.join(targetResources, 'app.icns');
 
 function xmlEscape(value) {
@@ -89,5 +96,25 @@ if (fs.existsSync(iconSource)) {
   fs.mkdirSync(targetResources, {recursive: true});
   fs.copyFileSync(iconSource, iconTarget);
 }
+
+// What makes the bundle openable on its own.
+//
+// This is a copy of Electron.app, and Electron only has an app to run if one is
+// named on the command line or sits at Contents/Resources/app. start-macos-app
+// passes the project on the command line, so `npm start` worked -- but the
+// bundle it leaves in ~/Applications is also a normal app in Launchpad and
+// Spotlight, and clicking it there passes no arguments. Electron then fell back
+// to its built-in default_app.asar: the grey window listing Electron/Chromium/
+// Node versions, which looks exactly like the launcher failing to start.
+//
+// A symlink rather than a copy so the bundle always runs the working tree, and
+// to the project root rather than a stub so Electron reads the real
+// package.json -- `name` there is what decides the userData directory, and a
+// stub with a different name would silently strand every existing setting in
+// ~/Library/Application Support/argys-anty. Verified: this leaves
+// app.isPackaged false, so the auto-updater stays off in a dev bundle.
+const appPayload = path.join(targetResources, 'app');
+fs.rmSync(appPayload, {recursive: true, force: true});
+fs.symlinkSync(root, appPayload);
 
 console.log(targetApp);

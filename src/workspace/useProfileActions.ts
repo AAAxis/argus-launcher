@@ -4,6 +4,7 @@ import {buildLaunchPayload} from '../lib/launch';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {matchedProxyForProfile, parseProxyConnectionString, proxyDedupeKey} from '../lib/proxies';
 import {isFsSafeId} from '../lib/trash';
+import {normalizeTags} from '../lib/tags';
 import {numberOrNull} from '../lib/text';
 import {native} from '../native';
 import {fingerprintFromDraftPatch, tagsFromDraft} from '../drafts';
@@ -369,6 +370,11 @@ export type ImportResult = {
   proxiesCreated: number;
   proxiesReused: number;
   foldersCreated: number;
+  // Rows that carried more than MAX_PROFILE_TAGS tags and had the extras
+  // dropped. Reported rather than silently trimmed: a CSV written against
+  // another tool has no reason to know this app's limit, and losing a tag
+  // without being told is the kind of thing found weeks later.
+  tagsTrimmed: number;
   skipped: Array<{name: string; reason: string}>;
 };
 
@@ -408,6 +414,7 @@ function planCsvImport(
     proxiesCreated: 0,
     proxiesReused: 0,
     foldersCreated: 0,
+    tagsTrimmed: 0,
     skipped: [],
   };
 
@@ -488,6 +495,11 @@ function planCsvImport(
     const createdAt = Date.parse(row.created_at || '') ?
       new Date(row.created_at).toISOString() :
       new Date().toISOString();
+    const csvTags = tagsFromDraft(row.tags || '');
+    const tags = normalizeTags(csvTags);
+    if (tags.length < csvTags.length) {
+      result.tagsTrimmed++;
+    }
     const profile: ArgusProfile = {
       id: importId,
       name,
@@ -495,7 +507,7 @@ function planCsvImport(
       color: existing?.color ?? DEFAULT_PROFILE_COLOR,
       folder_id: folderId,
       proxy_id: proxyId,
-      tags: tagsFromDraft(row.tags || ''),
+      tags,
       start_url: null,
       cookie_import_path: null,
       cookie_import_url: null,

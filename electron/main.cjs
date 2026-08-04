@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const {resolveFavicon} = require('./favicons.cjs');
+const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
 // Two shapes, and nothing else is honoured:
@@ -106,9 +107,13 @@ function deepLinkFromArgv(argv) {
   return (argv || []).find((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_SCHEME}://`)) || null;
 }
 
-// In dev the executable is Electron itself, so the scheme has to be registered
-// against that binary plus the app path -- otherwise the OS hands argus:// to a
-// bare Electron with no project and nothing happens.
+// When the project is named on the command line (`electron .`, and the Windows
+// and Linux dev loops), the executable is Electron itself, so the scheme has to
+// be registered against that binary plus the app path -- otherwise the OS hands
+// argus:// to a bare Electron with no project and nothing happens. The macOS
+// dev bundle carries its app at Contents/Resources/app instead (see
+// scripts/ensure-macos-app.cjs), which makes defaultApp false and sends it down
+// the same branch as a packaged build, where registering the bundle is right.
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
     app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [path.resolve(process.argv[1])]);
@@ -212,14 +217,36 @@ function resolveLanguage(fingerprintLanguage, proxy) {
   return COUNTRY_DEFAULTS[code]?.language || null;
 }
 
-function appIconPath() {
-  const candidates = [
-    path.join(__dirname, '../assets/app.icns'),
-    '/Applications/Argys Browser.app/Contents/Resources/app.icns',
-    '/Applications/Argus.app/Contents/Resources/app.icns',
-    path.join(app.getPath('home'), 'argus-browser/out/Release-dmg/Argus.app/Contents/Resources/app.icns'),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+// The launcher's own icon, for the current theme, as a PNG.
+//
+// This used to walk a list of .icns files -- assets/app.icns first, then the
+// browser's -- which was doubly wrong. assets/app.icns is a byte-identical copy
+// of the browser's icon, so the Dock showed one tile for the control plane and
+// for every session it had started, identifiable only by reading the name
+// underneath. And nativeImage cannot read .icns at all: it returns an empty
+// image, so both consumers below were silently no-ops and the packaged app's
+// icon was really coming from electron-builder alone. Hence a .png, and hence
+// no fallback -- there was never a working one to preserve.
+function appIconPath(dark = nativeTheme.shouldUseDarkColors) {
+  return launcherIconPng(dark) || '';
+}
+
+// macOS is the only platform that can restyle a running app's icon: the Dock
+// tile is set from an image at runtime, where the Windows taskbar reads it out
+// of the .exe. So the launcher follows the theme live here, and the Windows
+// build keeps whatever assets/app.ico holds until that icon is redrawn too.
+function applyDockIcon() {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+  const icon = appIconPath();
+  if (!icon) {
+    return;
+  }
+  const image = nativeImage.createFromPath(icon);
+  if (!image.isEmpty()) {
+    app.dock?.setIcon(image);
+  }
 }
 
 function settingsPath() {
@@ -868,9 +895,7 @@ function configureAutoUpdater() {
 
 function createWindow() {
   const icon = appIconPath();
-  if (process.platform === 'darwin' && icon) {
-    app.dock?.setIcon(nativeImage.createFromPath(icon));
-  }
+  applyDockIcon();
   const win = new BrowserWindow({
     title: 'Argus Launcher',
     width: 1180,
@@ -1307,6 +1332,11 @@ function normalizeCookieUrl(cookie) {
   return `${cookie.secure ? 'https' : 'http'}://${domain}${pathPart}`;
 }
 
+// The object shape this returns is a contract shared with the renderer:
+// src/lib/cookieFile.ts is a TypeScript port of this function and its
+// neighbours, and the cookie inspector writes that shape back out as the very
+// file this parses on the next launch. Nothing compiles electron/, so the two
+// cannot be one module -- if you change the fields here, change them there.
 function normalizeCookie(cookie) {
   if (!cookie || typeof cookie !== 'object') {
     return null;
@@ -1397,12 +1427,12 @@ async function parseCookieUrl(url) {
   return parseCookieContent(buffer.toString('utf8'));
 }
 
-// Writes one merged "Argys Cookie Manager" extension per launch, into the
+// Writes one merged "Argus Cookie Manager" extension per launch, into the
 // profile's own user-data-dir: a copy of extensions/cookie-manager's manual
 // export/import UI, plus (only when this profile has a cookie file assigned)
 // a seed-cookies.json the extension's own background.js auto-imports once on
 // first run. Previously this shipped as two separate extensions (a shared
-// "Argys Cookie Manager" plus a per-profile "Argys Cookie Seed <name>"
+// "Argus Cookie Manager" plus a per-profile "Argus Cookie Seed <name>"
 // generated from an inline script) -- merged so each profile shows exactly
 // one cookie extension that both seeds and manages.
 async function writeProfileCookieManagerExtension(payload) {
@@ -1795,25 +1825,57 @@ function profileLauncherPath(payload) {
   return path.join(profileLaunchersRoot(), `${fileSafeName(payload.name)}.app`);
 }
 
-function copyBrowserIcon(browserAppPath, resourcesDir) {
+// The icon this profile's wrapper bundle wears in Finder, Spotlight and
+// Launchpad. NOT its Dock tile -- the wrapper has none (see above); the Dock is
+// the browser's own, set from --argus-profile-icon.
+//
+// Every wrapper used to copy the browser's app.icns, so all of them were the
+// same Chromium tile in a folder listing whose only other distinguishing mark
+// is a filename. Each now takes its colour from the profiles table (see
+// profile-icons.cjs), the same colour its row and chip already carry in the
+// app, so the two agree.
+//
+// The browser's icon stays as the fallback: a profile with no colour is
+// impossible today (the column defaults) but a tree where assets/icons was
+// never generated is not, and a wrapper with no icon at all shows the generic
+// application placeholder.
+function writeProfileIcon(payload, browserAppPath, resourcesDir) {
   const candidates = [
+    profileIconIcns(payload.color, nativeTheme.shouldUseDarkColors),
     path.join(browserAppPath, 'Contents/Resources/app.icns'),
     '/Applications/Argys Browser.app/Contents/Resources/app.icns',
     '/Applications/Argus.app/Contents/Resources/app.icns',
   ];
-  const iconPath = candidates.find((candidate) => fs.existsSync(candidate));
+  const iconPath = candidates.find((candidate) => candidate && fs.existsSync(candidate));
   if (iconPath) {
     fs.copyFileSync(iconPath, path.join(resourcesDir, 'app.icns'));
   }
+  // Logged because "the Dock tile did not change" has two very different
+  // causes that look identical from outside: assets/icons is missing (falls
+  // through to the browser's own icon, named here), or this process predates
+  // the code that picks one -- main.cjs is read once at startup and does not
+  // reload with the renderer, so a launcher left running across an edit keeps
+  // the old behaviour with no sign of it.
+  console.log(`Profile icon for "${payload.name}": colour=${payload.color || '(none)'} -> ` +
+    `${iconPath ? path.basename(iconPath) : '(none found)'}`);
 }
 
-// The Dock/Cmd+Tab name for a running app comes from its bundle's Info.plist,
-// never from a window's title or command-line args -- there is no supported
-// way for one shared "Argys Browser" binary to report a different Dock
-// identity per profile. So each launch gets its own tiny wrapper .app (named
-// after the profile) whose sole job is to exec the real browser with this
-// profile's args; the Dock then shows the profile's name instead of the
-// shared "Argys Browser" identity, as required.
+// Each launch gets its own tiny wrapper .app, named after the profile, whose
+// sole job is to exec the real browser with this profile's args.
+//
+// It does NOT give the profile a Dock identity, despite what this comment used
+// to claim. Verified on macOS 26: a bundle whose executable is a zsh script
+// never calls NSApplicationMain, so LaunchServices runs it as a plain process
+// with no Dock tile and no Cmd+Tab entry. The only tile a profile session has
+// ever had is the browser's own, from the shared "Argys Browser" bundle -- the
+// browser retints it per profile from --argus-profile-icon, and puts the
+// profile's name in the window title, because those are the only handles that
+// actually reach the running session.
+//
+// What the wrapper still earns its place for: the pkill-then-exec sequence that
+// clears a stale process, the TZ export, and a per-profile entry in Finder,
+// Spotlight and Launchpad -- which is a real surface, and is where the tinted
+// icon below shows up.
 function writeProfileLauncherApp(payload, resolved, args, timezone) {
   const appPath = profileLauncherPath(payload);
   const contentsDir = path.join(appPath, 'Contents');
@@ -1838,11 +1900,23 @@ function writeProfileLauncherApp(payload, resolved, args, timezone) {
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
+<!-- This bundle's executable is a zsh script, not a Mach-O binary, so there is
+     no header for LaunchServices to read an architecture out of. Left to
+     itself it forges an LSArchitecturePriority of ("x86_64", arm64) for any
+     script bundle -- x86_64 FIRST -- and an Apple Silicon Mac then offers to
+     install Rosetta before it will open a wrapper that does nothing but exec
+     an arm64 browser. Declaring the priority ourselves is what suppresses
+     that; verified against lsregister -dump, where this clears the
+     "forged-arch-priority" flag. LSRequiresNativeExecution does NOT work here
+     -- LaunchServices ignores it for script bundles and forges x86_64 first
+     anyway. Both architectures are listed, arm64 first, so an Intel Mac (where
+     arm64 is unavailable and the browser build is x86_64) still launches. -->
+<key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
 </dict></plist>
 `;
   fs.writeFileSync(path.join(contentsDir, 'Info.plist'), infoPlist);
   fs.writeFileSync(path.join(contentsDir, 'PkgInfo'), 'APPL????');
-  copyBrowserIcon(resolved.appPath, resourcesDir);
+  writeProfileIcon(payload, resolved.appPath, resourcesDir);
 
   const logPath = `/tmp/argys-profile-${bundleSafeId(payload.id || displayName)}.log`;
   const launchArgs = args.map(shellQuote).join(' ');
@@ -1996,6 +2070,11 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   extensionPaths.push(...sharedExtensionPaths.filter(Boolean));
   killExistingProfileProcess(payload.id, payload.userDataDir);
   clearSessionRestore(payload.userDataDir);
+  // Resolved once, here, so the arg list below stays a list. Null in a tree
+  // where assets/icons was never generated, in which case the switch is simply
+  // omitted and the browser keeps the shared bundle icon.
+  const profileDockIcon =
+    profileIconPng(payload.color, nativeTheme.shouldUseDarkColors);
   const launchUrl = payload.startUrl || writeHomeFile(payload);
   writeProfileStartupPrefs(payload.userDataDir, launchUrl);
   writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
@@ -2032,6 +2111,12 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
     '--argus-profile-launch',
     `--argus-profile-id=${payload.id}`,
     `--argus-profile-name=${payload.name}`,
+    // The browser retints its own Dock tile from this (argus_dock_icon_mac.mm).
+    // It has to be the browser that does it: every session shares one bundle,
+    // and a bundle's icon is a file, so the only per-session handle on the tile
+    // is the running process. Resolved here because the launcher owns the
+    // artwork and is the only side that knows the user's current theme.
+    ...(profileDockIcon ? [`--argus-profile-icon=${profileDockIcon}`] : []),
     `--user-data-dir=${payload.userDataDir}`,
     '--profile-directory=Default',
     '--no-first-run',
@@ -2201,6 +2286,7 @@ ipcMain.handle('argus:set-theme', async (_event, preference) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light);
   }
+  applyDockIcon();
   return true;
 });
 
@@ -2265,11 +2351,15 @@ ipcMain.handle('argus:reveal-path', async (_event, target) => {
 
 // While on "System", the window background has to track the OS too -- the
 // renderer re-themes itself off matchMedia, but nothing else would repaint the
-// native shell behind it.
+// native shell behind it. The Dock tile is on the same hook for the same
+// reason. Already-open browser sessions keep the tile they launched with:
+// their icon lives in a bundle on disk, and rewriting it under a running app
+// does not repaint the Dock.
 nativeTheme.on('updated', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light);
   }
+  applyDockIcon();
 });
 
 ipcMain.handle('argus:update-status', async () => {
@@ -2722,6 +2812,46 @@ ipcMain.handle('argus:save-text-file', async (_event, {defaultName, content}) =>
   }
   fs.writeFileSync(result.filePath, content, 'utf8');
   return result.filePath;
+});
+
+// A proxy list is whatever the vendor emailed: .txt far more often than .csv,
+// occasionally no extension at all. The renderer parses the contents itself
+// (lib/proxies.ts), so this only has to hand back the text.
+ipcMain.handle('argus:select-proxy-file', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select proxy list',
+    properties: ['openFile'],
+    filters: [
+      {name: 'Proxy lists', extensions: ['txt', 'csv', 'list']},
+      {name: 'All files', extensions: ['*']},
+    ],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+  const filePath = result.filePaths[0];
+  return {path: filePath, content: fs.readFileSync(filePath, 'utf8')};
+});
+
+// A bookmarks file exported from another browser. Chrome, Edge, Firefox, Safari
+// and Brave all write the same Netscape bookmark HTML, so one filter covers
+// every browser a user is likely to be migrating from. Same division of labour
+// as the proxy picker above: this hands back the text and the renderer parses
+// it (lib/bookmarkImport.ts), where a real DOM parser is already available.
+ipcMain.handle('argus:select-bookmark-file', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select bookmarks file',
+    properties: ['openFile'],
+    filters: [
+      {name: 'Bookmarks', extensions: ['html', 'htm']},
+      {name: 'All files', extensions: ['*']},
+    ],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+  const filePath = result.filePaths[0];
+  return {path: filePath, content: fs.readFileSync(filePath, 'utf8')};
 });
 
 ipcMain.handle('argus:select-import-csv', async () => {

@@ -4,8 +4,8 @@ import {proxyToRow, rowToProxy} from './mappers';
 import type {ProxyRow} from './rows';
 
 const COLUMNS =
-  'id,org_id,name,type,host,port,username,password,last_checked_at,last_ip,last_country,' +
-  'last_latency_ms,created_at,last_country_code,last_error';
+  'id,org_id,name,type,host,port,username,password,folder_id,last_checked_at,last_ip,' +
+  'last_country,last_latency_ms,created_at,last_country_code,last_error';
 
 export async function list(orgId: string): Promise<ArgusProxy[]> {
   const client = optionalClient();
@@ -42,6 +42,23 @@ export async function remove(orgId: string, ids: string[]): Promise<void> {
       .eq('org_id', orgId)
       .in('id', ids);
   raise(error, 'proxies.remove');
+}
+
+// Files one proxy under a folder, or back under "All proxies" with null.
+//
+// A narrow update rather than an upsert of the whole row, for the same reason
+// recordCheck below is one: filing a proxy while someone else edits its
+// credentials -- or while the background sweep records a check -- must touch
+// the one column it means to.
+export async function assignFolder(
+    orgId: string, id: string, folderId: string | null): Promise<void> {
+  const client = requireClient();
+  const {error} = await client
+      .from('proxies')
+      .update({folder_id: folderId})
+      .eq('org_id', orgId)
+      .eq('id', id);
+  raise(error, 'proxies.assignFolder');
 }
 
 // The result of a proxy check -- the background loop's only write. Kept

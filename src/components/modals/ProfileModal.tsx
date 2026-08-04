@@ -1,22 +1,33 @@
 import {useState} from 'react';
 import {
-  Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Network, Palette, Plus,
+  Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
   Tag, Terminal, Trash2, UserRound,
 } from 'lucide-react';
+import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
 import {Field} from '../ui/Field';
+import {InfoHint} from '../ui/InfoHint';
 import {Modal} from '../ui/Modal';
-import {PlatformPicker} from '../ui/PlatformPicker';
+import {RotateButton} from '../ui/RotateButton';
+import {StatusPicker} from '../ui/StatusChip';
 import {TagInput} from '../ui/TagInput';
 import {FingerprintDatalists, FingerprintFields} from './FingerprintFields';
 import {ProfileSummary} from './ProfileSummary';
 import {randomFingerprintPatch} from '../../lib/fingerprintPresets';
+import {normalizeBookmarkUrl} from '../../lib/bookmarks';
 import {proxyOptionLabel, parseProxyLink} from '../../lib/proxies';
-import {profileFromDraft, tagsFromDraft, withFingerprintOs} from '../../drafts';
+import {MAX_PROFILE_TAGS} from '../../lib/tags';
+import {profileFromDraft, tagsFromDraft} from '../../drafts';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {SummaryTarget} from './ProfileSummary';
 import type {ProfileDraft, ProxyDraft} from '../../drafts';
+
+// Stable ids so the Summary panel's per-group Edit actions can put the caret in
+// the field they describe. The proxy field already needed one for its datalist.
+const NAME_FIELD_ID = 'profile-name-input';
+const PROXY_FIELD_ID = 'profile-proxy-input';
 
 export type ProfileModalProps = {
   draft: ProfileDraft;
@@ -39,7 +50,7 @@ export function ProfileModal({
   onCreateProxy,
   onRequestDelete,
 }: ProfileModalProps) {
-  const {data, toast, profiles, statusOptions} = useWorkspace();
+  const {data, toast, profiles, statusOptions, tagOptions} = useWorkspace();
   const state = data.state;
   const {run, isPending} = useAsyncAction();
   const [fingerprintOpen, setFingerprintOpen] = useState(false);
@@ -107,6 +118,20 @@ export function ProfileModal({
     return cookie.count ? `${cookie.name} (${cookie.count} cookies)` : cookie.name;
   }
 
+  // Where a Summary group's Edit button lands. The fingerprint group opens the
+  // dialog that owns those values; the other two put the caret in the first
+  // field of the block they summarize.
+  function editSummaryGroup(target: SummaryTarget) {
+    if (target === 'fingerprint') {
+      setFingerprintOpen(true);
+      return;
+    }
+    const field = document.getElementById(
+        target === 'proxy' ? PROXY_FIELD_ID : NAME_FIELD_ID);
+    field?.scrollIntoView({block: 'center', behavior: 'smooth'});
+    field?.focus();
+  }
+
   async function save() {
     const name = draft.name.trim();
     if (!name) {
@@ -118,17 +143,24 @@ export function ProfileModal({
       toast.setMessage('Proxy is required, or pick Direct / Free Proxy instead.');
       return;
     }
-    const createdAt = draft.id ?
+    const createdAt = draft.saved ?
       state.profiles.find((item) => item.id === draft.id)?.created_at :
       new Date().toISOString();
     const profile = profileFromDraft(draft, createdAt);
+    // A row written before the cap existed -- by an import or the API -- can
+    // arrive here with more tags than the editor will keep. profileFromDraft
+    // trims it either way; saying so is the difference between a rule and a
+    // tag quietly going missing.
+    const dropped = tagsFromDraft(draft.tags).length - (profile.tags?.length || 0);
     // On failure withDb has already surfaced the real error; don't overwrite it
     // with a false "saved" toast, and keep the dialog open so edits aren't lost.
     if (!await profiles.save(profile)) {
       return;
     }
     onClose();
-    toast.setMessage(`${profile.name} saved`);
+    toast.setMessage(dropped > 0 ?
+      `${profile.name} saved — kept the first ${MAX_PROFILE_TAGS} tags` :
+      `${profile.name} saved`);
   }
 
   return (
@@ -136,14 +168,14 @@ export function ProfileModal({
       <Modal
         className=""
         onClose={onClose}
-        title={draft.id ? 'Edit profile' : 'Create profile'}
+        title={draft.saved ? 'Edit profile' : 'Create profile'}
         subtitle="Cloud-backed profile settings used when Argys Browser launches anonymously."
         footer={
           <>
-            {draft.id && (
+            {draft.saved && (
               <button
                 className="danger ghost"
-                onClick={() => onRequestDelete([draft.id as string], draft.name)}
+                onClick={() => onRequestDelete([draft.id], draft.name)}
               >
                 <Trash2 size={16} /> Delete
               </button>
@@ -153,7 +185,7 @@ export function ProfileModal({
               busyLabel="Saving…"
               onClick={() => void run('save-profile', save)}
             >
-              {draft.id ? 'Save changes' : 'Create profile'}
+              {draft.saved ? 'Save changes' : 'Create profile'}
             </BusyButton>
           </>
         }
@@ -164,64 +196,71 @@ export function ProfileModal({
               <input
                 type="text"
                 autoFocus
+                id={NAME_FIELD_ID}
                 value={draft.name}
                 onChange={(event) => set({name: event.target.value})}
               />
             </Field>
-            <Field label="Status" icon={<Activity size={14} />}>
-              <div className="select-action">
-                <select
-                  value={statusOptions.includes(draft.status) ? draft.status : 'Ready'}
-                  onChange={(event) => set({status: event.target.value})}
-                >
-                  {statusOptions.map((status) => <option value={status} key={status}>{status}</option>)}
-                </select>
-                <button className="ghost" type="button" onClick={onNewStatus}>
-                  <Plus size={16} /> Status
-                </button>
-              </div>
-            </Field>
-
-            {/* The platform is the one fingerprint field that lives out here
-              * rather than behind "Edit fingerprint". It decides what every
-              * other field in that dialog is allowed to be -- picking it
-              * re-rolls the GPU, CPU, screen and media-device set -- so leaving
-              * it two dialogs deep meant every profile silently shipped as
-              * Windows 11. See the note in AGENTS.md. */}
-            <Field label="Platform" icon={<Fingerprint size={14} />} wide group>
-              <PlatformPicker
-                value={draft.fingerprint_os}
-                onChange={(os) => onChange(withFingerprintOs(draft, os))}
+            <Field label="Status" icon={<Activity size={14} />} wide group>
+              <StatusPicker
+                status={statusOptions.includes(draft.status) ? draft.status : 'Ready'}
+                options={statusOptions}
+                onChange={(status) => set({status})}
+                onNewStatus={onNewStatus}
               />
             </Field>
 
-            <label className="field wide">
-              <span>Proxy mode</span>
-              <div className="segmented">
+            {/* The three modes each needed a sentence of explanation. They used
+              * to be two conditional .field-hint paragraphs that appeared and
+              * disappeared under the control, moving the rest of the form. */}
+            <Field
+              label="Proxy mode"
+              icon={<Network size={14} />}
+              info={
+                <InfoHint label="Proxy mode">
+                  <p>
+                    <strong>Assigned proxy</strong> routes this profile through one proxy from
+                    your library. Saving or launching needs one picked.
+                  </p>
+                  <p>
+                    <strong>Direct</strong> sends traffic straight out with no proxy and no
+                    fallback extension — your own IP.
+                  </p>
+                  <p>
+                    <strong>Free Proxy</strong> loads the bundled FoxyWall Proxy extension
+                    instead of assigning one, and connects through it.
+                  </p>
+                </InfoHint>
+              }
+              wide
+              group
+            >
+              <div className="choice-chips" role="radiogroup" aria-label="Proxy mode">
                 {(['assigned', 'direct', 'free_proxy'] as const).map((mode) => (
                   <button
+                    aria-checked={draft.proxy_mode === mode}
+                    className={draft.proxy_mode === mode ? 'choice-chip active' : 'choice-chip'}
                     key={mode}
-                    type="button"
-                    className={draft.proxy_mode === mode ? 'active' : ''}
                     onClick={() => set({proxy_mode: mode})}
+                    role="radio"
+                    type="button"
                   >
                     {mode === 'assigned' ? 'Assigned proxy' : mode === 'direct' ? 'Direct' : 'Free Proxy'}
                   </button>
                 ))}
               </div>
-              {draft.proxy_mode === 'direct' && (
-                <p className="field-hint">No proxy, no fallback extension. Traffic goes out directly.</p>
-              )}
-              {draft.proxy_mode === 'free_proxy' && (
-                <p className="field-hint">Uses the bundled FoxyWall Proxy extension instead of an assigned proxy.</p>
-              )}
-            </label>
+            </Field>
 
+            {/* One field per row rather than the two-up grid these used to share:
+              * the search box and the connection-string box looked like one
+              * control split in half, and Create new proxy was wedged in beside
+              * the second of them. */}
             {draft.proxy_mode === 'assigned' && (
-              <Field label="Proxy" icon={<Network size={14} />}>
-                <div className="proxy-picker">
+              <>
+                <Field label="Proxy" icon={<Network size={14} />} wide>
                   <input
                     type="text"
+                    id={PROXY_FIELD_ID}
                     list="profile-proxy-options"
                     placeholder="Search and select proxy"
                     value={proxyFieldValue()}
@@ -255,20 +294,58 @@ export function ProfileModal({
                       <option value={proxyOptionLabel(proxy)} key={proxy.id} />
                     ))}
                   </datalist>
-                  <div className="inline-action">
+                </Field>
+                <Field
+                  label="Or add a new proxy"
+                  icon={<Link2 size={14} />}
+                  info={
+                    <InfoHint label="Adding a proxy">
+                      <p>
+                        Paste a connection string to create the proxy and assign it to this
+                        profile in one step. It joins your proxy library, so other profiles can
+                        pick it afterwards.
+                      </p>
+                      <p>
+                        Both shapes are accepted: <code>socks5://user:pass@host:port</code> and
+                        the vendor form <code>socks5://host:port:user:pass</code>.
+                      </p>
+                    </InfoHint>
+                  }
+                  wide
+                >
+                  <div className="stacked-action">
                     <input
                       type="text"
-                      placeholder="http://user:pass@host:port or socks5://..."
+                      placeholder="http://user:pass@host:port or socks5://host:port:user:pass"
                       value={draft.proxy_link}
                       onChange={(event) => set({proxy_link: event.target.value})}
                     />
-                    <button type="button" onClick={createProxyFromLink}>Create new proxy</button>
+                    <button className="ghost" type="button" onClick={createProxyFromLink}>
+                      Create new proxy
+                    </button>
                   </div>
-                </div>
-              </Field>
+                </Field>
+              </>
             )}
 
-            <Field label="Folder" icon={<Folder size={14} />}>
+            {/* Directly under Proxy, and no longer below cookie import: this
+              * card is now the only way into the fingerprint editor, so the
+              * platform it names has to be visible near the top of the form.
+              * See AGENTS.md. */}
+            <section className="form-section wide compact-section fingerprint-card">
+              <div>
+                <h3><Fingerprint size={15} /> Fingerprint</h3>
+                <p>
+                  {draft.fingerprint_os} · {draft.fingerprint_browser_version} ·{' '}
+                  {draft.fingerprint_timezone} · {draft.fingerprint_webrtc}
+                </p>
+              </div>
+              <button className="ghost" type="button" onClick={() => setFingerprintOpen(true)}>
+                Edit fingerprint
+              </button>
+            </section>
+
+            <Field label="Folder" icon={<Folder size={14} />} wide>
               <select
                 value={draft.folder_id}
                 onChange={(event) => set({folder_id: event.target.value})}
@@ -279,21 +356,29 @@ export function ProfileModal({
                 ))}
               </select>
             </Field>
-            <Field label="Colour" icon={<Palette size={14} />} group>
+            <Field label="Colour" icon={<Palette size={14} />} wide group>
               <ColorPicker value={draft.color} onChange={(color) => set({color})} />
             </Field>
             <Field
               label="Tags"
               icon={<Tag size={14} />}
-              hint="Enter or comma adds a tag. Tags are searchable from the profiles list."
+              hint={`Up to ${MAX_PROFILE_TAGS}. Click a suggestion, or type your own — Enter or ` +
+                'comma adds it. Tags filter and search the profiles list.'}
               wide
+              // Same reason the Status field is a group: the suggestion row and
+              // the chips' remove buttons sit inside this field, and a <label>
+              // wrapping them fires its implicit activation of the text input
+              // instead of the button that was actually clicked.
+              group
             >
               <TagInput
-                placeholder="warmup, facebook-cookies"
+                options={tagOptions}
+                placeholder="warmup, client-a"
                 value={tagsFromDraft(draft.tags)}
                 onChange={(tags) => set({tags: tags.join(', ')})}
               />
             </Field>
+
             <Field label="Start page" icon={<Globe size={14} />} wide>
               <input
                 type="text"
@@ -301,12 +386,10 @@ export function ProfileModal({
                 value={draft.start_url}
                 onChange={(event) => set({start_url: event.target.value})}
               />
+              <StartPageChips value={draft.start_url} onPick={(start_url) => set({start_url})} />
             </Field>
-            <Field
-              label="Account email"
-              icon={<AtSign size={14} />}
-              hint="The login this profile is signed into. Stored with your cloud data, in plaintext."
-            >
+
+            <Field label="Account email" icon={<AtSign size={14} />} wide>
               <input
                 type="email"
                 placeholder="you@example.com"
@@ -314,7 +397,23 @@ export function ProfileModal({
                 onChange={(event) => set({email: event.target.value})}
               />
             </Field>
-            <Field label="Account password" icon={<KeyRound size={14} />}>
+            <Field
+              label="Account password"
+              icon={<KeyRound size={14} />}
+              info={
+                <InfoHint label="Account password">
+                  <p>
+                    The login this profile is signed into, kept beside it so whoever picks the
+                    profile up has it.
+                  </p>
+                  <p>
+                    Stored with your cloud data <strong>in plaintext</strong> — anyone with
+                    access to the organization can read it.
+                  </p>
+                </InfoHint>
+              }
+              wide
+            >
               <input
                 type="password"
                 autoComplete="new-password"
@@ -325,7 +424,23 @@ export function ProfileModal({
 
             <section className="form-section wide compact-section">
               <div>
-                <h3><Cookie size={15} /> Cookie import</h3>
+                <h3>
+                  <Cookie size={15} /> Cookie import
+                  <InfoHint label="Cookie import">
+                    <p>
+                      Takes a JSON export or a Netscape <code>cookies.txt</code>. Both are what
+                      the usual browser cookie-export extensions produce.
+                    </p>
+                    <p>
+                      The file is uploaded to cloud sync, so every machine in the organization
+                      launches this profile with the same cookies.
+                    </p>
+                    <p>
+                      They are seeded at launch through a temporary generated extension in the
+                      profile directory, not written into the cookie database directly.
+                    </p>
+                  </InfoHint>
+                </h3>
                 <p>Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches.</p>
               </div>
               <div className="file-row wide">
@@ -370,17 +485,28 @@ export function ProfileModal({
               </div>
             </section>
 
-            <section className="form-section wide compact-section fingerprint-card">
-              <div>
-                <h3><Fingerprint size={15} /> Fingerprint</h3>
-                <p>{draft.fingerprint_os} · {draft.fingerprint_browser_version} · {draft.fingerprint_webrtc}</p>
-              </div>
-              <button className="ghost" type="button" onClick={() => setFingerprintOpen(true)}>
-                Edit fingerprint
-              </button>
-            </section>
-
-            <Field label="Command line switches" icon={<Terminal size={14} />} wide>
+            <Field
+              label="Command line switches"
+              icon={<Terminal size={14} />}
+              info={
+                <InfoHint label="Command line switches">
+                  <p>
+                    Extra Chromium flags, passed to the browser when this profile launches.
+                    One per line.
+                  </p>
+                  <p>
+                    Use the full <code>--flag</code> or <code>--flag=value</code> form, for
+                    example <code>--lang=en-US</code> or{' '}
+                    <code>--disable-features=ExampleFeature</code>.
+                  </p>
+                  <p>
+                    A flag that contradicts the fingerprint above wins — the browser applies
+                    what it is given, so a bad switch here can undo the identity settings.
+                  </p>
+                </InfoHint>
+              }
+              wide
+            >
               <textarea
                 placeholder="--disable-features=ExampleFeature&#10;--lang=en-US"
                 value={draft.command_line_switches}
@@ -389,7 +515,7 @@ export function ProfileModal({
             </Field>
           </div>
 
-          <ProfileSummary draft={draft} onRotate={rotate} />
+          <ProfileSummary draft={draft} onRotate={rotate} onEdit={editSummaryGroup} />
         </div>
 
         <FingerprintDatalists />
@@ -404,16 +530,53 @@ export function ProfileModal({
           subtitle="Profile-level browser identity settings stored with cloud data."
           footer={
             <>
-              <button className="ghost" onClick={rotate}>Rotate fingerprint</button>
+              <RotateButton onRotate={rotate}>Rotate fingerprint</RotateButton>
               <button onClick={() => setFingerprintOpen(false)}>Done</button>
             </>
           }
         >
           <div className="profile-form">
-            <FingerprintFields draft={draft} onChange={onChange} onRotate={rotate} />
+            <FingerprintFields draft={draft} onChange={onChange} />
           </div>
         </Modal>
       )}
     </>
+  );
+}
+
+// The shared bookmarks, as one-click values for the start page. Hidden when the
+// workspace has none rather than rendering a lone "home" chip that explains
+// nothing.
+function StartPageChips({value, onPick}: {value: string; onPick: (url: string) => void}) {
+  const {data} = useWorkspace();
+  const bookmarks = data.state.shared_bookmarks;
+  if (!bookmarks.length) {
+    return null;
+  }
+  const current = normalizeBookmarkUrl(value);
+  return (
+    <div className="bookmark-chips">
+      <button
+        className={value.trim() ? 'bookmark-chip' : 'bookmark-chip active'}
+        onClick={() => onPick('')}
+        type="button"
+      >
+        <span>Shared bookmarks home</span>
+      </button>
+      {bookmarks.map((bookmark) => (
+        <button
+          className={current && current === normalizeBookmarkUrl(bookmark.url) ?
+            'bookmark-chip active' :
+            'bookmark-chip'}
+          key={bookmark.id || bookmark.url}
+          onClick={() => onPick(bookmark.url)}
+          title={`${bookmark.title || bookmark.url} — ${bookmark.url}`}
+          type="button"
+        >
+          <BookmarkFavicon bookmark={bookmark} />
+          <span>{bookmark.title || bookmark.url}</span>
+        </button>
+      ))}
+    </div>
   );
 }

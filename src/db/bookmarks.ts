@@ -41,6 +41,30 @@ export async function create(orgId: string, bookmark: SharedBookmark): Promise<S
   return rowToBookmark(data as unknown as SharedBookmarkRow);
 }
 
+// One statement for a whole imported file. A browser export routinely carries
+// hundreds of bookmarks, and create()-in-a-loop would be that many round trips
+// -- slow enough to look hung, and able to stop half done. The caller has
+// already dropped duplicates, so this cannot collide.
+export async function createMany(
+    orgId: string, bookmarks: SharedBookmark[]): Promise<SharedBookmark[]> {
+  if (!bookmarks.length) {
+    return [];
+  }
+  const client = requireClient();
+  const {data, error} = await client
+      .from('shared_bookmarks')
+      .insert(bookmarks.map((bookmark) => ({
+        org_id: orgId,
+        title: bookmark.title,
+        url: bookmark.url,
+        icon: bookmark.icon ?? null,
+        position: bookmark.position ?? null,
+      })))
+      .select('id,org_id,title,url,position,icon');
+  raise(error, 'bookmarks.createMany');
+  return ((data || []) as unknown as SharedBookmarkRow[]).map(rowToBookmark);
+}
+
 // Replaces the row whose url is `originalUrl` -- the url itself is editable, so
 // it cannot be both the lookup key and part of the patch.
 export async function updateByUrl(

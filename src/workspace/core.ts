@@ -15,7 +15,6 @@ export type WorkspaceCore = {
   setCheckingProxyId: (id: string) => void;
 };
 
-export function newId(suffix?: string | number) {
-  return globalThis.crypto?.randomUUID?.() ||
-    (suffix === undefined ? `${Date.now()}` : `${Date.now()}-${suffix}`);
-}
+// Re-exported so the existing workspace call sites keep their short local
+// name; the implementation moved to lib/random.ts once drafts.ts needed it too.
+export {newRowId as newId} from '../lib/random';

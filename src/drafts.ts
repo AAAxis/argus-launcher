@@ -10,11 +10,22 @@ import {
   normalizeOsPreset,
 } from './lib/fingerprintPresets';
 import {DEFAULT_PROFILE_COLOR, normalizeProfileColor} from './lib/profileColors';
+import {newRowId} from './lib/random';
+import {normalizeTags} from './lib/tags';
 import {numberOrNull} from './lib/text';
 import type {ArgusProfile, ArgusProxy, ProxyMode, SharedBookmark} from './types';
+import type {FolderKind} from './workspace/useLibraryActions';
 
 export type ProfileDraft = {
-  id?: string;
+  // Minted when the draft is created, not when it is first written. A profile's
+  // id is also its directory name under the browser's profile root, so it is
+  // worth showing in the Summary before the save rather than after -- the panel
+  // used to print "New profile" there, which is not an id anyone can use.
+  id: string;
+  // Whether this draft corresponds to a row that already exists. It used to be
+  // inferred from `id` being set, which stopped working once every draft has
+  // one.
+  saved: boolean;
   name: string;
   status: string;
   color: string;
@@ -85,10 +96,26 @@ export type BookmarkDraft = {
 
 export type FolderDraft = {
   id?: string;
+  // Which library this folder belongs to. Decides which suggestions the dialog
+  // offers, which tab it lands in, and what the delete warning says. Not
+  // editable once the folder exists -- moving a folder between libraries would
+  // orphan everything filed in it.
+  kind: FolderKind;
   name: string;
   // A FOLDER_ICONS key. Always set in the draft even though ArgusFolder.icon is
   // optional -- the picker is a radiogroup and needs something selected.
   icon: string;
+  // A PROFILE_COLORS key or a custom hex, same as ProfileDraft.color. Always
+  // set, for the same radiogroup reason as icon.
+  color: string;
+  // Set when the draft was started from a tag suggestion, so the dialog can
+  // offer to move that tag's profiles in once the folder exists. Not persisted
+  // -- it describes where this dialog came from, not what a folder is.
+  fromTag?: string;
+  // The proxy-side twin of fromTag: an ISO country code the folder was
+  // suggested from, so the proxies checked into that country arrive pre-ticked
+  // in the move dialog. Equally not persisted.
+  fromCountry?: string;
 };
 
 export type StatusDraft = {
@@ -97,6 +124,8 @@ export type StatusDraft = {
 
 export function newProfileDraft(): ProfileDraft {
   return {
+    id: newRowId(),
+    saved: false,
     name: `Profile ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`,
     status: 'Ready',
     color: DEFAULT_PROFILE_COLOR,
@@ -145,6 +174,7 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
   const fingerprint = profile.fingerprint || {};
   return {
     id: profile.id,
+    saved: true,
     name: profile.name,
     status: profile.status || 'Ready',
     // Normalized on read, so a profile saved with one of the six old hexes
@@ -240,7 +270,7 @@ export function fingerprintFromDraftPatch(
 // a create (stamp now).
 export function profileFromDraft(draft: ProfileDraft, createdAt?: string): ArgusProfile {
   return {
-    id: draft.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}`,
+    id: draft.id,
     name: draft.name.trim(),
     status: draft.status.trim() || 'Ready',
     color: draft.color || DEFAULT_PROFILE_COLOR,
@@ -249,7 +279,10 @@ export function profileFromDraft(draft: ProfileDraft, createdAt?: string): Argus
     password: draft.password || undefined,
     proxy_id: draft.proxy_mode === 'assigned' ? (draft.proxy_id || null) : null,
     proxy_mode: draft.proxy_mode,
-    tags: tagsFromDraft(draft.tags),
+    // Normalized rather than merely split: a draft loaded from a row that an
+    // import or the API had already over-filled would otherwise carry its
+    // extra tags straight back to the database on the next save.
+    tags: normalizeTags(tagsFromDraft(draft.tags)),
     start_url: draft.start_url.trim() || null,
     cookie_import_path: draft.cookie_import_path.trim() || null,
     cookie_import_url: draft.cookie_import_url.trim() || null,

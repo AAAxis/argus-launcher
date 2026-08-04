@@ -4,16 +4,20 @@
 import {createContext, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import {baseProfileStatuses} from '../data/statuses';
+import {tagsInUse} from '../lib/tags';
 import {statusList} from '../lib/text';
 import {useToast} from '../hooks/useToast';
 import {useOrg} from '../org';
 import {useCloudData} from './useCloudData';
+import {useCookieActions} from './useCookieActions';
 import {useLibraryActions} from './useLibraryActions';
 import {useProfileActions} from './useProfileActions';
 import {useProxyActions} from './useProxyActions';
 import type {Toast} from '../hooks/useToast';
 import type {WorkspaceCore} from './core';
+import type {TagUsage} from '../lib/tags';
 import type {CloudData} from './useCloudData';
+import type {CookieActions} from './useCookieActions';
 import type {LibraryActions} from './useLibraryActions';
 import type {ProfileActions} from './useProfileActions';
 import type {ProxyActions} from './useProxyActions';
@@ -24,6 +28,7 @@ export type WorkspaceValue = {
   profiles: ProfileActions;
   proxies: ProxyActions;
   library: LibraryActions;
+  cookies: CookieActions;
   // Which profile row is highlighted. Lives here rather than in the Profiles
   // tab because deletes and saves have to keep it pointing at something real.
   selectedProfileId: string | null;
@@ -34,6 +39,18 @@ export type WorkspaceValue = {
   // already using -- so a status that only exists on an imported row still
   // shows up in the dropdowns instead of silently resetting to Ready.
   statusOptions: string[];
+  // Every tag the org's profiles actually carry, most used first and the user's
+  // own words ahead of the catalogued brands. The picker offers the user half,
+  // the table's filter offers all of it -- neither needs to walk the profiles
+  // again to find out what exists.
+  tagOptions: TagUsage[];
+  // The same thing for the cookie-set library, kept as a separate list rather
+  // than merged into tagOptions: that one feeds the Profiles filter dropdown
+  // and the folder suggestions, so a cookie-only tag in it would offer a filter
+  // that empties the profiles table. The half worth sharing is shared anyway --
+  // both go through tagKey() and the same brand catalog, so "Instagram" on a
+  // set and "instagram" on a profile render identically.
+  cookieTagOptions: TagUsage[];
   reload: () => void;
 };
 
@@ -66,6 +83,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   const proxies = useProxyActions(core);
   const profiles = useProfileActions(core, proxies);
   const library = useLibraryActions(core);
+  const cookies = useCookieActions(core);
 
   const {load, reset} = data;
   const {setMessage} = toast;
@@ -121,7 +139,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     };
   }, [orgId, load]);
 
-  const {custom_statuses: customStatuses, profiles: profileRows} = data.state;
+  const {custom_statuses: customStatuses, profiles: profileRows, cookies: cookieRows} = data.state;
   const statusOptions = useMemo(
       () => statusList(
           baseProfileStatuses,
@@ -129,6 +147,8 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
           profileRows.map((profile) => profile.status)),
       [customStatuses, profileRows],
   );
+  const tagOptions = useMemo(() => tagsInUse(profileRows), [profileRows]);
+  const cookieTagOptions = useMemo(() => tagsInUse(cookieRows), [cookieRows]);
 
   // Deliberately not memoized: several of the action closures read the current
   // cloudState, so a stable identity would hand consumers stale data. The old
@@ -140,11 +160,14 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     profiles,
     proxies,
     library,
+    cookies,
     selectedProfileId,
     setSelectedProfileId,
     checkingProxyId,
     setCheckingProxyId,
     statusOptions,
+    tagOptions,
+    cookieTagOptions,
     reload: () => {
       if (orgId) {
         void load(orgId, {quiet: true});

@@ -216,6 +216,7 @@ export function rowToProxy(row: ProxyRow): ArgusProxy {
     port: row.port || 0,
     username: undef(row.username),
     password: undef(row.password),
+    folder_id: row.folder_id,
     country: undef(row.last_country),
     country_code: undef(row.last_country_code),
     egress_ip: undef(row.last_ip),
@@ -235,6 +236,7 @@ export function proxyToRow(orgId: string, proxy: ArgusProxy): Insert<ProxyRow> {
     port: proxy.port || null,
     username: proxy.username ?? null,
     password: proxy.password ?? null,
+    folder_id: proxy.folder_id ?? null,
     last_checked_at: proxy.checked_at ?? null,
     last_ip: proxy.egress_ip ?? null,
     last_country: proxy.country ?? null,
@@ -250,7 +252,13 @@ export function rowToFolder(row: FolderRow): ArgusFolder {
   return {
     id: row.id,
     name: row.name || '',
+    // Anything that names no library is the profile one, so a row written
+    // before the column existed reads as what it always was. Listed positively
+    // rather than as "not proxy" so a fourth kind cannot silently land in the
+    // profiles rail.
+    kind: row.kind === 'proxy' ? 'proxy' : row.kind === 'cookie' ? 'cookie' : 'profile',
     icon: undef(row.icon),
+    color: undef(row.color),
     created_at: undef(row.created_at),
   };
 }
@@ -263,7 +271,59 @@ export function rowToCookie(row: CookieSetRow): ArgusCookie {
     name: row.name || '',
     url: row.source_url || '',
     count: row.count,
+    folder_id: row.folder_id,
+    tags: row.tags ?? [],
+    created_at: undef(row.created_at),
+    updated_at: undef(row.updated_at),
+    deleted_at: row.deleted_at,
   };
+}
+
+// The full row for an insert. `deleted_at` is deliberately absent, for exactly
+// the reason profileToRow omits it: Trash membership belongs to softDelete /
+// restore / purge alone, and a create path that could set it would be a way to
+// insert a row nobody can find.
+//
+// `cookies` is not here either -- the payload is passed separately by
+// cookieSets.create, because it is the one column large enough that a caller
+// should have to mean it.
+export function cookieToRow(orgId: string, cookie: ArgusCookie): Insert<CookieSetRow> {
+  return {
+    id: cookie.id,
+    org_id: orgId,
+    name: cookie.name || null,
+    source_url: cookie.url || null,
+    count: cookie.count ?? null,
+    folder_id: cookie.folder_id ?? null,
+    tags: cookie.tags ?? [],
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// Only the keys actually present are sent, so two workers renaming and
+// re-filing the same set cannot clobber each other's field. updated_at is
+// stamped on every patch: no trigger maintains it.
+export function cookiePatchToRow(patch: Partial<ArgusCookie>): Partial<CookieSetRow> {
+  const row: Partial<CookieSetRow> = {updated_at: new Date().toISOString()};
+  if ('name' in patch) {
+    row.name = patch.name ?? null;
+  }
+  if ('url' in patch) {
+    row.source_url = patch.url || null;
+  }
+  if ('count' in patch) {
+    row.count = patch.count ?? null;
+  }
+  if ('folder_id' in patch) {
+    row.folder_id = patch.folder_id ?? null;
+  }
+  if ('tags' in patch) {
+    row.tags = patch.tags ?? [];
+  }
+  if ('deleted_at' in patch) {
+    row.deleted_at = patch.deleted_at ?? null;
+  }
+  return row;
 }
 
 // ---- shared extensions --------------------------------------------------
@@ -275,6 +335,9 @@ export function rowToExtension(row: SharedExtensionRow): SharedExtension {
     source: row.source === 'webstore' ? 'webstore' : 'local',
     webstoreId: undef(row.webstore_id),
     storageUrl: undef(row.storage_url),
+    // null (column missing before the migration, or never written) reads as
+    // enabled, matching SharedExtension.enabled's documented convention.
+    enabled: row.enabled ?? undefined,
   };
 }
 
@@ -288,6 +351,7 @@ export function extensionToRow(
     source: extension.source,
     webstore_id: extension.webstoreId ?? null,
     storage_url: extension.storageUrl ?? null,
+    enabled: extension.enabled !== false,
   };
   // Only written on upload: it is the object key a future cleanup pass needs to
   // delete the zip from the bucket. Omitted on a plain row edit so an upsert

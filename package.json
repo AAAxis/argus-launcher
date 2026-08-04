@@ -5,6 +5,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && env -u ELECTRON_RUN_AS_NODE ARGUS_LAUNCHER_DEV=1 node scripts/start-macos-app.cjs\"",
+    "icons": "env -u ELECTRON_RUN_AS_NODE electron scripts/build-icons.cjs",
     "build": "vite build",
     "dist": "npm run build && electron-builder --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
@@ -39,7 +40,7 @@
     "appId": "com.argys.anty",
     "productName": "Argus Launcher",
     "buildVersion": "1.0.26.0",
-    "icon": "assets/app.icns",
+    "icon": "assets/icons/launcher-light.icns",
     "artifactName": "Argys-Anty-${version}-${os}-${arch}.${ext}",
     "protocols": [
       {
@@ -70,7 +71,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "assets/app.icns",
+      "icon": "assets/icons/launcher-light.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": [

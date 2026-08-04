@@ -11,7 +11,7 @@ export async function list(orgId: string): Promise<SharedExtension[]> {
   }
   const {data, error} = await client
       .from('shared_extensions')
-      .select('id,org_id,name,source,storage_path,created_at,webstore_id,storage_url')
+      .select('id,org_id,name,source,storage_path,created_at,webstore_id,storage_url,enabled')
       .eq('org_id', orgId)
       .order('created_at', {ascending: true});
   raise(error, 'extensions.list');

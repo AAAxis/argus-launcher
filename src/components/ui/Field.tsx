@@ -10,11 +10,17 @@
 // migrate to, not a rewrite the other dialogs are blocked on.
 import type {ReactNode} from 'react';
 
-export function Field({label, icon, hint, wide, compact, group, children}: {
+export function Field({label, icon, info, hint, wide, compact, group, children}: {
   label: ReactNode;
   // A lucide glyph or a platform mark, sized 14. Sits inside the label, so it
   // takes the label's --ink-soft rather than needing a colour of its own.
   icon?: ReactNode;
+  // An <InfoHint>, for the explanations too long to sit under the control as a
+  // hint. It renders inside the <label>, which is deliberate: the HTML spec
+  // makes a label's activation behavior a no-op for events targeted at an
+  // interactive descendant, so clicking the "i" opens the panel and does not
+  // also focus the control.
+  info?: ReactNode;
   // Explanatory line under the control. Not a placeholder: it stays visible
   // once the field has a value, which is the whole point of it.
   hint?: ReactNode;
@@ -30,7 +36,7 @@ export function Field({label, icon, hint, wide, compact, group, children}: {
   const className = ['field', wide ? 'wide' : '', compact ? 'compact' : ''].filter(Boolean).join(' ');
   const content = (
     <>
-      <span>{icon}{label}</span>
+      <span>{icon}{label}{info}</span>
       {children}
       {hint && <p className="field-hint">{hint}</p>}
     </>

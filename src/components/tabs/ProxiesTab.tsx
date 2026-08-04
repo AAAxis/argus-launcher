@@ -1,24 +1,57 @@
 import {useState} from 'react';
-import {Download, ExternalLink, Pencil, Plus, Trash2, Waypoints, X} from 'lucide-react';
+import {
+  Download, FolderInput, FolderPlus, Pencil, Plus, SearchX, Trash2, Upload, Waypoints, X,
+} from 'lucide-react';
+import {MoveProxiesModal} from '../modals/MoveProxiesModal';
+import {AssignedCell} from '../ui/AssignedCell';
+import {EmptyState} from '../ui/EmptyState';
+import {FolderGlyph} from '../ui/FolderGlyph';
 import {FlagIcon} from '../ui/icons';
 import {PaginationBar} from '../ui/PaginationBar';
-import {isProxyAssigned} from '../../lib/proxies';
+import {
+  isProxyAssigned, profilesUsingProxy, proxyCountryLabel, proxySearchText,
+} from '../../lib/proxies';
 import {paginate} from '../../lib/paginate';
+import {profileColorStyle} from '../../lib/profileColors';
+import {initials} from '../../lib/text';
 import {SITE_URL} from '../../lib/auth';
 import {PROXY_PROVIDERS, providerPath} from '../../data/proxyProviders';
 import {native} from '../../native';
 import {useSelection} from '../../hooks/useSelection';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
-import type {ArgusProxy} from '../../types';
+import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
 
 export type ProxiesTabProps = {
+  // Controlled by the shell, exactly like the Profiles tab's: creating a folder
+  // from the dialog selects it here.
+  folderId: string;
+  onFolderId: (folderId: string) => void;
   onAddProxy: () => void;
+  onImportProxies: () => void;
   onEditProxy: (proxy: ArgusProxy) => void;
+  onNewFolder: () => void;
+  onEditFolder: (folder: ArgusFolder) => void;
+  // Set for one render after a folder is created from a country suggestion: the
+  // move dialog opens on that folder with the country's proxies already ticked.
+  // Cleared through onFillCountryDone when it closes.
+  fillCountry: string;
+  onFillCountryDone: () => void;
   onRequestDelete: (proxyIds: string[], label: string, onDeleted?: () => void) => void;
 };
 
-export function ProxiesTab({onAddProxy, onEditProxy, onRequestDelete}: ProxiesTabProps) {
-  const {data, proxies, checkingProxyId} = useWorkspace();
+export function ProxiesTab({
+  folderId,
+  onFolderId,
+  onAddProxy,
+  onImportProxies,
+  onEditProxy,
+  onNewFolder,
+  onEditFolder,
+  fillCountry,
+  onFillCountryDone,
+  onRequestDelete,
+}: ProxiesTabProps) {
+  const {data, toast, library, proxies, checkingProxyId} = useWorkspace();
   const state = data.state;
   const selection = useSelection<ArgusProxy>();
 
@@ -26,31 +59,67 @@ export function ProxiesTab({onAddProxy, onEditProxy, onRequestDelete}: ProxiesTa
   const [assignedFilter, setAssignedFilter] = useState<'' | 'assigned' | 'unassigned'>('');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const assigned = (proxy: ArgusProxy) => isProxyAssigned(proxy, state.profiles);
-  const visible = visibleProxies(state.proxies, {search, assignedFilter, assigned});
+  const filtered = Boolean(search.trim() || assignedFilter);
+  const visible = visibleProxies(state.proxies, {folderId, search, assignedFilter, assigned});
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
+  const activeFolder = state.proxy_folders.find((folder) => folder.id === folderId) || null;
+  const movableCount = activeFolder ?
+    state.proxies.filter((proxy) => proxy.folder_id !== folderId).length :
+    0;
+
+  async function moveSelectionToFolder(nextFolderId: string) {
+    if (!selection.size) {
+      return;
+    }
+    const target = nextFolderId || null;
+    if (!await proxies.assignToFolder([...selection.ids], target)) {
+      return;
+    }
+    const folderName = target ?
+      state.proxy_folders.find((folder) => folder.id === target)?.name :
+      'All proxies';
+    toast.setMessage(`${selection.size} ${selection.size === 1 ? 'proxy' : 'proxies'} moved to ${folderName || 'All proxies'}`);
+  }
+
+  // Deleting a folder never deletes what is in it: proxies.folder_id is nulled
+  // (ON DELETE SET NULL server-side, mirrored locally by removeFolder), so they
+  // reappear under All proxies rather than vanishing with the folder. The
+  // confirmation says so, because "delete folder" reads like it should take
+  // them with it -- and here it would read like cancelling the subscription.
+  async function deleteFolder(folder: ArgusFolder) {
+    const count = state.proxies.filter((proxy) => proxy.folder_id === folder.id).length;
+    const consequence = count ?
+      `Its ${count} ${count === 1 ? 'proxy' : 'proxies'} will move to All proxies.` :
+      'It is empty.';
+    if (!window.confirm(`Delete folder ${folder.name}? ${consequence}`)) {
+      return;
+    }
+    if (!await library.removeFolder(folder.id)) {
+      return;
+    }
+    // The view was pointed at a folder that no longer exists.
+    if (folderId === folder.id) {
+      onFolderId('');
+    }
+    toast.setMessage(`${folder.name} folder deleted`);
+  }
+
   // Owning no proxies at all is a different situation from having filtered them
-  // all away, and it gets the whole tab. The toolbar and the pager are dropped
-  // rather than disabled: a search box and a page selector over zero rows are
-  // the loudest thing on a screen whose real job is to explain what a proxy is
-  // for and where to get one.
+  // all away, and it gets the whole tab. The toolbar, the folder row and the
+  // pager are dropped rather than disabled: a search box, an empty folder row
+  // and a page selector over zero rows are the loudest thing on a screen whose
+  // real job is to explain what a proxy is for and where to get one.
   if (state.proxies.length === 0) {
-    return <ProxiesEmptyState onAddProxy={onAddProxy} />;
+    return <ProxiesEmptyState onAddProxy={onAddProxy} onImportProxies={onImportProxies} />;
   }
 
   return (
     <>
       <section className="table-toolbar">
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={selection.allSelected(visible)}
-            onChange={() => selection.toggleAll(visible)}
-          />
-          <span>{selection.size > 0 ? `${selection.size} selected` : 'Select all'}</span>
-        </label>
         <input
           type="text"
           value={search}
@@ -75,6 +144,13 @@ export function ProxiesTab({onAddProxy, onEditProxy, onRequestDelete}: ProxiesTa
       {selection.size > 0 && (
         <section className="selection-toolbar">
           <div className="selection-toolbar-actions">
+            <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
+              <option value="" disabled>Assign to folder…</option>
+              <option value="">All proxies</option>
+              {state.proxy_folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
             <button
               className="ghost"
               onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
@@ -94,55 +170,180 @@ export function ProxiesTab({onAddProxy, onEditProxy, onRequestDelete}: ProxiesTa
         </section>
       )}
 
-      <section className="card-grid">
-        {items.map((proxy) => (
-          <article
-            className={selection.has(proxy.id) ? 'data-card proxy-card selected' : 'data-card proxy-card'}
-            key={proxy.id}
-          >
-            <label className="card-select" onClick={(event) => event.stopPropagation()}>
-              <input
-                type="checkbox"
-                checked={selection.has(proxy.id)}
-                onChange={() => selection.toggle(proxy.id)}
-              />
-            </label>
-            <div className="proxy-card-main">
-              <div className="proxy-title-row">
-                <span className="proxy-flag" title={proxy.country || proxy.country_code || 'Unchecked'}>
-                  <FlagIcon countryCode={proxy.country_code} />
-                </span>
-                <h2>{proxy.name || proxy.host}</h2>
-              </div>
-              <p>{proxy.type || 'http'} · {proxy.host}:{proxy.port}</p>
-              <p>{describeLastCheck(proxy)}</p>
-              <p>
-                <span className={assigned(proxy) ? 'proxy-badge assigned' : 'proxy-badge unassigned'}>
-                  {assigned(proxy) ? 'Assigned' : 'Not assigned'}
-                </span>
-              </p>
-            </div>
-            <div className="data-card-actions">
-              {checkingProxyId === proxy.id && <span className="proxy-status">Checking...</span>}
+      {/* The same folder navigation the Profiles tab has, minus Trash: a proxy
+        * is deleted outright, there is no soft-delete to hold it. */}
+      <section className="folder-row" aria-label="Folders">
+        <button
+          aria-pressed={!folderId}
+          className={folderId ? 'folder-card' : 'folder-card active'}
+          onClick={() => onFolderId('')}
+          type="button"
+        >
+          <span className="folder-glyph"><Waypoints size={17} strokeWidth={1.75} /></span>
+          <span className="folder-card-name">All proxies</span>
+          <span className="folder-card-count">{state.proxies.length}</span>
+        </button>
+
+        {state.proxy_folders.map((folder) => {
+          const count = state.proxies.filter((proxy) => proxy.folder_id === folder.id).length;
+          const active = folder.id === folderId;
+          return (
+            // A div, not a button: the pencil and the trash are buttons of
+            // their own, and nesting those inside the card's own button is
+            // both invalid and unclickable.
+            <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
               <button
-                className="icon-button"
-                aria-label={`Edit ${proxy.name || proxy.host}`}
-                onClick={() => onEditProxy(proxy)}
+                aria-pressed={active}
+                className="folder-card-main"
+                onClick={() => onFolderId(folder.id)}
+                type="button"
               >
-                <Pencil size={16} />
+                <FolderGlyph color={folder.color} icon={folder.icon} />
+                <span className="folder-card-name">{folder.name}</span>
               </button>
+              <span className="folder-card-count">{count}</span>
+              <span className="folder-card-actions">
+                <button
+                  aria-label={`Edit ${folder.name}`}
+                  onClick={() => onEditFolder(folder)}
+                  title={`Edit ${folder.name}`}
+                  type="button"
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  aria-label={`Delete ${folder.name}`}
+                  className="danger-icon"
+                  onClick={() => void deleteFolder(folder)}
+                  title={`Delete ${folder.name}`}
+                  type="button"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </span>
             </div>
-          </article>
-        ))}
-        {/* Past the early return above there is at least one proxy, so an empty
-          * grid here is always the search or the assignment filter. */}
-        {items.length === 0 && (
-          <p className="empty-state">
-            {search.trim() ?
-              'No proxies match your search.' :
-              'No proxies match this filter.'}
-          </p>
-        )}
+          );
+        })}
+
+        <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
+          <span className="folder-glyph"><FolderPlus size={17} strokeWidth={1.75} /></span>
+          <span className="folder-card-name">New folder</span>
+        </button>
+      </section>
+
+      <section className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>
+                {visible.length > 0 && (
+                  <input
+                    type="checkbox"
+                    aria-label="Select all"
+                    checked={selection.allSelected(visible)}
+                    onChange={() => selection.toggleAll(visible)}
+                  />
+                )}
+              </th>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Host</th>
+              <th>Country</th>
+              <th>Last check</th>
+              <th>Folder</th>
+              <th>Assigned to</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((proxy) => {
+              const folder = state.proxy_folders.find((item) => item.id === proxy.folder_id);
+              const label = proxy.name || proxy.host;
+              return (
+                <tr key={proxy.id} className={selection.has(proxy.id) ? 'row-checked' : ''}>
+                  <td className="checkbox-cell">
+                    <input
+                      type="checkbox"
+                      checked={selection.has(proxy.id)}
+                      onChange={() => selection.toggle(proxy.id)}
+                    />
+                  </td>
+                  <td className="name-cell">
+                    <span className="proxy-flag" title={proxyCountryLabel(proxy) || 'Country not checked'}>
+                      <FlagIcon countryCode={proxy.country_code} />
+                    </span>
+                    {label}
+                  </td>
+                  <td>{(proxy.type || 'http').toUpperCase()}</td>
+                  <td className="proxy-host-cell">{proxy.host}:{proxy.port}</td>
+                  <td>{proxyCountryLabel(proxy) || '-'}</td>
+                  <td className={proxy.check_error ? 'proxy-check-cell failed' : 'proxy-check-cell'}>
+                    {checkingProxyId === proxy.id ? 'Checking…' : describeLastCheck(proxy)}
+                  </td>
+                  <td>
+                    {folder ? (
+                      <span className="folder-label">
+                        <FolderGlyph color={folder.color} icon={folder.icon} size={13} small />
+                        {folder.name}
+                      </span>
+                    ) : 'All proxies'}
+                  </td>
+                  <td><AssignedCell holders={profilesUsingProxy(proxy, state.profiles)} /></td>
+                  <td>
+                    <button
+                      aria-label={`Edit ${label}`}
+                      className="ghost icon-button row-action"
+                      onClick={() => onEditProxy(proxy)}
+                      title={`Edit ${label}`}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      aria-label={`Delete ${label}`}
+                      className="ghost icon-button row-action row-action-danger"
+                      onClick={() => onRequestDelete([proxy.id], label)}
+                      title={`Delete ${label}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {items.length === 0 && (
+              <tr className="empty-row-tr">
+                {/* Nine columns. A short colSpan leaves a stray empty cell at
+                  * the end of the row. */}
+                <td colSpan={9}>
+                  <EmptyState
+                    icon={<SearchX size={22} />}
+                    title={filtered ? 'Nothing matches those filters' : 'This folder is empty'}
+                    body={filtered ?
+                      'Try a different search term, or set the assignment filter back to All proxies.' :
+                      'Proxies you move into this folder will show up here.'}
+                  >
+                    {!filtered && (
+                      <>
+                        <button onClick={onAddProxy} type="button">
+                          <Plus size={16} /> Add proxy
+                        </button>
+                        {/* A brand-new folder is far more often filled from
+                          * proxies that already exist than from scratch, and
+                          * the only route to that was selecting rows in a
+                          * table you have to leave this folder to see. */}
+                        {activeFolder && movableCount > 0 && (
+                          <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
+                            <FolderInput size={16} /> Move proxies here
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </EmptyState>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </section>
 
       <PaginationBar
@@ -152,7 +353,21 @@ export function ProxiesTab({onAddProxy, onEditProxy, onRequestDelete}: ProxiesTa
         pageSize={pageSize}
         onPage={setPage}
         onPageSize={(size) => { setPageSize(size); setPage(0); }}
+        extra={selection.size > 0 && (
+          <span className="pagination-selected">{selection.size} selected</span>
+        )}
       />
+
+      {(moveOpen || fillCountry) && activeFolder && (
+        <MoveProxiesModal
+          folder={activeFolder}
+          seedCountry={fillCountry || undefined}
+          onClose={() => {
+            setMoveOpen(false);
+            onFillCountryDone();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -171,7 +386,10 @@ function readProvidersDismissed() {
   }
 }
 
-function ProxiesEmptyState({onAddProxy}: {onAddProxy: () => void}) {
+function ProxiesEmptyState({onAddProxy, onImportProxies}: {
+  onAddProxy: () => void;
+  onImportProxies: () => void;
+}) {
   const [dismissed, setDismissed] = useState(readProvidersDismissed);
 
   function setProvidersDismissed(next: boolean) {
@@ -196,9 +414,15 @@ function ProxiesEmptyState({onAddProxy}: {onAddProxy: () => void}) {
       <h2>No proxies yet</h2>
       <p>
         A profile needs a proxy before it can launch. Add one you already own,
-        or pick up traffic from a provider below.
+        import the list your provider sent you, or pick up traffic from a
+        provider below.
       </p>
-      <button onClick={onAddProxy}><Plus size={18} /> Add proxy</button>
+      <div className="tab-empty-actions">
+        <button onClick={onAddProxy}><Plus size={18} /> Add proxy</button>
+        <button className="ghost" onClick={onImportProxies}>
+          <Upload size={18} /> Import from file
+        </button>
+      </div>
 
       {dismissed ? (
         <button className="link-button" onClick={() => setProvidersDismissed(false)}>
@@ -226,20 +450,26 @@ function ProviderStrip({onDismiss}: {onDismiss: () => void}) {
       <div className="provider-grid">
         {PROXY_PROVIDERS.map((provider) => {
           const Icon = provider.icon;
-          const mark = provider.logo ?
-            <img
-              alt=""
-              className={provider.invertOn ?
-                `integration-logo invert-on-${provider.invertOn}` :
-                'integration-logo'}
-              src={provider.logo}
-            /> :
-            <Icon size={20} />;
           return (
             <article className="provider-card" key={provider.slug}>
+              {/* A wordmark says the name itself, so it replaces the heading
+                * rather than sitting beside it. A provider we have no artwork
+                * for keeps the Lucide glyph and the written name. */}
               <div className="provider-card-head">
-                {mark}
-                <h4>{provider.name}</h4>
+                {provider.logo ? (
+                  <img
+                    alt={provider.name}
+                    className={provider.adapt ?
+                      `provider-logo ${provider.adapt}` :
+                      'provider-logo'}
+                    src={provider.logo}
+                  />
+                ) : (
+                  <>
+                    <Icon size={20} />
+                    <h4>{provider.name}</h4>
+                  </>
+                )}
               </div>
               <p className="provider-kinds">{provider.kinds}</p>
               <p>{provider.blurb}</p>
@@ -247,7 +477,7 @@ function ProviderStrip({onDismiss}: {onDismiss: () => void}) {
                 className="ghost"
                 onClick={() => void native?.openExternal?.(`${SITE_URL}${providerPath(provider.slug)}`)}
               >
-                Visit <ExternalLink size={14} />
+                Visit
               </button>
             </article>
           );
@@ -257,35 +487,62 @@ function ProviderStrip({onDismiss}: {onDismiss: () => void}) {
   );
 }
 
+// Short enough for a table cell. The card had room for country, IP and ping on
+// one line; the country and the flag now have columns of their own, so what is
+// left to say here is how it went and how long ago.
 function describeLastCheck(proxy: ArgusProxy) {
   if (!proxy.checked_at) {
-    return 'Country not checked';
+    return 'Not checked';
   }
   if (proxy.check_error) {
-    return `Check failed · ${proxy.check_error}`;
+    return `Failed · ${proxy.check_error}`;
   }
-  const where = proxy.country || proxy.country_code || 'Unknown';
-  return `${where} · ${proxy.egress_ip || 'No IP'} · ${proxy.ping_ms || 0}ms cached`;
+  return `${proxy.ping_ms || 0} ms · ${sinceLabel(proxy.checked_at)}`;
 }
 
+// Coarse on purpose: a check is a background sweep, and "3h ago" is the only
+// resolution anyone acts on. Anything older than a week is a date.
+function sinceLabel(iso: string) {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) {
+    return 'unknown';
+  }
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) {
+    return 'just now';
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return days <= 7 ? `${days}d ago` : iso.slice(0, 10);
+}
+
+// Folder first, then the assignment filter, then the search narrows whatever
+// those left -- the same order the Profiles tab filters in.
 function visibleProxies(
     allProxies: ArgusProxy[],
-    {search, assignedFilter, assigned}: {
+    {folderId, search, assignedFilter, assigned}: {
+      folderId: string;
       search: string;
       assignedFilter: '' | 'assigned' | 'unassigned';
       assigned: (proxy: ArgusProxy) => boolean;
     }) {
-  const byAssignment = assignedFilter ?
-    allProxies.filter((proxy) => assigned(proxy) === (assignedFilter === 'assigned')) :
+  const inFolder = folderId ?
+    allProxies.filter((proxy) => proxy.folder_id === folderId) :
     allProxies;
+  const byAssignment = assignedFilter ?
+    inFolder.filter((proxy) => assigned(proxy) === (assignedFilter === 'assigned')) :
+    inFolder;
   const query = search.trim().toLowerCase();
   if (!query) {
     return byAssignment;
   }
-  return byAssignment.filter((proxy) =>
-    [proxy.name, proxy.host, proxy.country, proxy.country_code, proxy.type]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-        .includes(query));
+  // Port and username are matched too. Vendor lists name every proxy after its
+  // host, so the port is often the only thing telling two of them apart.
+  return byAssignment.filter((proxy) => proxySearchText(proxy).includes(query));
 }

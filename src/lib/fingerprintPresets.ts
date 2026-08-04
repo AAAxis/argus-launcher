@@ -16,7 +16,96 @@ export const osPresets = ['Windows 11', 'Windows 10', 'macOS', 'Ubuntu', 'Androi
 export const browserVersionPresets = ['Auto', 'Chrome 126', 'Chrome 125', 'Chrome 124'];
 export const AUTO_FROM_PROXY = 'Auto from proxy';
 export const languagePresets = [AUTO_FROM_PROXY, 'en-US,en;q=0.9', 'en-GB,en;q=0.9', 'ru-RU,ru;q=0.9,en;q=0.8'];
-export const timezonePresets = ['Auto from proxy', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Asia/Jerusalem'];
+
+// The timezone dropdown, grouped by region. Five options used to be the whole
+// list, which meant every profile outside those five markets either sat on
+// "Auto from proxy" or carried a zone that did not match its proxy's country --
+// the exact mismatch a timezone override exists to avoid.
+//
+// Curated rather than Intl.supportedValuesOf('timeZone'): that returns ~430
+// zones, most of them aliases or single-city entries nobody is farming accounts
+// in, and a select of that length is worse than the five it replaces. These are
+// the canonical zone per market, in the order the regions are drawn.
+//
+// The offsets in the labels are standard time, not current time -- they are
+// there to help pick a plausible zone, and the browser resolves the real
+// DST-aware offset from the IANA name itself, which is what actually ships.
+export const timezoneGroups: Array<{region: string; zones: Array<{name: string; label: string}>}> = [
+  {
+    region: 'Americas',
+    zones: [
+      {name: 'America/New_York', label: 'New York (UTC-5)'},
+      {name: 'America/Toronto', label: 'Toronto (UTC-5)'},
+      {name: 'America/Chicago', label: 'Chicago (UTC-6)'},
+      {name: 'America/Denver', label: 'Denver (UTC-7)'},
+      {name: 'America/Phoenix', label: 'Phoenix (UTC-7, no DST)'},
+      {name: 'America/Los_Angeles', label: 'Los Angeles (UTC-8)'},
+      {name: 'America/Anchorage', label: 'Anchorage (UTC-9)'},
+      {name: 'America/Mexico_City', label: 'Mexico City (UTC-6)'},
+      {name: 'America/Bogota', label: 'Bogota (UTC-5)'},
+      {name: 'America/Sao_Paulo', label: 'Sao Paulo (UTC-3)'},
+      {name: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires (UTC-3)'},
+    ],
+  },
+  {
+    region: 'Europe',
+    zones: [
+      {name: 'Europe/London', label: 'London (UTC+0)'},
+      {name: 'Europe/Dublin', label: 'Dublin (UTC+0)'},
+      {name: 'Europe/Lisbon', label: 'Lisbon (UTC+0)'},
+      {name: 'Europe/Madrid', label: 'Madrid (UTC+1)'},
+      {name: 'Europe/Paris', label: 'Paris (UTC+1)'},
+      {name: 'Europe/Berlin', label: 'Berlin (UTC+1)'},
+      {name: 'Europe/Amsterdam', label: 'Amsterdam (UTC+1)'},
+      {name: 'Europe/Rome', label: 'Rome (UTC+1)'},
+      {name: 'Europe/Stockholm', label: 'Stockholm (UTC+1)'},
+      {name: 'Europe/Warsaw', label: 'Warsaw (UTC+1)'},
+      {name: 'Europe/Prague', label: 'Prague (UTC+1)'},
+      {name: 'Europe/Athens', label: 'Athens (UTC+2)'},
+      {name: 'Europe/Kyiv', label: 'Kyiv (UTC+2)'},
+      {name: 'Europe/Bucharest', label: 'Bucharest (UTC+2)'},
+      {name: 'Europe/Istanbul', label: 'Istanbul (UTC+3)'},
+      {name: 'Europe/Moscow', label: 'Moscow (UTC+3)'},
+    ],
+  },
+  {
+    region: 'Africa & Middle East',
+    zones: [
+      {name: 'Africa/Lagos', label: 'Lagos (UTC+1)'},
+      {name: 'Africa/Cairo', label: 'Cairo (UTC+2)'},
+      {name: 'Africa/Johannesburg', label: 'Johannesburg (UTC+2)'},
+      {name: 'Africa/Nairobi', label: 'Nairobi (UTC+3)'},
+      {name: 'Asia/Jerusalem', label: 'Jerusalem (UTC+2)'},
+      {name: 'Asia/Dubai', label: 'Dubai (UTC+4)'},
+    ],
+  },
+  {
+    region: 'Asia',
+    zones: [
+      {name: 'Asia/Karachi', label: 'Karachi (UTC+5)'},
+      {name: 'Asia/Kolkata', label: 'Kolkata (UTC+5:30)'},
+      {name: 'Asia/Dhaka', label: 'Dhaka (UTC+6)'},
+      {name: 'Asia/Bangkok', label: 'Bangkok (UTC+7)'},
+      {name: 'Asia/Jakarta', label: 'Jakarta (UTC+7)'},
+      {name: 'Asia/Singapore', label: 'Singapore (UTC+8)'},
+      {name: 'Asia/Hong_Kong', label: 'Hong Kong (UTC+8)'},
+      {name: 'Asia/Shanghai', label: 'Shanghai (UTC+8)'},
+      {name: 'Asia/Manila', label: 'Manila (UTC+8)'},
+      {name: 'Asia/Seoul', label: 'Seoul (UTC+9)'},
+      {name: 'Asia/Tokyo', label: 'Tokyo (UTC+9)'},
+    ],
+  },
+  {
+    region: 'Oceania',
+    zones: [
+      {name: 'Australia/Perth', label: 'Perth (UTC+8)'},
+      {name: 'Australia/Brisbane', label: 'Brisbane (UTC+10)'},
+      {name: 'Australia/Sydney', label: 'Sydney (UTC+10)'},
+      {name: 'Pacific/Auckland', label: 'Auckland (UTC+12)'},
+    ],
+  },
+];
+
 export const webRtcModes = ['Proxy only', 'Disabled', 'Real', 'Custom'];
 export const noiseModes = ['Real', 'Noise', 'Block'];
 export const webGpuModes = ['Real', 'Block'];

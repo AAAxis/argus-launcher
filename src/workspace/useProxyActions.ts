@@ -1,5 +1,6 @@
 import * as db from '../db';
 import {toCsv} from '../lib/csv';
+import {defaultProxyName} from '../lib/proxies';
 import {native} from '../native';
 import {newId} from './core';
 import type {WorkspaceCore} from './core';
@@ -11,7 +12,7 @@ const NO_CHECKER = 'Native proxy checker is not available. Restart Argus Launche
 export type ProxyActions = ReturnType<typeof useProxyActions>;
 
 export function useProxyActions({data, toast}: WorkspaceCore) {
-  const {state, withDb, patch} = data;
+  const {state, withDb, withDbError, patch} = data;
 
   // Every proxy-check path (background loop, manual re-check, pre-launch check)
   // lands here. The write touches the six last_* columns only, so a check
@@ -69,6 +70,38 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
     }
   }
 
+  // testConnection plus the "does this describe a saved row?" decision that
+  // used to live in the proxy dialog. It moved here because the check now
+  // outlives the dialog: closing the editor mid-test must still land the
+  // country and ping on the card, and an unmounted component cannot do that.
+  async function testConnectionAndRecord(
+      config: ProxyConfig, proxyId?: string): Promise<ProxyCheckResult> {
+    const result = await testConnection(config);
+    const stored = proxyId ? state.proxies.find((item) => item.id === proxyId) : undefined;
+    const describesStored = stored &&
+      (stored.type || 'http') === config.type &&
+      stored.host === config.host &&
+      stored.port === config.port &&
+      (stored.username || '') === (config.username || '') &&
+      (stored.password || '') === (config.password || '');
+    if (!stored || !describesStored) {
+      return result;
+    }
+    // Failures are recorded too: a proxy that has stopped working should say so
+    // on its card, which is exactly what the background sweep would write on
+    // its next pass anyway.
+    await recordCheck({
+      ...stored,
+      country: result.ok ? result.country : stored.country,
+      country_code: result.ok ? result.countryCode : stored.country_code,
+      egress_ip: result.ok ? result.ip : stored.egress_ip,
+      ping_ms: result.pingMs,
+      checked_at: new Date().toISOString(),
+      check_error: result.ok ? undefined : result.error || 'Proxy check failed',
+    });
+    return result;
+  }
+
   async function checkOnce(proxy: ArgusProxy) {
     if (!native?.checkProxy) {
       toast.setMessage(NO_CHECKER);
@@ -88,6 +121,10 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
     }
   }
 
+  // Returns the failure text rather than toasting it: the only caller is the
+  // proxy dialog, which renders it inline next to the fields. A toast for this
+  // was worse than useless -- it rendered underneath the dialog's own scrim,
+  // so a rejected save looked like a dead button.
   async function save(draft: {
     id?: string;
     name: string;
@@ -96,7 +133,7 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
     port: number;
     username?: string;
     password?: string;
-  }): Promise<ArgusProxy | null> {
+  }): Promise<{proxy: ArgusProxy; error?: undefined} | {proxy?: undefined; error: string}> {
     const existing = state.proxies.find((item) => item.id === draft.id);
     const connectionUnchanged = existing &&
       existing.type === draft.type &&
@@ -117,7 +154,12 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
         check_error: existing.check_error,
       } : {}),
       id: draft.id || newId(),
-      name: draft.name || `${draft.host}:${draft.port}`,
+      name: draft.name || defaultProxyName(draft.host, draft.port),
+      // Carried through explicitly. The draft has no folder field -- filing is
+      // done from the table, not from the editor -- and this builds a whole
+      // fresh row, so without this line saving a password change would quietly
+      // drop the proxy back into "All proxies".
+      folder_id: existing?.folder_id ?? null,
       type: draft.type,
       host: draft.host,
       port: draft.port,
@@ -125,13 +167,59 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
       password: draft.password || undefined,
     };
     const isExisting = Boolean(draft.id) && state.proxies.some((item) => item.id === proxy.id);
-    if (!await withDb((activeOrgId) => db.proxies.upsert(activeOrgId, proxy))) {
-      return null;
+    const error = await withDbError((activeOrgId) => db.proxies.upsert(activeOrgId, proxy));
+    if (error) {
+      return {error};
     }
     patch.proxies((list) => isExisting ?
       list.map((item) => item.id === proxy.id ? proxy : item) :
       [...list, proxy]);
-    return proxy;
+    return {proxy};
+  }
+
+  // Bulk-adds parsed list rows in one pass. Rows are written one at a time
+  // rather than as a single upsert so that one bad row -- a host the database
+  // rejects -- costs that row instead of the whole file.
+  //
+  // Nothing is checked here: importing 200 proxies would mean 200 concurrent
+  // curl runs. The rows land unchecked, and useBackgroundProxyChecks already
+  // sweeps exactly those, filling in country and ping a few at a time.
+  async function importList(entries: Array<Omit<ArgusProxy, 'id'>>): Promise<{
+    created: number;
+    failed: Array<{name: string; error: string}>;
+  }> {
+    const created: ArgusProxy[] = [];
+    const failed: Array<{name: string; error: string}> = [];
+    for (const entry of entries) {
+      const proxy: ArgusProxy = {...entry, id: newId()};
+      const error = await withDbError((activeOrgId) => db.proxies.upsert(activeOrgId, proxy));
+      if (error) {
+        failed.push({name: proxy.name || proxy.host, error});
+        continue;
+      }
+      created.push(proxy);
+    }
+    if (created.length) {
+      patch.proxies((list) => [...list, ...created]);
+    }
+    return {created: created.length, failed};
+  }
+
+  // Files proxies under a folder, or back under "All proxies" with null. One
+  // narrow update per proxy rather than a bulk upsert, so a proxy check landing
+  // mid-loop cannot be undone by a row that was rewritten wholesale.
+  async function assignToFolder(proxyIds: string[], folderId: string | null): Promise<boolean> {
+    const ok = await withDb(async (activeOrgId) => {
+      for (const id of proxyIds) {
+        await db.proxies.assignFolder(activeOrgId, id, folderId);
+      }
+    });
+    if (!ok) {
+      return false;
+    }
+    patch.proxies((list) => list.map((proxy) =>
+      proxyIds.includes(proxy.id) ? {...proxy, folder_id: folderId} : proxy));
+    return true;
   }
 
   async function create(proxy: ArgusProxy): Promise<boolean> {
@@ -172,10 +260,17 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
       toast.setMessage('Native file export is not available. Restart Argus Launcher and try again.');
       return;
     }
-    const header = ['name', 'type', 'host', 'port', 'username', 'password', 'country', 'country_code'];
+    const header = [
+      'name', 'type', 'host', 'port', 'username', 'password', 'country', 'country_code', 'folder',
+    ];
     const csv = toCsv(header, list, (proxy) => {
       const row = proxy as unknown as Record<string, unknown>;
-      return Object.fromEntries(header.map((key) => [key, String(row[key] ?? '')]));
+      // `folder` is the only column that is not a field on the proxy -- the row
+      // holds a folder id, and an id in an exported spreadsheet is noise.
+      const folderName = state.proxy_folders.find((folder) =>
+        folder.id === proxy.folder_id)?.name || '';
+      return Object.fromEntries(header.map((key) =>
+        [key, key === 'folder' ? folderName : String(row[key] ?? '')]));
     });
     const savedPath = await native.saveTextFile(`argys-proxies-${Date.now()}.csv`, csv);
     if (savedPath) {
@@ -183,5 +278,8 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
     }
   }
 
-  return {recordCheck, runCheck, checkOnce, testConnection, save, create, update, remove, exportToCsv};
+  return {
+    recordCheck, runCheck, checkOnce, testConnection, testConnectionAndRecord,
+    save, create, update, remove, assignToFolder, importList, exportToCsv,
+  };
 }

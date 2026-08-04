@@ -13,6 +13,11 @@ export type LaunchProfilePayload = {
   id: string;
   name: string;
   userDataDir: string;
+  // The profile's colour, exactly as `profiles.color` stores it: one of the six
+  // preset keys, or a custom hex. Not a browser argument -- on macOS the main
+  // process picks the wrapper bundle's Dock icon from it, so an open session is
+  // identifiable by the same colour its row carries in the table.
+  color?: string | null;
   proxy?: ProxyConfig | null;
   // True only when the profile's proxy_mode is explicitly 'free_proxy':
   // bundles the FoxyWall Proxy extension as a fallback. Never set for
@@ -244,6 +249,11 @@ type ArgusNative = {
   ): Promise<Record<string, CookieFileSelection | null>>;
   saveTextFile?(defaultName: string, content: string): Promise<string | null>;
   selectImportCsv?(): Promise<{path: string; content: string} | null>;
+  // Raw text of a proxy list file (.txt/.csv/.list); parsed by lib/proxies.ts.
+  selectProxyFile?(): Promise<{path: string; content: string} | null>;
+  // Raw text of a browser's exported bookmarks (Netscape bookmark HTML);
+  // parsed by lib/bookmarkImport.ts.
+  selectBookmarkFile?(): Promise<{path: string; content: string} | null>;
   // Local automation API (POST http://127.0.0.1:39219/v1/cookies/bulk-match)
   // support: main.cjs forwards a bulk cookie-match request here so it can run
   // against the signed-in renderer's cloud state, then reports the result

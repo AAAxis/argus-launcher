@@ -10,7 +10,7 @@ export async function list(orgId: string): Promise<ArgusFolder[]> {
   }
   const {data, error} = await client
       .from('folders')
-      .select('id,org_id,name,parent_id,created_at,icon')
+      .select('id,org_id,name,parent_id,created_at,icon,color,kind')
       .eq('org_id', orgId)
       .order('created_at', {ascending: true});
   raise(error, 'folders.list');
@@ -25,16 +25,23 @@ export async function create(orgId: string, folder: ArgusFolder): Promise<void> 
     id: folder.id,
     org_id: orgId,
     name: folder.name,
+    // Written explicitly rather than left to the column default: a folder
+    // created without a kind would silently become a profile folder and
+    // disappear from the tab that made it.
+    kind: folder.kind || 'profile',
     icon: folder.icon ?? null,
+    color: folder.color ?? null,
     created_at: folder.created_at || new Date().toISOString(),
   });
   raise(error, 'folders.create');
 }
 
-// Was rename(orgId, id, name). It edits two columns now, and a function called
-// `rename` that also sets the icon would be lying about what it does.
+// Was rename(orgId, id, name). It edits three columns now, and a function
+// called `rename` that also sets the icon would be lying about what it does.
 export async function update(
-    orgId: string, id: string, patch: {name?: string; icon?: string | null}): Promise<void> {
+    orgId: string,
+    id: string,
+    patch: {name?: string; icon?: string | null; color?: string | null}): Promise<void> {
   const client = requireClient();
   const {error} = await client
       .from('folders')

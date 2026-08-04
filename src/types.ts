@@ -109,9 +109,23 @@ export type ArgusProfile = {
 export type ArgusFolder = {
   id: string;
   name: string;
-  // A key into FOLDER_ICONS (src/data/folderIcons.ts) -- never a URL or markup,
-  // so an unknown value can only ever downgrade to the plain folder glyph.
+  // Which library this folder belongs to. Profile, proxy and cookie-set folders
+  // all share one `folders` table -- the column exists so they stay separate
+  // namespaces rather than one pile the user has to read twice. Undefined
+  // means 'profile', the column's default and what every row predating proxy
+  // folders is.
+  //
+  // There is no CHECK on the column, so a fourth library needs no migration --
+  // only a wider union here and a matching branch in the load-time split.
+  kind?: 'profile' | 'proxy' | 'cookie';
+  // A key into FOLDER_ICONS (src/data/folderIcons.ts), or a "flag:<ISO>" key
+  // for a country flag -- never a URL or markup, so an unknown value can only
+  // ever downgrade to the plain folder glyph.
   icon?: string;
+  // A PROFILE_COLORS key or a custom #rrggbb, read through profileColorStyle()
+  // exactly like ArgusProfile.color. Tints the folder's glyph in the rail and
+  // in the profiles table; the card itself stays neutral.
+  color?: string;
   created_at?: string;
 };
 
@@ -123,6 +137,9 @@ export type ArgusProxy = {
   port: number;
   username?: string;
   password?: string;
+  // The proxy-kind folder this proxy is filed under, or null for "All proxies".
+  // Same shape and same ON DELETE SET NULL as ArgusProfile.folder_id.
+  folder_id?: string | null;
   country?: string;
   country_code?: string;
   egress_ip?: string;
@@ -131,18 +148,42 @@ export type ArgusProxy = {
   check_error?: string;
 };
 
-// A shared, reusable cookie-set in the Cookies tab library -- assignable to
-// one profile at a time via ArgusProfile.cookie_id. `url` is a Supabase
-// Storage public URL (or data: URL fallback), produced by the exact same
-// upload path as the per-profile cookie_import_url flow (see
-// cloudCookieFromSelection in main.tsx) -- so the launch payload consumes it
-// identically, no separate backend handling needed.
+// A shared, reusable cookie-set in the Cookies tab library. A set is attached
+// to a profile through ArgusProfile.cookie_id (profiles.cookie_set_id): a
+// profile carries at most one set, a set may be used by any number of
+// profiles. The FK is the whole model -- there is no join table and there must
+// not be one, or "which cookies does this profile launch with" stops having a
+// single answer.
+//
+// `url` is a Supabase Storage public URL (or a data: URL fallback), produced by
+// the exact same upload path as the per-profile cookie_import_url flow (see
+// cloudCookieFromSelection) -- so the launch payload consumes it identically,
+// no separate backend handling needed. It stays the source of truth for a
+// launch: electron/main.cjs fetches it and holds no Supabase credentials.
+//
+// The cookies themselves are deliberately NOT on this type. They live in the
+// cookie_sets.cookies jsonb column and are loaded on demand by the inspector --
+// a workspace with 200 sets would otherwise pull every payload on every load,
+// and useCloudData reloads on window focus.
 export type ArgusCookie = {
   id: string;
   name: string;
   url: string;
   count?: number | null;
-  assigned_profile?: string | null;
+  // The cookie-kind folder this set is filed under, or null for
+  // "All cookie-sets". Same shape and same ON DELETE SET NULL as
+  // ArgusProfile.folder_id.
+  folder_id?: string | null;
+  // Free text, capped at MAX_PROFILE_TAGS and read through the same tag catalog
+  // profiles use -- a set tagged "instagram" and a profile tagged "Instagram"
+  // are the same idea and render alike.
+  tags?: string[];
+  created_at?: string;
+  updated_at?: string;
+  // Soft-delete timestamp, the same 30-day contract as ArgusProfile.deleted_at.
+  // Trashing a set also unassigns every profile using it, because a trashed set
+  // that could still seed a launch would be a lie.
+  deleted_at?: string | null;
 };
 
 export type SharedExtension = {
@@ -162,6 +203,12 @@ export type SharedExtension = {
   // downloads+unpacks it into their own local cache the first time they
   // launch a profile that uses it.
   storageUrl?: string;
+  // Whether profiles actually launch with it. Undefined/missing means enabled,
+  // the same convention BuiltInExtensionToggles uses below, so rows written
+  // before the column existed keep loading. Installed-but-off is a real state:
+  // it keeps the extension in the org's library (and out of every profile)
+  // without anyone having to re-find it in the store to turn it back on.
+  enabled?: boolean;
 };
 
 export type SharedBookmark = {
@@ -214,8 +261,19 @@ export type OrgMembership = {
 
 export type CloudState = {
   profiles: ArgusProfile[];
+  // Profile folders only. The proxy ones are held apart rather than mixed in
+  // behind a `kind` check because half a dozen call sites read this list and
+  // every one of them means profile folders -- the folder row, the assign
+  // dropdown, the move dialog, the tag suggestions, the API-key folder scope.
+  // Splitting once, on load, is what makes a proxy folder unable to leak into
+  // any of them.
   folders: ArgusFolder[];
+  proxy_folders: ArgusFolder[];
+  cookie_folders: ArgusFolder[];
   proxies: ArgusProxy[];
+  // Every set in the library, trashed ones included -- the Cookies tab filters
+  // on deleted_at the same way the Profiles tab does, so Trash is a view rather
+  // than a second read.
   cookies: ArgusCookie[];
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];

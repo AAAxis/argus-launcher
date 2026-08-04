@@ -57,6 +57,11 @@
   --status-review-bg: #f0edfc;
   --status-review-border: #7c5cd6;
   --status-review-ink: #5c3fb0;
+  /* Ready, and every user-created status: no hue, because "no particular
+     state" should not compete with the four that mean something. */
+  --status-neutral-bg: var(--paper);
+  --status-neutral-border: var(--border);
+  --status-neutral-ink: var(--ink-soft);
 
   /* HTTP verb chips on the API tab. Conventional hues, so they are their own
    * scale rather than being forced through the brand palette -- but muted, and
@@ -400,32 +405,134 @@ textarea {
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
-.status-select.status-active {
-  background-color: var(--status-active-bg);
+/* ── Status chips ───────────────────────────────────────────────────────────
+ * A profile's status, everywhere it is shown. This replaced a colour-tinted
+ * <select>: a control that looked like a filled tag but behaved like a
+ * dropdown, so a table column of them read as a column of form controls
+ * rather than as the statuses. The chip is now the value and the pencil beside
+ * it (.status-picker) is the way to change it.
+ *
+ * Each tone needs its own bg/border/ink triple -- the light tints are far too
+ * pale to survive on the dark theme's charcoal, so they are three tokens, not
+ * one hue with opacity. */
+.status-chip {
+  align-items: center;
+  background: var(--status-neutral-bg);
+  border: 1px solid var(--status-neutral-border);
+  border-radius: 999px;
+  color: var(--status-neutral-ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  line-height: 1;
+  padding: 5px 11px 5px 9px;
+  white-space: nowrap;
+}
+
+/* The dot carries the colour at a glance; the tint behind the word is too
+   light to be the only signal, especially for the two red-ish tones. */
+.status-chip-dot {
+  background: currentColor;
+  border-radius: 999px;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+
+.status-chip.status-active {
+  background: var(--status-active-bg);
   border-color: var(--status-active-border);
   color: var(--status-active-ink);
-  font-weight: 700;
 }
 
-.status-select.status-warmup {
-  background-color: var(--status-warmup-bg);
+.status-chip.status-warmup {
+  background: var(--status-warmup-bg);
   border-color: var(--status-warmup-border);
   color: var(--status-warmup-ink);
-  font-weight: 700;
 }
 
-.status-select.status-ban {
-  background-color: var(--status-ban-bg);
+.status-chip.status-ban {
+  background: var(--status-ban-bg);
   border-color: var(--status-ban-border);
   color: var(--status-ban-ink);
-  font-weight: 700;
 }
 
-.status-select.status-review {
-  background-color: var(--status-review-bg);
+.status-chip.status-review {
+  background: var(--status-review-bg);
   border-color: var(--status-review-border);
   color: var(--status-review-ink);
-  font-weight: 700;
+}
+
+.status-picker {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.status-picker-edit {
+  height: 26px;
+  width: 26px;
+}
+
+/* Hidden until its row is hovered -- fifty always-visible pencils down a table
+   are a column of their own. Scoped to tbody on purpose: in the profile dialog
+   this is the only way to change the status, so hiding it there would leave the
+   field with no visible affordance at all. It comes back on keyboard focus, so
+   it is never unreachable without a mouse. */
+tbody .status-picker-edit {
+  opacity: 0;
+}
+
+tbody tr:hover .status-picker-edit,
+tbody .status-picker-edit:focus-visible,
+tbody .status-picker-edit[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.status-pop-list {
+  display: grid;
+  gap: 2px;
+}
+
+.status-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.status-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.status-pop-option.active {
+  background: var(--selected);
+}
+
+/* A footer action inside the panel rather than a button sitting on it: the
+   ghost fill and full border would make it a second card inside a 230px box. */
+.status-pop-new {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--border-soft);
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: flex-start;
+  margin-top: 6px;
+  padding: 8px 8px 0;
+  width: 100%;
+}
+
+.status-pop-new:not(:disabled):hover {
+  box-shadow: none;
+  color: var(--ink);
 }
 
 .login-panel input:focus-visible {
@@ -576,6 +683,14 @@ textarea {
 
 button:disabled .btn-spin {
   opacity: 0.7;
+}
+
+/* One turn, not a loop: RotateButton's work is already done by the time the
+   animation starts, so this acknowledges the click rather than reporting a
+   wait. Same 0.8s period as .btn-spin so the two never beat against each
+   other. */
+.rotate-spin {
+  animation: spin 0.8s var(--ease);
 }
 
 .app-shell {
@@ -791,6 +906,16 @@ nav button.active svg {
 .avatar {
   height: 32px;
   width: 32px;
+}
+
+/* A third: the proxies table's Assigned to column, where up to four of these
+ * sit in one cell beside a host and a folder. The 32px plate is the subject of
+ * its row in the profiles table; here a profile is a footnote on a proxy. */
+.avatar.avatar-sm {
+  flex: none;
+  font-size: 10px;
+  height: 22px;
+  width: 22px;
 }
 
 .account span,
@@ -1419,28 +1544,6 @@ img.settings-identity-avatar {
   min-width: 180px;
 }
 
-/* The folder picker carries the selected folder's icon. A native <option> can
- * never render one, so it is overlaid on the select and the select's left
- * padding is opened up to make room -- the same trick the chevron on the right
- * already uses. */
-.folder-select {
-  display: inline-flex;
-  position: relative;
-}
-
-.folder-select select {
-  padding-left: 34px;
-}
-
-.folder-select-icon {
-  color: var(--ink-soft);
-  left: 11px;
-  pointer-events: none;
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
 /* The folder name in a table cell, with its icon. */
 .folder-label {
   align-items: center;
@@ -1448,9 +1551,11 @@ img.settings-identity-avatar {
   gap: 6px;
 }
 
-.folder-label svg {
+/* Scoped to the glyph rather than to `svg`: a folder with a colour carries it
+   as an inline style on .folder-glyph, and a descendant rule naming a colour on
+   the svg itself would win over that inheritance and grey every folder back. */
+.folder-label .folder-glyph {
   color: var(--ink-faint);
-  flex: none;
 }
 
 table {
@@ -1458,11 +1563,16 @@ table {
   width: 100%;
 }
 
+/* Cells centre on the row rather than sitting on a text baseline. Every table
+ * here has one column carrying a mark two or three times the height of a line
+ * of text -- an avatar, a flag plate, a row of holders -- and baseline
+ * alignment reads as a row where half the columns sag. */
 th,
 td {
   border-bottom: 1px solid var(--border-soft);
   padding: 10px 14px;
   text-align: left;
+  vertical-align: middle;
 }
 
 th {
@@ -1485,11 +1595,24 @@ tbody tr:last-child td {
   border-bottom: 0;
 }
 
+/* Deliberately not a flex row. `display: flex` on a <td> stops it being a table
+ * cell at all: the engine wraps it in an anonymous cell, and the padding, the
+ * hairline and the row's vertical alignment then apply to the flex box inside
+ * that cell instead of to the cell. This column's underline was drawn a few
+ * pixels above the one every other column shares, and its name rode above the
+ * line its own row sat on.
+ *
+ * Inline layout keeps the cell a cell. The mark beside the name (a profile
+ * avatar, a proxy's flag plate, a cookie glyph) is inline-flex already, so all
+ * it needs is the gap the flex `gap` used to give it and a shared centre. */
 td.name-cell {
-  align-items: center;
-  display: flex;
-  gap: 12px;
   font-weight: 750;
+}
+
+td.name-cell > .avatar,
+td.name-cell > .proxy-flag {
+  margin-right: 12px;
+  vertical-align: middle;
 }
 
 td.checkbox-cell {
@@ -1497,10 +1620,135 @@ td.checkbox-cell {
   white-space: nowrap;
 }
 
+/* A checkbox is an inline replaced box, so it sits on the text baseline of a
+   cell that has no text -- a couple of pixels below the middle of every row it
+   is meant to be selecting. */
+th > input[type='checkbox'],
+td.checkbox-cell > input[type='checkbox'] {
+  display: block;
+}
+
 td.platform-cell {
   color: var(--ink-soft);
   width: 1%;
   white-space: nowrap;
+}
+
+/* ── Proxies table cells ────────────────────────────────────────────────────
+ * The connection reads as data rather than as prose, so it gets the mono face
+ * -- host:port is the one column people compare character by character. */
+td.proxy-host-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+td.proxy-check-cell {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* A dead proxy is the reason someone opened this tab. The whole message stays
+   in the cell rather than being clipped -- a check that failed with "407
+   Proxy Authentication Required" is useless truncated to "407 Proxy…". */
+td.proxy-check-cell.failed {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* ── "Assigned to" cells ────────────────────────────────────────────────────
+ * Shared by the Proxies table and the Cookies table, which ask the same
+ * question of the same rows: which profiles are holding this. See
+ * components/ui/AssignedCell.tsx. */
+.assigned-cell {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.assigned-empty {
+  color: var(--ink-faint);
+}
+
+/* One holder: the profile's own avatar, and its name in a badge that only
+   appears under the cursor.
+
+   The badge is positioned rather than laid out, and that is the whole point:
+   this table sizes its columns from their content, so a name that took up room
+   when it appeared would re-measure the Assigned to column and shuffle every
+   column beside it on hover. Overlaying it leaves the row exactly where it was
+   and lets the badge run as wide as the name needs. */
+.assigned-holder {
+  display: inline-flex;
+  position: relative;
+}
+
+/* Above the badges of the holders beside it -- otherwise a later sibling's
+   avatar paints over the name this one just opened. */
+.assigned-holder:hover {
+  z-index: 5;
+}
+
+.assigned-holder .avatar {
+  position: relative;
+  z-index: 2;
+}
+
+/* Starts behind its own avatar (hence the left padding) so the badge reads as
+   the avatar growing a name rather than a second thing appearing next to it. */
+.assigned-holder-name {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  /* A block, not a flex row: text-overflow only ellipsizes inline content, and
+     a flex container's anonymous item is not that. line-height does the
+     centring a flex box would have. */
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  height: 26px;
+  left: -2px;
+  line-height: 24px;
+  /* Capped, and clipped rather than pushed past the edge: this table scrolls
+     inside its own box, so a badge wider than the two columns it can spill
+     across would be cut off by that box instead. The cell's title still
+     carries every name in full. */
+  max-width: 220px;
+  opacity: 0;
+  overflow: hidden;
+  padding: 0 12px 0 28px;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity 0.12s var(--ease);
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.assigned-holder:hover .assigned-holder-name,
+.assigned-holder:focus-within .assigned-holder-name {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Several profiles may share one proxy. The count carries the rest; the full
+   list is on the cell's title. */
+.assigned-more {
+  color: var(--ink-softer);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The flag chip is a fixed 34px plate, which is wider than the 12px gap the
+   name cell uses for an avatar. */
+td.name-cell .proxy-flag {
+  min-width: 30px;
+  padding: 4px 5px;
 }
 
 tr.selected {
@@ -1519,10 +1767,40 @@ tr.row-checked {
   min-height: 36px;
 }
 
-td:last-child {
+/* The row-actions cell, laid out as a flex row. `:not([colspan])` matters:
+ * display: flex on a <td> stops it being a table cell at all, and a cell that
+ * is not a table cell ignores colspan -- so the empty-folder message, which is
+ * a single <td colSpan={9}>, was being drawn inside the width of the first
+ * column instead of across the whole table. */
+td:last-child:not([colspan]) {
   align-items: center;
   display: flex;
   gap: 8px;
+}
+
+/* The per-row Edit and Delete. .icon-button strips the fill and border a bare
+ * <button> would have, which is right in a toolbar but not here: sitting next
+ * to a filled Launch, two naked glyphs read as marks printed on the row rather
+ * than as controls. These take the ghost surface back and match Launch's
+ * height so the three form one group. */
+.row-action {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--ink-soft);
+  height: 36px;
+  width: 36px;
+}
+
+.row-action:not(:disabled):hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.row-action-danger:not(:disabled):hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .icon-button {
@@ -1577,10 +1855,6 @@ td:last-child {
   position: relative;
   text-decoration: none;
   transition: box-shadow 0.14s var(--ease), border-color 0.14s var(--ease), transform 0.14s var(--ease);
-}
-
-.data-card.proxy-card {
-  padding-left: 40px;
 }
 
 .data-card.selected {
@@ -1690,95 +1964,10 @@ td:last-child {
   padding: 7px 10px;
 }
 
-/* Two rows, not one. As a single row the url shared its track with the title,
- * the favicon and the action pair, which in the narrowest grid column left it
- * about 50px -- so `https://www.instagram.com/` rendered as `htt...`. Giving it
- * the full card width is the only way it fits at every column width.
- *
- *   [icon] [title.................] [actions]
- *   [url...............................]
- *
- * Every text cell still needs min-width: 0. Grid items default to min-width:
- * auto, so without it a long unbreakable title grows its own track and paints
- * over the buttons -- the same failure the old flex layout had, and the reason
- * the previous comment here insisted on it for the text column. */
-.bookmark-card {
-  align-items: center;
-  column-gap: 10px;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  min-height: 76px;
-  row-gap: 2px;
-}
-
-.bookmark-card > .bookmark-favicon {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-/* The shared .data-card h2 margin is for single-row cards; here the row-gap
- * already separates the title from the url. */
-.bookmark-card > h2 {
-  grid-column: 2;
-  grid-row: 1;
-  margin: 0;
-  min-width: 0;
-}
-
-.bookmark-card > p {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  min-width: 0;
-}
-
-/* Held out of the flow until the card is hovered or something inside it takes
- * focus. The space stays reserved either way, so revealing them cannot reflow
- * the title next to them. */
-.bookmark-card-actions {
-  grid-column: 3;
-  grid-row: 1;
-  opacity: 0;
-  transition: opacity 0.12s var(--ease);
-}
-
-.bookmark-card:hover .bookmark-card-actions,
-.bookmark-card:focus-within .bookmark-card-actions {
-  opacity: 1;
-}
-
-/* Scoped through .bookmark-card because the generic `.data-card span` pill rule
- * is (0,1,1) and would otherwise win over a bare class on the monogram span,
- * dragging back its 999px radius and 7px/10px padding. */
-.bookmark-card .bookmark-favicon {
-  border-radius: 7px;
-  flex: 0 0 auto;
-  height: 28px;
-  object-fit: contain;
-  width: 28px;
-}
-
-/* Shown when a site exposes no favicon at all. Matches the monogram the
- * injected browser home page draws for the same bookmark. */
-.bookmark-card .bookmark-monogram {
-  align-items: center;
-  background: var(--paper);
-  border: 1px solid var(--border-soft);
-  color: var(--ink-soft);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 800;
-  justify-content: center;
-  padding: 0;
-}
-
 .data-card-actions {
   align-items: center;
   display: flex;
   gap: 4px;
-}
-
-.proxy-card-main {
-  min-width: 0;
 }
 
 .proxy-badge {
@@ -1800,21 +1989,12 @@ td:last-child {
   color: var(--danger);
 }
 
-.proxy-title-row {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-}
-
-.proxy-title-row h2 {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.data-card .proxy-flag {
+/* The flag chip. Was scoped to .data-card back when proxies were a card grid;
+ * it is unscoped now because the same chip appears in the proxies table's Name
+ * cell and in the move dialog's rows, and a proxy should not be wearing a
+ * different mark depending on which surface is showing it. The proxy editor's
+ * test result overrides only its flex behaviour, further down. */
+.proxy-flag {
   align-items: center;
   background: var(--paper);
   border: 1px solid var(--border-soft);
@@ -1922,6 +2102,290 @@ button:disabled {
   margin-top: 12px;
 }
 
+/* ── Folder row ─────────────────────────────────────────────────────────────
+ * The folders, above the table, the way a file manager shows them. auto-fill
+ * rather than a scroller: a workspace tends to have a handful of folders and
+ * wrapping to a second line reads better than hiding half of them off the
+ * right edge. */
+.folder-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+/* Both shapes the card takes: a plain <button> for All profiles / Trash / New
+   folder, and a <div> wrapper for a real folder, whose name is a button and
+   whose pencil and trash are two more. */
+.folder-card {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  color: var(--ink);
+  display: flex;
+  font-weight: 650;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 48px;
+  overflow: hidden;
+  padding: 0 12px;
+  position: relative;
+  text-align: left;
+}
+
+.folder-card:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: var(--shadow-xs);
+}
+
+.folder-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* The clickable body of a folder card. Stretches so the whole card opens the
+   folder, not just the words. */
+.folder-card-main {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  display: flex;
+  flex: 1;
+  font-weight: inherit;
+  gap: 10px;
+  margin: 0 -12px;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.folder-card-main:not(:disabled):hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A folder's mark, on a fixed plate so a coloured folder and an uncoloured one
+   line the names up at the same offset. Untinted it is just the glyph; a folder
+   with a colour gets that colour's fill, border and ink as an inline style,
+   which is also why nothing here may set `color` more specifically than this. */
+.folder-glyph {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+/* For the table cell and the move dialog, where the plate sits inside a line of
+   12px text rather than on a 48px card. */
+.folder-glyph.small {
+  border-radius: 5px;
+  height: 20px;
+  width: 20px;
+}
+
+/* A folder wearing a country flag. The plate keeps its size so flag folders and
+   glyph folders line their names up together, but it gains a hairline and a
+   paper fill: a flag is artwork rather than an icon in the ink colour, and
+   several of them (Japan, Switzerland, Poland) are mostly white and vanish into
+   the card without one. */
+.folder-glyph.flag {
+  background: var(--paper);
+  border-color: var(--border-soft);
+  overflow: hidden;
+}
+
+.folder-glyph.flag .flag-svg {
+  height: 16px;
+  width: 24px;
+}
+
+.folder-glyph.small.flag .flag-svg {
+  height: 12px;
+  width: 18px;
+}
+
+.folder-card.active .folder-glyph:not([style]) {
+  color: var(--ink);
+}
+
+/* The active card already tints its own glyph plate; a flag's plate must stay
+   paper or the fill bleeds through the flag's white stripes. */
+.folder-card.active .folder-glyph.flag {
+  color: var(--ink);
+}
+
+.folder-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many profiles are inside, as the quiet counter a file manager puts
+   there -- the folder's name is what is being read, not this. */
+.folder-card-count {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 22px;
+  padding: 2px 7px;
+  text-align: center;
+}
+
+/* Edit and delete, swapped in for the count on hover rather than added beside
+   it: at 180px a card has room for a name or for two buttons, not both. */
+.folder-card-actions {
+  align-items: center;
+  background: inherit;
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+
+.folder-card:hover .folder-card-actions,
+.folder-card:focus-within .folder-card-actions {
+  display: inline-flex;
+}
+
+.folder-card:hover .folder-card-count,
+.folder-card:focus-within .folder-card-count {
+  display: none;
+}
+
+.folder-card-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  color: var(--ink-soft);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: 26px;
+}
+
+.folder-card-actions button:not(:disabled):hover {
+  background: var(--selected);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.folder-card-actions button.danger-icon:not(:disabled):hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* The trailing "make another one" card. Dashed and unfilled so it reads as an
+   invitation rather than as a folder that happens to be called New folder. */
+.folder-card-new {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  color: var(--ink-soft);
+}
+
+.folder-card-new:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* ── Move profiles dialog ───────────────────────────────────────────────── */
+.move-profiles-list {
+  display: grid;
+  gap: 2px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+
+.move-profiles-row {
+  align-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr) max-content max-content;
+  min-height: 40px;
+  padding: 0 8px;
+}
+
+/* One more column than the profiles version: a proxy leads with its flag,
+   because "us-resi-04" and "de-dc-04" are the same word at a glance and the
+   country is the thing being filed by. */
+.move-proxies-row {
+  grid-template-columns: 18px max-content minmax(0, 1fr) max-content max-content;
+}
+
+/* Fixed width so an unchecked proxy -- which renders "--" instead of a flag --
+   does not shunt the names out of line with the rest of the list. */
+.move-proxies-flag {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  width: 18px;
+}
+
+.move-proxies-flag .flag-svg {
+  height: 12px;
+  width: 18px;
+}
+
+.move-profiles-row:hover {
+  background: var(--hover);
+}
+
+.move-profiles-row input {
+  height: 18px;
+  width: 18px;
+}
+
+.move-profiles-name {
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which folder the profile is leaving. Without it the list is a set of names
+   with no way to tell an accidental move from an intended one. */
+.move-profiles-from {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.move-profiles-empty {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 0;
+  padding: 28px 0;
+}
+
 /* The hero state is the only content on the screen, so its container stops
  * being a table shell: no inner border to box the message in. */
 .table-wrap-empty {
@@ -1931,9 +2395,22 @@ button:disabled {
 
 /* A row holding one of these is not a data row -- no hairline under it, and the
  * cell's own padding would fight the block's. */
+/* The empty state fills the table's body rather than sitting in it as a
+ * short row. `height` on a table cell behaves as a minimum, so this reserves
+ * the body area and vertical-align centres the message inside it -- otherwise
+ * the block hugged the header and the hover tint below made it obvious the row
+ * did not cover the space it appeared to. */
 .empty-row-tr td {
   border-bottom: 0;
+  height: 320px;
   padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Not a row anything can be done to, so it does not take the row hover. */
+tbody tr.empty-row-tr:hover {
+  background: transparent;
 }
 
 .api-panel {
@@ -1950,6 +2427,29 @@ button:disabled {
   min-width: 0;
 }
 
+/* Sized to the reading, not to the screen. The default .profile-modal is
+ * 1380px because the profile editor is three columns of fields; an importer is
+ * one paragraph, one row of buttons and a list, and at that width the
+ * paragraph ran as a single 1300px line -- the dialog was stretched by its own
+ * prose. Two or three wrapped lines in a dialog you can take in at a glance
+ * beat one line tracked across the whole display.
+ *
+ * Compounded with .profile-modal on purpose: that rule sets the same two
+ * properties and is declared further down this file, so a single .import-panel
+ * class would lose the tie and change nothing. Same reason .small-modal is
+ * written that way. */
+.profile-modal.import-panel {
+  max-width: 720px;
+  width: min(720px, calc(100vw - 56px));
+}
+
+/* Narrower again: no column reference to lay out, just the per-line preview,
+   which is a line number, a host:port and a badge. */
+.profile-modal.proxy-import-panel {
+  max-width: 580px;
+  width: min(580px, calc(100vw - 56px));
+}
+
 .import-panel code {
   background: var(--paper);
   border-radius: 4px;
@@ -1958,15 +2458,119 @@ button:disabled {
   padding: 1px 6px;
 }
 
+/* Wraps rather than overflowing: at 580px the proxy importer's row is two
+   buttons and a Type selector, which is a hair too wide for one line on a
+   narrow window. */
 .import-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .import-file-label {
   color: var(--ink-soft);
   font-size: 13px;
+}
+
+/* The column reference, replacing the paragraph of prose that used to be the
+ * dialog's subtitle. A two-column definition list rather than a table: the
+ * notes are sentences of very uneven length, and a table would either wrap them
+ * into a ragged column or force the dialog wide enough for the longest one. */
+.import-columns {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+}
+
+/* Wide enough for the longest column name and its Required pill on one line --
+   proxy_name wrapping put the pill on a row of its own. */
+.import-columns > div {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 182px minmax(0, 1fr);
+}
+
+.import-columns dt {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Sits beside the column name, so it has to read as an annotation on it rather
+ * than as a second name -- hence the border-only pill, no fill. */
+.import-columns dt em {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  text-transform: uppercase;
+}
+
+.import-columns dd {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 0;
+}
+
+/* A label + select sitting inline in .import-actions, rather than stacked the
+ * way .field lays out inside a form grid. */
+.import-actions .inline-field {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin: 0;
+}
+
+.import-actions .inline-field select {
+  width: auto;
+}
+
+/* Per-line preview of the file being imported. Capped and scrolled: a vendor
+ * list is routinely hundreds of lines, and the dialog still has to show the
+ * Import button underneath it. */
+.proxy-import-preview {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.proxy-import-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  font-size: 13px;
+  gap: 12px;
+  grid-template-columns: 36px 1fr auto;
+  padding: 8px 12px;
+}
+
+.proxy-import-row:last-child {
+  border-bottom: none;
+}
+
+.proxy-import-line {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.proxy-import-target {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
 }
 
 .import-summary {
@@ -2444,6 +3048,14 @@ button:disabled {
   max-width: 400px;
 }
 
+/* Two ways in from an empty tab (add one, or import a file) sit side by side;
+ * the flex column above would otherwise stack them and read as a ranking. */
+.tab-empty-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
 /* A button that reads as a link: for the secondary way back to something the
  * user dismissed, which must not compete with the primary action above it. */
 .link-button {
@@ -2531,11 +3143,40 @@ button:disabled {
   gap: 8px;
 }
 
-.provider-card-head svg,
-.provider-card-head .integration-logo {
+.provider-card-head svg {
   flex: 0 0 auto;
   height: 20px;
   width: 20px;
+}
+
+/* What proxy vendors publish is a wordmark, not an app icon: these run from
+   5:1 to 6:1. Forcing them into the 20x20 box the Lucide stand-in uses would
+   squash "bright data" into an illegible smear, so the height is fixed and the
+   width follows the artwork -- the same rule .tag-logo already lives by, and
+   for the same reason. The max-width keeps the longest of them from crowding
+   the blurb underneath. */
+.provider-logo {
+  display: block;
+  flex: 0 0 auto;
+  height: 18px;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
+  width: auto;
+}
+
+/* One colour only, drawn for one background. See .tag-logo's note. */
+:root:not([data-theme="dark"]) .provider-logo.invert-on-light,
+:root[data-theme="dark"] .provider-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+/* Dark ink plus a brand colour: the hue-rotate puts the colour back after the
+   invert lifts the ink, so IPRoyal's cyan and Webshare's teal stay themselves
+   instead of turning red and magenta. */
+:root[data-theme="dark"] .provider-logo.relight-on-dark,
+:root:not([data-theme="dark"]) .provider-logo.relight-on-light {
+  filter: invert(1) hue-rotate(180deg);
 }
 
 .provider-card h4 {
@@ -2558,7 +3199,12 @@ button:disabled {
   margin: 0;
 }
 
+/* margin-top pins it to the bottom of the card, so the five cards' buttons line
+   up however tall each blurb runs. Centred and wordless: with the icon gone
+   there is nothing for a left-aligned label to sit against, and "Visit" alone
+   in the corner of a full-width button read as a stray caption. */
 .provider-card button {
+  justify-content: center;
   margin-top: auto;
   min-height: var(--control-h-sm);
 }
@@ -2592,6 +3238,13 @@ button:disabled {
   background: var(--danger-bg);
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+
+/* The check runs in the background and the dialog stays usable while it does,
+ * so this is a neutral progress line rather than a blocking state. */
+.proxy-test-result.pending {
+  background: var(--raised);
+  color: var(--ink-soft);
 }
 
 .status-pill {
@@ -2811,31 +3464,226 @@ textarea {
   width: 100%;
 }
 
-.extension-row {
-  border-top: 1px solid var(--border-soft);
-  display: grid;
-  gap: 4px;
-  grid-template-columns: 1fr auto;
-  padding: 12px 0;
+/* ── Extensions tab ─────────────────────────────────────────────────────────
+ * Cards, on the .integration-card vocabulary next door -- same raised surface,
+ * same 1px border, same hairline shadow. The two tabs are adjacent in the rail
+ * and describe the same kind of object (a thing you switch on and a thing that
+ * has a logo), so they should not have looked like two different products.
+ *
+ * This replaces .extension-row, which was a bordered grid of name + grey
+ * caption + control. That row had nowhere to put a 34px mark, and a list of
+ * five identically-shaped rows gave the eye nothing to aim at. */
+/* No .panel wrapper: the cards sit straight on the app surface. A raised sheet
+ * around a grid of raised cards is a surface on a surface, and it turned the
+ * page into one object that happens to contain extensions rather than into the
+ * extensions themselves. */
+.extensions-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.extension-row span {
-  font-weight: 800;
+.extensions-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
 }
 
-.extension-row small {
+/* Why a plain member cannot move the bundled switches. Sits above the grid as
+ * a line of prose, not as an empty-state block -- nothing is missing. */
+.extensions-note {
   color: var(--ink-soft);
-  grid-column: 1;
+  margin: 0;
+  max-width: 62ch;
 }
 
-.extension-row button {
-  align-self: center;
-  background: transparent;
+.extensions-category {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Category labels in Discover. Caption weight: the chips above already say
+ * which view this is, so these should sort the cards, not announce them. */
+.extensions-group {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.extension-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.extension-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+
+/* Switched off is a real state and has to be visible at a glance across a grid,
+ * but it is not an error -- so it reads as recessed rather than as marked:
+ * the card drops to the sunken surface and the mark loses its colour.
+ *
+ * --paper, not --surface: the cards sit *on* --surface now, so tinting an off
+ * card with it erased the card's edge entirely instead of pushing it back. */
+.extension-card.is-off {
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.extension-card.is-off .extension-mark {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.extension-card-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.extension-card h3 {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+  /* Store names run long ("Buster: Captcha Solver for Humans"). Wrapping is
+   * fine; the card grows. Truncating would hide which of two similarly-named
+   * extensions this is, which is the one thing the name is here for. */
+  min-width: 0;
+}
+
+.extension-card p {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* The caveat under FoxyWall. Smaller and lighter than the tagline because it
+ * is the exception to what the tagline just said, not a second description. */
+.extension-card-note {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.extension-card-foot {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
+.extension-card-foot > button {
+  flex: 1;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+}
+
+.extension-card-foot > button:not(.ghost):hover {
+  background: var(--accent-strong);
+}
+
+.extension-remove {
+  flex: 0 0 auto;
+  min-height: 28px;
+  width: 28px;
+}
+
+.extension-remove:hover {
+  background: var(--danger-bg);
   color: var(--danger);
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  min-height: 34px;
-  padding: 0 8px;
+}
+
+.extension-mark {
+  flex: 0 0 auto;
+  height: 34px;
+  object-fit: contain;
+  width: 34px;
+}
+
+/* The Argus mark, drawn as a mask in the current ink colour. It is black line
+ * art, so as an <img> it would vanish against the dark theme's raised
+ * surface -- same reason the sidebar's .brand-mark is a mask. */
+.extension-mark.is-argus {
+  background-color: var(--ink);
+  display: block;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.extension-mark.is-fallback {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 8px;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: center;
+}
+
+/* The last tile in the Installed grid. Card-shaped so it holds its place in
+ * the row, but drawn as an outline rather than a surface -- it is the slot the
+ * next extension goes in, not an extension. Same idea as .start-tile-add. */
+.extension-add-tile {
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: center;
+  gap: 6px;
+  min-height: 150px;
+  text-align: center;
+  transition: background 0.14s var(--ease), border-color 0.14s var(--ease);
+}
+
+.extension-add-tile:not(:disabled):hover {
+  background: var(--raised);
+  border-color: var(--ink-faint);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.extension-add-icon {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.extension-add-label {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+/* Explicit weight because the base <button> rule sets 700 and this is a
+ * caption under the label, not a second label. */
+.extension-add-hint {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .message,
@@ -2843,6 +3691,9 @@ textarea {
   color: var(--ink-soft);
 }
 
+/* Above .modal-backdrop (50) and .nested-backdrop (70): a toast raised by a
+ * dialog's own action -- a failed save, a validation error -- used to render
+ * underneath that dialog's scrim, so the button looked like it did nothing. */
 .toast-stack {
   bottom: 20px;
   display: flex;
@@ -2850,7 +3701,7 @@ textarea {
   gap: 12px;
   position: fixed;
   right: 20px;
-  z-index: 40;
+  z-index: 80;
 }
 
 .status-toast {
@@ -3092,7 +3943,25 @@ textarea {
   z-index: 70;
 }
 
-.profile-modal header,
+/* The X belongs on the title line, not in the middle of the header. Centred,
+ * it tracked the subtitle instead: one line of prose kept it level with the
+ * title by accident, and three lines (the importers, since they stopped being
+ * 1380px wide) dropped it to the middle of the paragraph, where it read as
+ * floating between the two dialogs' worth of text. */
+.profile-modal header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+/* Top-aligning a 32px control against a 24px title line leaves it 4px low --
+ * this is that half-difference, so the glyph is optically on the title however
+ * many lines follow it. */
+.profile-modal header > .icon-button {
+  margin-top: -4px;
+}
+
 .modal-actions {
   align-items: center;
   display: flex;
@@ -3168,15 +4037,71 @@ textarea {
   text-transform: uppercase;
 }
 
+/* The panel's three blocks. Twenty-four rows in one list gave no way to tell
+ * which of them a given control was responsible for, and no way back to it --
+ * hence the per-group Edit, which is the point of the grouping. */
+.summary-group {
+  display: grid;
+  gap: 12px;
+}
+
+/* The heading doubles as the group's rule: a hairline under the row rather
+   than a bare label floating above the values, so the three blocks read as
+   blocks at a glance down a narrow column. */
+.summary-group-head {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding-bottom: 8px;
+}
+
+.summary-group-head h4 {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Bare pencil, not a bordered button. Needs the parent in the selector to
+   outrank `button.ghost`-weight rules, and to stay a quiet 24px square: three
+   labelled buttons down a 320px column out-weighed the values under them. */
+.summary-group-head .summary-group-edit {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: 24px;
+}
+
+.summary-group-head .summary-group-edit:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Tighter than it was: the fingerprint group alone is nineteen rows, and at
+   the old 16px they scrolled well past the form beside them. */
 .summary-list {
   display: grid;
-  gap: 16px;
+  gap: 10px;
 }
 
 .summary-row {
   display: grid;
-  gap: 18px;
-  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 12px;
+  grid-template-columns: 104px minmax(0, 1fr);
 }
 
 .summary-row strong {
@@ -3196,14 +4121,13 @@ textarea {
   gap: 6px;
 }
 
-.summary-tags em {
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  color: var(--accent);
-  font-size: 12px;
-  font-style: normal;
-  padding: 2px 8px;
+/* `.summary-row span` softens every value in the panel, and a tag chip is a
+   span inside one -- without this it would out-specify .tag-chip and grey the
+   user's own tags out beside the branded ones, which keep their inline ink. */
+.summary-tags .tag-chip {
+  color: var(--ink);
 }
+
 
 .summary-lines {
   display: grid;
@@ -3274,31 +4198,6 @@ textarea {
 
 .field.compact input {
   max-width: 160px;
-}
-
-.segmented {
-  background: var(--paper);
-  border-radius: 9px;
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  width: fit-content;
-}
-
-.segmented button {
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  box-shadow: none;
-  color: var(--ink);
-  font-weight: 750;
-  min-height: 34px;
-  padding: 0 14px;
-}
-
-.segmented button.active {
-  background: var(--accent);
-  color: var(--accent-ink);
 }
 
 .field-hint {
@@ -3404,6 +4303,87 @@ textarea {
   color: var(--ink);
 }
 
+/* The country flags, under the glyphs, for proxy folders only. A search box
+ * rather than a grid of all 250: the twenty-odd shown first are the countries
+ * this workspace's proxies actually checked into, which for most users is the
+ * whole list they will ever want. */
+.flag-choices {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.flag-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 7px;
+  padding: 0 9px;
+}
+
+.flag-search input {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+}
+
+.flag-search input:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+.icon-choice.flag {
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.icon-choice.flag .flag-svg {
+  height: 16px;
+  width: 24px;
+}
+
+.flag-choices-note {
+  color: var(--ink-softer);
+  font-size: 11px;
+  margin: 0;
+}
+
+/* A country offered as a folder, in the same slot the tag chips use. Not a
+ * TagChip: a tag is a word with a mark, a country is a flag with a name, and
+ * borrowing the chip would have meant a tone lookup for something that has
+ * no tone -- a country is not a brand, so it gets the neutral fill and reading
+ * ink rather than Instagram's gradient.
+ *
+ * The colour is stated rather than inherited: the wrapping .folder-suggestion
+ * is a <button>, and a button's ink is --accent-ink, which is white. The tag
+ * chips never showed it because they set their own; this read as an empty pill
+ * on light paper. */
+.country-suggestion {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 7px;
+  padding: 3px 9px 3px 7px;
+}
+
+.country-suggestion-count {
+  color: var(--ink-softer);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .proxy-picker {
   display: grid;
   gap: 8px;
@@ -3413,6 +4393,19 @@ textarea {
   display: grid;
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* .inline-action's field-and-button, stacked. Side by side inside the profile
+ * form's half-width column, the connection-string input had room for about
+ * fifteen characters before "Create new proxy" took the rest. */
+.stacked-action {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.stacked-action > input {
+  width: 100%;
 }
 
 .select-action {
@@ -3440,13 +4433,458 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.fingerprint-card > div:first-child {
-  grid-column: auto;
+/* ── Fingerprint groups ─────────────────────────────────────────────────────
+ * The fingerprint dialog's three blocks. Same surface recipe as .form-section
+ * and .panel -- raised, one hairline, --radius, --shadow-xs -- rather than a
+ * fourth card style; what makes them a group is the heading, not the box. Each
+ * spans the host .profile-form grid so the three stack. */
+.fp-group {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 14px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 16px;
 }
 
-.fingerprint-section {
+.fp-group-head {
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
+  padding-bottom: 12px;
+}
+
+/* Deliberately quieter than .form-section h3: these head a block inside a
+ * dialog that already has a title, so they are a level down, not a peer. */
+.fp-group-head h4 {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.fp-group-head p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* The two checkboxes at the end of Privacy & noise. Without this they sit on
+ * the grid's baseline while the selects beside them are 36px tall, so a row
+ * that mixes the two reads as misaligned. */
+.fp-group .check-field {
+  min-height: var(--control-h);
+}
+
+/* ── Popovers ───────────────────────────────────────────────────────────────
+ * The app's only floating layer, shared by InfoHint and the status picker.
+ * z-index 90 clears the nested modal backdrop at 70, which is the deepest
+ * thing one of these can open on top of. Positioned in JS (see ui/Popover.tsx)
+ * because every dialog it opens inside is an overflow: auto box that would
+ * otherwise clip it. */
+.popover-panel {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 10px;
+  position: fixed;
+  z-index: 90;
+  animation: modal-in 0.12s var(--ease);
+}
+
+/* Explicit weight and case: the trigger lives inside a .field label, whose
+   span sets 650 and would otherwise make three paragraphs of explanation
+   render as bold. */
+.info-pop {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.5;
+  padding: 12px 14px;
+  text-transform: none;
+}
+
+.info-pop strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.info-pop p {
+  margin: 0 0 8px;
+}
+
+.info-pop p:last-child {
+  margin-bottom: 0;
+}
+
+.info-pop code {
+  background: var(--paper);
+  border-radius: 4px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+}
+
+/* Sized to the 12px label it sits in rather than to .icon-button's 32px, which
+   would set the height of every label row it appears on. */
+.info-hint-trigger {
+  align-items: center;
+  background: transparent;
   border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  min-height: 0;
   padding: 0;
+  width: 18px;
+}
+
+.info-hint-trigger:not(:disabled):hover,
+.info-hint-trigger[aria-expanded='true'] {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* ── Choice chips ───────────────────────────────────────────────────────────
+ * The proxy-mode selector. It was a .segmented control -- three unlabelled
+ * buttons in a shared tray -- which read as a toolbar rather than as one
+ * choice of three. Pills, on the 999px vocabulary .status-chip and the tag
+ * pills already use. It was .segmented's only remaining caller, so that rule
+ * is gone with it. */
+.choice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice-chip {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  min-height: var(--control-h-sm);
+  padding: 0 16px;
+}
+
+.choice-chip:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.choice-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ── Start page tab ─────────────────────────────────────────────────────────
+ * Deliberately a narrow centred column rather than the full-width .card-grid
+ * the other tabs use. Those are worklists you scan; this is a launchpad you
+ * aim at, and at 1600px an auto-fill grid spread eight bookmarks across the
+ * whole window with the search box floating above nothing. 640px is about as
+ * wide as a five-tile row wants to be, and it matches the cap the injected
+ * browser home page now uses, so the two surfaces read as the same page. */
+.start-page {
+  display: grid;
+  /* .content is a flex column, so the auto margins are what centre this; they
+   * beat the container's align-items: stretch. flex: 0 0 auto keeps a long
+   * bookmark list from being squashed instead of scrolling .content. */
+  flex: 0 0 auto;
+  gap: 26px;
+  margin: 0 auto;
+  max-width: 640px;
+  padding-top: 44px;
+  width: 100%;
+}
+
+.start-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  gap: 8px;
+  height: 46px;
+  padding: 0 6px 0 15px;
+  transition: border-color 0.14s var(--ease), box-shadow 0.14s var(--ease);
+}
+
+.start-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.start-search-icon {
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+}
+
+/* The input carries no chrome of its own -- the pill around it is the control,
+ * so a second border and focus ring inside it would read as two nested fields.
+ * The pill takes the focus styling via :focus-within instead. */
+.start-search input {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  flex: 1;
+  font-size: 14px;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.start-engine {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 3px;
+  min-height: 32px;
+  padding: 0 9px 0 11px;
+}
+
+.start-engine:not(:disabled):hover {
+  background: var(--paper);
+  color: var(--accent);
+}
+
+.engine-menu {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+.engine-option {
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.engine-option:not(:disabled):hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.engine-option.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+
+.start-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+/* Drops a column at a time rather than letting auto-fill decide, so the tiles
+ * keep a predictable size instead of stretching to fill an awkward remainder. */
+@media (max-width: 900px) {
+  .start-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .start-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.start-tile {
+  position: relative;
+}
+
+.start-tile-open,
+.start-tile-add {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-height: 0;
+  padding: 14px 8px 12px;
+  text-decoration: none;
+  transition: background 0.14s var(--ease);
+  width: 100%;
+}
+
+.start-tile-open:hover,
+.start-tile-add:not(:disabled):hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.start-tile-icon {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+  color: var(--ink-soft);
+  display: flex;
+  height: 46px;
+  justify-content: center;
+  width: 46px;
+}
+
+/* Dashed, so the one tile that is an action rather than a destination is
+ * distinguishable from a bookmark whose favicon has not resolved yet. */
+.start-tile-add .start-tile-icon {
+  background: transparent;
+  border-style: dashed;
+}
+
+/* BookmarkFavicon renders the same markup here as in the profile-editor chips,
+ * so both sizings have to be scoped. Unscoped, whichever came last would win
+ * and one of the two would be sized for the other. */
+.start-tile .bookmark-favicon {
+  border-radius: 8px;
+  flex: 0 0 auto;
+  height: 26px;
+  object-fit: contain;
+  width: 26px;
+}
+
+.start-tile .bookmark-monogram {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  justify-content: center;
+  padding: 0;
+}
+
+/* min-width: 0 because a grid item defaults to min-width: auto, and without it
+ * a long unbreakable title widens its own column and skews the whole row. */
+.start-tile-label {
+  font-size: 12px;
+  font-weight: 650;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Absolutely positioned so revealing it cannot reflow the tile, and hidden
+ * until the tile is hovered or something inside it takes focus -- keyboard
+ * users reach it by tabbing, which is why :focus-within is here too. */
+.start-tile-edit {
+  min-height: 24px;
+  opacity: 0;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  transition: opacity 0.12s var(--ease);
+  width: 24px;
+}
+
+.start-tile:hover .start-tile-edit,
+.start-tile:focus-within .start-tile-edit {
+  opacity: 1;
+}
+
+/* ── Start page bookmark chips ──────────────────────────────────────────────
+ * The shared bookmarks, offered as one-click values for the start URL. Typing
+ * the URL by hand was the only way to point a profile at a page the team had
+ * already saved. */
+.bookmark-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bookmark-chip {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  max-width: 240px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px 0 8px;
+}
+
+.bookmark-chip:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.bookmark-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+/* A long bookmark title truncates rather than stretching the chip past the
+   form column; the full title stays available as the button's title=. */
+.bookmark-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-chip .bookmark-favicon {
+  border-radius: 3px;
+  flex: none;
+  height: 14px;
+  width: 14px;
+}
+
+/* The letter fallback, for a bookmark whose favicon has not resolved. Needs a
+   plate of its own at 14px or the letter floats loose in the chip. */
+.bookmark-chip .bookmark-monogram {
+  align-items: center;
+  background: var(--paper);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 800;
+  justify-content: center;
+  text-transform: uppercase;
+}
+
+/* The card's head keeps the left column so "Edit fingerprint" can hold the
+ * right one, and stacks its name over its summary line rather than running
+ * them along a row. Needs .form-section in the selector to outrank
+ * `.form-section > div:first-child` further down this file, which is equally
+ * specific and would otherwise win on order and span the head across both
+ * columns -- pushing the button onto a full-width row of its own. */
+.form-section.fingerprint-card > div:first-child {
+  display: block;
+  grid-column: auto;
 }
 
 .compact-section {
@@ -3624,12 +5062,102 @@ textarea {
   align-items: center;
   background: var(--paper);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 999px;
+  color: var(--ink);
   display: inline-flex;
+  flex: none;
   font-size: 12px;
   font-weight: 600;
   gap: 4px;
-  padding: 3px 4px 3px 8px;
+  max-width: 100%;
+  padding: 3px 4px 3px 6px;
+}
+
+/* A catalogued tag carries its brand's tone as an inline style -- one of the
+   six --profile-* triples, the same ones a profile avatar uses. Nothing is
+   named here; the rule only stops the neutral fill from winning. */
+.tag-chip-preset {
+  border-width: 1px;
+}
+
+.tag-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The brand mark, in the brand's own colours -- these are the full-colour cuts,
+   so they go through <img> like .integration-logo and the platform marks, not
+   through a mask (which would flatten Instagram's gradient and Google's four
+   colours to one silhouette). Height is set inline; the width follows the
+   artwork, because eBay and Amazon are wordmarks and YouTube is 256x180. */
+.tag-logo {
+  flex: none;
+  object-fit: contain;
+  width: auto;
+}
+
+/* Three marks are drawn for one background only and vanish on the other. Same
+   problem .integration-logo.invert-on-* solves for Codex and Cursor. */
+:root:not([data-theme="dark"]) .tag-logo.invert-on-light,
+:root[data-theme="dark"] .tag-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+/* And two are dark ink *plus* a brand colour -- TikTok's note beside its cyan
+   and red, Amazon's wordmark above its orange. A plain invert would lift the
+   ink but send cyan to red; the hue-rotate puts the hues back, leaving only
+   the lightness flipped.
+   relight-on-light is the same thing for a mark on an 'ink' chip, which is the
+   dark one in the *light* theme. */
+:root[data-theme="dark"] .tag-logo.relight-on-dark,
+:root:not([data-theme="dark"]) .tag-logo.relight-on-light {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* The 'ink' chip is --accent: the darkest fill the light theme draws and the
+   lightest the dark theme draws -- the one background in the app that runs
+   opposite to the page behind it. So a one-colour mark on it needs the opposite
+   flip to the one the rules above just applied, and both directions have to be
+   said, because the rule being undone is a filter rather than an absence of
+   one.
+
+   TikTok is what this is for: its note is drawn #fff for a dark background. On
+   the ink chip that is right in the light theme and wrong in the dark one --
+   the exact reverse of how it behaves in the tag picker, where the same mark
+   sits on the ordinary surface. Without this the chip is white-on-white in one
+   theme and black-on-black in the other. */
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.relight-on-light,
+:root[data-theme="dark"] .tag-on-ink .tag-logo.relight-on-dark,
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.invert-on-light,
+:root[data-theme="dark"] .tag-on-ink .tag-logo.invert-on-dark {
+  filter: none;
+}
+
+:root[data-theme="dark"] .tag-on-ink .tag-logo.relight-on-light,
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.relight-on-dark {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+:root[data-theme="dark"] .tag-on-ink .tag-logo.invert-on-light,
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+.tag-chip svg {
+  flex: none;
+  opacity: 0.85;
+}
+
+/* How many profiles carry this tag. Sits inside the chip in the folder
+   suggestions, where the count is what makes the tag worth a folder. */
+.tag-chip-count {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 5px;
 }
 
 .tag-chip button {
@@ -3645,10 +5173,255 @@ textarea {
   width: 16px;
 }
 
+/* On a tinted chip the remove button has to be the chip's own ink -- the faint
+   grey above disappears into a coloured fill. */
+.tag-chip-preset button {
+  color: currentColor;
+  opacity: 0.65;
+}
+
 .tag-chip button:not(:disabled):hover {
   background: var(--hover);
   box-shadow: none;
   color: var(--danger);
+}
+
+.tag-chip-preset button:not(:disabled):hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: currentColor;
+  opacity: 1;
+}
+
+/* "3 of 5", beside the caret. Only earns its place once the field has
+   something in it, and turns solid at the cap, where it is the explanation for
+   the input having gone dead. */
+.tag-count {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: auto;
+  padding: 0 2px;
+}
+
+.tag-count.full {
+  color: var(--ink-soft);
+}
+
+.tag-input input:disabled {
+  background: transparent;
+  min-width: 0;
+}
+
+/* ── Suggested tags ─────────────────────────────────────────────────────────
+ * Under the field, not inside it: these are not this profile's tags yet, and a
+ * chip sitting in the same box as the ones that are would say they were. One
+ * click each, and the + opens the rest of the catalog. */
+.tag-suggest {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.tag-suggest-label {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* A bare button around the chip -- the chip is the thing being pressed, and a
+   second border around it would read as a chip inside a box. */
+.tag-suggest-chip {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  min-height: 0;
+  opacity: 0.75;
+  padding: 2px;
+}
+
+.tag-suggest-chip:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* The + itself, sized to sit level with the chips beside it. */
+.tag-suggest-more {
+  align-items: center;
+  border: 1px dashed var(--border);
+  color: var(--ink-soft);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  opacity: 1;
+  padding: 0;
+  width: 26px;
+}
+
+.tag-suggest-more:not(:disabled):hover {
+  background: var(--hover);
+  border-style: solid;
+  color: var(--ink);
+}
+
+/* ── Tag picker ─────────────────────────────────────────────────────────────
+ * The catalog, hanging off the tag input. Same panel shape as .status-pop, so
+ * the two "pick one of these coloured things" controls behave alike. */
+/* The one scroll container, around both groups. Sized so a full catalog is
+   obviously cut off mid-row rather than ending flush with the panel, which is
+   what tells you there is more to scroll to. */
+.tag-pop-scroll {
+  max-height: 296px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Sticky, so you can still tell which group you are in halfway down the
+   catalog. Opaque for the same reason -- rows must not show through it. */
+.tag-pop-heading {
+  background: var(--raised);
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  padding: 4px;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  z-index: 1;
+}
+
+.tag-pop-list {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 6px;
+}
+
+/* An even row: mark in a fixed-width slot, name on a steady left edge, tick on
+   the right. The fixed slot is what keeps the names aligned when the marks
+   themselves are not all the same width -- eBay and Amazon are wordmarks. */
+.tag-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.tag-pop-mark {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 16px;
+  justify-content: center;
+  width: 18px;
+}
+
+.tag-pop-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.tag-pop-option.active {
+  background: var(--selected);
+}
+
+.tag-pop-option:disabled {
+  opacity: 0.4;
+}
+
+.tag-pop-option > svg:last-child {
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+
+.tag-pop-note {
+  border-top: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 6px 0 0;
+  padding-top: 8px;
+}
+
+/* ── Tags in the profiles table ─────────────────────────────────────────────
+ * One tag keeps its word; several collapse to marks, because five full chips
+ * take more width than the profile's own name. */
+.tag-cell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* A tag with the word dropped. Square-ish rather than a circle so a wordmark
+   (eBay, Amazon) still has somewhere to sit, and sized to the row's line-height
+   so a cell of five does not make the row taller than its neighbours. */
+.tag-badge {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 5px;
+}
+
+.tag-badge b {
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Folder suggestions ─────────────────────────────────────────────────────
+ * The tags this workspace already runs on, offered as folders. Bare buttons
+ * around a chip: the chip is the thing being pressed, and a second border
+ * around it would read as a chip inside a box. */
+.folder-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.folder-suggestion {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  /* A button's default ink is --accent-ink (white on the accent fill it no
+     longer has), so it has to be reset here for anything that does not paint
+     its own -- see .country-suggestion. */
+  color: var(--ink);
+  min-height: 0;
+  padding: 2px;
+}
+
+.folder-suggestion:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
 }
 
 /* ── Profiles walkthrough ───────────────────────────────────────────────────
@@ -3727,4 +5500,98 @@ textarea {
 .check-field span {
   color: var(--ink);
   font-weight: 800;
+}
+
+/* ── Cookies tab ────────────────────────────────────────────────────────────
+ * The Cookies tab reuses the profiles vocabulary wholesale -- .table-toolbar,
+ * .selection-toolbar, .folder-row, .table-wrap, .pagination-bar are all the
+ * same elements doing the same job. Only what a cookie-set has and a profile
+ * does not is below. */
+
+/* The inspector holds a whole table of its own, so it opts out of .small-modal
+   and takes the full panel width. The inner table is capped and scrolls: a real
+   session export runs to several hundred cookies, and a modal that grows past
+   the viewport puts its own Save button off screen. */
+.cookie-set-modal .table-wrap {
+  max-height: min(46vh, 380px);
+  overflow: auto;
+}
+
+/* The cookie's own domain, compared character by character exactly the way a
+   proxy's host:port is -- hence the same mono treatment. */
+td.cookie-domain-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Every value is editable, but a table of three hundred bordered inputs reads
+   as a form rather than as data. The border arrives on hover and focus, so the
+   column looks like the text it is until it is being changed. */
+td.cookie-value-cell {
+  max-width: 320px;
+}
+
+td.cookie-value-cell input {
+  background: transparent;
+  border-color: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  height: var(--control-h-sm);
+  width: 100%;
+}
+
+td.cookie-value-cell input:hover {
+  border-color: var(--border-soft);
+}
+
+td.cookie-value-cell input:focus {
+  background: var(--paper);
+  border-color: var(--border);
+}
+
+/* An expired cookie is the usual reason a set that "works" launches signed out,
+   so it is coloured rather than left as a date to compare by eye. */
+.cookie-expired {
+  color: var(--danger);
+}
+
+/* httpOnly / secure / sameSite, in the same shape as a tag badge: small, muted,
+   and there to be scanned rather than read. */
+.cookie-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cookie-flag {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* One more column than the profiles version, for the set each profile carries
+   today -- which is the only thing that makes the reassignment readable. */
+.assign-cookies-row {
+  grid-template-columns: 18px minmax(0, 1fr) max-content minmax(0, max-content);
+}
+
+/* Ticking a profile that already has a different set REPLACES it. That is the
+   one destructive thing this dialog does, so it is the one thing in it wearing
+   the danger colour. */
+.assign-cookie-warn {
+  align-items: center;
+  color: var(--danger);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 4px;
+  white-space: nowrap;
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 import * as CountryFlagIcons from 'country-flag-icons/react/3x2';
-import {Apple, Monitor} from 'lucide-react';
-import {AndroidMark, IosMark, UbuntuMark, WindowsMark} from './PlatformMarks';
+import {Monitor, Puzzle} from 'lucide-react';
+import {AndroidMark, AppleMark, UbuntuMark, WindowsMark} from './PlatformMarks';
 import type {Integration} from '../../data/integrations';
 
 // Renders a real flag SVG (bundled, so it never depends on the OS having a
@@ -22,9 +22,9 @@ export function FlagIcon({countryCode}: {countryCode?: string}) {
 
 // Maps a fingerprint OS preset (see osPresets) to its platform mark. Five of
 // the six used to collapse into two glyphs, because lucide has no brand logos
-// -- PlatformMarks.tsx supplies the missing four, and macOS keeps lucide's own
-// <Apple> rather than a hand-traced logo. Anything unrecognized falls back to a
-// dimmed <Monitor> rather than rendering nothing.
+// -- PlatformMarks.tsx supplies real ones. Two pairs share a mark on purpose
+// (Windows 11/10, macOS/iOS); the label and title tell them apart. Anything
+// unrecognized falls back to a dimmed <Monitor> rather than rendering nothing.
 export function PlatformIcon({os, size = 16}: {os?: string; size?: number}) {
   const label = os || 'Unknown';
   const Mark = PLATFORM_MARKS[os || ''];
@@ -41,10 +41,10 @@ export function PlatformIcon({os, size = 16}: {os?: string; size?: number}) {
 const PLATFORM_MARKS: Record<string, ({size}: {size?: number}) => React.ReactElement> = {
   'Windows 11': WindowsMark,
   'Windows 10': WindowsMark,
-  'macOS': ({size}) => <Apple size={size} />,
+  'macOS': AppleMark,
   'Ubuntu': UbuntuMark,
   'Android': AndroidMark,
-  'iOS': IosMark,
+  'iOS': AppleMark,
 };
 
 // An integration's brand mark, or its Lucide stand-in when there is no asset.
@@ -59,6 +59,29 @@ export function IntegrationMark({integration, size = 20}: {integration: Integrat
     `integration-logo invert-on-${integration.invertOn}` :
     'integration-logo';
   return <img alt="" className={className} src={integration.logo} style={{height: size, width: size}} />;
+}
+
+// An extension's artwork: its store icon, the Argus mark for the one we ship
+// ourselves, or a Lucide stand-in when neither is available. Shared by the
+// Installed cards and the Discover cards so an extension is drawn the same way
+// before and after it is added.
+//
+// `tint` renders the Argus mark as a CSS mask instead of an <img>, because it
+// is black-on-transparent line art and would disappear on the dark theme's
+// raised surface. Store icons are full-colour and stay images.
+// The card's own heading carries the name, so every branch here is decorative.
+export function ExtensionMark({logo, tint}: {logo?: string; tint?: boolean}) {
+  if (tint) {
+    return <span aria-hidden="true" className="extension-mark is-argus" />;
+  }
+  if (logo) {
+    return <img alt="" className="extension-mark" src={logo} />;
+  }
+  return (
+    <span aria-hidden="true" className="extension-mark is-fallback">
+      <Puzzle size={20} strokeWidth={1.75} />
+    </span>
+  );
 }
 
 // Google's mark, inline. Lucide has no brand icons and their guidelines require

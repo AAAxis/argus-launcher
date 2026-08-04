@@ -5,49 +5,104 @@
 import * as db from '../db';
 import {describeDbError} from '../db/errors';
 import {baseProfileStatuses} from '../data/statuses';
-import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {statusList} from '../lib/text';
 import {native} from '../native';
 import {supabase} from '../supabase';
 import {newId} from './core';
 import type {WorkspaceCore} from './core';
-import type {CookieFileSelection} from '../native';
 import type {
-  ArgusCookie, ArgusFolder, BuiltInExtensionToggles, SharedBookmark, SharedExtension,
+  ArgusFolder, BuiltInExtensionToggles, SharedBookmark, SharedExtension,
 } from '../types';
 
 export type LibraryActions = ReturnType<typeof useLibraryActions>;
+
+// What the folder dialog can set. Create and save take the same shape so a
+// field added to one cannot be forgotten in the other.
+//
+// `kind` is required rather than defaulted: which library a folder belongs to
+// is not something a call site should be able to leave to chance, and a proxy
+// folder that quietly became a profile folder would vanish from the tab that
+// created it.
+export type FolderKind = 'profile' | 'proxy' | 'cookie';
+
+export type FolderFields = {
+  kind: FolderKind;
+  name: string;
+  icon?: string;
+  color?: string;
+};
 
 export function useLibraryActions({data, toast}: WorkspaceCore) {
   const {state, setState, withDb, patch} = data;
 
   // ---- Folders ---------------------------------------------------------
 
-  async function createFolder(name: string, icon?: string): Promise<ArgusFolder | null> {
-    const folder: ArgusFolder = {id: newId(), name, icon, created_at: new Date().toISOString()};
+  // Takes the fields as one object rather than positionally: it was
+  // createFolder(name, icon) and a third `color` argument is where a call site
+  // stops saying which value is which.
+  // Every library's folders live in one table, so every local patch has to go
+  // to the list for this folder's kind. Reading the kind off the stored folder
+  // rather than asking the caller for it keeps delete callers at one argument
+  // and makes the paths structurally unable to disagree.
+  const folderList = (kind: FolderKind) => {
+    if (kind === 'proxy') {
+      return patch.proxyFolders;
+    }
+    return kind === 'cookie' ? patch.cookieFolders : patch.folders;
+  };
+
+  function kindOfFolder(folderId: string): FolderKind | null {
+    if (state.folders.some((folder) => folder.id === folderId)) {
+      return 'profile';
+    }
+    if (state.proxy_folders.some((folder) => folder.id === folderId)) {
+      return 'proxy';
+    }
+    return state.cookie_folders.some((folder) => folder.id === folderId) ? 'cookie' : null;
+  }
+
+  async function createFolder(
+      fields: FolderFields): Promise<ArgusFolder | null> {
+    const folder: ArgusFolder = {id: newId(), ...fields, created_at: new Date().toISOString()};
     if (!await withDb((activeOrgId) => db.folders.create(activeOrgId, folder))) {
       return null;
     }
-    patch.folders((list) => [...list, folder]);
+    folderList(fields.kind)((list) => [...list, folder]);
     return folder;
   }
 
-  async function saveFolder(
-      folderId: string, patchFields: {name: string; icon?: string}): Promise<boolean> {
-    const next = {name: patchFields.name, icon: patchFields.icon ?? null};
+  async function saveFolder(folderId: string, fields: FolderFields): Promise<boolean> {
+    const next = {name: fields.name, icon: fields.icon ?? null, color: fields.color ?? null};
     if (!await withDb((activeOrgId) => db.folders.update(activeOrgId, folderId, next))) {
       return false;
     }
-    patch.folders((list) => list.map((item) =>
-      item.id === folderId ? {...item, name: next.name, icon: patchFields.icon} : item));
+    // The kind is not editable, so it is not in the update -- a folder cannot
+    // be moved from one library to the other, only made again in the other.
+    folderList(fields.kind)((list) => list.map((item) => item.id === folderId ?
+      {...item, name: fields.name, icon: fields.icon, color: fields.color} :
+      item));
     return true;
   }
 
-  // profiles.folder_id is nulled server-side by the FK's ON DELETE SET NULL,
-  // so this is genuinely one statement; the local lists just mirror it.
+  // profiles.folder_id / proxies.folder_id / cookie_sets.folder_id are all
+  // nulled server-side by the FK's ON DELETE SET NULL, so this is genuinely one
+  // statement; the local lists just mirror it.
   async function removeFolder(folderId: string): Promise<boolean> {
+    const kind = kindOfFolder(folderId);
     if (!await withDb((activeOrgId) => db.folders.remove(activeOrgId, folderId))) {
       return false;
+    }
+    if (kind === 'proxy') {
+      patch.proxyFolders((list) => list.filter((item) => item.id !== folderId));
+      patch.proxies((list) => list.map((proxy) =>
+        proxy.folder_id === folderId ? {...proxy, folder_id: null} : proxy));
+      return true;
+    }
+    if (kind === 'cookie') {
+      patch.cookieFolders((list) => list.filter((item) => item.id !== folderId));
+      patch.cookies((list) => list.map((cookie) =>
+        cookie.folder_id === folderId ? {...cookie, folder_id: null} : cookie));
+      return true;
     }
     patch.folders((list) => list.filter((item) => item.id !== folderId));
     patch.profiles((list) => list.map((profile) =>
@@ -70,50 +125,9 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
     return true;
   }
 
-  // ---- Cookie-set library ---------------------------------------------
-
-  // Uploads a picked cookie file straight into the shared library, reusing the
-  // same upload path as a per-profile import but keyed by a fresh cookie id.
-  async function addCookieSet(selection: CookieFileSelection): Promise<ArgusCookie | null> {
-    const id = newId();
-    const uploaded = await cloudCookieFromSelection(id, selection);
-    if (!uploaded.cookie_import_url) {
-      throw new Error('Cookie upload did not return a usable URL.');
-    }
-    const entry: ArgusCookie = {
-      id,
-      name: uploaded.cookie_import_name || 'cookies.txt',
-      url: uploaded.cookie_import_url,
-      count: uploaded.cookie_import_count,
-    };
-    if (!await withDb((activeOrgId) => db.cookieSets.create(activeOrgId, entry))) {
-      return null;
-    }
-    patch.cookies((list) => [...list, entry]);
-    return entry;
-  }
-
-  // The FK nulls profiles.cookie_set_id server-side, but nothing puts those
-  // profiles back into 'paste' mode -- that stays an explicit write, one per
-  // profile that actually referenced this set.
-  async function removeCookieSet(id: string): Promise<boolean> {
-    const referencing = state.profiles.filter((profile) => profile.cookie_id === id);
-    const ok = await withDb(async (activeOrgId) => {
-      await db.cookieSets.remove(activeOrgId, id);
-      for (const profile of referencing) {
-        await db.profiles.update(activeOrgId, profile.id, {cookie_id: null, cookie_mode: 'paste'});
-      }
-    });
-    if (!ok) {
-      return false;
-    }
-    patch.cookies((list) => list.filter((item) => item.id !== id));
-    patch.profiles((list) => list.map((profile) =>
-      profile.cookie_id === id ?
-        {...profile, cookie_id: null, cookie_mode: 'paste' as const} :
-        profile));
-    return true;
-  }
+  // The cookie-set library lives in useCookieActions -- it outgrew this hook's
+  // "each one is a handful of lines" premise once the Cookies tab gained
+  // folders, tags, a Trash and an editable payload.
 
   // ---- Bookmarks -------------------------------------------------------
 
@@ -142,6 +156,28 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
       saved,
     ]);
     return true;
+  }
+
+  // Bulk-adds bookmarks from another browser's exported file. Positions carry
+  // on from the end of the current list, so an import lands after what is
+  // already there rather than interleaving with it.
+  async function importBookmarks(entries: SharedBookmark[]): Promise<number> {
+    if (!entries.length) {
+      return 0;
+    }
+    const base = state.shared_bookmarks.length;
+    const saved = entries.map((entry, index) => ({...entry, position: base + index}));
+    let created: SharedBookmark[] = [];
+    const ok = await withDb(async (activeOrgId) => {
+      created = await db.bookmarks.createMany(activeOrgId, saved);
+    });
+    if (!ok) {
+      return 0;
+    }
+    // The rows returned by the insert, not the ones sent: they carry the uuid
+    // the column default generated.
+    patch.bookmarks((list) => [...list, ...created]);
+    return created.length;
   }
 
   async function removeBookmark(url: string): Promise<boolean> {
@@ -230,6 +266,24 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
     return true;
   }
 
+  // The shared-extension counterpart of setBuiltInExtensionEnabled below.
+  // Written through the same upsert an edit uses rather than a narrow UPDATE:
+  // the row's other columns are already in hand, and upsert is the one path
+  // that knows (org_id, id) is the composite key.
+  async function setExtensionEnabled(id: string, enabled: boolean): Promise<boolean> {
+    const current = state.shared_extensions.find((extension) => extension.id === id);
+    if (!current) {
+      return false;
+    }
+    const next: SharedExtension = {...current, enabled};
+    if (!await withDb((activeOrgId) => db.extensions.upsert(activeOrgId, next))) {
+      return false;
+    }
+    patch.extensions((list) =>
+      list.map((extension) => (extension.id === id ? next : extension)));
+    return true;
+  }
+
   // These toggles live on the organization, not on the individual user, so one
   // worker cannot silently change what their colleagues' profiles launch with.
   // The RLS UPDATE policy on organizations requires is_org_admin, which is why
@@ -249,13 +303,13 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
     saveFolder,
     removeFolder,
     createStatus,
-    addCookieSet,
-    removeCookieSet,
     saveBookmark,
+    importBookmarks,
     removeBookmark,
     addExtensionFromFolder,
     addExtensionFromWebStore,
     removeExtension,
+    setExtensionEnabled,
     setBuiltInExtensionEnabled,
   };
 }

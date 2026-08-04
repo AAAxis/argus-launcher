@@ -57,7 +57,7 @@ pool of profiles, proxies and cookies. Schema in `../docs/data-model.md`.
 | `orgs.ts` | `listMyOrgs`, `getOrg`, `createOrg` (the `bootstrap_org` RPC), `updateBuiltInExtensions`, `currentOrgId` |
 | `profiles.ts` | `list`, `create`, `replace`, `save`, `update`, `softDelete`, `restore`, `purge`, `purgeExpired` |
 | `proxies.ts` | `list`, `upsert`, `remove`, `recordCheck` |
-| `cookieSets.ts` | `list`, `create`, `update`, `remove`, `uploadCookieFile` |
+| `cookieSets.ts` | `list`, `loadPayload`, `create`, `update`, `savePayload`, `cachePayload`, `softDelete`, `restore`, `purge`, `purgeExpired`, `uploadCookieFile`, `downloadCookieFile`. `list` deliberately omits the `cookies` column — payloads are fetched one set at a time. |
 | `folders.ts`, `extensions.ts`, `bookmarks.ts`, `statuses.ts` | one table each |
 
 Two invariants the whole layer keeps:

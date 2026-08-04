@@ -68,6 +68,7 @@ export type ProxyRow = {
   port: number | null;
   username: string | null;
   password: string | null;
+  folder_id: string | null;
   last_checked_at: string | null;
   last_ip: string | null;
   last_country: string | null;
@@ -84,6 +85,11 @@ export type FolderRow = {
   parent_id: string | null;
   created_at: string;
   icon: string | null;
+  color: string | null;
+  // 'profile' or 'proxy'. Not null in the database (default 'profile'), but
+  // typed nullable here so a row read back before the migration lands maps to
+  // a profile folder rather than to undefined behaviour.
+  kind: string | null;
 };
 
 // `cookies` holds the cookie payload itself and is unused by the launcher
@@ -93,11 +99,23 @@ export type CookieSetRow = {
   id: string;
   org_id: string;
   name: string | null;
+  // The parsed cookie array. '[]' for every row written before the inspector
+  // existed, backfilled lazily the first time such a set is opened. Never in
+  // cookieSets.list()'s column list -- see COLUMNS there for why.
   cookies: unknown[];
   updated_at: string;
   created_at: string;
+  // Where a launch actually reads the payload from. electron/main.cjs fetches
+  // this URL and has no Supabase credentials, so `cookies` above is a read
+  // cache and this is the source of truth. Every write updates both.
   source_url: string | null;
   count: number | null;
+  folder_id: string | null;
+  // The column is NOT NULL default '{}', but typed nullable here for the same
+  // reason FolderRow.kind is: a row read back before the migration lands maps
+  // to an empty tag list rather than to undefined behaviour.
+  tags: string[] | null;
+  deleted_at: string | null;
 };
 
 // Primary key is (org_id, id), not (id): addExtensionFromWebStoreLink uses the
@@ -111,6 +129,9 @@ export type SharedExtensionRow = {
   created_at: string;
   webstore_id: string | null;
   storage_url: string | null;
+  // Nullable for the same reason FolderRow.tags is: a row read back before the
+  // migration lands maps to "enabled", not to undefined behaviour.
+  enabled: boolean | null;
 };
 
 export type SharedBookmarkRow = {

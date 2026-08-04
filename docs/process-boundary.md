@@ -34,6 +34,12 @@ Launcher passes:
 - `--argus-profile-launch`
 - `--argus-profile-id`
 - `--argus-profile-name`
+- `--argus-profile-icon` — absolute path to a PNG the launcher generated for
+  this profile's colour and the user's current theme. The browser retints its
+  own Dock tile from it (macOS only). It has to be passed rather than derived,
+  because the artwork and the theme both live on the launcher side; and it has
+  to be the browser that applies it, because all sessions share one bundle and
+  the only per-session handle on a Dock tile is the running process.
 - `--user-data-dir`
 - proxy flags
 - shared extension paths

@@ -1,21 +1,25 @@
 import {useState} from 'react';
 import {
-  BookOpen, Cookie, Download, FolderPlus, Pencil, Play, SearchX, Trash2, UserPlus, UsersRound,
+  BookOpen, Cookie, Download, FolderInput, FolderPlus, Pencil, Play, SearchX, Trash2, UserPlus,
+  UsersRound,
 } from 'lucide-react';
+import {MoveProfilesModal} from '../modals/MoveProfilesModal';
 import {BusyButton} from '../ui/BusyButton';
+import {EmptyState} from '../ui/EmptyState';
+import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
 import {PlatformIcon} from '../ui/icons';
+import {StatusPicker} from '../ui/StatusChip';
+import {TagCell} from '../ui/TagChip';
 import {daysUntilPurge, TRASH_FOLDER_ID} from '../../lib/trash';
-import {initials} from '../../lib/text';
+import {formatDateShort, initials} from '../../lib/text';
 import {paginate} from '../../lib/paginate';
 import {profileColorStyle} from '../../lib/profileColors';
-import {folderIcon} from '../../data/folderIcons';
-import {statusSelectClass} from '../../data/statuses';
+import {tagKey, tagLabel} from '../../lib/tags';
 import {native} from '../../native';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useSelection} from '../../hooks/useSelection';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
-import type {ReactNode} from 'react';
 import type {ArgusFolder, ArgusProfile} from '../../types';
 
 export type ProfilesTabProps = {
@@ -25,8 +29,13 @@ export type ProfilesTabProps = {
   onEditProfile: (profile: ArgusProfile) => void;
   onNewProfile: () => void;
   onNewFolder: () => void;
-  // Was onRenameFolder. The dialog edits the icon as well now.
+  // Was onRenameFolder. The dialog edits the icon and colour as well now.
   onEditFolder: (folder: ArgusFolder) => void;
+  // Set for one render after a folder is created from a tag suggestion: the
+  // move dialog opens on the folder with that tag's profiles already ticked,
+  // so filling it is one click. Cleared through onFillTagDone when it closes.
+  fillTag: string;
+  onFillTagDone: () => void;
   // Both delete paths funnel through the shared confirmation dialog, which the
   // app shell owns because the profile editor can raise it too.
   onRequestDelete: (profileIds: string[], label: string, onDeleted?: () => void) => void;
@@ -40,23 +49,43 @@ export function ProfilesTab({
   onNewProfile,
   onNewFolder,
   onEditFolder,
+  fillTag,
+  onFillTagDone,
   onRequestDelete,
   onShowIntro,
 }: ProfilesTabProps) {
-  const {data, toast, profiles, selectedProfileId, setSelectedProfileId, statusOptions} = useWorkspace();
+  const {
+    data, toast, library, profiles, selectedProfileId, setSelectedProfileId, statusOptions,
+    tagOptions,
+  } = useWorkspace();
   const state = data.state;
   const {run, isPending} = useAsyncAction();
   const selection = useSelection<ArgusProfile>();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  // Held as a tagKey, not the tag as typed, so "Instagram" and "instagram" are
+  // one entry in the dropdown and one filter rather than two.
+  const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const inTrash = folderId === TRASH_FOLDER_ID;
-  const filtered = Boolean(search.trim() || statusFilter);
-  const visible = visibleProfiles(state.profiles, {folderId, statusFilter, search});
+  const filtered = Boolean(search.trim() || statusFilter || tagFilter);
+  const visible = visibleProfiles(state.profiles, {folderId, statusFilter, tagFilter, search});
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
+
+  // The real folder the view is pointed at, if any: "" is All profiles and
+  // TRASH_FOLDER_ID is a flag on the row, and neither is somewhere a profile
+  // can be moved to.
+  const activeFolder = inTrash ? null :
+    state.folders.find((folder) => folder.id === folderId) || null;
+  const movableCount = activeFolder ?
+    state.profiles.filter((profile) => !profile.deleted_at && profile.folder_id !== folderId).length :
+    0;
+  const allCount = state.profiles.filter((profile) => !profile.deleted_at).length;
+  const trashCount = state.profiles.length - allCount;
 
   // Nothing in the workspace at all -- not a filter that matched nothing, and
   // not an empty folder. There is no table worth drawing headers for, and every
@@ -128,6 +157,30 @@ export function ProfilesTab({
     }
   }
 
+  // Deleting a folder never deletes what is in it: profiles.folder_id is nulled
+  // (ON DELETE SET NULL server-side, mirrored locally by removeFolder), so they
+  // reappear under All profiles rather than vanishing with the folder. The
+  // confirmation says so, because "delete folder" reads like it should take
+  // them with it.
+  async function deleteFolder(folder: ArgusFolder) {
+    const count = state.profiles.filter((profile) =>
+      !profile.deleted_at && profile.folder_id === folder.id).length;
+    const consequence = count ?
+      `Its ${count} ${count === 1 ? 'profile' : 'profiles'} will move to All profiles.` :
+      'It is empty.';
+    if (!window.confirm(`Delete folder ${folder.name}? ${consequence}`)) {
+      return;
+    }
+    if (!await library.removeFolder(folder.id)) {
+      return;
+    }
+    // The view was pointed at a folder that no longer exists.
+    if (folderId === folder.id) {
+      onFolderId('');
+    }
+    toast.setMessage(`${folder.name} folder deleted`);
+  }
+
   async function purgeOne(profile: ArgusProfile) {
     if (!window.confirm(`Permanently delete ${profile.name}? This cannot be undone.`)) {
       return;
@@ -161,33 +214,6 @@ export function ProfilesTab({
   return (
     <>
       <section className="table-toolbar">
-        {/* A native <option> cannot carry a glyph, so the selected folder's icon
-          * sits beside the picker instead of inside it. */}
-        <span className="folder-select">
-          <ActiveFolderIcon />
-          <select value={folderId} onChange={(event) => onFolderId(event.target.value)}>
-            <option value="">All profiles</option>
-            {state.folders.map((folder) => (
-              <option key={folder.id} value={folder.id}>{folder.name}</option>
-            ))}
-            <option value={TRASH_FOLDER_ID}>Trash</option>
-          </select>
-        </span>
-        {folderId && !inTrash && (
-          <button
-            className="icon-button"
-            aria-label={`Edit ${state.folders.find((folder) => folder.id === folderId)?.name || 'folder'}`}
-            onClick={() => {
-              const folder = state.folders.find((item) => item.id === folderId);
-              if (folder) {
-                onEditFolder(folder);
-              }
-            }}
-          >
-            <Pencil size={14} />
-          </button>
-        )}
-        <button className="ghost" onClick={onNewFolder}><FolderPlus size={16} /> Add folder</button>
         <input
           type="text"
           value={search}
@@ -197,6 +223,17 @@ export function ProfilesTab({
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="">All statuses</option>
           {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+        </select>
+        {/* Only tags that are actually on a profile: a dropdown listing all
+          * twenty brands when the workspace uses two of them is a list of
+          * eighteen ways to empty the table. */}
+        <select value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}>
+          <option value="">All tags</option>
+          {tagOptions.map((option) => (
+            <option key={tagKey(option.tag)} value={tagKey(option.tag)}>
+              {tagLabel(option.tag)} ({option.count})
+            </option>
+          ))}
         </select>
       </section>
 
@@ -249,6 +286,81 @@ export function ProfilesTab({
         </section>
       )}
 
+      {/* The folder navigation, in full: All profiles, the folders themselves,
+        * Trash, and the way to make another one. This replaced a dropdown --
+        * finding out what folders existed took opening it, and the only route
+        * to editing or deleting one was to select it first. */}
+      <section className="folder-row" aria-label="Folders">
+        <button
+          aria-pressed={!folderId}
+          className={folderId ? 'folder-card' : 'folder-card active'}
+          onClick={() => onFolderId('')}
+          type="button"
+        >
+          <span className="folder-glyph"><UsersRound size={17} strokeWidth={1.75} /></span>
+          <span className="folder-card-name">All profiles</span>
+          <span className="folder-card-count">{allCount}</span>
+        </button>
+
+        {state.folders.map((folder) => {
+          const count = state.profiles.filter((profile) =>
+            !profile.deleted_at && profile.folder_id === folder.id).length;
+          const active = folder.id === folderId;
+          return (
+            // A div, not a button: the pencil and the trash are buttons of
+            // their own, and nesting those inside the card's own button is
+            // both invalid and unclickable.
+            <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
+              <button
+                aria-pressed={active}
+                className="folder-card-main"
+                onClick={() => onFolderId(folder.id)}
+                type="button"
+              >
+                <FolderGlyph color={folder.color} icon={folder.icon} />
+                <span className="folder-card-name">{folder.name}</span>
+              </button>
+              <span className="folder-card-count">{count}</span>
+              <span className="folder-card-actions">
+                <button
+                  aria-label={`Edit ${folder.name}`}
+                  onClick={() => onEditFolder(folder)}
+                  title={`Edit ${folder.name}`}
+                  type="button"
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  aria-label={`Delete ${folder.name}`}
+                  className="danger-icon"
+                  onClick={() => void deleteFolder(folder)}
+                  title={`Delete ${folder.name}`}
+                  type="button"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </span>
+            </div>
+          );
+        })}
+
+        <button
+          aria-pressed={inTrash}
+          className={inTrash ? 'folder-card active' : 'folder-card'}
+          onClick={() => onFolderId(TRASH_FOLDER_ID)}
+          type="button"
+        >
+          <span className="folder-glyph"><Trash2 size={17} strokeWidth={1.75} /></span>
+          <span className="folder-card-name">Trash</span>
+          <span className="folder-card-count">{trashCount}</span>
+        </button>
+
+        <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
+          <span className="folder-glyph"><FolderPlus size={17} strokeWidth={1.75} /></span>
+          <span className="folder-card-name">New folder</span>
+        </button>
+      </section>
+
       <section className="table-wrap">
         <table>
           <thead>
@@ -299,24 +411,24 @@ export function ProfilesTab({
                   <td className="platform-cell">
                     <PlatformIcon os={profile.fingerprint?.os} />
                   </td>
-                  <td>
-                    <select
-                      className={statusSelectClass(profile.status || 'Ready')}
-                      value={profile.status || 'Ready'}
-                      onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => void profiles.update(profile, {status: event.target.value})}
-                    >
-                      {statusOptions.map((status) => <option key={status}>{status}</option>)}
-                    </select>
+                  {/* stopPropagation because the row itself is a selection
+                    * target -- picking a status should not also select the
+                    * profile underneath the picker. */}
+                  <td onClick={(event) => event.stopPropagation()}>
+                    <StatusPicker
+                      status={profile.status || 'Ready'}
+                      options={statusOptions}
+                      onChange={(status) => void profiles.update(profile, {status})}
+                    />
                   </td>
-                  <td>{profile.created_at?.slice(0, 10) || '-'}</td>
+                  <td>{formatDateShort(profile.created_at)}</td>
                   <td>
                     {profile.deleted_at ?
                       `${daysUntilPurge(profile.deleted_at)}d left in Trash` :
                       <FolderLabel folder={folder} />}
                   </td>
                   <td>{proxy ? `${proxy.host}:${proxy.port}` : 'Direct'}</td>
-                  <td>{profile.tags?.join(', ') || '-'}</td>
+                  <td><TagCell tags={profile.tags} /></td>
                   <td>
                     {profile.deleted_at ? (
                       <>
@@ -345,10 +457,31 @@ export function ProfilesTab({
                         >
                           Launch
                         </BusyButton>
-                        <button className="icon-button" aria-label={`Edit ${profile.name}`} onClick={(event) => {
-                          event.stopPropagation();
-                          onEditProfile(profile);
-                        }}><Pencil size={16} /></button>
+                        {/* Bordered rather than bare: beside a filled Launch
+                          * button, a naked glyph read as decoration on the
+                          * row instead of as something to press. */}
+                        <button
+                          aria-label={`Edit ${profile.name}`}
+                          className="ghost icon-button row-action"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onEditProfile(profile);
+                          }}
+                          title={`Edit ${profile.name}`}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          aria-label={`Delete ${profile.name}`}
+                          className="ghost icon-button row-action row-action-danger"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRequestDelete([profile.id], profile.name);
+                          }}
+                          title={`Delete ${profile.name}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </>
                     )}
                   </td>
@@ -366,14 +499,25 @@ export function ProfilesTab({
                       'Nothing matches those filters' :
                       inTrash ? 'Trash is empty' : 'This folder is empty'}
                     body={filtered ?
-                      'Try a different search term, or clear the status filter.' :
+                      'Try a different search term, or clear the status and tag filters.' :
                       inTrash ? 'Deleted profiles wait here for 30 days before they are purged.' :
                         'Profiles you add to this folder will show up here.'}
                   >
                     {!inTrash && !filtered && (
-                      <button onClick={onNewProfile} type="button">
-                        <UserPlus size={16} /> Add profile
-                      </button>
+                      <>
+                        <button onClick={onNewProfile} type="button">
+                          <UserPlus size={16} /> Add profile
+                        </button>
+                        {/* A brand-new folder is far more often filled from
+                          * profiles that already exist than from scratch, and
+                          * the only route to that was selecting rows in a
+                          * table you have to leave this folder to see. */}
+                        {activeFolder && movableCount > 0 && (
+                          <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
+                            <FolderInput size={16} /> Move profiles here
+                          </button>
+                        )}
+                      </>
                     )}
                   </EmptyState>
                 </td>
@@ -394,58 +538,44 @@ export function ProfilesTab({
           <span className="pagination-selected">{selection.size} selected</span>
         )}
       />
+
+      {(moveOpen || fillTag) && activeFolder && (
+        <MoveProfilesModal
+          folder={activeFolder}
+          seedTag={fillTag || undefined}
+          onClose={() => {
+            setMoveOpen(false);
+            onFillTagDone();
+          }}
+        />
+      )}
     </>
   );
 
-  // Both of these read `state` and `folderId` off the closure, which is why
-  // they live in here rather than beside visibleProfiles below.
-  function ActiveFolderIcon() {
-    if (inTrash) {
-      return <Trash2 className="folder-select-icon" size={15} />;
-    }
-    const folder = state.folders.find((item) => item.id === folderId);
-    const Icon = folderIcon(folder?.icon);
-    return <Icon className="folder-select-icon" size={15} strokeWidth={1.75} />;
-  }
-
+  // Reads `state` off the closure, which is why it lives in here rather than
+  // beside visibleProfiles below.
   function FolderLabel({folder}: {folder?: ArgusFolder | null}) {
     if (!folder) {
       return <>All profiles</>;
     }
-    const Icon = folderIcon(folder.icon);
     return (
       <span className="folder-label">
-        <Icon size={14} strokeWidth={1.75} /> {folder.name}
+        <FolderGlyph color={folder.color} icon={folder.icon} size={13} small /> {folder.name}
       </span>
     );
   }
 }
 
-// The one shape both empty states take. `hero` is the workspace-is-empty
-// version -- same parts, more room and a heavier glyph, because it is the whole
-// screen rather than a row inside a table that still has its headers.
-function EmptyState({icon, title, body, hero, children}: {
-  icon: ReactNode;
-  title: string;
-  body: string;
-  hero?: boolean;
-  children?: ReactNode;
-}) {
-  return (
-    <div className={hero ? 'table-empty hero' : 'table-empty'}>
-      <span className="table-empty-icon">{icon}</span>
-      <h2>{title}</h2>
-      <p>{body}</p>
-      {children && <div className="table-empty-actions">{children}</div>}
-    </div>
-  );
-}
-
 // Trash is a folder in the picker but a flag on the row, so it filters first
-// and the other two narrow whatever it left.
+// and the rest narrow whatever it left.
 function visibleProfiles(
     allProfiles: ArgusProfile[],
-    {folderId, statusFilter, search}: {folderId: string; statusFilter: string; search: string}) {
+    {folderId, statusFilter, tagFilter, search}: {
+      folderId: string;
+      statusFilter: string;
+      tagFilter: string;
+      search: string;
+    }) {
   const inTrash = folderId === TRASH_FOLDER_ID;
   const byTrash = allProfiles.filter((profile) => Boolean(profile.deleted_at) === inTrash);
   const inFolder = folderId && !inTrash ?
@@ -455,11 +585,16 @@ function visibleProfiles(
     inFolder.filter((profile) =>
       (profile.status || 'Ready').toLowerCase() === statusFilter.toLowerCase()) :
     inFolder;
+  // Compared on tagKey, so a row tagged "Instagram" and a row tagged
+  // "instagram" both answer to the one dropdown entry.
+  const byTag = tagFilter ?
+    byStatus.filter((profile) => profile.tags?.some((tag) => tagKey(tag) === tagFilter)) :
+    byStatus;
   const query = search.trim().toLowerCase();
   if (!query) {
-    return byStatus;
+    return byTag;
   }
-  return byStatus.filter((profile) =>
+  return byTag.filter((profile) =>
     profile.name?.toLowerCase().includes(query) ||
     profile.tags?.some((tag) => tag.toLowerCase().includes(query)));
 }

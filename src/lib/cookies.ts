@@ -15,22 +15,35 @@ import type {CloudState} from '../types';
 // empty. Relational rows make that exact failure impossible, but the resolve
 // check is still the right test: a cookie set deleted by one worker leaves
 // another worker's profile pointing at nothing, and this rebuilds it.
+// A trashed set does not count as resolving, and is not a candidate to re-point
+// at either. Both halves matter, and the second is the subtle one: without it,
+// trashing a legacy set nulls the profile's cookie_id, the next load finds the
+// (trashed) row already present so skips the insert -- and then still returns
+// the profile pointed back at it, which useCloudData writes to the database.
+// The delete would silently undo itself on the next window focus.
 export function migrateLegacyCookieImports(state: CloudState) {
   let migrated = 0;
   const cookies = [...state.cookies];
+  const isLive = (id: string | null | undefined) =>
+    Boolean(id) && cookies.some((cookie) => cookie.id === id && !cookie.deleted_at);
   const profiles = state.profiles.map((profile) => {
-    const hasValidCookieId =
-      profile.cookie_id && cookies.some((cookie) => cookie.id === profile.cookie_id);
-    if (hasValidCookieId || !profile.cookie_import_url) {
+    if (isLive(profile.cookie_id) || !profile.cookie_import_url) {
       return profile;
     }
     const id = profile.cookie_id || `legacy:${profile.id}`;
-    if (!cookies.some((cookie) => cookie.id === id)) {
+    const existing = cookies.find((cookie) => cookie.id === id);
+    if (existing?.deleted_at) {
+      // Trashed on purpose. Restoring it is the user's call, not ours.
+      return profile;
+    }
+    if (!existing) {
       cookies.push({
         id,
         name: profile.cookie_import_name || `${profile.name} cookies`,
         url: profile.cookie_import_url,
         count: profile.cookie_import_count ?? null,
+        tags: [],
+        folder_id: null,
       });
     }
     migrated++;

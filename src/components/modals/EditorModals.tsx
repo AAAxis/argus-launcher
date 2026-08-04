@@ -1,17 +1,29 @@
 // The small record editors: proxy, bookmark, folder and custom status. Each is
 // a handful of fields over the shared Modal shell.
-import {useState} from 'react';
-import {AlertCircle, Folder as FolderIcon, LayoutGrid, PlugZap, Trash2} from 'lucide-react';
+import {useEffect, useRef, useState} from 'react';
+import {
+  AlertCircle, Folder as FolderIcon, LayoutGrid, Palette, PlugZap, RefreshCw, Trash2,
+} from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {BusyButton} from '../ui/BusyButton';
+import {ColorPicker} from '../ui/ColorPicker';
 import {Field} from '../ui/Field';
 import {IconPicker} from '../ui/IconPicker';
+import {TagChip} from '../ui/TagChip';
 import {FlagIcon} from '../ui/icons';
 import {normalizeBookmarkUrl} from '../../lib/bookmarks';
+import {defaultProxyName, looksLikeProxyHost, parseProxyLink} from '../../lib/proxies';
+import {tagKey, tagLabel} from '../../lib/tags';
+import {
+  countryName, DEFAULT_FOLDER_ICON, flagCodeFromIcon, flagIconKey,
+} from '../../data/folderIcons';
+import {tagFolderColor} from '../../data/tagPresets';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {ClipboardEvent} from 'react';
 import type {BookmarkDraft, FolderDraft, ProxyDraft, StatusDraft} from '../../drafts';
+import type {TagUsage} from '../../lib/tags';
 import type {ProxyCheckResult} from '../../native';
-import type {SharedBookmark} from '../../types';
+import type {ArgusFolder, ArgusProxy, SharedBookmark} from '../../types';
 
 export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequestDelete}: {
   draft: ProxyDraft;
@@ -23,9 +35,20 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
   onSaved: (proxyId: string, fromProfile: boolean) => void;
   onRequestDelete: (proxyIds: string[], label: string) => void;
 }) {
-  const {data, toast, proxies} = useWorkspace();
+  const {toast, proxies} = useWorkspace();
   const [testResult, setTestResult] = useState<ProxyCheckResult | null>(null);
   const [testing, setTesting] = useState(false);
+  // Everything that can stop a save, rendered inside the dialog. It used to be
+  // a toast, which the modal backdrop covered -- so "Add proxy" on an invalid
+  // host looked like a button that did nothing at all.
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Bumped whenever the connection details change or the dialog unmounts, so a
+  // check still running against the old details cannot overwrite the panel with
+  // a result for a host the user has since retyped.
+  const testRun = useRef(0);
+
+  useEffect(() => () => { testRun.current++; }, []);
 
   // A result describes the connection details it was run against, so any edit
   // to those invalidates it -- otherwise a green "United States · 84ms" would
@@ -35,59 +58,110 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
     const connectionChanged = ['type', 'host', 'port', 'username', 'password']
         .some((key) => key in patch);
     if (connectionChanged) {
+      testRun.current++;
       setTestResult(null);
+      setTesting(false);
     }
+    setError(null);
     onChange({...draft, ...patch});
   };
+
+  // Vendors hand out proxies as one "host:port:username:password" string, and
+  // pasting that into Host is the obvious thing to do -- it used to be stored
+  // verbatim as the hostname, which curl then rejected outright ("Unsupported
+  // proxy syntax"). Anything parseProxyLink recognises is spread across the
+  // fields it belongs in; anything else is left alone as a literal hostname.
+  //
+  // parseProxyLink locates the port rather than trusting its position, so
+  // "user:pass@host:port" and "user:pass:host:port" land in the same fields as
+  // the usual order.
+  //
+  // `strict` is set everywhere except Host: a paste into Password is only
+  // treated as a connection string when what parsed out of it really looks like
+  // a host, because "hunter2:1080" parses just as cleanly as a proxy does.
+  function applyPastedConnection(raw: string, strict = false) {
+    const parsed = raw.includes(':') ? parseProxyLink(raw) : null;
+    if (!parsed) {
+      return false;
+    }
+    const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim());
+    if (strict && !scheme && !looksLikeProxyHost(parsed.host)) {
+      return false;
+    }
+    testRun.current++;
+    setTestResult(null);
+    setTesting(false);
+    setError(null);
+    onChange({
+      ...draft,
+      // A bare host:port:user:pass carries no scheme, and parseProxyLink
+      // defaults those to socks5; keep whatever the user already picked
+      // instead of silently switching the type under them.
+      type: /^(https?|socks5?):(\/\/)?/i.test(raw.trim()) ? parsed.type || draft.type : draft.type,
+      // The line the user pasted is usually all they have: there is no name in
+      // it, and an unnamed proxy is saved as host:port anyway. Filling it now
+      // means the field they pasted into does not sit empty while the fields
+      // below it fill -- and anything they have already typed is left alone.
+      name: draft.name.trim() || defaultProxyName(parsed.host, parsed.port),
+      host: parsed.host,
+      port: String(parsed.port),
+      username: parsed.username || '',
+      password: parsed.password || '',
+    });
+    return true;
+  }
+
+  // Every connection field takes a whole line, not just Host. This dialog opens
+  // with Name focused, so the first Cmd-V of a vendor's
+  // "206.251.200.232:43645:user:pass" went into the name box and left the four
+  // fields under it empty -- the paste has to be caught wherever it lands.
+  function onConnectionPaste(event: ClipboardEvent<HTMLInputElement>) {
+    if (applyPastedConnection(event.clipboardData.getData('text'), true)) {
+      event.preventDefault();
+    }
+  }
 
   // Host plus a port in range is all either action needs; save() and
   // testConnection() share it so they can never disagree about what is valid.
   function connection() {
     const host = draft.host.trim();
     const port = Number(draft.port);
-    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-      toast.setMessage('Proxy host and valid port are required');
+    if (!host) {
+      setError('Enter the proxy host, or paste the full host:port:username:password line.');
+      return null;
+    }
+    // The single most common way to get here: the whole connection string went
+    // into Host and the port never got filled in. Say so, instead of the old
+    // generic "host and valid port are required".
+    if (host.includes(':')) {
+      setError('That looks like a full connection string. Paste it again and it will be split into the fields below.');
+      return null;
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setError('Enter a port between 1 and 65535.');
       return null;
     }
     return {host, port, type: draft.type, username: draft.username.trim(), password: draft.password};
   }
 
-  async function test() {
+  // Fire-and-forget: the dialog stays fully interactive while this runs, and
+  // the result is recorded against the saved row by the workspace action, so
+  // closing the editor mid-check still updates the card behind it.
+  function test() {
     const config = connection();
     if (!config) {
       return;
     }
+    const run = ++testRun.current;
     setTesting(true);
     setTestResult(null);
-    try {
-      const result = await proxies.testConnection(config);
-      setTestResult(result);
-      // A pass against an existing row whose connection details are untouched
-      // describes that row, so record it: the card behind the dialog updates
-      // now instead of waiting for the next background sweep. When the details
-      // were edited the result belongs to something not yet saved, and save()
-      // deliberately clears the stored check for exactly that reason.
-      const stored = draft.id ? data.state.proxies.find((item) => item.id === draft.id) : undefined;
-      const describesStored = stored &&
-        stored.type === config.type &&
-        stored.host === config.host &&
-        stored.port === config.port &&
-        (stored.username || '') === config.username &&
-        (stored.password || '') === config.password;
-      if (result.ok && stored && describesStored) {
-        await proxies.recordCheck({
-          ...stored,
-          country: result.country,
-          country_code: result.countryCode,
-          egress_ip: result.ip,
-          ping_ms: result.pingMs,
-          checked_at: new Date().toISOString(),
-          check_error: undefined,
-        });
+    void proxies.testConnectionAndRecord(config, draft.id).then((result) => {
+      if (testRun.current !== run) {
+        return;
       }
-    } finally {
       setTesting(false);
-    }
+      setTestResult(result);
+    });
   }
 
   async function save() {
@@ -95,12 +169,16 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
     if (!config) {
       return;
     }
-    const saved = await proxies.save({
+    setSaving(true);
+    const result = await proxies.save({
       id: draft.id,
       name: draft.name.trim(),
       ...config,
     });
+    setSaving(false);
+    const saved = result.proxy;
     if (!saved) {
+      setError(result.error || 'Could not save this proxy.');
       return;
     }
     const fromProfile = !draft.id && source === 'profile';
@@ -126,18 +204,15 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
               <Trash2 size={16} /> Delete
             </button>
           )}
-          <BusyButton
-            busy={testing}
-            busyLabel="Testing…"
-            className="ghost"
-            icon={<PlugZap size={16} />}
-            onClick={() => void test()}
-          >
-            Test connection
-          </BusyButton>
-          <button onClick={() => void save()}>
-            {draft.id ? 'Save changes' : source === 'profile' ? 'Create and assign' : 'Add proxy'}
+          {/* Deliberately not a BusyButton: the check runs in the background,
+            * so neither this nor Save is disabled while it is in flight. Click
+            * it again and the newer run wins. */}
+          <button className="ghost" onClick={test}>
+            <PlugZap size={16} /> {testing ? 'Test again' : 'Test connection'}
           </button>
+          <BusyButton busy={saving} busyLabel="Saving…" onClick={() => void save()}>
+            {draft.id ? 'Save changes' : source === 'profile' ? 'Create and assign' : 'Add proxy'}
+          </BusyButton>
         </>
       }
     >
@@ -159,6 +234,7 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
             type="text"
             placeholder="US socks proxy"
             value={draft.name}
+            onPaste={onConnectionPaste}
             onChange={(event) => set({name: event.target.value})}
           />
         </label>
@@ -166,9 +242,21 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
           <span>Host</span>
           <input
             type="text"
-            placeholder="1.2.3.4"
+            placeholder="1.2.3.4 or host:port:user:pass"
             value={draft.host}
+            // Handled on paste rather than on every keystroke: splitting as the
+            // user types would rewrite the fields the moment they got as far as
+            // "1.2.3.4:8", while they were still typing the port. Not strict --
+            // whatever is pasted here was meant to be a host, dotted or not.
+            onPaste={(event) => {
+              if (applyPastedConnection(event.clipboardData.getData('text'))) {
+                event.preventDefault();
+              }
+            }}
             onChange={(event) => set({host: event.target.value})}
+            // Catches the paths onPaste misses -- drag-and-drop, and a string
+            // typed out by hand -- once the user has moved on from the field.
+            onBlur={(event) => applyPastedConnection(event.target.value)}
           />
         </label>
         <label className="field">
@@ -178,6 +266,7 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
             inputMode="numeric"
             placeholder="1080"
             value={draft.port}
+            onPaste={onConnectionPaste}
             onChange={(event) => set({port: event.target.value.replace(/[^\d]/g, '')})}
           />
         </label>
@@ -187,6 +276,7 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
             type="text"
             placeholder="Optional"
             value={draft.username}
+            onPaste={onConnectionPaste}
             onChange={(event) => set({username: event.target.value})}
           />
         </label>
@@ -196,10 +286,23 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
             placeholder="Optional"
             type="password"
             value={draft.password}
+            onPaste={onConnectionPaste}
             onChange={(event) => set({password: event.target.value})}
           />
         </label>
-        {testResult && <ProxyTestResult result={testResult} />}
+        {error && (
+          <p className="proxy-test-result failed">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </p>
+        )}
+        {testing && (
+          <p className="proxy-test-result pending">
+            <RefreshCw size={16} className="btn-spin" />
+            <span>Testing in the background — you can keep editing or close this.</span>
+          </p>
+        )}
+        {!testing && testResult && <ProxyTestResult result={testResult} />}
       </div>
     </Modal>
   );
@@ -266,6 +369,9 @@ export function BookmarkModal({draft, onChange, onClose}: {
 
   return (
     <Modal
+      // Three stacked fields do not need the profile editor's 1380px. Without
+      // this the dialog was as wide as the window for one column of inputs.
+      className="small-modal"
       onClose={onClose}
       title={draft.originalUrl ? 'Edit bookmark' : 'Add bookmark'}
       subtitle="Shared bookmarks are injected into each anonymous browser home page."
@@ -320,9 +426,32 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
   draft: FolderDraft;
   onChange: (draft: FolderDraft) => void;
   onClose: () => void;
-  onCreated: (folderId: string) => void;
+  // The second argument is what the folder was suggested from, when it was: a
+  // tag for a profile folder, an ISO country code for a proxy one. The caller
+  // uses it to offer the fill; nothing is moved here.
+  onCreated: (folderId: string, seed?: string) => void;
 }) {
-  const {data, toast, library} = useWorkspace();
+  const {data, toast, library, tagOptions} = useWorkspace();
+  const state = data.state;
+  const isProxy = draft.kind === 'proxy';
+  const isCookie = draft.kind === 'cookie';
+  // Only on create. Re-offering suggestions while editing would invite
+  // overwriting a folder someone has already named and filled.
+  //
+  // Cookie folders get no suggestions in this version: both inputs to
+  // folderSuggestions are profile-scoped (the profiles' tags, and the existing
+  // profile folders), so offering them here would suggest grouping cookie-sets
+  // by what the profiles happen to be tagged. A cookie-side engine is worth
+  // adding once there is something to base it on -- the domains in each set.
+  const tagIdeas = draft.id || isProxy || isCookie ?
+    [] :
+    folderSuggestions(tagOptions, state.folders);
+  const countryIdeas = draft.id || !isProxy ?
+    [] :
+    countrySuggestions(state.proxies, state.proxy_folders);
+  // Countries this workspace's proxies actually checked into, most-used first,
+  // so the flag picker opens on the ones worth filing by.
+  const proxyCountries = isProxy ? countriesInUse(state.proxies).map((entry) => entry.code) : [];
 
   async function save() {
     const name = draft.name.trim();
@@ -330,30 +459,37 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
       toast.setMessage('Folder name is required');
       return;
     }
+    const fields = {kind: draft.kind, name, icon: draft.icon, color: draft.color};
     if (draft.id) {
-      if (!await library.saveFolder(draft.id, {name, icon: draft.icon})) {
+      if (!await library.saveFolder(draft.id, fields)) {
         return;
       }
       onClose();
       toast.setMessage(`${name} folder saved`);
       return;
     }
-    const folder = await library.createFolder(name, draft.icon);
+    const folder = await library.createFolder(fields);
     if (!folder) {
       return;
     }
-    onCreated(folder.id);
+    onCreated(folder.id, seedFor(draft, name));
     onClose();
     toast.setMessage(`${folder.name} folder created`);
   }
 
   async function remove() {
-    const folder = data.state.folders.find((item) => item.id === draft.id);
+    const folders = isProxy ? state.proxy_folders : isCookie ? state.cookie_folders : state.folders;
+    const folder = folders.find((item) => item.id === draft.id);
     onClose();
     if (!folder) {
       return;
     }
-    if (!window.confirm(`Delete folder ${folder.name}? Profiles will move to All profiles.`)) {
+    const consequence = isProxy ?
+      'Proxies will move to All proxies.' :
+      isCookie ?
+        'Cookie-sets will move to All cookie-sets.' :
+        'Profiles will move to All profiles.';
+    if (!window.confirm(`Delete folder ${folder.name}? ${consequence}`)) {
       return;
     }
     if (await library.removeFolder(folder.id)) {
@@ -366,7 +502,11 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
       className="small-modal"
       onClose={onClose}
       title={draft.id ? 'Edit folder' : 'Create folder'}
-      subtitle="Folders organize launcher profiles only. Browser sessions stay separate."
+      subtitle={isProxy ?
+        'Folders group proxies in your library. Which profile a proxy is assigned to is separate.' :
+        isCookie ?
+          'Folders group cookie-sets in your library. Which profiles a set is assigned to is separate.' :
+          'Folders organize launcher profiles only. Browser sessions stay separate.'}
       footer={
         <>
           {draft.id && (
@@ -381,11 +521,76 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
       }
     >
       <div className="profile-form">
+        {/* The tags this workspace already runs on, offered as folders. A tag
+          * used on several profiles is a grouping the user has been keeping by
+          * hand; this is the one place it can become the real thing. */}
+        {tagIdeas.length > 0 && (
+          <Field
+            label="Suggested from your tags"
+            icon={<LayoutGrid size={14} />}
+            hint="Fills the name, icon and colour. Everything stays editable."
+            wide
+            group
+          >
+            <div className="folder-suggestions">
+              {tagIdeas.map((suggestion) => (
+                <button
+                  className="folder-suggestion"
+                  key={suggestion.tag}
+                  onClick={() => onChange({
+                    ...draft,
+                    name: tagLabel(suggestion.tag),
+                    icon: suggestion.preset?.folderIcon || DEFAULT_FOLDER_ICON,
+                    color: suggestion.preset ? tagFolderColor(suggestion.preset) : draft.color,
+                    fromTag: suggestion.tag,
+                  })}
+                  type="button"
+                >
+                  <TagChip count={suggestion.count} tag={suggestion.tag} />
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
+        {/* The proxy-side twin: the countries this workspace's proxies have
+          * actually checked into. The same grouping the user would make by
+          * hand, one click, already wearing the right flag. */}
+        {countryIdeas.length > 0 && (
+          <Field
+            label="Suggested from your proxies"
+            icon={<LayoutGrid size={14} />}
+            hint="Fills the name and the flag. Everything stays editable."
+            wide
+            group
+          >
+            <div className="folder-suggestions">
+              {countryIdeas.map((suggestion) => (
+                <button
+                  className="folder-suggestion"
+                  key={suggestion.code}
+                  onClick={() => onChange({
+                    ...draft,
+                    name: suggestion.name,
+                    icon: flagIconKey(suggestion.code),
+                    fromCountry: suggestion.code,
+                  })}
+                  type="button"
+                >
+                  <span className="country-suggestion">
+                    <FlagIcon countryCode={suggestion.code} />
+                    {suggestion.name}
+                    <span className="country-suggestion-count">{suggestion.count}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
         <Field label="Name" icon={<FolderIcon size={14} />} wide>
           <input
             type="text"
             autoFocus
-            placeholder="Warmup"
+            placeholder={isProxy ? 'United States' : isCookie ? 'Instagram' : 'Warmup'}
             value={draft.name}
             onChange={(event) => onChange({...draft, name: event.target.value})}
             onKeyDown={(event) => {
@@ -399,15 +604,110 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
         <Field
           label="Icon"
           icon={<LayoutGrid size={14} />}
-          hint="Shown next to the folder in the profiles list."
+          hint={isProxy ?
+            'A glyph or a country flag, shown next to the folder in the proxies list.' :
+            isCookie ?
+              'Shown next to the folder in the cookie-sets list.' :
+              'Shown next to the folder in the profiles list.'}
           wide
           group
         >
-          <IconPicker value={draft.icon} onChange={(icon) => onChange({...draft, icon})} />
+          <IconPicker
+            value={draft.icon}
+            onChange={(icon) => onChange({...draft, icon})}
+            preferredCountries={isProxy ? proxyCountries : undefined}
+          />
         </Field>
+        {/* Hidden once a flag is picked: FolderGlyph ignores the colour there,
+          * so leaving the swatches on screen would be six controls that do
+          * nothing. Switching back to a glyph brings them straight back, and
+          * the draft's colour is untouched in the meantime. */}
+        {!flagCodeFromIcon(draft.icon) && (
+          <Field
+            label="Colour"
+            icon={<Palette size={14} />}
+            hint={isProxy ?
+              "Tints the folder's icon in the folder row and in the proxies table." :
+              isCookie ?
+                "Tints the folder's icon in the folder row and in the cookie-sets table." :
+                "Tints the folder's icon in the folder row and in the profiles table."}
+            wide
+            group
+          >
+            <ColorPicker value={draft.color} onChange={(color) => onChange({...draft, color})} />
+          </Field>
+        )}
       </div>
     </Modal>
   );
+}
+
+// What a just-created folder was suggested from, if the name still says so.
+//
+// Editing "Instagram" into "IG burners", or "United States" into "Client A",
+// and then being offered twelve Instagram profiles or eighteen US proxies would
+// be the dialog second-guessing what was just typed. Compared on tagKey, which
+// strips case and punctuation, so "united states" still counts.
+function seedFor(draft: FolderDraft, name: string): string | undefined {
+  if (draft.kind === 'proxy') {
+    return draft.fromCountry && tagKey(countryName(draft.fromCountry)) === tagKey(name) ?
+      draft.fromCountry :
+      undefined;
+  }
+  // Cookie folders are never suggested from anything, so there is nothing to
+  // seed the move dialog with.
+  if (draft.kind === 'cookie') {
+    return undefined;
+  }
+  return draft.fromTag && tagKey(tagLabel(draft.fromTag)) === tagKey(name) ?
+    draft.fromTag :
+    undefined;
+}
+
+// Tags worth turning into a folder: on more than one profile, and not already
+// a folder by that name. One profile is not a grouping, and re-offering a
+// folder that exists is how a workspace ends up with two Instagrams.
+const SUGGESTION_MIN_PROFILES = 2;
+const SUGGESTION_LIMIT = 6;
+
+function folderSuggestions(tagOptions: TagUsage[], folders: ArgusFolder[]): TagUsage[] {
+  const taken = new Set(folders.map((folder) => tagKey(folder.name)));
+  return tagOptions
+      .filter((option) => option.count >= SUGGESTION_MIN_PROFILES &&
+        !taken.has(tagKey(tagLabel(option.tag))))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, SUGGESTION_LIMIT);
+}
+
+// The countries this workspace's proxies checked into, most-used first. Only
+// checked proxies have one -- an unchecked or failing proxy has no country to
+// file it by, and the background sweep will give it one soon enough.
+function countriesInUse(proxies: ArgusProxy[]) {
+  const counts = new Map<string, number>();
+  for (const proxy of proxies) {
+    const code = proxy.country_code?.trim().toUpperCase();
+    if (code && /^[A-Z]{2}$/.test(code)) {
+      counts.set(code, (counts.get(code) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+      .map(([code, count]) => ({code, name: countryName(code), count}))
+      .sort((a, b) => b.count - a.count);
+}
+
+// The proxy-side folderSuggestions, deliberately the same shape and the same
+// two thresholds. A country is skipped when a folder already carries its flag
+// or its name -- otherwise "United States" gets offered forever, next to the
+// United States folder the user made from it last week.
+function countrySuggestions(proxies: ArgusProxy[], folders: ArgusFolder[]) {
+  const takenNames = new Set(folders.map((folder) => tagKey(folder.name)));
+  const takenFlags = new Set(folders
+      .map((folder) => flagCodeFromIcon(folder.icon))
+      .filter((code): code is string => Boolean(code)));
+  return countriesInUse(proxies)
+      .filter((entry) => entry.count >= SUGGESTION_MIN_PROFILES &&
+        !takenFlags.has(entry.code) && !takenNames.has(tagKey(entry.name)))
+      .slice(0, SUGGESTION_LIMIT);
 }
 
 export function StatusModal({draft, onChange, onClose}: {

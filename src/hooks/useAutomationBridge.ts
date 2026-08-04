@@ -10,6 +10,7 @@ import type {DependencyList} from 'react';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
+import {normalizeTags} from '../lib/tags';
 import {comparable} from '../lib/text';
 import {repairProxyAssignments} from '../lib/proxies';
 import {native} from '../native';
@@ -62,7 +63,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       ({folderPath, profileIds}) => profileActions.matchCookies(folderPath, profileIds),
       cloud);
 
-  // Argys Cookie Manager extensions can push decrypted local browser cookies
+  // Argus Cookie Manager extensions can push decrypted local browser cookies
   // over the loopback automation API. Store that snapshot as the profile's
   // cloud cookie-import source so other machines and later launches seed it.
   useChannel(
@@ -298,7 +299,12 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         if (!existing) {
           return {matched: false, profileId};
         }
-        if (!await profileActions.update(existing, fields)) {
+        // An agent posting eight tags gets five, on the same terms as the
+        // editor and the CSV importer -- this is the third and last write path
+        // into profiles.tags, and none of them may leave a row the dialog
+        // would then refuse to save.
+        const patch = 'tags' in fields ? {...fields, tags: normalizeTags(fields.tags || [])} : fields;
+        if (!await profileActions.update(existing, patch)) {
           throw new Error('Failed to save to cloud state.');
         }
         toast.setMessage(`Updated ${profileId}`);

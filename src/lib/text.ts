@@ -80,3 +80,28 @@ export function statusList(...groups: Array<Array<string | undefined | null>>) {
   }
   return list;
 }
+
+// The table form of the above: "04 Aug 2026".
+//
+// The tables used to slice the ISO string, which is unambiguous but reads as a
+// serial number -- down a column of twenty-five the eye has to parse the month
+// back out of a two-digit field every time. A short month name is scannable at
+// a glance and, unlike "04/08/2026", cannot be misread as US ordering.
+//
+// Separate from formatDate rather than replacing it: that one is prose in the
+// settings panels ("Renews 4 August 2026"), where the full month reads better
+// and there is room for it. This one is for a column.
+//
+// Fixed to en-GB rather than the user's locale, which is what pins the day-
+// first order and the two-digit day: a column of dates should line up, and a
+// screenshot passed around the team should mean the same thing to everyone.
+export function formatDateShort(value: string | null | undefined): string {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return date.toLocaleDateString('en-GB', {day: '2-digit', month: 'short', year: 'numeric'});
+}

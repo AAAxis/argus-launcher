@@ -7,7 +7,8 @@
 // `figure` names the screenshot each step will eventually carry. The files do
 // not exist yet -- the modal draws a labelled placeholder at the right aspect
 // ratio in the meantime, so dropping them in later moves no layout.
-export type ProfileIntroStep = {
+// Shared with data/cookieIntro.ts -- IntroModal renders both from this shape.
+export type IntroStep = {
   title: string;
   body: string;
   // Short line under the figure. Says what the picture shows, so the step still
@@ -16,7 +17,7 @@ export type ProfileIntroStep = {
   figure: string;
 };
 
-export const PROFILE_INTRO_STEPS: ProfileIntroStep[] = [
+export const PROFILE_INTRO_STEPS: IntroStep[] = [
   {
     title: 'A profile is a whole separate browser',
     body: 'Each one keeps its own cookies, storage, history and logins in its own folder ' +
