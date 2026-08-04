@@ -8,17 +8,28 @@
 // Renaming the app types would touch every tab and dialog in main.tsx, so the
 // translation lives here instead and the UI keeps reading what it always read.
 import type {
+  ArgusAutomation,
   ArgusCookie,
   ArgusFolder,
   ArgusOrg,
   ArgusProfile,
   ArgusProxy,
+  AutomationRun,
   BuiltInExtensionToggles,
   ProxyMode,
   SharedBookmark,
   SharedExtension,
 } from '../types';
 import type {
+  AutomationStep,
+  AutomationVars,
+  RunLogEntry,
+  RunStatus,
+  RunTrigger,
+} from '../automations/types';
+import type {
+  AutomationRow,
+  AutomationRunRow,
   CookieSetRow,
   CustomStatusRow,
   FolderRow,
@@ -68,6 +79,10 @@ export function rowToOrg(row: OrganizationRow): ArgusOrg {
     billing_status: row.billing_status,
     current_period_end: row.current_period_end,
     built_in_extensions: row.built_in_extensions || undefined,
+    // `?? 0`, not `?? null`: null means unlimited, and a row read back from a
+    // database that has not had the migration applied would otherwise hand
+    // every org an unlimited automation allowance.
+    automation_limit: row.automation_limit ?? 0,
   };
 }
 
@@ -95,6 +110,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     cookie_import_count: row.cookie_import_count,
     cookie_mode: undef(row.cookie_mode) as ArgusProfile['cookie_mode'],
     cookie_id: row.cookie_set_id,
+    automation_id: row.automation_id,
     command_line_switches: switchesToText(row.command_line_switches),
     fingerprint,
     created_at: undef(row.created_at),
@@ -120,6 +136,7 @@ export function profileToRow(orgId: string, profile: ArgusProfile): Insert<Profi
     folder_id: profile.folder_id ?? null,
     proxy_id: profile.proxy_id ?? null,
     cookie_set_id: profile.cookie_id ?? null,
+    automation_id: profile.automation_id ?? null,
     fingerprint: (profile.fingerprint || {}) as Record<string, unknown>,
     status: profile.status ?? null,
     tags: profile.tags ?? [],
@@ -174,6 +191,9 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
   if ('start_url' in patch) {
     const startUrl = patch.start_url?.trim();
     row.start_urls = startUrl ? [startUrl] : [];
+  }
+  if ('automation_id' in patch) {
+    row.automation_id = patch.automation_id ?? null;
   }
   if ('cookie_id' in patch) {
     row.cookie_set_id = patch.cookie_id ?? null;
@@ -380,6 +400,119 @@ export function rowToBookmark(row: SharedBookmarkRow): SharedBookmark {
 // per label (with an unused `color`). The label is the string.
 export function rowToStatus(row: CustomStatusRow): string {
   return row.label || '';
+}
+
+// ---- automations --------------------------------------------------------
+//
+// Near-identity, on purpose. The renames at the top of this file are historical
+// -- src/types.ts predates the schema -- and the automations tables were named
+// to match the app type precisely so no new ones were needed. Everything below
+// only coerces null to undefined and fills defaults for a row written before a
+// column existed.
+
+export function rowToAutomation(row: AutomationRow): ArgusAutomation {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    steps: (row.steps || []) as AutomationStep[],
+    variables: (row.variables || {}) as AutomationVars,
+    pinned: row.pinned ?? false,
+    timeout_ms: row.timeout_ms ?? undefined,
+    close_on_finish: row.close_on_finish ?? false,
+    created_at: undef(row.created_at),
+    updated_at: undef(row.updated_at),
+  };
+}
+
+// `updated_at` is set here for the same reason profileToRow sets it: no trigger
+// maintains it, so a save that did not touch it would leave the column at
+// whatever the insert default wrote.
+export function automationToRow(
+    orgId: string, automation: ArgusAutomation): Insert<AutomationRow> {
+  return {
+    id: automation.id,
+    org_id: orgId,
+    name: automation.name,
+    description: automation.description ?? null,
+    steps: automation.steps as unknown[],
+    variables: (automation.variables || {}) as Record<string, unknown>,
+    pinned: automation.pinned ?? false,
+    timeout_ms: automation.timeout_ms ?? 300000,
+    close_on_finish: automation.close_on_finish ?? false,
+    created_at: automation.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function automationPatchToRow(
+    patch: Partial<ArgusAutomation>): Partial<AutomationRow> {
+  const row: Partial<AutomationRow> = {updated_at: new Date().toISOString()};
+  if ('name' in patch) {
+    row.name = patch.name as string;
+  }
+  if ('description' in patch) {
+    row.description = patch.description ?? null;
+  }
+  if ('steps' in patch) {
+    row.steps = (patch.steps || []) as unknown[];
+  }
+  if ('variables' in patch) {
+    row.variables = (patch.variables || {}) as Record<string, unknown>;
+  }
+  if ('pinned' in patch) {
+    row.pinned = patch.pinned ?? false;
+  }
+  if ('timeout_ms' in patch) {
+    row.timeout_ms = patch.timeout_ms ?? 300000;
+  }
+  if ('close_on_finish' in patch) {
+    row.close_on_finish = patch.close_on_finish ?? false;
+  }
+  return row;
+}
+
+// ---- automation runs ----------------------------------------------------
+
+export function rowToRun(row: AutomationRunRow): AutomationRun {
+  return {
+    id: row.id,
+    automation_id: row.automation_id,
+    automation_name: row.automation_name || '',
+    profile_id: row.profile_id,
+    profile_name: row.profile_name || '',
+    trigger: (row.trigger || 'manual') as RunTrigger,
+    status: (row.status || 'running') as RunStatus,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    duration_ms: row.duration_ms,
+    step_count: row.step_count ?? 0,
+    failed_step_id: row.failed_step_id,
+    error: row.error,
+    vars: (row.vars || {}) as AutomationVars,
+    log: (row.log || []) as RunLogEntry[],
+  };
+}
+
+export function runToRow(orgId: string, run: AutomationRun): Insert<AutomationRunRow> {
+  return {
+    id: run.id,
+    org_id: orgId,
+    automation_id: run.automation_id ?? null,
+    automation_name: run.automation_name || '',
+    profile_id: run.profile_id ?? null,
+    profile_name: run.profile_name || '',
+    trigger: run.trigger,
+    status: run.status,
+    started_at: run.started_at,
+    finished_at: run.finished_at ?? null,
+    duration_ms: run.duration_ms ?? null,
+    step_count: run.step_count ?? 0,
+    failed_step_id: run.failed_step_id ?? null,
+    error: run.error ?? null,
+    vars: (run.vars || {}) as Record<string, unknown>,
+    log: (run.log || []) as unknown[],
+  };
 }
 
 // ---- built-in extension toggles -----------------------------------------

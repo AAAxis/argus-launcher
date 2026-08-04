@@ -22,7 +22,7 @@ export async function listMyOrgs(): Promise<OrgMembership[]> {
   const {data, error} = await client
       .from('org_members')
       .select('role, organizations(id,name,plan,profile_limit,seat_limit,billing_status,' +
-        'current_period_end,created_at,built_in_extensions)')
+        'current_period_end,created_at,built_in_extensions,automation_limit)')
       .eq('user_id', userId)
       .order('created_at', {ascending: true});
   raise(error, 'listMyOrgs');
@@ -63,7 +63,7 @@ export async function getOrg(orgId: string): Promise<ArgusOrg | null> {
   const {data, error} = await client
       .from('organizations')
       .select('id,name,plan,profile_limit,seat_limit,billing_status,current_period_end,' +
-        'created_at,built_in_extensions')
+        'created_at,built_in_extensions,automation_limit')
       .eq('id', orgId)
       .maybeSingle();
   raise(error, 'getOrg');

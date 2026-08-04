@@ -149,10 +149,17 @@ export type IntegrationStatus = {
   // Hive and the generic MCP card have no config file for us to write; they
   // connect by showing the user a snippet instead.
   manual: boolean;
-  // Whether the tool itself looks present on this machine. Advisory only --
-  // never used to block connecting, because a false negative would make a
-  // working install unconnectable.
+  // Whether the tool itself was found on this machine: an application bundle,
+  // an executable, or a file only that tool writes -- never the config file
+  // this app writes, and never the dot-directory holding it, which is what used
+  // to make an uninstalled Cursor read as Connected.
+  //
+  // It gates what a card may claim, never whether you can connect: a false
+  // negative would otherwise make a working install unconnectable.
   installed: boolean;
+  // The exact path that proved it, so the UI can show a fact instead of making
+  // a claim. Empty when nothing was found, and for the manual integrations.
+  installedEvidence: string;
   hasEntry: boolean;
   // The entry names the server this build ships, rather than an older install's
   // path or the Python bridge that no longer exists.

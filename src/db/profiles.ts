@@ -7,7 +7,7 @@ const COLUMNS =
   'id,org_id,name,notes,folder_id,proxy_id,cookie_set_id,fingerprint,status,tags,start_urls,' +
   'command_line_switches,created_by,deleted_at,updated_at,created_at,color,proxy_mode,' +
   'cookie_mode,cookie_import_path,cookie_import_url,cookie_import_name,cookie_import_count,' +
-  'email,password';
+  'email,password,automation_id';
 
 // Trashed profiles come back too -- the Trash view reads the same list and
 // filters on deleted_at, exactly as it did against the blob.

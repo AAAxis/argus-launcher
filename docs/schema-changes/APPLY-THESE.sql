@@ -93,6 +93,18 @@ on public.cookie_sets (org_id, deleted_at);
 alter table public.shared_extensions
 add column if not exists enabled boolean not null default true;
 
+-- ── 2026-08-05, automations ───────────────────────────────────────────────
+-- NOT INLINED HERE. Run 2026-08-05-automations.sql next, as its own paste.
+--
+-- Everything above is `add column if not exists`, which is why it is safe to
+-- keep one copy in each file. The automations change creates two tables, eight
+-- policies and a trigger, so a second copy would be two things to keep in step
+-- instead of one -- and it opens with a column-type check whose answer decides
+-- what the rest of that file should say.
+--
+-- Run it after this file: profiles.automation_id references automations(id),
+-- so the table has to exist first.
+
 -- ── Check it worked ───────────────────────────────────────────────────────
 -- Expect ten rows: cookie_sets.deleted_at, cookie_sets.folder_id,
 -- cookie_sets.tags, folders.color, folders.icon, folders.kind,

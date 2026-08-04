@@ -30,6 +30,7 @@ export const defaultCloudState: CloudState = {
   shared_extensions: [],
   shared_bookmarks: [],
   custom_statuses: [],
+  automations: [],
 };
 
 // BUILT_IN_EXTENSIONS moved to data/extensionCatalog.ts, where it sits next to

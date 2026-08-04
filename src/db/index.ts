@@ -12,6 +12,7 @@
 // One exception to rule 1: `account` is the signed-in user's own record, which
 // belongs to a person rather than to a tenant, so its functions take no orgId.
 export * as account from './account';
+export * as automations from './automations';
 export * as bookmarks from './bookmarks';
 export * as cookieSets from './cookieSets';
 export * as extensions from './extensions';
@@ -19,6 +20,7 @@ export * as folders from './folders';
 export * as orgs from './orgs';
 export * as profiles from './profiles';
 export * as proxies from './proxies';
+export * as runs from './runs';
 export * as statuses from './statuses';
 
 export {CloudUnavailableError, STORAGE_BUCKET, supabase} from './client';

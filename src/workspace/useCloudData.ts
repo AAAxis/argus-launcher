@@ -91,7 +91,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setLoading(true);
     }
     try {
-      // allSettled, not all. These eight reads are independent, and Promise.all
+      // allSettled, not all. These nine reads are independent, and Promise.all
       // rejects the whole batch on the first failure -- which meant one table
       // the client could not read left `loaded` unassigned, setState never
       // called, and the entire workspace rendering as defaultCloudState. A
@@ -100,7 +100,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       // while the rows sat untouched in Postgres. Read failures must degrade to
       // the tables they actually affect.
       const [profilesResult, proxiesResult, foldersResult, cookiesResult, extensionsResult,
-        bookmarksResult, statusesResult, organizationResult] = await Promise.allSettled([
+        bookmarksResult, statusesResult, automationsResult,
+        organizationResult] = await Promise.allSettled([
         db.profiles.list(targetOrgId),
         db.proxies.list(targetOrgId),
         db.folders.list(targetOrgId),
@@ -108,6 +109,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         db.extensions.list(targetOrgId),
         db.bookmarks.list(targetOrgId),
         db.statuses.list(targetOrgId),
+        db.automations.list(targetOrgId),
         db.orgs.getOrg(targetOrgId),
       ]);
 
@@ -138,6 +140,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       const sharedExtensions = take('extensions', extensionsResult, []);
       const bookmarkRows = take('bookmarks', bookmarksResult, []);
       const customStatuses = take('statuses', statusesResult, []);
+      const automations = take('automations', automationsResult, []);
       const organization = take('organization', organizationResult, null);
       const mergedBookmarks = mergeBookmarks(bookmarkRows, socialBookmarks);
 
@@ -163,6 +166,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
           ...(bookmarksResult.status === 'fulfilled' ?
             {shared_bookmarks: mergedBookmarks.bookmarks} : {}),
           ...(statusesResult.status === 'fulfilled' ? {custom_statuses: customStatuses} : {}),
+          ...(automationsResult.status === 'fulfilled' ? {automations} : {}),
           ...(organizationResult.status === 'fulfilled' ?
             {built_in_extensions: organization?.built_in_extensions} : {}),
         }));
@@ -185,6 +189,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         shared_extensions: sharedExtensions,
         shared_bookmarks: mergedBookmarks.bookmarks,
         custom_statuses: customStatuses,
+        automations,
         built_in_extensions: organization?.built_in_extensions,
       };
 

@@ -1,3 +1,11 @@
+import type {
+  AutomationStep,
+  AutomationVars,
+  RunLogEntry,
+  RunStatus,
+  RunTrigger,
+} from './automations/types';
+
 // Mirrors argus::Fingerprint's JSON dict keys (chrome/browser/argus/
 // argus_fingerprint.cc ToDict/FromDict) so it can be dropped straight into
 // --argus-fingerprint-json for the browser to apply verbatim. timezone,
@@ -74,6 +82,16 @@ export type ArgusProfile = {
   // above instead.
   cookie_mode?: 'paste' | 'saved';
   cookie_id?: string | null;
+  // The automation that runs when this profile launches, or null for none.
+  // One per profile on purpose: the on-launch trigger fires exactly once, so
+  // "what runs when I click Launch" must have exactly one answer -- the same
+  // argument cookie_id above is built on, and why neither has a join table.
+  //
+  // Attaching one is also what opens --remote-debugging-port for that launch.
+  // A profile with no automation gets no port, because an always-open debug
+  // port is connectable by any local process and CDP attachment is observable
+  // from the page.
+  automation_id?: string | null;
   command_line_switches?: string | null;
   fingerprint?: {
     os?: string;
@@ -235,6 +253,59 @@ export type BuiltInExtensionToggles = {
   foxywall_free_proxy?: boolean;
 };
 
+// A workflow: an ordered list of steps driven against one profile's browser
+// over CDP. The steps themselves are typed in src/automations/types.ts.
+//
+// Saved automations are documents, not assets -- nothing on disk belongs to
+// one, so there is no deleted_at and no Trash. Deleting one detaches the
+// profiles pointing at it (ON DELETE SET NULL) and leaves its runs readable,
+// which is what automation_name on AutomationRun is for.
+export type ArgusAutomation = {
+  id: string;
+  name: string;
+  description?: string | null;
+  steps: AutomationStep[];
+  // Seed values every run starts with, before any setVar or extract.
+  variables?: AutomationVars;
+  // Shows as a tile on every profile's generated start page. Org-wide: the
+  // per-profile slot is ArgusProfile.automation_id, and pins are the
+  // many-to-many case that would otherwise need a join table.
+  pinned?: boolean;
+  // Whole-run ceiling. The runner also caps every individual step.
+  timeout_ms?: number;
+  // Whether to close the browser when the run ends. Defaults false for runs a
+  // human is watching (on-launch, start-page) and true for MCP and API runs,
+  // where nobody is looking at the window.
+  close_on_finish?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+// One execution. Written when the run starts, not when it finishes, so a crash
+// still leaves a record -- a run that vanishes without one is the worst
+// outcome. The runner mirrors this to <userData>/AutomationRuns/<id>/run.json
+// on every status change and flushes it here on next launch, which is what
+// makes history honest when the window was closed mid-run.
+export type AutomationRun = {
+  id: string;
+  automation_id?: string | null;
+  // Denormalized at write time so a run still reads after its automation is
+  // deleted.
+  automation_name: string;
+  profile_id?: string | null;
+  profile_name: string;
+  trigger: RunTrigger;
+  status: RunStatus;
+  started_at: string;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  step_count: number;
+  failed_step_id?: string | null;
+  error?: string | null;
+  vars: AutomationVars;
+  log: RunLogEntry[];
+};
+
 // The tenant. One client firm is one org; its workers are org_members. Every
 // row in every table below hangs off organizations.id, and RLS keys on it --
 // see docs/data-model.md. profile_limit null means unlimited (Enterprise).
@@ -247,6 +318,13 @@ export type ArgusOrg = {
   billing_status: string;
   current_period_end?: string | null;
   built_in_extensions?: BuiltInExtensionToggles;
+  // How many automations this org may save. null is unlimited, the same
+  // convention profile_limit uses; the database default is 0, so an org on a
+  // plan without automations cannot create one and every automation route
+  // refuses it. A column rather than a lookup on `plan` on purpose -- the site
+  // and the database disagree about plan keys (landing/LANDING.md:96-128), and
+  // an integer means the launcher never has to know which spelling is live.
+  automation_limit?: number | null;
 };
 
 export type OrgRole = 'owner' | 'admin' | 'member';
@@ -278,5 +356,9 @@ export type CloudState = {
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];
   custom_statuses: string[];
+  // Saved workflows. Runs are deliberately NOT here: they are unbounded and
+  // only the history view wants them, so they are read on demand -- the same
+  // reason cookie_sets.list() leaves the `cookies` column out.
+  automations: ArgusAutomation[];
   built_in_extensions?: BuiltInExtensionToggles;
 };

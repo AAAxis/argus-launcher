@@ -33,6 +33,13 @@ export function describeDbError(error: unknown, fallback = 'Something went wrong
   if (raw.includes('seat_limit_reached')) {
     return 'Your plan\'s seat limit is full. Upgrade the plan to invite more people.';
   }
+  // Raised by trg_automation_limit (2026-08-05-automations.sql). The free
+  // default is 0, so this is the first thing a free-plan user hits on the
+  // Automations tab -- it has to say what to do, not just what failed.
+  if (raw.includes('automation_limit_reached')) {
+    return 'Your plan doesn\'t include any more automations. Delete one, or upgrade the ' +
+      'plan to add more.';
+  }
   // Ids are also on-disk directory names (E:\ArgysProfiles\<id>), which is what
   // the *_id_fs_safe CHECKs protect. The CSV importer writes profile_id
   // verbatim, so this is reachable from real user input.

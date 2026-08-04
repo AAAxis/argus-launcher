@@ -16,6 +16,11 @@ export type OrganizationRow = {
   current_period_end: string | null;
   created_at: string;
   built_in_extensions: BuiltInExtensionToggles | null;
+  // How many automations this org may save; null is unlimited. Nullable here
+  // for the same reason FolderRow.kind is -- a row read back before the
+  // migration lands must map to something defined, and the client treats
+  // null-or-missing as "no automations" rather than as unlimited.
+  automation_limit: number | null;
 };
 
 export type OrgMemberRow = {
@@ -57,6 +62,8 @@ export type ProfileRow = {
   // the editor had both fields and the mappers silently dropped them.
   email: string | null;
   password: string | null;
+  // The automation to run when this profile launches. Added 2026-08-05.
+  automation_id: string | null;
 };
 
 export type ProxyRow = {
@@ -148,4 +155,48 @@ export type CustomStatusRow = {
   org_id: string;
   label: string | null;
   color: string | null;
+};
+
+// A saved workflow. `steps` and `variables` are jsonb; they come back already
+// parsed, so they are typed as what they hold rather than as string.
+//
+// Unlike the tables above, nothing here is renamed on the way through
+// mappers.ts -- these columns were named to match the app type, so the mapper
+// is a near-identity that only coerces null to undefined. The renames that do
+// exist elsewhere are historical (src/types.ts predates the schema); do not add
+// new ones.
+export type AutomationRow = {
+  id: string;
+  org_id: string;
+  name: string;
+  description: string | null;
+  steps: unknown[];
+  variables: Record<string, unknown> | null;
+  pinned: boolean | null;
+  timeout_ms: number | null;
+  close_on_finish: boolean | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// One execution. Inserted when the run starts and updated when it ends, so an
+// interrupted run leaves a `running` row rather than no row at all.
+export type AutomationRunRow = {
+  id: string;
+  org_id: string;
+  automation_id: string | null;
+  automation_name: string;
+  profile_id: string | null;
+  profile_name: string;
+  trigger: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  step_count: number;
+  failed_step_id: string | null;
+  error: string | null;
+  vars: Record<string, unknown> | null;
+  log: unknown[];
 };

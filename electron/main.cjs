@@ -2486,12 +2486,18 @@ ipcMain.handle('argus:integration-status', async (_event, {integrationId}) => {
   const entry = manual ?
     {configPath: null, hasEntry: false, command: null, args: []} :
     integrations.readIntegrationEntry({integrationId, home, platform: process.platform});
+  const found = manual ?
+    {found: true, evidence: ''} :
+    integrations.detectToolDetail(integrationId, home, process.platform);
   return {
     configPath: entry.configPath,
     manual,
     // Hive and the generic card have nothing to detect -- treat them as
     // present so the UI never labels them "not installed".
-    installed: manual || integrations.detectTool(integrationId, home, process.platform),
+    installed: found.found,
+    // The exact thing on disk that says so, for a UI that would rather show a
+    // path than assert. Empty when nothing was found, and for the manual cards.
+    installedEvidence: found.evidence,
     hasEntry: entry.hasEntry,
     entryIsCurrent: entryIsCurrent(entry),
     stale: integrations.isStaleEntry(entry),
@@ -2719,12 +2725,29 @@ ipcMain.handle('argus:verify-integration', async (_event, {integrationId}) => {
   const checks = [];
   const add = (id, label, ok, detail) => checks.push({id, label, ok, detail: detail || ''});
 
+  const manual = integrations.isManual(integrationId);
+  const tool = integrations.TOOLS[integrationId];
+
+  // First, and about the tool rather than about us. Every other check on this
+  // list proves only our own side -- that we wrote a file, and that the server
+  // we ship starts and can reach the API -- all of which is just as true for a
+  // tool that is not installed. Seven green rows for a machine with no Cursor
+  // on it is what this row exists to stop.
+  if (!manual) {
+    const found = integrations.detectToolDetail(integrationId, home, process.platform);
+    add('tool', `${tool ? tool.name : integrationId} is on this machine`, found.found,
+        found.found ?
+          found.evidence :
+          `Nothing here looks like ${tool ? tool.name : integrationId}. ` +
+            'The settings below are still written and will work as soon as you install it.');
+  }
+
   add('api', 'Local API is running', apiState.status === 'ready',
       apiState.status === 'ready' ?
         apiState.url :
         `The local automation API is ${apiState.status || 'not running'}.`);
 
-  if (integrations.isManual(integrationId)) {
+  if (manual) {
     return {ok: checks.every((check) => check.ok), checks};
   }
 

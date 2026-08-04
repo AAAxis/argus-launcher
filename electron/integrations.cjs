@@ -51,6 +51,94 @@ function zedConfigDir(home, platform) {
   return path.join(home, '.config', 'zed');
 }
 
+// ── Looking for the tool itself ──────────────────────────────────────────────
+// The pieces the `detect` blocks below are written in terms of. They only ever
+// answer "does this exact thing exist on disk", never "did we once write here".
+
+function existsPath(candidate) {
+  try {
+    return fs.existsSync(candidate);
+  } catch {
+    // An unreadable parent directory is not evidence either way, and must not
+    // throw out of a detection sweep that has other candidates left to try.
+    return false;
+  }
+}
+
+// Where a GUI editor is installed, per platform. macOS keeps both a system-wide
+// and a per-user Applications folder and either is a normal place to drag an
+// app to; Windows installers for all four of these default to
+// %LOCALAPPDATA%\Programs. Linux gets nothing here on purpose -- there is no
+// single convention, and it is the one platform where PATH is trustworthy.
+function appBundles(home, platform, macName, winParts) {
+  if (platform === 'darwin') {
+    return [`/Applications/${macName}.app`, path.join(home, 'Applications', `${macName}.app`)];
+  }
+  if (platform === 'win32') {
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    return [path.join(local, 'Programs', ...winParts)];
+  }
+  return [];
+}
+
+// PATH, plus the directories package managers actually install into.
+//
+// The extras are not padding: a packaged macOS app launched from Finder
+// inherits launchd's PATH, which is /usr/bin:/bin:/usr/sbin:/sbin and nothing
+// else -- no Homebrew, no ~/.local/bin, no npm prefix. Scanning only PATH would
+// therefore miss every CLI tool the moment this app is double-clicked rather
+// than run from a terminal, and label a working install "not found".
+function searchDirs(home, platform) {
+  const raw = process.env.PATH || '';
+  const dirs = raw.split(platform === 'win32' ? ';' : ':').filter(Boolean);
+  if (platform === 'win32') {
+    return dirs;
+  }
+  return dirs.concat([
+    path.join(home, '.local', 'bin'),
+    path.join(home, 'bin'),
+    path.join(home, '.bun', 'bin'),
+    path.join(home, '.volta', 'bin'),
+    path.join(home, '.deno', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+    path.join(home, '.npm-global', 'bin'),
+    path.join(home, '.yarn', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+  ]);
+}
+
+// Windows has no execute bit -- what makes a file runnable there is its
+// extension being in PATHEXT, so the name has to be tried with each of them.
+function executableNames(name, platform) {
+  if (platform !== 'win32') {
+    return [name];
+  }
+  const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  return exts.map((ext) => name + ext.toLowerCase());
+}
+
+// Returns the full path of the first match, so the caller can show the user
+// exactly what was found rather than asserting.
+function findExecutable(names, home, platform) {
+  const dirs = searchDirs(home, platform);
+  for (const name of names) {
+    for (const candidate of executableNames(name, platform)) {
+      for (const dir of dirs) {
+        const full = path.join(dir, candidate);
+        try {
+          fs.accessSync(full, fs.constants.X_OK);
+          return full;
+        } catch {
+          // Not here, or here but not runnable -- either way, keep looking.
+        }
+      }
+    }
+  }
+  return null;
+}
+
 // One row per tool. `container` is the property path our entry sits under, and
 // it is the only part that genuinely differs between JSON tools:
 //
@@ -62,72 +150,163 @@ function zedConfigDir(home, platform) {
 // `entryShape` covers the second difference: VS Code and Claude Code want an
 // explicit "type": "stdio"; the rest infer stdio from the presence of `command`.
 //
-// `detect` lists paths that mean "this tool has run on this machine". Config
-// directory presence is the only signal that works the same on macOS and
-// Windows -- a binary on PATH is a bonus, never the sole test, because plenty
-// of these ship as GUI apps that never put one there.
+// `name` is the tool as a user says it, duplicated from src/data/integrations.ts
+// because nothing compiles electron/ and the two cannot share a module. It is
+// only ever used in sentences the user reads, so drift shows up as odd wording
+// rather than as broken behaviour.
+//
+// ── `detect`: the three kinds of evidence, and why each row differs ──────────
+// This used to be one shared rule -- "any of these paths exists" -- with the
+// tool's own dot-directory in the list. That rule reported Cursor and Windsurf
+// as installed on a machine that has neither: ~/.cursor is left behind by
+// anything that ever wrote a rules file, ~/.codeium by the VS Code extension,
+// ~/.gemini by unrelated Google tooling, and -- worst of all -- ~/.cursor,
+// ~/.codeium/windsurf and Code/User are directories THIS app creates when it
+// writes the config. Detection that counts our own footprint can only ever
+// answer yes.
+//
+// So the evidence is now per tool and of three named kinds:
+//
+//   apps   The application bundle or installed executable. For the GUI editors
+//          this is the only signal that survives an uninstall honestly: the
+//          bundle goes, while everything under Application Support stays behind
+//          forever. Those four tools therefore have `apps` and `bins` and no
+//          `marks` at all -- leftover state is exactly the lie being fixed.
+//   marks  Files the tool itself writes and this app never does. Only for the
+//          CLIs, which have no bundle to look for. Never the config file we
+//          write, never the bare dot-directory that holds it.
+//   bins   Executable names, resolved by scanning PATH and the usual install
+//          directories (see findExecutable). A hit is a real file on disk and
+//          so proves presence; a miss proves nothing, because a double-clicked
+//          .app inherits launchd's minimal PATH.
 const TOOLS = {
   'claude-code': {
+    name: 'Claude Code',
     format: 'json',
     configPath: (home) => path.join(home, '.claude.json'),
     container: ['mcpServers'],
     entryShape: 'typed',
-    detect: (home) => [path.join(home, '.claude.json'), path.join(home, '.claude')],
+    // ~/.claude.json is missing here on purpose: it is the file we write, and
+    // we create it when it does not exist.
+    detect: {
+      bins: ['claude'],
+      marks: (home) => [
+        path.join(home, '.claude', 'projects'),
+        path.join(home, '.claude', 'history.jsonl'),
+        path.join(home, '.claude', 'statsig'),
+        path.join(home, '.claude', 'ide'),
+        path.join(home, '.claude', '.credentials.json'),
+        path.join(home, '.claude', 'settings.json'),
+      ],
+    },
   },
   codex: {
+    name: 'Codex',
     format: 'toml',
     configPath: (home) => path.join(home, '.codex', 'config.toml'),
-    detect: (home) => [path.join(home, '.codex')],
+    // config.toml is ours to create, so the evidence is the state Codex keeps
+    // beside it: the account it signed in with, and the sessions it recorded.
+    detect: {
+      bins: ['codex'],
+      marks: (home) => [
+        path.join(home, '.codex', 'auth.json'),
+        path.join(home, '.codex', 'sessions'),
+        path.join(home, '.codex', 'history.jsonl'),
+        path.join(home, '.codex', 'installation_id'),
+        path.join(home, '.codex', 'version.json'),
+        path.join(home, '.codex', 'log'),
+      ],
+    },
   },
   cursor: {
+    name: 'Cursor',
     format: 'json',
     configPath: (home) => path.join(home, '.cursor', 'mcp.json'),
     container: ['mcpServers'],
     entryShape: 'plain',
-    detect: (home, platform) => [
-      path.join(home, '.cursor'),
-      platform === 'darwin' ?
-        '/Applications/Cursor.app' :
-        path.join(home, 'AppData', 'Local', 'Programs', 'cursor'),
-    ],
+    detect: {
+      bins: ['cursor'],
+      apps: (home, platform) => appBundles(home, platform, 'Cursor', ['cursor', 'Cursor.exe']),
+    },
   },
   openclaw: {
+    name: 'OpenClaw',
     format: 'json',
     configPath: (home) => path.join(home, '.openclaw', 'openclaw.json'),
     container: ['mcp', 'servers'],
     entryShape: 'plain',
-    detect: (home) => [path.join(home, '.openclaw')],
+    // The one directory this app can reason about as a whole: openclaw.json is
+    // the only thing we ever put in ~/.openclaw, so anything else in there was
+    // put there by OpenClaw. Every other tool's dot-directory is shared with
+    // unrelated software, which is why none of them get this treatment.
+    detect: {
+      bins: ['openclaw'],
+      ownDir: (home) => ({dir: path.join(home, '.openclaw'), ours: ['openclaw.json']}),
+    },
   },
   'gemini-cli': {
+    name: 'Gemini CLI',
     format: 'json',
     configPath: (home) => path.join(home, '.gemini', 'settings.json'),
     container: ['mcpServers'],
     entryShape: 'plain',
-    detect: (home) => [path.join(home, '.gemini')],
+    // ~/.gemini is not evidence of anything: on the machine this bug was found
+    // on it holds only Antigravity's data. settings.json is not evidence
+    // either -- that is the file we write. The credentials and the install id
+    // are Gemini CLI's alone.
+    detect: {
+      bins: ['gemini'],
+      marks: (home) => [
+        path.join(home, '.gemini', 'oauth_creds.json'),
+        path.join(home, '.gemini', 'google_accounts.json'),
+        path.join(home, '.gemini', 'installation_id'),
+        path.join(home, '.gemini', 'commands'),
+        path.join(home, '.gemini', 'extensions'),
+        path.join(home, '.gemini', 'tmp'),
+      ],
+    },
   },
   windsurf: {
+    name: 'Windsurf',
     format: 'json',
     configPath: (home) => path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
     container: ['mcpServers'],
     entryShape: 'plain',
-    detect: (home) => [path.join(home, '.codeium', 'windsurf'), path.join(home, '.codeium')],
+    // ~/.codeium/windsurf is created by us on first connect, and ~/.codeium
+    // by the Codeium editor extension, which is not Windsurf. Bundle only.
+    detect: {
+      bins: ['windsurf'],
+      apps: (home, platform) =>
+        appBundles(home, platform, 'Windsurf', ['Windsurf', 'Windsurf.exe']),
+    },
   },
   vscode: {
+    name: 'VS Code',
     format: 'json',
     configPath: (home, platform) => path.join(vscodeUserDir(home, platform), 'mcp.json'),
     container: ['servers'],
     entryShape: 'typed',
-    detect: (home, platform) => [vscodeUserDir(home, platform), path.join(home, '.vscode')],
+    // Code/User survives an uninstall with settings.json and keybindings.json
+    // in it -- true on the machine this bug was found on, which has the folder
+    // and no VS Code. The bundle is the only thing that goes away.
+    detect: {
+      bins: ['code'],
+      apps: (home, platform) =>
+        appBundles(home, platform, 'Visual Studio Code', ['Microsoft VS Code', 'Code.exe']),
+    },
   },
   zed: {
+    name: 'Zed',
     format: 'json',
     configPath: (home, platform) => path.join(zedConfigDir(home, platform), 'settings.json'),
     container: ['context_servers'],
     entryShape: 'plain',
-    detect: (home, platform) => [
-      zedConfigDir(home, platform),
-      platform === 'darwin' ? '/Applications/Zed.app' : path.join(home, '.zed'),
-    ],
+    // ~/.config/zed holds settings.json, which is the file we write -- so the
+    // directory would report itself as Zed the moment anyone connected.
+    detect: {
+      bins: ['zed'],
+      apps: (home, platform) => appBundles(home, platform, 'Zed', ['Zed', 'Zed.exe']),
+    },
   },
 };
 
@@ -430,21 +609,59 @@ function isStaleEntry(entry) {
   return !fs.existsSync(entry.command);
 }
 
-// Advisory only. A false negative here must never block connecting -- plenty of
-// these tools can be installed somewhere this cannot see, and refusing to wire
-// up a working install would be a worse failure than an over-eager card.
-function detectTool(integrationId, home, platform) {
+// Is the tool this config is for actually on this machine, and what says so.
+//
+// The evidence is returned, not just the verdict, for two reasons. The UI can
+// then name the thing it found -- "/Applications/Cursor.app" reads as a fact
+// where "Detected" reads as a claim -- and anyone doubting a "not found" can
+// see which kinds of proof were looked for.
+//
+// A miss is still not proof of absence: someone can install any of these
+// somewhere nothing here looks. So this never blocks connecting; it only
+// decides what the card is allowed to say. Refusing to wire up a working
+// install would be a worse failure than an unsure label.
+function detectToolDetail(integrationId, home, platform) {
   const tool = TOOLS[integrationId];
-  if (!tool) {
-    return false;
+  const detect = tool && tool.detect;
+  if (!detect) {
+    return {found: false, evidence: ''};
   }
-  return tool.detect(home, platform).some((candidate) => {
+
+  // Bundles first, then tool-written state, then an executable: strongest
+  // evidence first, so the evidence string is the most convincing true thing
+  // available rather than whichever check happened to run first.
+  const paths = [
+    ...(detect.apps ? detect.apps(home, platform) : []),
+    ...(detect.marks ? detect.marks(home, platform) : []),
+  ];
+  const hit = paths.find(existsPath);
+  if (hit) {
+    return {found: true, evidence: hit};
+  }
+
+  const binary = detect.bins ? findExecutable(detect.bins, home, platform) : null;
+  if (binary) {
+    return {found: true, evidence: binary};
+  }
+
+  if (detect.ownDir) {
+    const {dir, ours} = detect.ownDir(home, platform);
     try {
-      return fs.existsSync(candidate);
+      const extra = fs.readdirSync(dir)
+          .find((entry) => !ours.includes(entry) && !entry.endsWith('.argus-tmp'));
+      if (extra) {
+        return {found: true, evidence: path.join(dir, extra)};
+      }
     } catch {
-      return false;
+      // No directory at all, which is the same answer as an empty one.
     }
-  });
+  }
+
+  return {found: false, evidence: ''};
+}
+
+function detectTool(integrationId, home, platform) {
+  return detectToolDetail(integrationId, home, platform).found;
 }
 
 module.exports = {
@@ -453,6 +670,7 @@ module.exports = {
   applyIntegrationConfig,
   configPathFor,
   detectTool,
+  detectToolDetail,
   isManual,
   isStaleEntry,
   readIntegrationEntry,
