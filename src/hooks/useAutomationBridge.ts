@@ -467,7 +467,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         }
         const result = await launchProfile(
             buildLaunchPayload(profile, proxy, state),
-            [`--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*']);
+            [`--remote-debugging-port=${cdpPort}`]);
         return {ok: result.ok, pid: result.pid, error: result.error};
       },
       cloud);

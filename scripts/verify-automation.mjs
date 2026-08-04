@@ -160,7 +160,6 @@ async function main() {
     '--disable-session-restore',
     '--new-window',
     `--remote-debugging-port=${CDP_PORT}`,
-    '--remote-allow-origins=*',
     'about:blank',
   ], {stdio: 'ignore'});
 

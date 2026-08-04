@@ -82,8 +82,14 @@ async function pageTarget(cdpUrl) {
 
 function connect(wsUrl) {
   return new Promise((resolve, reject) => {
-    // No Origin header: Chromium accepts a browserless client without one, and
-    // the browser is launched with --remote-allow-origins=* anyway.
+    // No Origin header, and that is load-bearing rather than incidental.
+    //
+    // Chromium accepts a browserless client that sends none, which is why the
+    // launch no longer passes --remote-allow-origins=*. That flag used to be on
+    // every automation launch, and '*' meant any web page in any browser on this
+    // machine could open this same socket if it found the port -- full control
+    // of a logged-in profile, which is the asset this product exists to protect.
+    // Do not add an `origin` option here; it would require re-opening that hole.
     const socket = new WebSocket(loopback(wsUrl), {
       perMessageDeflate: false,
       maxPayload: 256 * 1024 * 1024,

@@ -236,10 +236,13 @@ export function useProfileActions(
       const attached = target.automation_id ?
         state.automations.find((item) => item.id === target.automation_id) :
         null;
+      //
+      // No --remote-allow-origins either. It used to be '*' here, which let any
+      // web page in any browser on this machine drive an open profile if it
+      // found the port. Our clients all connect from Node through
+      // electron/cdp-core.cjs and send no Origin, which Chromium accepts.
       const cdpPort = attached ? await native.reserveCdpPort?.() : undefined;
-      const extraArgs = cdpPort ?
-        [`--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*'] :
-        [];
+      const extraArgs = cdpPort ? [`--remote-debugging-port=${cdpPort}`] : [];
 
       const result = await native.launchProfile(
           buildLaunchPayload(target, proxy, state), extraArgs);

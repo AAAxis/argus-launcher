@@ -109,7 +109,7 @@ export function useAutomationActions(
         const proxy = state.proxies.find((item) => item.id === profile.proxy_id) || null;
         return bridge.launchProfile(
             buildLaunchPayload(profile, proxy, state),
-            [`--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*']);
+            [`--remote-debugging-port=${cdpPort}`]);
       },
     });
     if (!result.ok) {
