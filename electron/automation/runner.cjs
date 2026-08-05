@@ -300,7 +300,7 @@ class Run {
 // This is not a style choice: AUTOMATION_REQUEST_TIMEOUT_MS is 20s and a real
 // run is minutes, so a route that awaited completion would 504 and look like a
 // hang in the runner rather than a timeout in the bridge.
-async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent}) {
+async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, onFinish}) {
   const problems = validateSteps(automation.steps || [], SCHEMA);
   if (problems.length > 0) {
     throw new Error(`This automation is not valid: ${problems.slice(0, 5).join('; ')}`);
@@ -325,12 +325,22 @@ async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent})
   onEvent({type: 'started', runId: run.id, run: run.record});
 
   // Deliberately not awaited.
-  void execute(run);
+  void execute(run, onFinish);
   return run.id;
 }
 
-async function execute(run) {
+// onFinish is what makes `close_on_finish` real. It is a callback rather than a
+// reference to the launch table on purpose: this module owns the CDP socket for
+// the length of a run and nothing else, and teaching it to kill browser
+// processes would put the two halves of the process boundary in one file. main
+// decides what closing means; this decides when.
+async function execute(run, onFinish) {
   let session = null;
+  // Seeded with a failure rather than left null: every path out of the try
+  // below assigns it, and if some future edit finds one that does not, a run
+  // that ends as 'failed' is a bug you can see rather than one that leaves the
+  // record stuck on 'running' forever.
+  let outcome = {status: 'failed', error: 'The run ended without a result'};
   const budget = Math.min(
       Number(run.automation.timeout_ms) || DEFAULT_RUN_TIMEOUT_MS,
       DEFAULT_RUN_TIMEOUT_MS);
@@ -358,18 +368,33 @@ async function execute(run) {
       timeoutIn(budget, 'This run'),
     ]);
 
-    run.finish(run.degraded ? 'partial' : 'ok', null);
+    outcome = {status: run.degraded ? 'partial' : 'ok', error: null};
   } catch (error) {
     const message = error?.message || String(error);
-    if (run.cancelled || message === 'cancelled') {
-      run.finish('cancelled', null);
-    } else {
-      run.finish('failed', message);
-    }
+    outcome = run.cancelled || message === 'cancelled' ?
+      {status: 'cancelled', error: null} :
+      {status: 'failed', error: message};
   } finally {
     if (session) {
       session.close();
     }
+    // Closing the browser happens BEFORE the record is sealed, which is why
+    // finish() moved down here. It used to sit at the end of each branch above,
+    // and a warning logged after it would have reached the open window as an
+    // event and then never been written anywhere -- finish() is what persists
+    // the log and what the renderer answers by flushing the run to Supabase.
+    //
+    // Not on 'cancelled': the user is standing at the machine having just
+    // stopped the run, and taking their window away is the opposite of what
+    // stopping asked for.
+    if (onFinish && outcome.status !== 'cancelled') {
+      try {
+        onFinish();
+      } catch (error) {
+        run.log('warn', `Could not close the browser: ${error?.message || String(error)}`);
+      }
+    }
+    run.finish(outcome.status, outcome.error);
     active.delete(run.id);
   }
 }

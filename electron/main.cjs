@@ -9,6 +9,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
+const builtInExtensions = require('./built-in-extensions.cjs');
 const {resolveFavicon} = require('./favicons.cjs');
 const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
@@ -16,6 +17,7 @@ const cdpCore = require('./cdp-core.cjs');
 const automationRunner = require('./automation/runner.cjs');
 const automationStore = require('./automation/store.cjs');
 const automationSteps = require('./automation/steps.cjs');
+const automationAi = require('./automation/ai.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
   createRunTokens, handleRecheckFromPage, handleRunFromPage,
@@ -1013,94 +1015,21 @@ function launchSafeSwitches(raw) {
   });
 }
 
-function cookieManagerSourcePath() {
-  const candidate = path.join(__dirname, '../extensions/cookie-manager');
-  return isLoadableExtensionDir(candidate) ? candidate : '';
+// Every enabled built-in extension's ready-to-load directory. What each one is
+// and where its copy goes lives in built-in-extensions.cjs; this only supplies
+// the file helpers and the cache root that module deliberately does not own.
+function builtInExtensionDeps() {
+  return {
+    isLoadableExtensionDir,
+    copyDirectoryContents,
+    parseCookieFile,
+    parseCookieUrl,
+    webstoreCachePath,
+  };
 }
 
-// onlinesim-sms is bundled for every profile regardless of proxy mode, unless
-// the Extensions tab's global toggle turns it off.
-function bundledExtensionPaths(payload) {
-  if (payload.enableSmsActivate === false) {
-    return [];
-  }
-  const bundled = [
-    {name: 'SMSActivate', source: path.join(__dirname, '../extensions/onlinesim-sms')},
-  ];
-  return bundled
-      .map((entry) => materializeBundledExtension(payload, entry.name, entry.source))
-      .filter(Boolean);
-}
-
-function materializeBundledExtension(payload, name, sourceDir) {
-  if (!payload?.userDataDir) {
-    return '';
-  }
-  if (!isLoadableExtensionDir(sourceDir)) {
-    console.warn(
-        `Skipping bundled extension "${name}": source folder is missing or has no valid ` +
-        `manifest.json (${sourceDir}). Profile launch will continue without it.`);
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, 'ArgysBundled', name);
-  fs.rmSync(extensionDir, {recursive: true, force: true});
-  copyDirectoryContents(sourceDir, extensionDir);
-  if (!isLoadableExtensionDir(extensionDir)) {
-    console.warn(
-        `Skipping bundled extension "${name}": copy to ${extensionDir} did not produce a ` +
-        `readable manifest.json. Profile launch will continue without it.`);
-    fs.rmSync(extensionDir, {recursive: true, force: true});
-    return '';
-  }
-  return extensionDir;
-}
-
-const FREE_PROXY_SOURCE_PATH = path.join(__dirname, '../extensions/foxywall');
-
-// Chrome caches an unpacked (--load-extension) service worker's script body
-// independently of its manifest version or file content -- reloading the
-// browser against the same stable path on an already-used profile can keep
-// running a stale background.js from hours earlier no matter how many times
-// the source file changes or its manifest version is bumped (confirmed via
-// live CDP inspection: chrome.runtime.getManifest().version reflected a fresh
-// bump, but functions/consts only present in newer source were still
-// undefined). Copying into a fresh, uniquely-named per-launch directory --
-// same pattern as writeProfileCookieManagerExtension below -- gives Chrome a
-// genuinely new extension identity every time, so it can never reuse a stale
-// cached service worker.
-function writeProfileFreeProxyExtension(payload) {
-  if (!isLoadableExtensionDir(FREE_PROXY_SOURCE_PATH)) {
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, `ArgysFreeProxy-${Date.now()}`);
-  copyDirectoryContents(FREE_PROXY_SOURCE_PATH, extensionDir);
-  // FoxyWall is now bundled for every profile (so its toolbar icon/manual
-  // toggle is always available), but must only auto-connect on launch when
-  // the user actually picked Free Proxy mode -- never for 'direct' (no proxy
-  // at all) or 'assigned' (a real proxy already owns the connection; this
-  // would be a second, competing proxy source). This config file is the
-  // signal background.js reads before deciding whether to auto-connect.
-  fs.writeFileSync(path.join(extensionDir, 'argus-config.json'), JSON.stringify({
-    autoConnect: Boolean(payload.useFreeProxy),
-  }));
-  return extensionDir;
-}
-
-// Stale per-launch free-proxy extension copies (see writeProfileFreeProxyExtension
-// above) accumulate one fresh directory per launch forever otherwise -- prune
-// old ones for this profile before writing today's.
-function pruneStaleFreeProxyExtensions(userDataDir) {
-  let entries;
-  try {
-    entries = fs.readdirSync(userDataDir, {withFileTypes: true});
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.startsWith('ArgysFreeProxy-')) {
-      fs.rmSync(path.join(userDataDir, entry.name), {recursive: true, force: true});
-    }
-  }
+function builtInExtensionPaths(payload) {
+  return builtInExtensions.materializeBuiltIns(payload, builtInExtensionDeps());
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,7 +1046,19 @@ function sharedExtensionsRoot() {
   return path.join(app.getPath('userData'), 'SharedExtensions');
 }
 
-function downloadBuffer(url, redirectsLeft = 5) {
+// Where a Web Store extension's unpacked copy lives on this machine, keyed by
+// its store id. One copy per machine shared by every profile -- which is why
+// built-in-extensions.cjs can list an 80 MB extension without it being copied
+// into each profile's user-data-dir the way the vendored folders are.
+function webstoreCachePath(extensionId) {
+  return path.join(sharedExtensionsRoot(), extensionId);
+}
+
+// `onProgress({receivedBytes, totalBytes})` is optional and fires as bytes
+// arrive; totalBytes is 0 when the server sends no content-length. Only the
+// CaptchaPlugin enable flow passes it -- at ~56 MB that download is long enough
+// that a card with no progress bar reads as a frozen one.
+function downloadBuffer(url, redirectsLeft = 5, onProgress = null) {
   if (url.startsWith('data:')) {
     const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url);
     if (!match) {
@@ -1130,7 +1071,8 @@ function downloadBuffer(url, redirectsLeft = 5) {
     https.get(url, {headers: {'User-Agent': 'ArgysAnty/1.0'}}, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
         res.resume();
-        resolve(downloadBuffer(new URL(res.headers.location, url).toString(), redirectsLeft - 1));
+        resolve(downloadBuffer(
+            new URL(res.headers.location, url).toString(), redirectsLeft - 1, onProgress));
         return;
       }
       if (res.statusCode !== 200) {
@@ -1138,8 +1080,16 @@ function downloadBuffer(url, redirectsLeft = 5) {
         reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
         return;
       }
+      const totalBytes = Number(res.headers['content-length']) || 0;
+      let receivedBytes = 0;
       const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('data', (chunk) => {
+        chunks.push(chunk);
+        if (onProgress) {
+          receivedBytes += chunk.length;
+          onProgress({receivedBytes, totalBytes});
+        }
+      });
       res.on('end', () => resolve(Buffer.concat(chunks)));
       res.on('error', reject);
     }).on('error', reject);
@@ -1263,11 +1213,11 @@ function copyPathRecursive(from, to, dirent = null) {
 // Google's public CRX update endpoint -- the same one Chrome itself uses to
 // fetch/update webstore extensions, so this always gets whatever the
 // developer currently has published, with no re-hosting on our side.
-async function downloadWebstoreExtension(extensionId, destDir) {
+async function downloadWebstoreExtension(extensionId, destDir, onProgress = null) {
   const url = 'https://clients2.google.com/service/update2/crx?response=redirect' +
       '&acceptformat=crx2,crx3&prodversion=124.0.0.0' +
       `&x=id%3D${extensionId}%26installsource%3Dondemand%26uc`;
-  const crxBuffer = await downloadBuffer(url);
+  const crxBuffer = await downloadBuffer(url, 5, onProgress);
   const zipOffset = crxZipOffset(crxBuffer);
   unzipBufferTo(crxBuffer.subarray(zipOffset), destDir);
 }
@@ -1313,6 +1263,111 @@ async function materializeSharedExtension(entry) {
     console.error(`Failed to materialize shared extension ${entry.id}:`, error);
     fs.rmSync(destDir, {recursive: true, force: true});
     return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Web Store built-ins (see built-in-extensions.cjs; currently CaptchaPlugin
+// alone). These are the built-ins whose files are not vendored in extensions/
+// but downloaded once per machine, because they are far too large to copy into
+// every profile.
+//
+// The org-wide toggle and the bytes live in different places: the toggle is
+// cloud state shared by the team, the bytes are local to one machine. So there
+// are two ways in. The enable click downloads with progress and only then
+// writes the toggle. A colleague's machine never clicks anything, so it also
+// gets a quiet catch-up pass at app start for "toggle on, files missing".
+// ---------------------------------------------------------------------------
+
+// key -> in-flight promise, so the enable click and the catch-up pass can never
+// run two 56 MB downloads of the same extension at once.
+const webstoreBuiltInDownloads = new Map();
+
+// A CRX whose zip has a single top-level folder unpacks one level too deep.
+// Shared extensions handle that by returning the nested path, but a built-in's
+// location has to stay derivable from its id alone -- launch looks it up via
+// webstoreCachePath() with nothing else to go on -- so flatten instead.
+function flattenNestedExtensionDir(destDir) {
+  if (fs.existsSync(path.join(destDir, 'manifest.json'))) {
+    return;
+  }
+  const entries = isDirectory(destDir) ?
+    fs.readdirSync(destDir, {withFileTypes: true}) : [];
+  const nested = entries.length === 1 && entries[0].isDirectory() ? entries[0] : null;
+  if (!nested || !isLoadableExtensionDir(path.join(destDir, nested.name))) {
+    return;
+  }
+  const nestedPath = path.join(destDir, nested.name);
+  for (const entry of fs.readdirSync(nestedPath, {withFileTypes: true})) {
+    fs.renameSync(path.join(nestedPath, entry.name), path.join(destDir, entry.name));
+  }
+  fs.rmSync(nestedPath, {recursive: true, force: true});
+}
+
+function sendBuiltInDownloadProgress(key, progress) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('argus:built-in-download-progress', {key, ...progress});
+  }
+}
+
+// Downloads a Web Store built-in into this machine's cache if it is not already
+// there. Never throws: returns {ok} so the enable click can leave the toggle
+// off and say why. `notify` is false for the unattended catch-up pass, which
+// has no card waiting on a progress bar.
+async function ensureWebstoreBuiltIn(key, {notify = false} = {}) {
+  const entry = builtInExtensions.builtInExtension(key);
+  if (!entry || entry.source.kind !== 'webstore') {
+    return {ok: false, error: `"${key}" is not a Web Store built-in extension.`};
+  }
+  const destDir = webstoreCachePath(entry.source.id);
+  if (isLoadableExtensionDir(destDir)) {
+    return {ok: true, alreadyInstalled: true};
+  }
+  const inFlight = webstoreBuiltInDownloads.get(key);
+  if (inFlight) {
+    return inFlight;
+  }
+  const run = (async () => {
+    try {
+      fs.rmSync(destDir, {recursive: true, force: true});
+      // Throttled to whole percent: a 56 MB body arrives in thousands of
+      // chunks, and one IPC message per chunk would cost more than the
+      // download.
+      let lastPercent = -1;
+      await downloadWebstoreExtension(entry.source.id, destDir, !notify ? null : (progress) => {
+        const percent = progress.totalBytes ?
+          Math.floor((progress.receivedBytes / progress.totalBytes) * 100) : -1;
+        if (percent !== lastPercent) {
+          lastPercent = percent;
+          sendBuiltInDownloadProgress(key, progress);
+        }
+      });
+      flattenNestedExtensionDir(destDir);
+      if (!isLoadableExtensionDir(destDir)) {
+        throw new Error('downloaded package has no readable manifest.json');
+      }
+      return {ok: true};
+    } catch (error) {
+      fs.rmSync(destDir, {recursive: true, force: true});
+      console.error(`Failed to download built-in extension "${key}":`, error);
+      return {ok: false, error: error?.message || String(error)};
+    } finally {
+      webstoreBuiltInDownloads.delete(key);
+    }
+  })();
+  webstoreBuiltInDownloads.set(key, run);
+  return run;
+}
+
+// "Toggle on, files missing" -- the state a machine lands in when someone else
+// on the team enabled it. Runs unattended at app start; launches never wait on
+// it, so until it finishes those profiles simply launch without the extension.
+function catchUpWebstoreBuiltIns(toggles) {
+  for (const entry of builtInExtensions.BUILT_IN_EXTENSIONS) {
+    if (entry.source.kind !== 'webstore') continue;
+    if (!builtInExtensions.builtInEnabled(toggles, entry)) continue;
+    if (isLoadableExtensionDir(webstoreCachePath(entry.source.id))) continue;
+    void ensureWebstoreBuiltIn(entry.key);
   }
 }
 
@@ -1435,61 +1490,6 @@ async function parseCookieUrl(url) {
   }
   const buffer = await downloadBuffer(url);
   return parseCookieContent(buffer.toString('utf8'));
-}
-
-// Writes one merged "Argus Cookie Manager" extension per launch, into the
-// profile's own user-data-dir: a copy of extensions/cookie-manager's manual
-// export/import UI, plus (only when this profile has a cookie file assigned)
-// a seed-cookies.json the extension's own background.js auto-imports once on
-// first run. Previously this shipped as two separate extensions (a shared
-// "Argus Cookie Manager" plus a per-profile "Argus Cookie Seed <name>"
-// generated from an inline script) -- merged so each profile shows exactly
-// one cookie extension that both seeds and manages.
-async function writeProfileCookieManagerExtension(payload) {
-  const sourceDir = cookieManagerSourcePath();
-  if (!isLoadableExtensionDir(sourceDir)) {
-    console.warn(
-        `Skipping Cookie Manager extension: source folder is missing or has no valid ` +
-        `manifest.json (${sourceDir}). Profile launch will continue without it.`);
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, 'ArgysCookieManager');
-  fs.rmSync(extensionDir, {recursive: true, force: true});
-  copyDirectoryContents(sourceDir, extensionDir);
-  if (!isLoadableExtensionDir(extensionDir)) {
-    console.warn(
-        `Skipping Cookie Manager extension: copy to ${extensionDir} did not produce a ` +
-        `readable manifest.json. Profile launch will continue without it.`);
-    fs.rmSync(extensionDir, {recursive: true, force: true});
-    return '';
-  }
-  // Lets the popup show which profile it's attached to (Argys Browser windows
-  // are otherwise unlabeled from the extension's point of view).
-  fs.writeFileSync(path.join(extensionDir, 'profile-meta.json'), JSON.stringify({
-    id: payload.id || '',
-    name: payload.name || '',
-  }, null, 2));
-  const writeSeedCookies = (cookies) => {
-    if (cookies.length) {
-      fs.writeFileSync(path.join(extensionDir, 'seed-cookies.json'), JSON.stringify({cookies}, null, 2));
-    }
-  };
-  if (payload.cookieImportUrl) {
-    try {
-      writeSeedCookies(await parseCookieUrl(payload.cookieImportUrl));
-    } catch {
-      // Fall back to a local path below if one is still available.
-    }
-  }
-  if (!fs.existsSync(path.join(extensionDir, 'seed-cookies.json')) && payload.cookieImportPath) {
-    try {
-      writeSeedCookies(parseCookieFile(payload.cookieImportPath));
-    } catch {
-      // No seed file written: the extension's own fetch() of seed-cookies.json
-      // simply finds nothing and skips seeding, so this fails soft.
-    }
-  }
-  return extensionDir;
 }
 
 function proxyArgs(proxy) {
@@ -2220,10 +2220,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
       };
     }
   }
-  const extensionPaths = [
-    ...bundledExtensionPaths(payload),
-    ...(payload.extensionPaths || []),
-  ].filter(Boolean);
+  const extensionPaths = [...(payload.extensionPaths || [])].filter(Boolean);
   // Team-shared extensions (see SharedExtension in src/types.ts): each is a
   // reference (webstore id, or a Storage URL), materialized into a local
   // cache on first use on this machine. A missing/offline one resolves to ''
@@ -2244,23 +2241,20 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   const launchUrl = payload.startUrl || argusHomeUrl;
   writeProfileStartupPrefs(payload.userDataDir, launchUrl, argusHomeUrl);
   writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
-  const cookieManagerPath = payload.enableCookieManager !== false ?
-    await writeProfileCookieManagerExtension(payload) : '';
-  if (cookieManagerPath) {
-    extensionPaths.push(cookieManagerPath);
-  }
-  // Bundled for every profile (so its toolbar icon/manual toggle is always
-  // available) unless the Extensions tab's global switch turns it off
-  // entirely. writeProfileFreeProxyExtension's own argus-config.json still
-  // gates auto-connect to payload.useFreeProxy only -- being merely installed
-  // never makes it touch chrome.proxy.settings on its own, so an
+  // Built-in extensions (see built-in-extensions.cjs): the folders vendored in
+  // extensions/, copied into this profile's own user-data-dir, plus any Web
+  // Store one already sitting in this machine's shared cache. Each resolves to
+  // '' rather than throwing, so a missing or unreadable one is skipped instead
+  // of blocking the launch.
+  //
+  // After killExistingProfileProcess above, not before: these write into the
+  // user-data-dir of a browser that may still be running until that call.
+  //
+  // Being bundled is not the same as being active -- FoxyWall's own
+  // argus-config.json still gates auto-connect to payload.useFreeProxy, so
+  // merely installing it never makes it touch chrome.proxy.settings and an
   // assigned-proxy profile's connection is never contested.
-  pruneStaleFreeProxyExtensions(payload.userDataDir);
-  const freeProxyPath = payload.enableFoxywallFreeProxy !== false ?
-    writeProfileFreeProxyExtension(payload) : '';
-  if (freeProxyPath) {
-    extensionPaths.push(freeProxyPath);
-  }
+  extensionPaths.push(...await builtInExtensionPaths(payload));
   const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);
   const switches = launchSafeSwitches(payload.commandLineSwitches);
   const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
@@ -2973,6 +2967,32 @@ ipcMain.handle('argus:install-update', async () => {
     return {ok: false, error: 'No downloaded update is ready to install.'};
   }
   autoUpdater.quitAndInstall(false, true);
+  return {ok: true};
+});
+
+// Downloads a Web Store built-in on demand -- the enable click. Resolves
+// {ok:false, error} rather than throwing so the Extensions tab can leave the
+// switch off and show why, instead of writing a toggle every profile then
+// silently launches without.
+ipcMain.handle('argus:install-built-in-extension', async (_event, {key}) =>
+  ensureWebstoreBuiltIn(key, {notify: true}));
+
+// Which Web Store built-ins this machine actually has on disk. The toggle is
+// org-wide, the bytes are per machine, so the card needs both to know whether
+// to offer Enable, a progress bar, or nothing.
+ipcMain.handle('argus:built-in-extension-status', async () => {
+  const installed = {};
+  for (const entry of builtInExtensions.BUILT_IN_EXTENSIONS) {
+    if (entry.source.kind !== 'webstore') continue;
+    installed[entry.key] = isLoadableExtensionDir(webstoreCachePath(entry.source.id));
+  }
+  return {installed};
+});
+
+// Fired once when the workspace's cloud state loads: picks up anything a
+// teammate enabled on their machine. Fire-and-forget by design.
+ipcMain.handle('argus:catch-up-built-in-extensions', async (_event, {toggles}) => {
+  catchUpWebstoreBuiltIns(toggles);
   return {ok: true};
 });
 
@@ -3697,6 +3717,16 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
       cdpUrl: payload.cdpUrl,
       vars: payload.vars,
       onEvent: sendRunEvent,
+      // close_on_finish, which until now was a checkbox that saved and did
+      // nothing. Two conditions, not one: the automation has to ask for it AND
+      // this run has to have opened the browser itself. ownsSession comes from
+      // the renderer, which is the only side that knows -- it is the half of
+      // startRun that had to launch the profile because it was not already
+      // open. Without it, ticking the box would close the window a user was
+      // working in the moment they ran anything against that profile.
+      onFinish: payload.automation?.close_on_finish && payload.ownsSession ?
+        () => killAutomationLaunch(payload.profile.id) :
+        undefined,
     });
     return {ok: true, runId};
   } catch (error) {
@@ -3708,6 +3738,36 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
 
 ipcMain.handle('argus:cancel-automation-run', async (_event, {runId}) => {
   return {ok: automationRunner.cancel(runId)};
+});
+
+// The workspace's model endpoints, pushed over from the renderer.
+//
+// It is a push and not a pull because this process holds no Supabase
+// credentials and must never start: the renderer is the only side that can read
+// ai_providers, so it hands the resolved list across whenever it changes.
+// Memory only -- nothing here is written to disk, exactly as run tokens are
+// handled, and for the same reason.
+ipcMain.handle('argus:set-ai-providers', async (_event, {providers}) => {
+  automationAi.setProviders(providers);
+  return {ok: true};
+});
+
+// The Test button in Settings → AI providers. Deliberately the cheapest call
+// the API will accept: this answers "does this key reach this model", and a
+// longer answer would cost the user money to learn nothing more.
+ipcMain.handle('argus:test-ai-provider', async (_event, {provider}) => {
+  try {
+    await automationAi.complete({
+      provider,
+      user: 'Reply with the single word: ok',
+      maxTokens: 8,
+    });
+    return {ok: true};
+  } catch (error) {
+    // The provider's own words. describeDbError has no equivalent here and a
+    // generic "the test failed" would hide the one useful sentence.
+    return {ok: false, error: error?.message || String(error)};
+  }
 });
 
 // A run that is in flight right now, so a reopened window can rejoin one that

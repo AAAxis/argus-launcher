@@ -65,16 +65,18 @@ export function IntroModal({steps, onClose, finishLabel, onFinish}: {
       <div className="intro-body">
         {/* The frame is 16:10 whether or not a screenshot exists yet, so a step
           * that has one and a step that does not sit at the same height in the
-          * same dialog and Next never shifts the text under it. A shot is
-          * letterboxed inside it rather than cropped to fit: these are pictures
-          * of a UI, and cutting the edge off a dialog to make it 16:10 would
-          * take the thing being pointed at with it.
+          * same dialog and Next never shifts the text under it.
+          * A shot is letterboxed inside it by default rather than cropped to
+          * fit: these are pictures of a UI, and cutting the edge off a dialog to
+          * make it 16:10 would take the thing being pointed at with it. A step
+          * whose shot is the whole app window opts out with `fill` -- there the
+          * only thing at the edge is wallpaper. See IntroStep.fill.
           * The caption sits under the frame in both cases. It used to be inside
           * the placeholder, which is fine for a label on an empty box and wrong
           * for one on a picture. */}
         <figure className="intro-figure">
           <div
-            className={step.image ? 'intro-figure-frame has-shot' : 'intro-figure-frame'}
+            className={frameClass(step)}
             data-figure={step.figure}
           >
             {step.image ?
@@ -87,4 +89,14 @@ export function IntroModal({steps, onClose, finishLabel, onFinish}: {
       </div>
     </Modal>
   );
+}
+
+// `has-shot` swaps the placeholder's dashed outline for a solid mount; `is-full`
+// then drops the mount's inset so the picture reaches the frame's edges. Both
+// are meaningless without an image, so neither is set until there is one.
+function frameClass(step: IntroStep) {
+  if (!step.image) {
+    return 'intro-figure-frame';
+  }
+  return step.fill ? 'intro-figure-frame has-shot is-full' : 'intro-figure-frame has-shot';
 }

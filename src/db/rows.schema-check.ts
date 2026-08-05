@@ -25,6 +25,7 @@
 
 import type {Database} from './database.types';
 import type {
+  AiProviderRow,
   AutomationRow,
   AutomationRunRow,
   CookieSetRow,
@@ -60,6 +61,7 @@ const _sharedExtensions: ColumnsExist<SharedExtensionRow, Tables['shared_extensi
 const _sharedBookmarks: ColumnsExist<SharedBookmarkRow, Tables['shared_bookmarks']['Row']> = true;
 const _customStatuses: ColumnsExist<CustomStatusRow, Tables['custom_statuses']['Row']> = true;
 const _automations: ColumnsExist<AutomationRow, Tables['automations']['Row']> = true;
+const _aiProviders: ColumnsExist<AiProviderRow, Tables['ai_providers']['Row']> = true;
 const _automationRuns: ColumnsExist<AutomationRunRow, Tables['automation_runs']['Row']> = true;
 /* eslint-enable @typescript-eslint/no-unused-vars */
 

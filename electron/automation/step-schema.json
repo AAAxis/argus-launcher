@@ -152,6 +152,55 @@
     ],
     "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
   },
+  "aiPrompt": {
+    "label": "Ask AI",
+    "icon": "sparkles",
+    "summary": "Ask AI into {into}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "provider", "kind": "provider", "label": "Provider",
+       "hint": "Leave as the workspace default unless this step needs a specific model."},
+      {"key": "prompt", "kind": "textarea", "label": "Prompt", "required": true,
+       "interpolate": true,
+       "placeholder": "Summarise this page in one sentence.",
+       "hint": "Supports {{vars.x}} and {{profile.email}}."},
+      {"key": "context", "kind": "select", "label": "Show the model", "default": "none",
+       "options": ["none", "pageText", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"context": "selector"}, "check": "selector"},
+      {"key": "format", "kind": "select", "label": "Answer as", "default": "text",
+       "options": ["text", "json"]},
+      {"key": "maxTokens", "kind": "number", "label": "Answer length cap (tokens)", "min": 1,
+       "max": 4096, "default": 512},
+      {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "hint": "Readable afterwards as {{vars.<name>}}."}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies. Page text is truncated before it is sent."
+  },
+  "aiCheck": {
+    "label": "AI check",
+    "icon": "scan-eye",
+    "summary": "AI check: {question}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "provider", "kind": "provider", "label": "Provider"},
+      {"key": "question", "kind": "textarea", "label": "Yes/no question", "required": true,
+       "interpolate": true,
+       "placeholder": "Is this a captcha or bot-check page?"},
+      {"key": "context", "kind": "select", "label": "Show the model", "default": "pageText",
+       "options": ["none", "pageText", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"context": "selector"}, "check": "selector"},
+      {"key": "into", "kind": "text", "label": "Store the answer in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "hint": "Stores \"yes\" or \"no\". Branch on it with an If step: {{vars.<name>}} equals yes."},
+      {"key": "onFalse", "kind": "select", "label": "If the answer is no", "default": "continue",
+       "options": ["continue", "fail"],
+       "hint": "\"fail\" makes this an assertion: the step fails and On failure decides the rest."}
+    ],
+    "note": "The model is asked for one word and nothing else. Anything it says that is not yes or no fails the step rather than being guessed at."
+  },
   "if": {
     "label": "If",
     "icon": "git-branch",

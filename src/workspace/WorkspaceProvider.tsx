@@ -7,11 +7,13 @@ import {baseProfileStatuses} from '../data/statuses';
 import {tagsInUse} from '../lib/tags';
 import {statusList} from '../lib/text';
 import {useToast} from '../hooks/useToast';
+import {native} from '../native';
 import {useOrg} from '../org';
 import {useCloudData} from './useCloudData';
 import {useCookieActions} from './useCookieActions';
 import {useLibraryActions} from './useLibraryActions';
 import {useProfileActions} from './useProfileActions';
+import {useAiProviderActions} from './useAiProviderActions';
 import {useAutomationActions} from './useAutomationActions';
 import {useProxyActions} from './useProxyActions';
 import {useSharedActions} from './useSharedActions';
@@ -23,6 +25,7 @@ import type {CloudData} from './useCloudData';
 import type {CookieActions} from './useCookieActions';
 import type {LibraryActions} from './useLibraryActions';
 import type {ProfileActions} from './useProfileActions';
+import type {AiProviderActions} from './useAiProviderActions';
 import type {AutomationActions} from './useAutomationActions';
 import type {ProxyActions} from './useProxyActions';
 import type {SharedActions} from './useSharedActions';
@@ -36,6 +39,7 @@ export type WorkspaceValue = {
   library: LibraryActions;
   cookies: CookieActions;
   automations: AutomationActions;
+  aiProviders: AiProviderActions;
   // Members and invites. The roster itself is in data.state.members, since the
   // Profiles table reads it too; this is the mutations plus the invite list,
   // which only the owner can see.
@@ -123,6 +127,10 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   // records are written by whoever is signed in, and a run that starts while
   // signed out has to buffer to disk instead of failing.
   const automations = useAutomationActions(core, proxies, orgId, Boolean(org.userId));
+  // Mounted here rather than in the settings dialog: it pushes the provider
+  // list into the main process on every change, and that has to keep happening
+  // whether or not anyone has Settings open.
+  const aiProviders = useAiProviderActions(core);
   const team = useTeamActions(core);
   const shared = useSharedActions(core);
 
@@ -153,6 +161,21 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
       }
     });
   }, [orgId, load, reset]);
+
+  // Built-in extensions whose files are downloaded rather than vendored (see
+  // electron/built-in-extensions.cjs) have an org-wide toggle but per-machine
+  // bytes. So when a colleague enables one, this machine arrives with the
+  // toggle already on and nothing on disk, and it never sees the click that
+  // would have fetched it. Ask main to fill any such gap once the org's state
+  // is here. Fire-and-forget: launches never wait on it, and profiles started
+  // before it lands simply run without that extension.
+  const builtInToggles = data.state.built_in_extensions;
+  useEffect(() => {
+    if (!orgId) {
+      return;
+    }
+    void native?.catchUpBuiltInExtensions?.(builtInToggles);
+  }, [orgId, builtInToggles]);
 
   // A second worker's changes only reach this machine when we ask for them.
   // Window focus is the cheapest honest trigger: it is exactly the moment the
@@ -230,6 +253,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     library,
     cookies,
     automations,
+    aiProviders,
     team,
     shared,
     selectedProfileId,

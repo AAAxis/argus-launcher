@@ -31,6 +31,7 @@ export const defaultCloudState: CloudState = {
   shared_bookmarks: [],
   custom_statuses: [],
   automations: [],
+  ai_providers: [],
   members: [],
 };
 

@@ -9,6 +9,7 @@
 // translation lives here instead and the UI keeps reading what it always read.
 import {normalizeTags} from '../lib/tags';
 import type {
+  ArgusAiProvider,
   ArgusAutomation,
   ArgusCookie,
   ArgusFolder,
@@ -35,6 +36,7 @@ import type {
   RunTrigger,
 } from '../automations/types';
 import type {
+  AiProviderRow,
   AutomationRow,
   AutomationRunRow,
   CookieSetRow,
@@ -453,6 +455,39 @@ export function rowToStatus(row: CustomStatusRow): string {
 // to match the app type precisely so no new ones were needed. Everything below
 // only coerces null to undefined and fills defaults for a row written before a
 // column existed.
+
+export function rowToAiProvider(row: AiProviderRow): ArgusAiProvider {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    base_url: row.base_url,
+    model: row.model,
+    api_key: row.api_key,
+    is_default: row.is_default ?? false,
+    created_at: undef(row.created_at),
+    updated_at: undef(row.updated_at),
+  };
+}
+
+// Blank strings become null rather than being written through. An empty
+// base_url means "use the preset's endpoint", and '' is not that -- it would
+// resolve to a request against the empty URL.
+export function aiProviderToRow(
+    orgId: string, provider: ArgusAiProvider): Insert<AiProviderRow> {
+  return {
+    id: provider.id,
+    org_id: orgId,
+    name: provider.name.trim(),
+    kind: provider.kind,
+    base_url: provider.base_url?.trim() || null,
+    model: provider.model.trim(),
+    api_key: provider.api_key?.trim() || null,
+    is_default: provider.is_default ?? false,
+    created_at: provider.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
 
 export function rowToAutomation(row: AutomationRow): ArgusAutomation {
   return {

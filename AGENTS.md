@@ -303,6 +303,48 @@ not rank for "argus browser" and the site is not indexed.
 launch, which let any web page reach the CDP socket. Our clients send no
 `Origin` and Chromium accepts that.
 
+**`close_on_finish` is real now, and it closes only what the run opened.**
+It was persisted, mapped both ways and editable for months while nothing read
+it — `showcaseAutomation.ts` said so in a comment. The rule has two halves and
+both are load-bearing: the automation asks for it, AND the renderer reports
+`ownsSession` (the `!session.running` branch of `startRun` — the run had to
+launch the profile). `main.cjs` ANDs them and hands `runner.start` an
+`onFinish` callback that calls `killAutomationLaunch`. Drop `ownsSession` and
+ticking that box closes the window a user was working in the moment they run
+anything against that profile. Cancelling never closes anything either — the
+user just asked for the run to stop, not for their window to go.
+
+The runner takes a **callback**, not the launch table. It owns the CDP socket
+for the length of a run and nothing else; teaching it to kill processes puts
+both halves of the process boundary in one file. `run.finish()` moved into
+`execute`'s `finally` for this: the close happens before the record is sealed,
+so a browser that will not die is logged into the run the user reads rather
+than into a record that was already flushed.
+
+**The AI steps' key never leaves the main process.** `aiPrompt`/`aiCheck` store
+a provider *id*; the renderer reads `ai_providers` from Supabase and pushes the
+resolved list over `argus:set-ai-providers`, where `automation/ai.cjs` holds it
+in a module-level Map — memory only, like run tokens. That is what keeps the
+credential out of the steps, the vars, the log and `run.json`, which is what
+makes it safe for a run record to be flushed to the cloud and read by the org.
+Do not add a step field that carries a key, and do not let any MCP tool list
+providers with `api_key` — `useAutomationBridge` already strips proxy
+credentials for exactly this reason.
+
+The **adapter and base URL are resolved on the renderer side**
+(`runtimeProvider` in `src/data/aiProviders.ts`) before the push. Nothing
+compiles `electron/`, so the alternative is a second hand-kept copy of thirteen
+base URLs over there — the same drift `step-schema.json` exists to prevent.
+There are two adapters for thirteen providers because eleven of them publish an
+OpenAI-compatible `/chat/completions`. Do not write a third without checking
+first.
+
+**`aiCheck` stores `'yes'`/`'no'` as a string, not a boolean.**
+`evaluateCondition` compares with `String()` on both sides, so a boolean would
+work by accident and read as a bug. Anything the model says that is not one of
+those two words fails the step rather than being guessed at — a hedge silently
+resolving to `no` is how a branch starts taking the wrong arm.
+
 **The Run button never picks a profile.** It opens `RunAutomationModal`. It used
 to call `runTarget()` — the single attached profile, else whatever row happened
 to be highlighted on the Profiles tab — and the first sign that the guess was
@@ -313,6 +355,18 @@ proxy health before the commit and a profile whose proxy failed its check cannot
 be ticked. `runTarget` still exists for the editor's Check button alone, and now
 prefers `automations.lastRunProfileId()` so Check tests against the page the
 last run actually used — the two agreeing is the reason that file exists.
+
+**Why Run is greyed out is `describeRunBlock`, and it lives beside
+`runReadiness`.** The card used to disable Run for one reason (no profiles) and
+leave it enabled for the other (every profile's proxy dead), which opened a
+dialog where nothing could be ticked and nothing said why. Both reasons now come
+from the same pure function the dialog's rows use, so the button and the dialog
+cannot disagree. It returns a sentence, not a structure: the card shows it as a
+`title` on a **wrapper span**, because Chromium suppresses pointer events on a
+disabled control and a `title` on the button itself never appears at the one
+moment it is needed. There is deliberately no banner on the card — the tab
+already carries one standing note, and repeating it per card says it twelve
+times.
 
 **`RUN_CONCURRENCY` (`src/automations/limit.ts`) must equal
 `MAX_CONCURRENT_RUNS` (`electron/automation/runner.cjs`).** The runner's cap

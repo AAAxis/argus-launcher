@@ -28,7 +28,12 @@ export type FieldKind =
   | 'boolean'
   | 'keyvalue'
   | 'steps'
-  | 'condition';
+  | 'condition'
+  // A dropdown of the workspace's configured AI providers. The one field kind
+  // whose options are data rather than a list in the JSON -- which is why the
+  // editor threads the provider list down to StepFields the same way it threads
+  // checkProfile, instead of the schema naming them.
+  | 'provider';
 
 export type FieldSpec = {
   key: string;

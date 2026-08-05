@@ -39,8 +39,16 @@ export type PlanInfo = {
   // identical bullets across two adjacent cards is what makes a pricing table
   // unreadable.
   carriesOver?: PlanKey;
-  // The one card that gets the ribbon and the filled button.
-  highlighted?: boolean;
+  // The banner over the card, and the reason it is there: "Most popular" on
+  // Team, "Most valuable" on Enterprise. A tier that carries one also gets the
+  // accent border, the tinted card and the filled button.
+  //
+  // It is copy rather than a boolean because the two recommended tiers are
+  // recommended for different reasons -- Team is what most workspaces buy,
+  // Enterprise is what buys the most -- and a shared "Most popular" on both
+  // would be the same claim made twice, which is no claim at all. Base has no
+  // ribbon: it is the way in, not a recommendation.
+  ribbon?: string;
 };
 
 export const PLANS: Record<PlanKey, PlanInfo> = {
@@ -92,7 +100,7 @@ export const PLANS: Record<PlanKey, PlanInfo> = {
       '10 automations',
       'Local API access',
     ],
-    highlighted: true,
+    ribbon: 'Most popular',
   },
   team: {
     key: 'team',
@@ -108,6 +116,7 @@ export const PLANS: Record<PlanKey, PlanInfo> = {
       'Up to 25 people, sharing one workspace',
       '100 automations',
     ],
+    ribbon: 'Most valuable',
   },
 };
 

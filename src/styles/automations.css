@@ -24,20 +24,13 @@
  *
  * The rest of the wrapper -- the 1080px cap, the column, the 16px gap -- is the
  * shared `.api-panel, .automations-tab, .extensions-tab` rule in styles.css,
- * which this tab joined when it was restyled to match Extensions. Only the
- * empty state below overrides it.
+ * which this tab joined when it was restyled to match Extensions.
  *
- * With no cards to sit above, the hero should be in the middle of the working
- * area rather than tucked under the header -- a lone paragraph pinned to the
- * top of a tall window reads as a page that failed to load rather than as an
- * empty library. min-height instead of a full-height chain because the tab's
- * ancestors are not height-constrained, and 60vh centres it without making the
- * pane scroll on a short window. */
-.automations-tab.is-empty {
-  align-content: center;
-  display: grid;
-  min-height: 60vh;
-}
+ * A tab with no automations at all does not use this wrapper: it returns
+ * .tab-empty (styles.css) instead, the shared whole-tab empty state that
+ * Profiles, Proxies, Cookies and the Start page all sit in. There used to be an
+ * `.is-empty` override here that centred the hero in 60vh, which is why the
+ * glyph on this tab sat lower than on those and moved as the window resized. */
 
 /* The one .api-note in the app that carries an action. It is a standing fact
    *and* the way out of it -- load the example before making a profile and this
@@ -108,15 +101,16 @@
   min-width: 0;
 }
 
-/* Pushed to the right edge of the head, which is where .extension-card's
-   remove button sits. Delete moved up here out of the button row so the foot
-   holds only the three things you do *with* an automation. */
-.automation-card-remove {
-  margin-left: auto;
-}
+/* The head's delete button is gone -- deleting a workflow is done from the
+   editor's footer now, beside Cancel and Save. Its rules went with it. */
 
-.automation-card-remove:hover {
-  color: var(--danger);
+/* Why Run is grey is a tooltip on the wrapper around it, not a banner on the
+   card: the tab already carries one standing note about having no profiles, and
+   a second amber box repeating it on every card in the grid says the same thing
+   twelve times. The wrapper exists only to hold that title -- a disabled button
+   suppresses its own. */
+.extension-card-foot > span {
+  display: inline-flex;
 }
 
 /* The description, and the reason every card's foot lands on the same line
@@ -392,11 +386,19 @@
  * a single-branch step (loop) always takes the full width, because a loop body
  * squeezed into half a column for symmetry helps nobody. */
 
+/* margin-top is load-bearing, and its absence was the bug. The container sat
+ * flush against the node card above it while ::before reached 20px *up* from
+ * its own top edge -- so the trunk was drawn twenty pixels inside the card,
+ * over its bottom border and up towards the icon tile, which is exactly what
+ * made the line look like it came out of the step's glyph. The two numbers have
+ * to agree: the margin is the gap the line has to cross, and ::before's
+ * negative top is that same gap. */
 .automation-branches {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin-left: var(--arm);
-  padding: 4px 0 0 16px;
+  margin-top: 12px;
+  padding: 0 0 0 16px;
   position: relative;
 }
 
@@ -412,7 +414,7 @@
   content: '';
   left: 0;
   position: absolute;
-  top: -20px;
+  top: -12px;
   width: 2px;
 }
 
@@ -420,18 +422,19 @@
   background: var(--paper);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 10px 4px;
+  padding: 14px 12px 10px;
   position: relative;
 }
 
-/* The stub joining this branch to the trunk. */
+/* The stub joining this branch to the trunk. It lands on the label's line, so
+   it moved down 2px with the box's top padding. */
 .automation-branch::before {
   background: var(--border);
   content: '';
   height: 2px;
   left: -16px;
   position: absolute;
-  top: 22px;
+  top: 24px;
   width: 16px;
 }
 
@@ -440,14 +443,21 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   text-transform: uppercase;
 }
 
 /* Yes and No carry the app's existing green and red, mixed back toward the
    surface so a branch reads as a labelled region rather than as a status. The
-   loop body gets the violet, which is not used by any step state. */
+   loop body gets the violet, which is not used by any step state.
+   The fill is the same three status tokens as the border and the label, so the
+   branch is one colour stated three ways. Held well back toward --paper: the
+   step cards inside are --raised and have to stay the foreground, and a branch
+   at full --status-*-bg reads as an alert about the steps rather than as the
+   region containing them. Both themes define these, so nothing here needs a
+   dark-mode counterpart. */
 .automation-branch[data-branch='then'] {
+  background: color-mix(in srgb, var(--status-active-bg) 55%, var(--paper));
   border-color: color-mix(in srgb, var(--status-active-border) 45%, var(--border));
 }
 
@@ -456,6 +466,7 @@
 }
 
 .automation-branch[data-branch='else'] {
+  background: color-mix(in srgb, var(--status-ban-bg) 55%, var(--paper));
   border-color: color-mix(in srgb, var(--status-ban-border) 45%, var(--border));
 }
 
@@ -464,6 +475,7 @@
 }
 
 .automation-branch[data-branch='body'] {
+  background: color-mix(in srgb, var(--status-review-bg) 55%, var(--paper));
   border-color: color-mix(in srgb, var(--status-review-border) 45%, var(--border));
 }
 
@@ -482,6 +494,40 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* ── The editor's right-hand column ──────────────────────────────────────────
+ * .profile-editor-side had no rule anywhere in either stylesheet. It is a plain
+ * block, so its five controls stacked with whatever margins they brought with
+ * them -- which for a <label class="field"> is none at all. That is why the
+ * timeout's hint appeared to be glued to the checkbox under it: nothing
+ * separated them. The gap belongs to the column, not to each field.
+ *
+ * Scoped to the automation editor. The profile editor uses the same layout
+ * class and settled its own spacing long ago inside .profile-summary. */
+.automation-modal .profile-editor-side {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+}
+
+/* Full width, because it is the column's action rather than one control in a
+   row of them. */
+.automation-run-now {
+  justify-content: center;
+  width: 100%;
+}
+
+/* The settings, on their own surface. --paper against the dialog's --raised is
+   the same inset relationship .automation-node-icon uses against its card, so
+   this reads as a recessed panel rather than as a new kind of box. */
+.automation-settings-card {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 16px;
+  padding: 16px;
 }
 
 /* ── The dialog's editable title ── */

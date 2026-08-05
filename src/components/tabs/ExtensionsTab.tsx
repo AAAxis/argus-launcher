@@ -20,18 +20,20 @@
 // and needs no words. The badge on each card already says where it came from,
 // and the grid ends in an Add tile, so the same information is there as an
 // invitation instead of an absence.
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {BadgeCheck, Check, Download, Link2, Plus, ShieldCheck, Trash2} from 'lucide-react';
 import {Badge} from '../ui/Badge';
 import {ExtensionMark} from '../ui/icons';
 import {
-  BUILT_IN_EXTENSIONS, CATALOG_CATEGORIES, EXTENSION_CATALOG, extensionLogo,
+  BUILT_IN_EXTENSIONS, CATALOG_CATEGORIES, EXTENSION_CATALOG, builtInExtensionEnabled,
+  extensionLogo,
 } from '../../data/extensionCatalog';
+import {native} from '../../native';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ReactNode} from 'react';
-import type {CatalogExtension} from '../../data/extensionCatalog';
-import type {BuiltInExtensionToggles, SharedExtension} from '../../types';
+import type {BuiltInExtension, CatalogExtension} from '../../data/extensionCatalog';
+import type {SharedExtension} from '../../types';
 
 type View = 'installed' | 'discover';
 
@@ -91,11 +93,7 @@ export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
 
 function InstalledView({onBrowse}: {onBrowse: () => void}) {
   const org = useOrg();
-  const {data, library} = useWorkspace();
-  // Undefined/missing means enabled, for cloud state saved before either of
-  // these toggles existed.
-  const builtInEnabled = (key: keyof BuiltInExtensionToggles) =>
-    data.state.built_in_extensions?.[key] !== false;
+  const {data} = useWorkspace();
 
   return (
     <>
@@ -119,18 +117,7 @@ function InstalledView({onBrowse}: {onBrowse: () => void}) {
 
       <div className="extension-grid">
         {BUILT_IN_EXTENSIONS.map((entry) => (
-          <ExtensionCard
-            badge="Included"
-            enabled={builtInEnabled(entry.key)}
-            key={entry.key}
-            logo={extensionLogo(entry.slug)}
-            name={entry.name}
-            note={entry.note}
-            onToggle={(next) => void library.setBuiltInExtensionEnabled(entry.key, next)}
-            tagline={entry.tagline}
-            tint={entry.tint}
-            verified
-          />
+          <BuiltInExtensionCard entry={entry} key={entry.key} />
         ))}
 
         {data.state.shared_extensions.map((extension) => (
@@ -147,6 +134,86 @@ function InstalledView({onBrowse}: {onBrowse: () => void}) {
         </button>
       </div>
     </>
+  );
+}
+
+// A built-in card. Most are a plain switch, because their files are vendored in
+// extensions/ and are always there. One is not: Captcha Plugin's ~56 MB comes
+// from the Web Store on demand, so its first enable has to fetch before the
+// org's toggle can honestly say it is on.
+//
+// The org toggle is shared but the bytes are per machine, so "on" and
+// "downloaded" are genuinely different facts and the card reads both.
+function BuiltInExtensionCard({entry}: {entry: BuiltInExtension}) {
+  const {data, library} = useWorkspace();
+  const enabled = builtInExtensionEnabled(data.state.built_in_extensions, entry);
+  const [installed, setInstalled] = useState(!entry.downloadsOnEnable);
+  const [percent, setPercent] = useState<number | null>(null);
+  const [error, setError] = useState('');
+
+  // Whether this machine has the files, and progress for a download already
+  // running (this window's, or the catch-up pass started at sign-in).
+  useEffect(() => {
+    if (!entry.downloadsOnEnable) {
+      return undefined;
+    }
+    let live = true;
+    void native?.builtInExtensionStatus?.().then((status) => {
+      if (live) setInstalled(Boolean(status?.installed?.[entry.key]));
+    });
+    const stop = native?.onBuiltInDownloadProgress?.((progress) => {
+      if (!live || progress.key !== entry.key) return;
+      setPercent(progress.totalBytes ?
+        Math.floor((progress.receivedBytes / progress.totalBytes) * 100) : null);
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [entry.downloadsOnEnable, entry.key]);
+
+  const downloading = percent !== null && !installed;
+
+  async function toggle(next: boolean) {
+    setError('');
+    // Turning off never deletes the download: the files stay cached so turning
+    // it back on is instant, and a teammate toggling it off on their machine
+    // should not cost everyone else 56 MB again.
+    if (!next || installed || !entry.downloadsOnEnable) {
+      void library.setBuiltInExtensionEnabled(entry.key, next);
+      return;
+    }
+    setPercent(0);
+    const result = await native?.installBuiltInExtension?.(entry.key);
+    setPercent(null);
+    // The toggle is only written once the bytes are actually on disk. Writing
+    // it first would leave every profile in the org claiming an extension they
+    // then silently launch without.
+    if (result?.ok) {
+      setInstalled(true);
+      void library.setBuiltInExtensionEnabled(entry.key, true);
+      return;
+    }
+    setError(result?.error || 'Download failed. Check your connection and try again.');
+  }
+
+  return (
+    <ExtensionCard
+      badge="Included"
+      enabled={enabled}
+      logo={extensionLogo(entry.slug)}
+      name={entry.name}
+      note={entry.note}
+      onToggle={(next) => void toggle(next)}
+      status={
+        downloading ? `Downloading… ${percent}%` :
+          error ? <span className="extension-card-error">{error}</span> : null
+      }
+      tagline={entry.tagline}
+      tint={entry.tint}
+      toggleDisabled={downloading}
+      verified
+    />
   );
 }
 
@@ -245,7 +312,7 @@ function CatalogCard({entry, installed, onInstall}: {
 // The card both views share
 // ---------------------------------------------------------------------------
 
-function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagline, tint,
+function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, status, tagline, tint,
   toggleDisabled, verified}: {
   action?: ReactNode;
   badge: string;
@@ -254,6 +321,10 @@ function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagl
   name: string;
   note?: string;
   onToggle: (enabled: boolean) => void;
+  // Beside the switch: what is happening right now (a download's progress, why
+  // one failed), as opposed to `note`, which is a standing fact about the
+  // extension.
+  status?: ReactNode;
   tagline: string;
   tint?: boolean;
   toggleDisabled?: boolean;
@@ -282,6 +353,7 @@ function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagl
       <p>{tagline}</p>
       {note && <p className="extension-card-note">{note}</p>}
       <div className="extension-card-foot">
+        {status && <span className="extension-card-status">{status}</span>}
         <label className="switch" aria-label={`${enabled ? 'Disable' : 'Enable'} ${name}`}>
           <input
             checked={enabled}

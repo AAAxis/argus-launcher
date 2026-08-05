@@ -109,13 +109,16 @@ function AddStep({onAdd, subtle}: {
   );
 }
 
-export function StepList({steps, onChange, checkProfile, depth = 0}: {
+export function StepList({steps, onChange, checkProfile, providers = [], depth = 0}: {
   steps: AutomationStep[];
   onChange: (next: AutomationStep[]) => void;
   // Passed straight through to StepFields for the Check button. Threaded
   // rather than read from context because this component is also the
   // recursion, and a branch's steps check against the same profile.
   checkProfile?: {id: string; name: string} | null;
+  // The workspace's AI providers, for an AI step's provider dropdown. Threaded
+  // for the same reason checkProfile is.
+  providers?: {id: string; name: string; is_default?: boolean}[];
   depth?: number;
 }) {
   // A Set, not a single id. It used to be `string | null`, so opening one step
@@ -249,6 +252,7 @@ export function StepList({steps, onChange, checkProfile, depth = 0}: {
                     step={step}
                     onChange={(next) => replace(index, next)}
                     checkProfile={checkProfile}
+                    providers={providers}
                   />
                 </div>
               )}
@@ -274,6 +278,7 @@ export function StepList({steps, onChange, checkProfile, depth = 0}: {
                         <StepList
                           steps={nested}
                           checkProfile={checkProfile}
+                          providers={providers}
                           depth={depth + 1}
                           onChange={(next) => replace(
                               index,

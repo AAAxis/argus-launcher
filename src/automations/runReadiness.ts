@@ -98,6 +98,62 @@ export function needsCheck(readiness: RunReadiness): boolean {
     readiness.kind === 'failed';
 }
 
+// Why the Run button cannot be pressed, as one sentence, or null when it can.
+//
+// The Automations tab used to disable Run for exactly one reason -- no profiles
+// at all. The other way a run cannot happen is a workspace full of profiles
+// whose proxies are all dead, and for that case the button stayed enabled, the
+// dialog opened, every row in it was un-tickable, and its footer's Run was
+// disabled with nothing anywhere naming the problem.
+//
+// A sentence and not a structure: the caller shows it on hover and has nothing
+// else to decide. Keeping this free of UI is why the wording lives here at all
+// -- the same reasoning RunAutomationModal's blocked-row summary follows.
+export function describeRunBlock(
+    profiles: ArgusProfile[],
+    proxies: ArgusProxy[],
+    now: number = Date.now(),
+): string | null {
+  // Trashed profiles are restorable, so they are not profiles you can run
+  // against -- the same call the tab already makes for its Demo-profile offer.
+  const live = profiles.filter((profile) => !profile.deleted_at);
+  if (live.length === 0) {
+    return 'No profiles yet — an automation needs one to run against.';
+  }
+  let failed = 0;
+  let missing = 0;
+  for (const profile of live) {
+    const readiness = runReadiness(profile, proxies, now);
+    // One runnable profile is enough. 'stale' and 'unchecked' count as runnable
+    // here for the same reason isRunnable lets them through: they are questions
+    // the run dialog answers by checking, not grounds for refusing.
+    if (isRunnable(readiness)) {
+      return null;
+    }
+    if (readiness.kind === 'failed') {
+      failed += 1;
+    } else {
+      missing += 1;
+    }
+  }
+  // One profile gets a sentence about that profile. Counting to one and
+  // printing "1 has a proxy that failed its check" is technically true and
+  // reads like a report about somebody else's workspace.
+  if (live.length === 1) {
+    return `${live[0].name || 'This profile'} can't run: ${failed > 0 ?
+      'its proxy failed its last check.' :
+      'it has no working proxy assigned.'}`;
+  }
+  const causes: string[] = [];
+  if (failed > 0) {
+    causes.push(`${failed} ${failed === 1 ? 'has a proxy' : 'have a proxy'} that failed its check`);
+  }
+  if (missing > 0) {
+    causes.push(`${missing} ${missing === 1 ? 'has' : 'have'} no working proxy assigned`);
+  }
+  return `All ${live.length} profiles are blocked — ${causes.join(', ')}.`;
+}
+
 // The proxies a batch of profiles would have checked, each one once.
 //
 // Deduplicated by id rather than by profile: a folder of twenty profiles

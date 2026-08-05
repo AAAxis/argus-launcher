@@ -76,10 +76,15 @@
    * in the site's cyan, the whole path is recognisably one.
    *
    * Scope is the price of it, and it is not negotiable: ONLY the Plans tab, the
-   * plan welcome modal and Settings > Plan & usage may use these. The sidebar,
-   * tables, buttons, links and focus rings stay ink. If a fourth surface ever
-   * wants them, that is a decision to take deliberately, not by reaching for the
-   * token because it is there. */
+   * plan welcome modal, Settings > Plan & usage and the sign-in mark may use
+   * these. The sidebar, tables, buttons, links and focus rings stay ink. If a
+   * fifth surface ever wants them, that is a decision to take deliberately, not
+   * by reaching for the token because it is there.
+   *
+   * The sign-in mark was added as the fourth on exactly that basis. It is the
+   * same argument as the other three, one seam earlier: the account is created
+   * on the site, in cyan, and the panel it lands on is the first thing the app
+   * shows. One mark, not the whole panel -- see .login-mark. */
   --plan-accent: #0e8aa6;
   --plan-accent-strong: #0a6f87;
   --plan-accent-ink: #ffffff;
@@ -450,9 +455,28 @@ button.ghost.danger:not(:disabled):hover {
   width: min(420px, calc(100vw - 40px));
 }
 
-.login-panel svg {
-  color: var(--accent);
+/* The Argus mark at the head of the sign-in panel, drawn as a mask so it takes
+ * a colour rather than stamping black line art into the dark theme -- the same
+ * technique as .brand-mark and .plan-welcome-glyph.
+ *
+ * Filled with --plan-accent, which makes this the fourth surface allowed to use
+ * the token; see its comment at the top of this file. Deliberate, and for the
+ * same reason the other three have it: the sign-in screen is the seam between
+ * the site and the app -- the account was made on argus.bot, in cyan, and the
+ * first launcher screen it leads to should not look like a different company.
+ *
+ * The art is 874x1124, so the box carries that ratio rather than a square that
+ * would leave the mask floating in dead space. */
+.login-mark {
+  background-color: var(--plan-accent);
+  display: block;
+  height: 44px;
   justify-self: center;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 34px;
 }
 
 /* One canonical text input, the same way `select` below is canonical.
@@ -511,6 +535,27 @@ textarea:focus-visible {
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
   outline: none;
+}
+
+/* The native number stepper, gone, everywhere.
+ *
+ * Chromium draws a two-arrow spinner inside every input[type=number], which is
+ * the only control in this app with a browser-drawn widget inside it -- so a
+ * run timeout, a retry count and a match index each carried a pair of grey
+ * arrows that belong to no part of the design system, sitting where the
+ * select's chevron sits and meaning something else entirely. The keyboard's
+ * up/down arrows still step the value; only the drawn control goes.
+ *
+ * `appearance: textfield` is the Firefox/spec half and the ::-webkit- rules are
+ * the Chromium half. Both are needed, and Electron only reads the second. */
+input[type='number'] {
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
 }
 
 /* One canonical select. Every dropdown in the app inherits from here: the
@@ -779,6 +824,15 @@ tbody .status-picker-edit[aria-expanded='true'] {
 .login-form {
   display: grid;
   gap: 14px;
+}
+
+/* Buttons are inline-flex and left-packed by default, which is right in a
+ * toolbar and wrong here: stretched to the panel's width by the grid, the label
+ * sat against the left edge while the Google button above it was centred, so
+ * the two ways in read as different kinds of control. Centring the icon/label
+ * pair lines them up. */
+.login-form button {
+  justify-content: center;
 }
 
 .login-links {
@@ -1455,6 +1509,65 @@ nav button.active svg {
   padding: 10px 22px;
 }
 
+/* ── AI providers ────────────────────────────────────────────────────────────
+ * The list reuses SettingsRow; only the right-hand actions, the key preview and
+ * the add/edit form need rules of their own. */
+
+.ai-provider-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* The masked key, in the row's description line. Monospace so the four visible
+   characters can actually be compared against the key you have in hand --
+   which is the only thing they are for. */
+.ai-provider-key {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
+}
+
+/* The form replaces the list rather than expanding inside it: five fields in a
+   settings row would have to squeeze into the right-hand track, and this is a
+   record you are filling in, not a setting you are flipping. */
+.ai-provider-form {
+  display: grid;
+  gap: 16px;
+  padding: 4px 22px 18px;
+}
+
+.ai-provider-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+/* Test says what the provider said, in the provider's own words. Green and red
+   because there are exactly two answers and no third state worth a colour. */
+.ai-provider-test {
+  align-items: flex-start;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0;
+}
+
+.ai-provider-test > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.ai-provider-test.is-ok {
+  color: var(--status-active-ink);
+}
+
+.ai-provider-test.is-bad {
+  color: var(--danger);
+}
+
 /* ── Account identity block ── */
 .settings-identity {
   align-items: center;
@@ -1657,6 +1770,25 @@ img.settings-identity-avatar {
   display: flex;
   gap: 5px;
   justify-content: flex-end;
+}
+
+/* The meter's own name, when the caller hands it one instead of drawing a
+ * heading above the control. The auto margin is the whole layout: the name sits
+ * hard left, the count stays hard right where every other meter puts it, and
+ * the track spans both underneath. Two rows, not three. */
+/* align-self overrides the row's baseline: the count is the tallest thing on the
+ * line, and baseline-aligning a flex box that contains an icon lines the icon up
+ * with the digits instead of the words next to it. */
+.settings-meter-label {
+  align-items: center;
+  align-self: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  margin-inline-end: auto;
+  min-width: 0;
 }
 
 /* One line instead of two, for the Team toolbar. The stacked form is right in
@@ -3059,10 +3191,17 @@ button:disabled {
 /* ── Empty states ───────────────────────────────────────────────────────────
  * Two sizes of the same block. The small one sits in a table cell under headers
  * that are still worth showing (a filter matched nothing, Trash is empty); the
- * `hero` one replaces the table, its headers and the toolbar entirely, for a
- * workspace that has no profiles at all. Both are centred on the column rather
- * than on the row, which is why the wrapper -- not the cell -- does the
- * centring: a <td> that is one of nine cannot centre itself across the table. */
+ * `hero` one is the same block given room, and is now only the Team tab's --
+ * its roster, its plan gate and its empty share list all sit under a toolbar
+ * that stays useful, so they are a block on the page rather than the page. Both
+ * are centred on the column rather than on the row, which is why the wrapper --
+ * not the cell -- does the centring: a <td> that is one of nine cannot centre
+ * itself across the table.
+ *
+ * A tab whose whole collection is empty uses .tab-empty instead, further down.
+ * Profiles, Proxies, Cookies and Automations all drop their toolbar, folder row
+ * and pager in that case, so there is no shell for the message to sit in and
+ * nothing above it to align to but the topbar. */
 .table-empty {
   align-items: center;
   display: flex;
@@ -3554,13 +3693,6 @@ button:disabled {
   gap: 8px;
   margin: 10px 0 0;
   padding: 8px 10px;
-}
-
-/* The hero state is the only content on the screen, so its container stops
- * being a table shell: no inner border to box the message in. */
-.table-wrap-empty {
-  display: grid;
-  place-items: center;
 }
 
 /* A row holding one of these is not a data row -- no hairline under it, and the
@@ -4565,11 +4697,18 @@ tbody tr.empty-row-tr:hover {
 }
 
 /* Two ways in from an empty tab (add one, or import a file) sit side by side;
- * the flex column above would otherwise stack them and read as a ranking. */
+ * the flex column above would otherwise stack them and read as a ranking.
+ *
+ * Wrapping and centred because the empty Automations tab puts up to four of
+ * these at once (create, load the example, mint a Demo profile, read the docs),
+ * which is past what 620px holds on one line. At two buttons neither property
+ * does anything. */
 .tab-empty-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+  justify-content: center;
 }
 
 /* A button that reads as a link: for the secondary way back to something the
@@ -5237,6 +5376,21 @@ textarea {
   gap: 10px;
   justify-content: flex-end;
   margin-top: 2px;
+}
+
+/* What is happening right now on a card that has to fetch itself before it can
+ * be on -- a download's progress, or why one failed. Sits at the leading edge
+ * against the foot's flex-end so it reads as a status line for the card rather
+ * than as a label for the switch it would otherwise be pressed against. */
+.extension-card-status {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+}
+
+.extension-card-error {
+  color: var(--danger);
 }
 
 .extension-card-foot > button {
@@ -5919,6 +6073,55 @@ textarea {
   text-transform: none;
 }
 
+/* A field's own value, restated in words, inside its label: "Give up after
+ * = 5 minutes". Quieter than the label and pushed to its far end, so it reads
+ * as the form answering rather than as a second thing being asked. */
+.field-echo {
+  color: var(--ink-faint);
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* A unit that belongs to the number rather than to the sentence under it. The
+ * span is the bordered box and the input inside it is bare, which is what keeps
+ * the focus ring around the pair instead of around the number alone. */
+.field-suffixed {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: flex;
+  min-height: var(--control-h);
+  padding-right: 15px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+.field-suffixed:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* The second selector is not redundant: `.field input:not(.selector)` above
+ * sets width: 100%, which on a flex child inside this box makes the number
+ * overrun the unit. Same specificity, and this rule is later, so it wins. */
+.field-suffixed > input,
+.field .field-suffixed > input {
+  background: none;
+  border: none;
+  box-shadow: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: auto;
+}
+
+.field-suffixed > span {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ── Platform picker ────────────────────────────────────────────────────────
  * Six cards instead of the dropdown this replaces. auto-fit rather than a fixed
  * six columns: the same control renders in the 1380px profile dialog and in the
@@ -6311,12 +6514,22 @@ textarea {
  * wide as a five-tile row wants to be, and it matches the cap the injected
  * browser home page now uses, so the two surfaces read as the same page.
  *
- * No padding-top. It used to add 44px on top of .content's 24px and the 16px
- * flex gap, so this was the one tab whose first row sat 60px below where every
- * other tab's did -- the same complaint as .automations-tab's nested padding.
- * The 26px gap below carries the separation the 44px was standing in for. */
+ * The 56px on top is .tab-empty's, deliberately the same number: this tab and
+ * an empty Proxies/Profiles/Cookies tab are both a centred column under the
+ * topbar with a mark at the head of it, and at different offsets the mark
+ * jumped up the window as you moved between them. Both are the second flex
+ * child of .content, so matching the padding is all it takes to land the Argus
+ * mark and the empty state's glyph on the same line.
+ *
+ * This was 0 for a while, on the grounds that a tab whose first row sits lower
+ * than every other tab's reads as misaligned. That still holds against a
+ * *populated* table -- whose toolbar starts at the top -- and is the trade being
+ * made here: the pairing with the empty states is the one worth having, because
+ * those are the screens a new workspace actually moves between. The 26px gap
+ * below still carries the separation the old 44px was standing in for. */
 .start-page {
   display: grid;
+  padding-top: 56px;
   /* .content is a flex column, so the auto margins are what centre this; they
    * beat the container's align-items: stretch. flex: 0 0 auto keeps a long
    * bookmark list from being squashed instead of scrolling .content. */
@@ -7268,13 +7481,35 @@ textarea {
   padding: 8px;
 }
 
-/* `contain`, so a shot that is not 16:10 -- the cookie manager one is nearly
- * square -- is letterboxed on the paper fill rather than cropped. */
+/* `contain`, so a shot that is not 16:10 is letterboxed on the paper fill
+ * rather than cropped. Every shot in the app happens to opt into `is-full`
+ * below at the moment; this stays the default because it is the one that cannot
+ * silently eat the subject of a picture that arrives at some other ratio. */
 .intro-figure-frame img {
   border-radius: 6px;
   max-height: 100%;
   max-width: 100%;
   object-fit: contain;
+}
+
+/* The opt-in from IntroStep.fill: the picture is the card, edge to edge.
+ *
+ * No padding and no radius on the image -- the frame's own corners clip it, and
+ * a rounded rectangle inset by nothing inside another rounded rectangle draws a
+ * second, wrong-radius corner. `cover` rather than `contain` because filling is
+ * the whole point; it costs a centre crop to 16:10, which is why only whole-
+ * window shots may ask for this. Their outer band is desktop wallpaper. */
+.intro-figure-frame.is-full {
+  padding: 0;
+}
+
+.intro-figure-frame.is-full img {
+  border-radius: 0;
+  height: 100%;
+  max-height: none;
+  max-width: none;
+  object-fit: cover;
+  width: 100%;
 }
 
 .intro-figure figcaption {
@@ -8130,9 +8365,11 @@ td.cookie-value-cell input:focus {
  * it shares. Nothing here sets padding: .content owns the page's 24px, and
  * adding more is the double-inset bug automations.css documents. */
 
-/* Same reasoning as .automations-tab.is-empty: with no roster to sit above,
-   the upsell belongs in the middle of the working area. A hero pinned under
-   the header reads as a page that failed to load. */
+/* With no roster to sit above, the upsell belongs in the middle of the working
+   area. Not .tab-empty, which the other tabs' whole-tab empty states moved to:
+   this one is not the whole tab. The view chips and the seat meter are still
+   above it and still worth using, so there is a header here to be pinned under
+   and nothing for a fixed 56px to line up with. */
 .team-tab.is-empty {
   align-content: center;
   display: grid;
@@ -8685,27 +8922,21 @@ td.cookie-value-cell input:focus {
   white-space: nowrap;
 }
 
+/* A grid rather than a wrapping flex row, so the three tracks are the same
+ * length and start at the same x. Three meters of content-width lengths side by
+ * side invite a comparison between the bars themselves, which is meaningless --
+ * the denominators are different -- and equal columns take that reading away.
+ *
+ * Each meter is two rows, name-and-count over track: they carry their own names
+ * now (Meter's `label`) instead of getting a heading stacked on top, which is
+ * what made this strip three rows tall and put "Profiles" and "0 of 5" on
+ * separate lines. */
 .plans-current-meters {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: 12px 28px;
-  min-width: 0;
-}
-
-.plans-current-meter {
   display: grid;
-  gap: 4px;
-  min-width: 132px;
-}
-
-.plans-current-label {
-  align-items: center;
-  color: var(--ink-soft);
-  display: flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
+  flex: 1 1 auto;
+  gap: 12px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  min-width: 0;
 }
 
 /* The meter is the shared control from components/ui/Meter.tsx, so it arrives
@@ -8720,17 +8951,24 @@ td.cookie-value-cell input:focus {
   background: var(--danger);
 }
 
+/* Stretch, so the three cards end level and the three buttons land on one line.
+ * The cards have unequal feature lists, and with `align-items: start` each one
+ * stopped wherever its list ran out -- three ragged bottoms, and the button you
+ * are being asked to press sitting at a different height on every card. The
+ * card is already a column with the list at `flex: 1`, so the slack falls above
+ * the button and nothing else moves. */
 .plans-grid {
-  align-items: start;
+  align-items: stretch;
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* Ribbon over card. The slot is what keeps the three card tops on one line:
- * the ribbon strip is rendered for every plan and filled for one, because
- * dropping the element for the other two would stand them taller than the plan
- * being recommended -- the opposite of what a recommendation should look like. */
+/* Ribbon over card. The slot is what keeps the three card tops on one line: the
+ * ribbon strip is rendered for every plan and filled for the two that carry one
+ * ("Most popular" on Team, "Most valuable" on Enterprise), because dropping the
+ * element for Base would stand it taller than the plans being recommended --
+ * the opposite of what a recommendation should look like. */
 .plan-slot {
   display: flex;
   flex-direction: column;
@@ -8766,10 +9004,28 @@ td.cookie-value-cell input:focus {
   padding: 20px;
 }
 
-/* The recommended card carries the ribbon's colour down its own edge and squares
+/* A recommended card carries the ribbon's colour down its own edge and squares
  * the two top corners into it, so the pair reads as one object rather than a
- * label resting on a box. */
+ * label resting on a box.
+ *
+ * The wash is the plan welcome dialog's hero: this is the tier that dialog will
+ * congratulate the buyer on, and the two screens are the same promise thirty
+ * seconds apart. It pours from the ribbon's edge downward and is gone by the
+ * price, so the name and the number sit in it and the feature list below stays
+ * on plain --raised where it is easiest to read.
+ *
+ * Held higher and lighter than the dialog's, though, and both numbers are the
+ * card's height rather than the dialog's: the hero's 150% radius is most of a
+ * short modal but all of a 400px card, which tinted the whole thing instead of
+ * its top. 62% ends the fade just past the price rule. Layered over --raised
+ * rather than replacing it -- a gradient to `transparent` alone would leave the
+ * bottom of the card showing the canvas through. */
 .plan-card.is-highlighted {
+  background:
+    radial-gradient(130% 62% at 50% 0%,
+      color-mix(in srgb, var(--plan-accent) 14%, transparent) 0%,
+      transparent 74%),
+    var(--raised);
   border-color: var(--plan-accent);
   border-top-left-radius: 0;
   border-top-right-radius: 0;
@@ -8852,8 +9108,9 @@ td.cookie-value-cell input:focus {
   width: 100%;
 }
 
-/* One filled button on the screen, and it is the recommendation. The other two
- * cards use .ghost, which is already the app's quiet primary. */
+/* Filled on the two recommended cards. Base uses .ghost, which is already the
+ * app's quiet primary -- three identical fills would leave nothing pointing
+ * anywhere. */
 .plan-cta:not(.ghost) {
   background: var(--plan-accent);
   color: var(--plan-accent-ink);

@@ -87,6 +87,72 @@ export function ProfileDeleteModal({request, onClose, onDeleted}: {
   );
 }
 
+// Deleting a workflow, from the editor's own footer.
+//
+// It was a window.confirm() on the card, which is the pattern the three dialogs
+// around it exist to replace -- and it is the one destructive action in the app
+// whose consequence lands somewhere the user is not looking: every profile with
+// this automation attached silently stops running anything on launch. That
+// sentence is the reason this is a dialog and not a native confirm.
+export type AutomationDeleteRequest = {
+  id: string;
+  label: string;
+  attachedProfiles: number;
+};
+
+export function AutomationDeleteModal({request, onClose, onDeleted}: {
+  request: AutomationDeleteRequest;
+  onClose: () => void;
+  // Deleted for real: the editor that raised it should close too.
+  onDeleted: () => void;
+}) {
+  const {toast, automations} = useWorkspace();
+  const {run, isPending} = useAsyncAction();
+  const {id, label, attachedProfiles} = request;
+
+  async function confirm() {
+    if (!await automations.remove([id])) {
+      return;
+    }
+    onDeleted();
+    toast.setMessage(`${label} deleted`);
+  }
+
+  return (
+    <Modal
+      className="small-modal"
+      onClose={onClose}
+      title={`Delete ${label}?`}
+      footer={
+        <>
+          <button className="ghost" onClick={onClose}>Cancel</button>
+          <BusyButton
+            className="danger"
+            busy={isPending('delete-automation')}
+            icon={<Trash2 size={16} />}
+            busyLabel="Deleting…"
+            onClick={() => void run('delete-automation', confirm)}
+          >
+            Delete
+          </BusyButton>
+        </>
+      }
+    >
+      <p className="error-detail">
+        This permanently removes the workflow and its steps. Runs already in its
+        history stay where they are.
+      </p>
+      {attachedProfiles > 0 && (
+        <p className="error-detail">
+          {attachedProfiles === 1 ?
+            '1 profile has it attached and will stop running it on launch.' :
+            `${attachedProfiles} profiles have it attached and will stop running it on launch.`}
+        </p>
+      )}
+    </Modal>
+  );
+}
+
 export function ProxyDeleteModal({request, onClose, onDeleted}: {
   request: ProxyDeleteRequest;
   onClose: () => void;

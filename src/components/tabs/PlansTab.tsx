@@ -86,34 +86,32 @@ export function PlansTab({profileCount, automationCount, memberCount, onOpenSite
   );
 }
 
+// The name rides inside the meter rather than above it, so each entitlement is
+// two rows and not three: "Profiles ... 0 of 5" on one line, the track under
+// both. See the `label` note in components/ui/Meter.tsx.
 function PlanUsage({icon, label, used, limit}: {
   icon: ReactNode;
   label: string;
   used: number;
   limit: number | null;
 }) {
-  return (
-    <div className="plans-current-meter">
-      <span className="plans-current-label">{icon}{label}</span>
-      <Meter used={used} limit={limit} />
-    </div>
-  );
+  return <Meter label={<>{icon}{label}</>} used={used} limit={limit} />;
 }
 
 function PlanCard({plan, onChoose}: {plan: PlanInfo; onChoose: () => void}) {
-  // Rendered for every card, filled for one. The ribbon is attached above the
-  // card rather than sitting inside it, so an empty one is what keeps the three
-  // card tops on a line -- dropping the element for the other two would leave
-  // them standing taller than the plan being recommended.
+  // Rendered for every card, filled for the two that carry a ribbon. The ribbon
+  // is attached above the card rather than sitting inside it, so an empty one is
+  // what keeps the three card tops on a line -- dropping the element for Base
+  // would leave it standing taller than the plans being recommended.
   const carriedFrom = plan.carriesOver ? PLANS[plan.carriesOver] : null;
 
   return (
     <div className="plan-slot">
-      <div className={plan.highlighted ? 'plan-ribbon is-shown' : 'plan-ribbon'} aria-hidden={!plan.highlighted}>
-        {plan.highlighted ? 'Most popular' : ''}
+      <div className={plan.ribbon ? 'plan-ribbon is-shown' : 'plan-ribbon'} aria-hidden={!plan.ribbon}>
+        {plan.ribbon ?? ''}
       </div>
 
-      <article className={plan.highlighted ? 'plan-card is-highlighted' : 'plan-card'}>
+      <article className={plan.ribbon ? 'plan-card is-highlighted' : 'plan-card'}>
         <h3>{plan.label}</h3>
         <p className="plan-tagline">{plan.tagline}</p>
 
@@ -135,12 +133,12 @@ function PlanCard({plan, onChoose}: {plan: PlanInfo; onChoose: () => void}) {
           ))}
         </ul>
 
-        {/* One filled button on the screen. The other two cards are outlined --
-          * three identical fills would make the recommendation invisible and the
-          * page louder, and the app's own primary/ghost split already works this
-          * way everywhere else. */}
+        {/* Filled on the two recommended tiers, outlined on Base. Three
+          * identical fills would make the recommendation invisible; two fills
+          * against one ghost still reads as "these are the plans, and that is
+          * the way in", which is the split the page is arguing for. */}
         <button
-          className={plan.highlighted ? 'plan-cta' : 'plan-cta ghost'}
+          className={plan.ribbon ? 'plan-cta' : 'plan-cta ghost'}
           onClick={onChoose}
           type="button"
         >

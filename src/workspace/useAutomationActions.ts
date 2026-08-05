@@ -77,13 +77,16 @@ export function useAutomationActions(
     return null;
   }
 
-  async function remove(ids: string[]) {
+  // Answers whether the delete actually happened. The editor's Delete button
+  // closes the dialog it was clicked in, and a dialog that closes on a failed
+  // write reports success the toast is simultaneously denying.
+  async function remove(ids: string[]): Promise<boolean> {
     if (ids.length === 0) {
-      return;
+      return false;
     }
     const ok = await withDb((activeOrgId) => db.automations.remove(activeOrgId, ids));
     if (!ok) {
-      return;
+      return false;
     }
     patch.automations((list) => list.filter((item) => !ids.includes(item.id)));
     // The database detaches profiles for us (ON DELETE SET NULL), but local
@@ -93,6 +96,7 @@ export function useAutomationActions(
       profile.automation_id && ids.includes(profile.automation_id) ?
         {...profile, automation_id: null} :
         profile));
+    return true;
   }
 
   async function setPinned(automation: ArgusAutomation, pinned: boolean) {

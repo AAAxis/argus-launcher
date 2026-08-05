@@ -15,6 +15,7 @@
 // before the recipient has chosen which of their workspaces to put it in, so
 // there is no org to filter on until they accept.
 export * as account from './account';
+export * as aiProviders from './aiProviders';
 export * as automations from './automations';
 export * as bookmarks from './bookmarks';
 export * as cookieSets from './cookieSets';

@@ -14,43 +14,68 @@
 // The styles stay `.settings-meter*` in styles.css rather than being renamed:
 // the class names are load-bearing in a 6,900-line stylesheet and the component
 // moving does not make them wrong.
+import type {ReactNode} from 'react';
+
+// `label` names the thing being measured, on the numbers' own line and hard
+// against the far edge from them: "Profiles ....... 0 of 5", track underneath.
+// It belongs to the meter rather than to the caller because a caller that draws
+// its own heading above one gets three stacked rows for a two-row control --
+// name, then count, then track -- which is exactly what the Plans strip looked
+// like before this existed. Callers that already have a heading (a Settings row
+// label, a toolbar) pass nothing and are unchanged.
+//
 // `compact` lays the numbers beside the track instead of above it. The stacked
 // form is right in Settings, where a meter owns a row and vertical space is
 // free. In a toolbar it is not: it makes a two-line block standing next to
 // one-line controls, so the numbers ride above the track and nothing in the row
 // shares a centre line with the button the meter exists to qualify.
-export function Meter({used, limit, compact}: {
+export function Meter({used, limit, label, compact}: {
   used: number;
   limit: number | null;
+  label?: ReactNode;
   compact?: boolean;
 }) {
-  const className = compact ? 'settings-meter is-compact' : 'settings-meter';
+  const className = [
+    'settings-meter',
+    compact ? 'is-compact' : '',
+    label === undefined ? '' : 'has-label',
+  ].filter(Boolean).join(' ');
+
   if (limit === null) {
     return (
       <div className={className}>
-        <strong>{used}</strong>
-        <span>of unlimited</span>
+        <Numbers label={label} used={used} of="of unlimited" />
       </div>
     );
   }
   if (limit <= 0) {
     return (
       <div className={className}>
-        <strong>{used}</strong>
-        <span>not included on this plan</span>
+        <Numbers label={label} used={used} of="not included on this plan" />
       </div>
     );
   }
   const percent = Math.min(100, Math.round((used / limit) * 100));
   return (
     <div className={className}>
-      <div className="settings-meter-numbers">
-        <strong>{used}</strong>
-        <span>of {limit}</span>
-      </div>
+      <Numbers label={label} used={used} of={`of ${limit}`} />
       <div className="settings-meter-track" aria-hidden="true">
         <span className={percent >= 100 ? 'full' : ''} style={{width: `${percent}%`}} />
       </div>
+    </div>
+  );
+}
+
+// The one line every branch has. It is shared rather than inlined three times
+// so the trackless branches keep the same shape as the one with a track: the
+// unlimited case used to return a bare strong and span into a column flexbox,
+// which stacked "0" above "of unlimited" for no reason anybody chose.
+function Numbers({label, used, of}: {label?: ReactNode; used: number; of: string}) {
+  return (
+    <div className="settings-meter-numbers">
+      {label !== undefined && <span className="settings-meter-label">{label}</span>}
+      <strong>{used}</strong>
+      <span>{of}</span>
     </div>
   );
 }

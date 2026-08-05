@@ -9,18 +9,22 @@
 // mounted above App.
 import {useEffect, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
-import {CreditCard, PackageOpen, Palette, SlidersHorizontal, User, X} from 'lucide-react';
+import {
+  CreditCard, PackageOpen, Palette, SlidersHorizontal, Sparkles, User, X,
+} from 'lucide-react';
 import * as db from '../db';
 import type {ResourceState} from '../native';
 import {useOrg} from '../org';
 import {useWorkspace} from '../workspace/WorkspaceProvider';
 import {AccountSection} from './sections/AccountSection';
+import {AiProvidersSection} from './sections/AiProvidersSection';
 import {AppearanceSection} from './sections/AppearanceSection';
 import {BrowserUpdatesSection} from './sections/BrowserUpdatesSection';
 import {GeneralSection} from './sections/GeneralSection';
 import {PlanUsageSection} from './sections/PlanUsageSection';
 
-export type SettingsSectionId = 'account' | 'plan' | 'appearance' | 'general' | 'browser';
+export type SettingsSectionId =
+  'account' | 'plan' | 'ai' | 'appearance' | 'general' | 'browser';
 
 type SectionDef = {
   id: SettingsSectionId;
@@ -32,6 +36,10 @@ type SectionDef = {
 const SECTIONS: SectionDef[] = [
   {id: 'account', label: 'Account', group: 'Account', icon: User},
   {id: 'plan', label: 'Plan & usage', group: 'Account', icon: CreditCard},
+  // Its own group rather than under Account: this is workspace configuration
+  // the whole org shares and only the owner may change, which is neither "who
+  // am I" nor "what does the app look like on this machine".
+  {id: 'ai', label: 'AI providers', group: 'Workspace', icon: Sparkles},
   {id: 'appearance', label: 'Appearance', group: 'App', icon: Palette},
   {id: 'general', label: 'General', group: 'App', icon: SlidersHorizontal},
   {id: 'browser', label: 'Browser & updates', group: 'App', icon: PackageOpen},
@@ -181,6 +189,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
                 automationCount={automationCount}
               />
             )}
+            {active === 'ai' && <AiProvidersSection />}
             {active === 'appearance' && <AppearanceSection />}
             {active === 'general' && (
               <GeneralSection onMessage={toast.setMessage} onOpenIntro={props.onOpenIntro} />

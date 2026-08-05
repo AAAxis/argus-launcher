@@ -59,6 +59,17 @@ contextBridge.exposeInMainWorld('argusNative', {
     ipcRenderer.on('argus:automation-run-event', listener);
     return () => ipcRenderer.removeListener('argus:automation-run-event', listener);
   },
+
+  // ── AI providers ─────────────────────────────────────────────────────────
+  // One way, renderer to main. The renderer reads ai_providers from Supabase --
+  // this process holds no Supabase credentials and must not start -- and hands
+  // the resolved list over so an AI step can make its outbound call. Held in
+  // memory over there and never written to disk.
+  setAiProviders: (providers) => ipcRenderer.invoke('argus:set-ai-providers', {providers}),
+  // A single cheap completion against one provider, for the Test button. Takes
+  // the config directly rather than an id so an unsaved edit can be tried
+  // before it is written.
+  testAiProvider: (provider) => ipcRenderer.invoke('argus:test-ai-provider', {provider}),
   onDeepLink: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:deep-link', listener);
@@ -89,6 +100,16 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   selectExtensionFolder: () => ipcRenderer.invoke('argus:select-extension-folder'),
   zipExtensionFolder: (folderPath) => ipcRenderer.invoke('argus:zip-extension-folder', folderPath),
+  installBuiltInExtension: (key) =>
+    ipcRenderer.invoke('argus:install-built-in-extension', {key}),
+  builtInExtensionStatus: () => ipcRenderer.invoke('argus:built-in-extension-status'),
+  catchUpBuiltInExtensions: (toggles) =>
+    ipcRenderer.invoke('argus:catch-up-built-in-extensions', {toggles}),
+  onBuiltInDownloadProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:built-in-download-progress', listener);
+    return () => ipcRenderer.removeListener('argus:built-in-download-progress', listener);
+  },
   selectCookieFile: () => ipcRenderer.invoke('argus:select-cookie-file'),
   selectCookieFolder: () => ipcRenderer.invoke('argus:select-cookie-folder'),
   matchCookieFiles: (folderPath, profileNames) =>

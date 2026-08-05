@@ -28,10 +28,10 @@ export const SHOWCASE_AUTOMATION: Omit<ArgusAutomation, 'id'> = {
   // Matches newAutomation(): a run that hangs on a bot check should fail on the
   // clock rather than hold the profile open indefinitely.
   timeout_ms: 300000,
-  // Persisted, editable and mapped both ways -- and read by nothing. The
-  // browser is never closed by the runner today. Left false rather than true so
-  // the example does not appear to depend on behavior that does not exist; do
-  // not set it to true until something actually consumes it.
+  // Real now: the runner closes the browser when a run that opened it finishes
+  // (see the onFinish wiring in main.cjs). Still false here, for a different
+  // reason than before -- the example exists to be watched, and the last thing
+  // it does is take a screenshot of a page worth looking at.
   close_on_finish: false,
   variables: {},
   pinned: false,

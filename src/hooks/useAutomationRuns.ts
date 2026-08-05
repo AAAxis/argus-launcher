@@ -194,6 +194,10 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
     }
     try {
       let session = await native.resolveProfileCdp(profile.id);
+      // Whether this run is the reason the browser is open. It decides whether
+      // close_on_finish may close it: a window that was already there belongs
+      // to whoever opened it, and a run is a guest in it.
+      let ownsSession = false;
       if (!session.running) {
         if (!options.buildLaunch) {
           return {ok: false, error: `${profile.name} is not open.`};
@@ -225,6 +229,7 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
           };
         }
         session = {running: true, cdpUrl: ready.cdpUrl, pid: null};
+        ownsSession = true;
       }
       const result = await native.startAutomationRun({
         automation,
@@ -232,6 +237,7 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
         trigger: options.trigger || 'manual',
         cdpUrl: session.cdpUrl as string,
         vars: options.vars,
+        ownsSession,
       });
       if (!result.ok || !result.runId) {
         return {ok: false, error: result.error || 'The run did not start.'};

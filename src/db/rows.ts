@@ -267,6 +267,23 @@ export type AutomationRow = {
   assigned_to: string | null;
 };
 
+// A model endpoint for the AI steps. Org-scoped, owner-writable, member-
+// readable -- api_key included, which is what lets a teammate run a shared
+// workflow. See supabase/migrations/20260805200000_ai_providers.sql.
+export type AiProviderRow = {
+  id: string;
+  org_id: string;
+  name: string;
+  kind: string;
+  base_url: string | null;
+  model: string;
+  api_key: string | null;
+  is_default: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // One execution. Inserted when the run starts and updated when it ends, so an
 // interrupted run leaves a `running` row rather than no row at all.
 export type AutomationRunRow = {

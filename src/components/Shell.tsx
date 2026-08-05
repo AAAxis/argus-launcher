@@ -2,7 +2,7 @@
 import {Settings, X} from 'lucide-react';
 import {InboxBell} from './InboxBell';
 import {tabs, visibleTabs} from '../data/tabs';
-import {initials, shortenEmail} from '../lib/text';
+import {accountLabel, initials} from '../lib/text';
 import {native} from '../native';
 import {useOrg} from '../org';
 import type {ReactNode} from 'react';
@@ -47,10 +47,13 @@ export function Sidebar({activeTab, onTab, onSettings}: {
           onClick={onSettings}
           title={`${org.email} -- open settings`}
         >
+          {/* Initials off the same string the row is labelled with, so the
+              circle and the name agree. From the address they are whatever the
+              local part starts with, which is a fallback and reads as one. */}
           {org.avatarUrl ?
             <img alt="" className="account-avatar" referrerPolicy="no-referrer" src={org.avatarUrl} /> :
-            <span>{initials(org.email)}</span>}
-          <strong>{shortenEmail(org.email)}</strong>
+            <span>{initials(org.displayName || org.email)}</span>}
+          <strong>{accountLabel(org.displayName, org.email)}</strong>
           <Settings className="account-gear" size={15} strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>

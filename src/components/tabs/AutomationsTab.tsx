@@ -18,18 +18,18 @@
 // per action.
 import {useState} from 'react';
 import {
-  BookOpen, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Share2, Sparkles, Trash2,
+  BookOpen, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Share2, Sparkles,
   Workflow,
 } from 'lucide-react';
 import {Assignee} from '../ui/Assignee';
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
-import {EmptyState} from '../ui/EmptyState';
 import {TagChip} from '../ui/TagChip';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import {SITE_LINKS} from '../../data/links';
 import {automationCap} from '../../automations/limit';
+import {describeRunBlock} from '../../automations/runReadiness';
 import {RUN_LABEL, RUN_TONE} from '../../automations/runStatus';
 import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusAutomation, AutomationRun} from '../../types';
@@ -79,6 +79,14 @@ export function AutomationsTab({
   // profiles" -- offering to mint a Demo one on top of them would be the app
   // failing to see what the user already has.
   const hasNoProfiles = !state.profiles.some((profile) => !profile.deleted_at);
+  // Why no run can start, or null. One decision for every card on the tab: it
+  // is a property of the workspace, not of any one automation, so computing it
+  // per card would be the same answer worked out N times.
+  //
+  // Shared with RunAutomationModal through runReadiness, which is the point of
+  // that file -- the button and the dialog have to agree about which profiles
+  // are usable, or the button opens a dialog that refuses everything.
+  const block = describeRunBlock(state.profiles, state.proxies);
 
   // The newest run per automation, from whatever this session has seen. Older
   // history lives in the database and is opened explicitly -- see onHistory.
@@ -104,27 +112,31 @@ export function AutomationsTab({
 
   if (list.length === 0) {
     return (
-      // is-empty centres the whole block in the working area rather than
-      // parking it under the header: with no cards to sit above, a hero pinned
-      // to the top of a tall window reads as the page having failed to load.
+      // .tab-empty, the shape an empty Profiles, Proxies, Cookies or Start tab
+      // takes: a centred column under the topbar with the mark at a fixed 56px,
+      // so the glyph lands on the same line whichever of them you arrive at.
+      // This used to centre itself in 60vh instead, which put it lower than all
+      // four and moved as the window resized.
       //
-      // The hero survives the restyle -- Extensions has no empty state and says
+      // The block survives the restyle -- Extensions has no empty state and says
       // so, but its add-tile stands in for four words of encouragement, and this
       // one carries four distinct offers (create, load the example, mint a Demo
       // profile, read the docs) that no tile can hold.
-      <section className="automations-tab is-empty">
-        <EmptyState
-          hero
-          icon={<Workflow size={20} strokeWidth={1.75} />}
-          title="No automations yet"
-          body={atCap ?
+      <section className="tab-empty">
+        <span className="tab-empty-mark">
+          <Workflow size={26} strokeWidth={1.5} />
+        </span>
+        <h2>No automations yet</h2>
+        <p>
+          {atCap ?
             'Your plan doesn\'t include automations yet. They run a list of steps ' +
               'against a profile — open a page, fill a form, read something back — ' +
               'on launch, on a schedule, or from an agent.' :
             'An automation is a list of steps run against a profile: open a page, ' +
               'fill a form, read something back. Attach one to a profile and it runs ' +
               'when that profile launches.'}
-        >
+        </p>
+        <div className="tab-empty-actions">
           {atCap ? (
             <button className="primary" onClick={() => onOpenSite(SITE_LINKS.pricing)}>
               See plans
@@ -132,14 +144,14 @@ export function AutomationsTab({
           ) : (
             <>
               <button className="primary" onClick={onNew}>
-                <Plus size={16} /> Create your first automation
+                <Plus size={18} /> Create your first automation
               </button>
               {/* Inside the !atCap branch with the primary button, and for the
                   same reason: loading the example is an INSERT, so an org with
                   no automation slots left must not be offered it only to be
                   refused by trg_automation_limit after the click. */}
               <button className="ghost" onClick={onLoadExample}>
-                <Sparkles size={16} /> Load the example
+                <Sparkles size={18} /> Load the example
               </button>
             </>
           )}
@@ -149,13 +161,13 @@ export function AutomationsTab({
               rather than sending the user to another tab. */}
           {hasNoProfiles && (
             <button className="ghost" onClick={onCreateDemoProfile}>
-              <MonitorSmartphone size={16} /> Create a Demo profile
+              <MonitorSmartphone size={18} /> Create a Demo profile
             </button>
           )}
           <button className="ghost" onClick={() => onOpenSite(SITE_LINKS.docs)}>
-            <BookOpen size={16} /> See the documentation
+            <BookOpen size={18} /> See the documentation
           </button>
-        </EmptyState>
+        </div>
       </section>
     );
   }
@@ -235,10 +247,16 @@ export function AutomationsTab({
           const busy = runningCount > 0;
           return (
             <article className="automation-card" key={automation.id}>
-              {/* One flex-wrap row -- mark, name, step count, delete -- like
+              {/* One flex-wrap row -- mark, name, step count -- like
                   .extension-card-head. The step count leads the badges because
                   it is the one fact every automation has; the rest are wiring,
-                  and wiring belongs under the description. */}
+                  and wiring belongs under the description.
+                  Delete used to sit here, at the end of the row. It was the one
+                  destructive action in the app reachable in a single click from
+                  a grid, on a card whose other three buttons are all safe, and
+                  it guarded itself with a window.confirm(). It now lives in the
+                  editor's footer beside Cancel and Save -- you open the thing
+                  before you throw it away. */}
               <div className="automation-card-head">
                 <span aria-hidden="true" className="extension-mark is-fallback">
                   <Workflow size={20} strokeWidth={1.75} />
@@ -247,20 +265,6 @@ export function AutomationsTab({
                 <Badge icon={<Layers size={12} />}>
                   {automation.steps.length} step{automation.steps.length === 1 ? '' : 's'}
                 </Badge>
-                <button
-                  aria-label={`Delete ${automation.name}`}
-                  className="icon-button automation-card-remove"
-                  onClick={() => {
-                    const detaching = attachedTo.length > 0 ?
-                      `\n\n${attachedTo.length} profile${attachedTo.length === 1 ? '' : 's'} ` +
-                        'will stop running it on launch.' :
-                      '';
-                    if (window.confirm(`Delete "${automation.name}"?${detaching}`)) {
-                      void automations.remove([automation.id]);
-                    }
-                  }}
-                  title="Delete"
-                ><Trash2 size={16} /></button>
               </div>
 
               {/* Always rendered, empty or not: this is the element carrying
@@ -319,19 +323,25 @@ export function AutomationsTab({
                 {/* Opens the picker; it never starts a run itself. It used to
                     resolve a target with runTarget() and go, which is how a run
                     landed on a profile nobody chose and died on that profile's
-                    dead proxy. Disabled only when there is nothing to run
-                    against at all -- "which profile" is a question the dialog
-                    asks, not a reason to grey the button out. */}
-                <BusyButton
-                  busy={busy}
-                  busyLabel={runningCount > 1 ? `Running ${runningCount}` : 'Running'}
-                  icon={<Play size={14} />}
-                  onClick={() => onRun(automation)}
-                  disabled={hasNoProfiles}
-                  title={hasNoProfiles ?
-                    'Create a profile first — an automation needs one to run against.' :
-                    'Pick profiles and run'}
-                >Run</BusyButton>
+                    dead proxy. Disabled when nothing in the workspace could
+                    accept a run -- but never for "which profile", which is a
+                    question the dialog asks.
+                    The title is on the wrapper, not on the button. Chromium
+                    suppresses pointer events on a disabled control, tooltips
+                    included, so the one moment the explanation is needed is the
+                    one moment a title on the button itself never appears. */}
+                <span title={block || 'Pick profiles and run'}>
+                  <BusyButton
+                    busy={busy}
+                    busyLabel={runningCount > 1 ? `Running ${runningCount}` : 'Running'}
+                    icon={<Play size={14} />}
+                    onClick={() => onRun(automation)}
+                    disabled={Boolean(block)}
+                    // A disabled button is not tabbable, so the reason has to
+                    // travel with its name to be readable at all.
+                    aria-label={block ? `Run — ${block}` : undefined}
+                  >Run</BusyButton>
+                </span>
                 <button className="ghost" onClick={() => onEdit(automation)}>Edit</button>
                 {/* Per-card rather than on a selection toolbar, because this tab
                     has no selection model at all -- no checkboxes, no

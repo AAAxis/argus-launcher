@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
-  STALE_AFTER_MS, isRunnable, needsCheck, proxiesToCheck, runReadiness,
+  STALE_AFTER_MS, describeRunBlock, isRunnable, needsCheck, proxiesToCheck, runReadiness,
 } from './runReadiness';
 import type {ArgusProfile, ArgusProxy} from '../types';
 
@@ -158,6 +158,78 @@ describe('proxiesToCheck', () => {
   it('returns nothing when there is nothing to learn', () => {
     const fresh = proxy({checked_at: iso(NOW)});
     expect(proxiesToCheck([profile()], [fresh], NOW)).toEqual([]);
+  });
+});
+
+describe('describeRunBlock', () => {
+  const ok = proxy({id: 'ok', checked_at: iso(NOW)});
+  const dead = proxy({id: 'dead', check_error: 'Connection refused'});
+
+  it('does not block when one profile can run', () => {
+    const list = [
+      profile({id: 'a', proxy_id: 'dead'}),
+      profile({id: 'b', proxy_id: 'gone'}),
+      profile({id: 'c', proxy_id: 'ok'}),
+    ];
+    expect(describeRunBlock(list, [ok, dead], NOW)).toBeNull();
+  });
+
+  // The same rule isRunnable follows: a proxy nobody has checked lately is a
+  // question the run dialog answers by checking, not a reason to refuse.
+  it('counts stale and unchecked proxies as runnable', () => {
+    const stale = proxy({id: 'stale', checked_at: iso(NOW - STALE_AFTER_MS - 1)});
+    const cold = proxy({id: 'cold'});
+    expect(describeRunBlock([profile({proxy_id: 'stale'})], [stale], NOW)).toBeNull();
+    expect(describeRunBlock([profile({proxy_id: 'cold'})], [cold], NOW)).toBeNull();
+  });
+
+  it('counts direct and free-proxy profiles as runnable', () => {
+    const list = [
+      profile({id: 'a', proxy_id: 'dead'}),
+      profile({id: 'b', proxy_mode: 'direct', proxy_id: undefined}),
+    ];
+    expect(describeRunBlock(list, [dead], NOW)).toBeNull();
+    expect(describeRunBlock(
+        [profile({proxy_mode: 'free_proxy', proxy_id: undefined})], [], NOW)).toBeNull();
+  });
+
+  // Trashed profiles are restorable, so a workspace holding only trashed ones
+  // has no profiles -- and the way out is a Demo profile, not the Proxies tab.
+  it('asks for a profile when every one is trashed', () => {
+    const list = [profile({id: 'a', deleted_at: iso(NOW - 1000)})];
+    expect(describeRunBlock(list, [ok], NOW))
+        .toBe('No profiles yet — an automation needs one to run against.');
+  });
+
+  it('asks for a profile when there are none at all', () => {
+    expect(describeRunBlock([], [], NOW))
+        .toBe('No profiles yet — an automation needs one to run against.');
+  });
+
+  // A count of one reads as a report about someone else's workspace, so the
+  // single-profile case names the profile instead.
+  it('names the profile when there is only one', () => {
+    expect(describeRunBlock([profile({name: 'Main US', proxy_id: 'dead'})], [dead], NOW))
+        .toBe("Main US can't run: its proxy failed its last check.");
+    expect(describeRunBlock([profile({name: 'Main US', proxy_id: 'gone'})], [], NOW))
+        .toBe("Main US can't run: it has no working proxy assigned.");
+  });
+
+  it('counts both causes when several are blocked', () => {
+    const list = [
+      profile({id: 'a', proxy_id: 'dead'}),
+      profile({id: 'b', proxy_id: 'dead'}),
+      profile({id: 'c', proxy_id: 'gone'}),
+    ];
+    expect(describeRunBlock(list, [dead], NOW))
+        .toBe('All 3 profiles are blocked — 2 have a proxy that failed its check, ' +
+          '1 has no working proxy assigned.');
+  });
+
+  it('names only the cause that applies', () => {
+    const list = [profile({id: 'a', proxy_id: 'gone'}), profile({id: 'b', proxy_id: 'nope'})];
+    expect(describeRunBlock(list, [], NOW))
+        .toBe('All 2 profiles are blocked — 2 have no working proxy assigned.');
   });
 });
 

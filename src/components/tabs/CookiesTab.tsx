@@ -220,24 +220,29 @@ export function CookiesTab({
   // zero, so the whole screen becomes the invitation to add the first set.
   if (workspaceEmpty) {
     return (
-      <section className="table-wrap table-wrap-empty">
-        <EmptyState
-          hero
-          icon={<Cookie size={30} strokeWidth={1.5} />}
-          title="No cookie-sets yet"
-          body={'A cookie-set is a saved export of a logged-in browser session. Add one and ' +
-            'any profile can launch already signed in.'}
-        >
+      // The Proxies tab's shape: a bare centred section rather than .table-wrap,
+      // whose border and raised fill would box the message inside the outline of
+      // a table that has nothing in it.
+      <section className="tab-empty">
+        <span className="tab-empty-mark">
+          <Cookie size={26} strokeWidth={1.5} />
+        </span>
+        <h2>No cookie-sets yet</h2>
+        <p>
+          A cookie-set is a saved export of a logged-in browser session. Add one
+          and any profile can launch already signed in.
+        </p>
+        <div className="tab-empty-actions">
           <button onClick={onNewCookieSet} type="button">
-            <Cookie size={16} /> Add cookie-set
+            <Cookie size={18} /> Add cookie-set
           </button>
           {/* The same pairing the empty Profiles tab uses: the action, and the
             * way to find out what the action is for. Someone who has never
             * exported cookies needs the second one first. */}
           <button className="ghost" onClick={onShowAbout} type="button">
-            <BookOpen size={16} /> What are cookie-sets?
+            <BookOpen size={18} /> What are cookie-sets?
           </button>
-        </EmptyState>
+        </div>
       </section>
     );
   }

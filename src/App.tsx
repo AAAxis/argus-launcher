@@ -23,7 +23,10 @@ import {AutomationModal} from './components/modals/AutomationModal';
 import {RunAutomationModal} from './components/modals/RunAutomationModal';
 import {RunLogModal} from './components/modals/RunLogModal';
 import {CookieSetModal} from './components/modals/CookieSetModal';
-import {ProfileDeleteModal, ProxyDeleteModal, ErrorModal} from './components/modals/ConfirmModals';
+import {
+  AutomationDeleteModal, ProfileDeleteModal, ProxyDeleteModal, ErrorModal,
+} from './components/modals/ConfirmModals';
+import type {AutomationDeleteRequest} from './components/modals/ConfirmModals';
 import {BookmarkModal, FolderModal, ProxyModal, StatusModal} from './components/modals/EditorModals';
 import {IntegrationModal} from './components/modals/IntegrationModal';
 import {
@@ -107,6 +110,11 @@ export function App() {
   const [automationDraft, setAutomationDraft] =
     useState<{automation: ArgusAutomation; exists: boolean} | null>(null);
   const [historyFor, setHistoryFor] = useState<ArgusAutomation | null>(null);
+  // The automation whose delete confirmation is open. Beside automationDraft
+  // rather than in useEditors because only the editor raises it -- the card in
+  // the grid has no Delete any more.
+  const [automationDeleteRequest, setAutomationDeleteRequest] =
+    useState<AutomationDeleteRequest | null>(null);
   // The automation whose profile picker is open. Held here rather than in the
   // Automations tab because the editor's own Run button raises the same dialog,
   // and that dialog must not be a second copy living inside the editor.
@@ -530,9 +538,39 @@ export function App() {
               workspace.selectedProfileId,
               workspace.automations.lastRunProfileId(automationDraft.automation.id),
           )}
+          // Names and ids only. The key stays out of the editor entirely -- a
+          // step stores a provider id, and the main process is the only thing
+          // that ever turns one into a credential.
+          providers={data.state.ai_providers.map((provider) => ({
+            id: provider.id,
+            name: provider.name,
+            is_default: provider.is_default,
+          }))}
           onClose={() => setAutomationDraft(null)}
           onRun={setRunningAutomation}
           onSave={(next) => workspace.automations.save(next, automationDraft.exists)}
+          // Counted from the saved automation's id, not from the draft: the
+          // draft may have unsaved edits, but what is attached to a profile is
+          // whatever was last written.
+          onDelete={() => setAutomationDeleteRequest({
+            id: automationDraft.automation.id,
+            label: automationDraft.automation.name || 'this automation',
+            attachedProfiles: data.state.profiles.filter((profile) =>
+              !profile.deleted_at &&
+              profile.automation_id === automationDraft.automation.id).length,
+          })}
+        />
+      )}
+      {automationDeleteRequest && (
+        <AutomationDeleteModal
+          request={automationDeleteRequest}
+          onClose={() => setAutomationDeleteRequest(null)}
+          onDeleted={() => {
+            setAutomationDeleteRequest(null);
+            // The editor it was raised from is showing something that no longer
+            // exists, so it goes too.
+            setAutomationDraft(null);
+          }}
         />
       )}
       {historyFor && (

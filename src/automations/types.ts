@@ -23,6 +23,8 @@ export type StepType =
   | 'wait'
   | 'setVar'
   | 'httpRequest'
+  | 'aiPrompt'
+  | 'aiCheck'
   | 'if'
   | 'loop';
 
@@ -139,6 +141,41 @@ export type AutomationStep =
       headers?: Record<string, string>;
       body?: string;
       into?: string;
+    })
+  | (StepBase & {
+      // Asks a model a question, optionally about the page, and stores the
+      // answer. Like httpRequest it runs in the main process, and for the same
+      // reason -- a call from the page would traverse the profile's proxy and
+      // carry its cookies.
+      //
+      // `provider` is an ai_providers id, or empty for the workspace default.
+      // The key is never here: the main process resolves the id against the
+      // list the renderer pushed it, which is what keeps the credential out of
+      // the steps, the vars, the log and run.json.
+      type: 'aiPrompt';
+      provider?: string;
+      prompt: string;
+      context?: 'none' | 'pageText' | 'selector';
+      selector?: string;
+      format?: 'text' | 'json';
+      maxTokens?: number;
+      into: string;
+    })
+  | (StepBase & {
+      // The same call, constrained to a yes/no answer so a branch can act on
+      // it. `into` stores the string 'yes' or 'no' rather than a boolean,
+      // because Condition compares with String() on both sides -- a boolean
+      // would work by accident and read as a bug.
+      //
+      // onFalse: 'fail' is the assertion the step catalogue never had. Nothing
+      // else in it can end a run on a judgement about the page.
+      type: 'aiCheck';
+      provider?: string;
+      question: string;
+      context?: 'none' | 'pageText' | 'selector';
+      selector?: string;
+      into?: string;
+      onFalse?: 'continue' | 'fail';
     })
   | (StepBase & {
       type: 'if';

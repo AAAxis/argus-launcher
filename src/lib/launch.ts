@@ -82,8 +82,10 @@ export function buildLaunchPayload(
     cookieImportName: savedMode ?
       (savedCookie?.name || null) :
       (profile.cookie_import_name || null),
-    enableCookieManager: state.built_in_extensions?.cookie_manager !== false,
-    enableSmsActivate: state.built_in_extensions?.sms_activate !== false,
-    enableFoxywallFreeProxy: state.built_in_extensions?.foxywall_free_proxy !== false,
+    // Passed through as saved, not normalized here: what a missing key means
+    // differs per extension (the three original ones default on so state saved
+    // before their toggles existed keeps them; CaptchaPlugin defaults off
+    // because it costs a download), and that polarity lives in the registry.
+    builtInExtensions: state.built_in_extensions,
   };
 }

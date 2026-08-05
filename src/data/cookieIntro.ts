@@ -24,6 +24,7 @@ export const COOKIE_INTRO_STEPS: IntroStep[] = [
     caption: 'A cookie-set opened: every cookie in it, and the profiles using it.',
     figure: 'cookie-set',
     image: cookieSetShot,
+    fill: true,
   },
   {
     title: 'Where to get them',
@@ -38,5 +39,6 @@ export const COOKIE_INTRO_STEPS: IntroStep[] = [
     caption: 'The Argus Cookie Manager, in a launched profile\'s extensions menu.',
     figure: 'cookie-manager',
     image: cookieManagerShot,
+    fill: true,
   },
 ];

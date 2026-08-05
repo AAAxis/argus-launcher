@@ -29,6 +29,56 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_providers: {
+        Row: {
+          api_key: string | null
+          base_url: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_default: boolean
+          kind: string
+          model: string
+          name: string
+          org_id: string
+          updated_at: string
+        }
+        Insert: {
+          api_key?: string | null
+          base_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          kind: string
+          model: string
+          name: string
+          org_id: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string | null
+          base_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          kind?: string
+          model?: string
+          name?: string
+          org_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_providers_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       api_tokens: {
         Row: {
           created_at: string

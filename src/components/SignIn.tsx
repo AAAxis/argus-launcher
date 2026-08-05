@@ -1,4 +1,4 @@
-import {Shield} from 'lucide-react';
+import {Mail} from 'lucide-react';
 import {GoogleMark} from './ui/icons';
 import {OTP_CODE_LENGTH, SITE_URL} from '../lib/auth';
 import {native} from '../native';
@@ -8,7 +8,12 @@ export function SignIn({state}: {state: SignInState}) {
   return (
     <main className="login-shell">
       <section className="login-panel">
-        <Shield size={34} />
+        {/* The product's own mark, not a generic padlock. This is the first
+            Argus screen anyone sees, and a lucide shield said "some security
+            app". Masked from the same PNG the sidebar's .brand-mark uses, so it
+            inverts with the theme instead of stamping a plate into the dark
+            panel -- see .login-mark in styles.css. */}
+        <span className="login-mark" aria-hidden="true" />
         {state.step === 'email' ? <EmailStep state={state} /> : <CodeStep state={state} />}
       </section>
     </main>
@@ -42,7 +47,11 @@ function EmailStep({state}: {state: SignInState}) {
           autoFocus
           required
         />
+        {/* Icon and label centred as a pair, to answer the Google button
+            directly above it: the two ways in are the same shape, the same
+            height and the same alignment, and differ only in their mark. */}
         <button type="submit" disabled={state.busy}>
+          <Mail size={16} strokeWidth={2} />
           {state.busy ? 'Sending…' : 'Email me a code'}
         </button>
       </form>

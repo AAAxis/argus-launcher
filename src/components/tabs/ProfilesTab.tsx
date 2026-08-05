@@ -273,23 +273,29 @@ export function ProfilesTab({
     setPurge({ids: [profile.id], count: 1, label: profile.name});
   }
 
+  // The same shape the empty Proxies tab uses: a bare centred section, not a
+  // table shell wrapped around a message. .table-wrap draws a raised, bordered
+  // card, and with no rows in it that border reads as the outline of a table
+  // that failed to load rather than as an invitation.
   if (workspaceEmpty) {
     return (
-      <section className="table-wrap table-wrap-empty">
-        <EmptyState
-          hero
-          icon={<UsersRound size={30} strokeWidth={1.5} />}
-          title="No profiles yet"
-          body={'A profile is a separate browser with its own cookies, fingerprint and proxy. ' +
-            'Make one and it appears here, ready to launch.'}
-        >
+      <section className="tab-empty">
+        <span className="tab-empty-mark">
+          <UsersRound size={26} strokeWidth={1.5} />
+        </span>
+        <h2>No profiles yet</h2>
+        <p>
+          A profile is a separate browser with its own cookies, fingerprint and
+          proxy. Make one and it appears here, ready to launch.
+        </p>
+        <div className="tab-empty-actions">
           <button onClick={onNewProfile} type="button">
-            <UserPlus size={16} /> Add profile
+            <UserPlus size={18} /> Add profile
           </button>
           <button className="ghost" onClick={onShowIntro} type="button">
-            <BookOpen size={16} /> How profiles work
+            <BookOpen size={18} /> How profiles work
           </button>
-        </EmptyState>
+        </div>
       </section>
     );
   }

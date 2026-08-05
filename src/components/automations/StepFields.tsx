@@ -186,6 +186,9 @@ function control(
     field: FieldSpec,
     value: unknown,
     set: (next: unknown) => void,
+    // The workspace's AI providers, for the one field kind whose options are
+    // data rather than a list in step-schema.json.
+    providers: {id: string; name: string; is_default?: boolean}[],
 ): ReactNode {
   switch (field.kind) {
     case 'textarea':
@@ -236,6 +239,29 @@ function control(
       );
     case 'condition':
       return <ConditionFields value={value as Condition} onChange={set} />;
+    case 'provider':
+      return (
+        <select value={String(value ?? '')} onChange={(event) => set(event.target.value)}>
+          {/* Empty means "whichever the workspace has marked default", which is
+              resolved at run time and not here -- so an automation stays
+              correct after the default changes, and an agent authoring one over
+              MCP can leave the field out entirely. */}
+          <option value="">
+            Workspace default{providers.some((entry) => entry.is_default) ?
+              ` (${providers.find((entry) => entry.is_default)?.name})` :
+              ' — none set yet'}
+          </option>
+          {providers.map((provider) => (
+            <option key={provider.id} value={provider.id}>{provider.name}</option>
+          ))}
+          {/* A provider that has been deleted, or one from another workspace.
+              Listed so the step keeps showing what it actually names instead of
+              silently snapping back to the default. */}
+          {Boolean(value) && !providers.some((provider) => provider.id === value) && (
+            <option value={String(value)}>Missing provider</option>
+          )}
+        </select>
+      );
     default:
       return (
         <input
@@ -247,9 +273,13 @@ function control(
   }
 }
 
-export function StepFields({step, onChange, checkProfile}: {
+export function StepFields({step, onChange, checkProfile, providers = []}: {
   step: AutomationStep;
   onChange: (next: AutomationStep) => void;
+  // Threaded from the editor rather than read from context, exactly as
+  // checkProfile is: StepList is also the recursion, and a branch's steps
+  // choose from the same list.
+  providers?: {id: string; name: string; is_default?: boolean}[];
   // The profile a Check tests against. See automations/target.ts -- the same
   // rule the Run button uses, so the page you check is the page you run on.
   checkProfile?: {id: string; name: string} | null;
@@ -278,7 +308,7 @@ export function StepFields({step, onChange, checkProfile}: {
         if (field.kind === 'boolean') {
           return (
             <div className="automation-field" key={field.key}>
-              {control(field, values[field.key], set)}
+              {control(field, values[field.key], set, providers)}
               {field.hint && <p className="field-hint">{field.hint}</p>}
             </div>
           );
@@ -289,7 +319,7 @@ export function StepFields({step, onChange, checkProfile}: {
             label={field.required ? `${field.label} *` : field.label}
             hint={field.hint}
           >
-            {control(field, values[field.key], set)}
+            {control(field, values[field.key], set, providers)}
             {/* Keyed on the selector's current value, so editing the input
                 clears a stale verdict rather than leaving "1 match" sitting
                 under a selector that has since been changed. */}
