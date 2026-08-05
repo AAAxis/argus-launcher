@@ -3831,6 +3831,20 @@ ipcMain.handle('argus:set-connectors', async (_event, {connectors}) => {
 // would cost the user money to learn nothing more. For a message connector it
 // is one real message, because there is no cheaper way to prove a webhook or a
 // chat id than to use it.
+// What models an AI connector's endpoint actually serves, for the connector
+// form's model picker. Takes the draft (key included) rather than an id for
+// the same reason the Test button does: the endpoint being asked is the one
+// about to be saved, not whatever the last save wrote.
+ipcMain.handle('argus:list-connector-models', async (_event, {connector}) => {
+  try {
+    const models = await automationAi.listModels({provider: connector});
+    return {ok: true, models};
+  } catch (error) {
+    // The provider's own words -- "invalid x-api-key" beats "could not load".
+    return {ok: false, error: error?.message || String(error)};
+  }
+});
+
 ipcMain.handle('argus:test-connector', async (_event, {connector}) => {
   try {
     if (connector?.category === 'message') {

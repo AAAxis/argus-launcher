@@ -7,12 +7,12 @@
 // only then shows the form. The kind is locked once saved: changing it under
 // an existing config would leave the old kind's keys orphaned inside `config`,
 // and "delete it and add the right one" is honest about what that is.
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {ArrowLeft, Check, ExternalLink, Eye, EyeOff, X} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {Field} from '../ui/Field';
 import {Modal} from '../ui/Modal';
-import {connectorGlyph} from '../automations/ConnectorsView';
+import {ConnectorMark} from '../automations/ConnectorsView';
 import {native} from '../../native';
 import {
   CONNECTOR_PRESETS, presetFor, runtimeConnector, validateConnectorConfig,
@@ -68,10 +68,69 @@ export function ConnectorModal({connector, exists, onClose}: {
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<TestResult | null>(null);
   const [error, setError] = useState('');
+  // What the endpoint says it serves, once asked. null = never loaded (the
+  // model box is free text); a list turns the box into a real choice, with
+  // `manualModel` as the escape hatch back to typing -- gateways route ids
+  // their /models listing does not admit to.
+  const [models, setModels] = useState<string[] | null>(null);
+  const [modelsError, setModelsError] = useState('');
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [manualModel, setManualModel] = useState(false);
 
   const preset = presetFor(draft.kind);
   // Creating and no kind picked yet -> the picker is the whole dialog.
   const picking = !exists && !draft.kind;
+
+  // The listing can be asked for once the endpoint resolves and the key -- on
+  // the kinds that demand one -- is present. The local runtimes need nothing.
+  const needsKey = Boolean(preset?.fields.some(
+      (field) => field.key === 'api_key' && field.required));
+  const canLoadModels = preset?.category === 'ai' &&
+    Boolean(runtimeConnector(draft).base_url) &&
+    (!needsKey || Boolean((draft.config.api_key || '').trim()));
+
+  async function loadModels() {
+    setLoadingModels(true);
+    setModelsError('');
+    const answer = await native?.listConnectorModels?.(runtimeConnector(draft));
+    setLoadingModels(false);
+    if (!answer) {
+      setModelsError('Loading models needs the desktop app.');
+      return;
+    }
+    if (!answer.ok || !answer.models?.length) {
+      setModels(null);
+      setModelsError(answer.error || 'Could not load the model list.');
+      return;
+    }
+    setModels(answer.models);
+    setManualModel(false);
+    // A blank model box picks up the endpoint's first offering -- the one
+    // choice that is always wrong is an empty string.
+    if (!(draft.config.model || '').trim()) {
+      setConfig('model', answer.models[0]);
+    }
+  }
+
+  // Fetch by itself as soon as it can: on opening an existing connector (its
+  // key is already there) and shortly after a key or endpoint is pasted into
+  // a new one. Debounced so typing a key asks once, not per keystroke; a
+  // failed attempt shows its reason under the box and the Refresh button
+  // retries.
+  const keyValue = draft.config.api_key || '';
+  const baseValue = draft.config.base_url || '';
+  useEffect(() => {
+    if (!canLoadModels) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      void loadModels();
+    }, 700);
+    return () => clearTimeout(timer);
+    // Re-asks when what the request is built from changes -- not when the
+    // model selection does, which loadModels itself writes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.kind, keyValue, baseValue]);
 
   function pick(kind: string) {
     const picked = presetFor(kind);
@@ -93,6 +152,9 @@ export function ConnectorModal({connector, exists, onClose}: {
     });
     setTest(null);
     setError('');
+    setModels(null);
+    setModelsError('');
+    setManualModel(false);
   }
 
   function setConfig(key: string, value: string) {
@@ -129,6 +191,9 @@ export function ConnectorModal({connector, exists, onClose}: {
     setDraft({...draft, kind: '', config: {}});
     setTest(null);
     setError('');
+    setModels(null);
+    setModelsError('');
+    setManualModel(false);
   }
 
   async function save() {
@@ -187,20 +252,17 @@ export function ConnectorModal({connector, exists, onClose}: {
           <section className="connector-pick-group" key={category}>
             <h3>{category === 'ai' ? 'AI models' : 'Messaging'}</h3>
             <div className="connector-pick-grid">
-              {CONNECTOR_PRESETS.filter((entry) => entry.category === category).map((entry) => {
-                const Glyph = connectorGlyph(entry);
-                return (
-                  <button
-                    className="connector-pick-tile"
-                    key={entry.kind}
-                    onClick={() => pick(entry.kind)}
-                    type="button"
-                  >
-                    <Glyph size={18} strokeWidth={1.75} />
-                    <span>{entry.label}</span>
-                  </button>
-                );
-              })}
+              {CONNECTOR_PRESETS.filter((entry) => entry.category === category).map((entry) => (
+                <button
+                  className="connector-pick-tile"
+                  key={entry.kind}
+                  onClick={() => pick(entry.kind)}
+                  type="button"
+                >
+                  <ConnectorMark kind={entry.kind} preset={entry} size={18} />
+                  <span>{entry.label}</span>
+                </button>
+              ))}
             </div>
           </section>
         ))}
@@ -260,26 +322,88 @@ export function ConnectorModal({connector, exists, onClose}: {
           />
         </Field>
 
-        {(preset?.fields || []).map((field) => (
-          <Field
-            key={field.key}
-            label={field.required ? `${field.label} *` : field.label}
-            hint={field.hint}
-          >
-            {control(field)}
-            {/* "Get one" sits beside the field it fills, in the user's own
-                browser -- never a profile window; those stay anonymous. */}
-            {field.secret && field.key === keyField?.key && preset?.keyUrl && (
-              <button
-                className="link-button"
-                onClick={() => void native?.openExternal?.(preset.keyUrl as string)}
-                type="button"
-              >
-                Get one <ExternalLink size={12} />
-              </button>
-            )}
-          </Field>
-        ))}
+        {(preset?.fields || []).map((field) => {
+          // The model box, once the endpoint has been asked, is a choice of
+          // what it actually serves rather than a string typed from memory --
+          // with "Type a model id…" as the way out for gateways that route
+          // ids their listing omits. Until then (no key yet, listing failed)
+          // it stays the plain input.
+          if (preset?.category === 'ai' && field.key === 'model') {
+            const currentModel = draft.config.model || '';
+            return (
+              <Field key={field.key} label={`${field.label} *`} hint={field.hint}>
+                {models && !manualModel ? (
+                  <select
+                    value={currentModel}
+                    onChange={(event) => {
+                      if (event.target.value === '__manual') {
+                        setManualModel(true);
+                        return;
+                      }
+                      setConfig('model', event.target.value);
+                    }}
+                  >
+                    {/* The stored model, kept even when the listing omits it
+                        -- a saved choice must not silently snap to another. */}
+                    {currentModel && !models.includes(currentModel) && (
+                      <option value={currentModel}>{currentModel}</option>
+                    )}
+                    {models.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                    <option value="__manual">Type a model id…</option>
+                  </select>
+                ) : control(field)}
+                <div className="connector-models-row">
+                  <BusyButton
+                    busy={loadingModels}
+                    busyLabel="Loading"
+                    className="ghost small"
+                    disabled={!canLoadModels}
+                    onClick={() => void loadModels()}
+                    title={canLoadModels ?
+                      'Ask the endpoint what models it serves' :
+                      (needsKey ? 'Enter the API key first.' : 'Enter the endpoint first.')}
+                  >
+                    {models ? 'Refresh models' : 'Load models'}
+                  </BusyButton>
+                  {models && manualModel && (
+                    <button
+                      className="link-button"
+                      onClick={() => setManualModel(false)}
+                      type="button"
+                    >Back to the list</button>
+                  )}
+                </div>
+                {modelsError && (
+                  <p className="connector-card-test is-bad">
+                    <X size={13} /><span>{modelsError}</span>
+                  </p>
+                )}
+              </Field>
+            );
+          }
+          return (
+            <Field
+              key={field.key}
+              label={field.required ? `${field.label} *` : field.label}
+              hint={field.hint}
+            >
+              {control(field)}
+              {/* "Get one" sits beside the field it fills, in the user's own
+                  browser -- never a profile window; those stay anonymous. */}
+              {field.secret && field.key === keyField?.key && preset?.keyUrl && (
+                <button
+                  className="link-button"
+                  onClick={() => void native?.openExternal?.(preset.keyUrl as string)}
+                  type="button"
+                >
+                  Get one <ExternalLink size={12} />
+                </button>
+              )}
+            </Field>
+          );
+        })}
 
         {test && (
           <p className={`connector-card-test ${test.ok ? 'is-ok' : 'is-bad'}`}>

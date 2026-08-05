@@ -13,7 +13,7 @@
 // them speak OpenAI's /chat/completions; Anthropic speaks /v1/messages.
 // Anything else that turns up almost certainly publishes an OpenAI-compatible
 // base URL -- check before writing a third adapter.
-const {REQUEST_TIMEOUT_MS, join, postJson} = require('./connectors.cjs');
+const {REQUEST_TIMEOUT_MS, getJson, join, postJson} = require('./connectors.cjs');
 
 // Anthropic pins its wire format to a dated version header. Without it the API
 // answers 400 rather than defaulting to anything.
@@ -98,4 +98,34 @@ async function complete({provider, system, user, maxTokens, json}) {
   return provider.adapter === 'anthropic' ? completeAnthropic(args) : completeOpenAi(args);
 }
 
-module.exports = {REQUEST_TIMEOUT_MS, complete};
+// What the endpoint actually serves, so the model box can be a real choice
+// instead of a string typed from memory. Both wire formats publish a listing
+// -- GET /models on everything OpenAI-compatible, GET /v1/models on Anthropic
+// -- and both answer {data: [{id}]}. The key proves itself here too: a wrong
+// one fails this call with the provider's own 401 sentence.
+//
+// Order is preserved as the provider sent it (most put the current models
+// first) and nothing is filtered: guessing which ids are "chat" models breaks
+// differently on every vendor, and a picker that hides a real id is worse
+// than one that shows an embedding model.
+async function listModels({provider}) {
+  const endpoint = String(provider?.base_url || '').trim();
+  if (!endpoint) {
+    throw new Error(`AI connector "${provider?.name || 'unnamed'}" has no endpoint set`);
+  }
+  const anthropic = provider.adapter === 'anthropic';
+  const answer = await getJson(
+      join(endpoint, anthropic ? '/v1/models?limit=1000' : '/models'),
+      anthropic ?
+        {'x-api-key': provider.api_key || '', 'anthropic-version': ANTHROPIC_VERSION} :
+        (provider.api_key ? {authorization: `Bearer ${provider.api_key}`} : {}));
+  const models = (Array.isArray(answer?.data) ? answer.data : [])
+      .map((entry) => (typeof entry === 'string' ? entry : entry?.id))
+      .filter((id) => typeof id === 'string' && id.length > 0);
+  if (models.length === 0) {
+    throw new Error('The endpoint answered, but with no models this app recognises');
+  }
+  return [...new Set(models)];
+}
+
+module.exports = {REQUEST_TIMEOUT_MS, complete, listModels};

@@ -71,6 +71,10 @@ contextBridge.exposeInMainWorld('argusNative', {
   // Takes the config directly rather than an id so an unsaved edit can be
   // tried before it is written.
   testConnector: (connector) => ipcRenderer.invoke('argus:test-connector', {connector}),
+  // The endpoint's own model listing, for the form's model picker. Draft in,
+  // like testConnector, so an unsaved key can prove itself.
+  listConnectorModels: (connector) =>
+    ipcRenderer.invoke('argus:list-connector-models', {connector}),
   onDeepLink: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:deep-link', listener);

@@ -17,7 +17,7 @@ import {
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {native} from '../../native';
-import {presetFor, runtimeConnector, secretKeysFor} from '../../data/connectors';
+import {connectorLogo, presetFor, runtimeConnector, secretKeysFor} from '../../data/connectors';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ConnectorPreset} from '../../data/connectors';
@@ -37,6 +37,23 @@ const ICONS: Record<string, typeof Cable> = {
 
 export function connectorGlyph(preset: ConnectorPreset | null): typeof Cable {
   return (preset && ICONS[preset.icon]) || Cable;
+}
+
+// A kind's mark: the brand image when one exists (assets/connectors, falling
+// back to the tag catalogue's cut in assets/brands), the lucide glyph when
+// none does. Through <img> with its own colours, the same route the tag marks
+// take -- see assets/connectors/README.md.
+export function ConnectorMark({kind, preset, size = 20}: {
+  kind: string;
+  preset: ConnectorPreset | null;
+  size?: number;
+}) {
+  const logo = connectorLogo(kind);
+  if (logo) {
+    return <img alt="" className="connector-logo" src={logo} style={{height: size - 2}} />;
+  }
+  const Glyph = connectorGlyph(preset);
+  return <Glyph size={size} strokeWidth={1.75} />;
 }
 
 // The last four characters, which are there so the value can be compared
@@ -82,7 +99,6 @@ function ConnectorCard({connector, canEdit, onEdit}: {
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState<TestResult | null>(null);
 
-  const Glyph = connectorGlyph(preset);
   const secretKey = secretKeysFor(connector.kind)
       .find((key) => (connector.config || {})[key]);
   const secretValue = secretKey ? connector.config[secretKey] : '';
@@ -123,7 +139,7 @@ function ConnectorCard({connector, canEdit, onEdit}: {
     <article className="automation-card connector-card">
       <div className="automation-card-head">
         <span aria-hidden="true" className="extension-mark is-fallback">
-          <Glyph size={20} strokeWidth={1.75} />
+          <ConnectorMark kind={connector.kind} preset={preset} size={20} />
         </span>
         <h3>{connector.name}</h3>
         {connector.is_default && (

@@ -358,6 +358,10 @@ type ArgusNative = {
   // unsaved draft can be tried before it is written. For an AI connector this
   // is one tiny completion; for a messaging one it sends a real test message.
   testConnector?(connector: RuntimeConnector): Promise<{ok: boolean; error?: string}>;
+  // What models an AI connector's endpoint serves, so the form offers a real
+  // choice. Takes the resolved draft, key included, like testConnector.
+  listConnectorModels?(connector: RuntimeConnector):
+    Promise<{ok: boolean; models?: string[]; error?: string}>;
   cancelAutomationRun?(runId: string): Promise<{ok: boolean}>;
   // Runs in flight right now, so a window that reopens mid-run rejoins it
   // rather than showing nothing.

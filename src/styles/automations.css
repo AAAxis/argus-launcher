@@ -928,3 +928,20 @@
 .connector-modal-back {
   margin-right: auto;
 }
+
+/* Brand marks keep their own colours and their own aspect -- height fixed,
+ * width left to the artwork, exactly as .tag-logo does and for the same
+ * reason: several brand cuts are not square. */
+.connector-logo {
+  max-width: 30px;
+  object-fit: contain;
+  width: auto;
+}
+
+/* Load/Refresh models sits under the model box, beside the way back to the
+ * list when the user chose to type. */
+.connector-models-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}

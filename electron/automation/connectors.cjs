@@ -79,7 +79,7 @@ function resolve(connectorId, category) {
 // answers 204 with nothing at all, and treating either as a failure would
 // "fail" every send that worked. Callers that need the parsed body check
 // `parsed`; callers that only care that it went through ignore the result.
-function postText(url, headers, payload) {
+function requestText(method, url, headers, payload) {
   return new Promise((resolvePromise, reject) => {
     let target;
     try {
@@ -90,10 +90,12 @@ function postText(url, headers, payload) {
     }
     const transport = target.protocol === 'http:' ? http : https;
     const request = transport.request(target, {
-      method: 'POST',
+      method,
       headers: {
-        'content-type': 'application/json',
-        'content-length': Buffer.byteLength(payload),
+        ...(payload === undefined ? {} : {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+        }),
         ...headers,
       },
       timeout: REQUEST_TIMEOUT_MS,
@@ -131,16 +133,30 @@ function postText(url, headers, payload) {
       request.destroy(new Error(`${target.host} did not answer within ${
         Math.round(REQUEST_TIMEOUT_MS / 1000)}s`)));
     request.on('error', reject);
-    request.write(payload);
+    if (payload !== undefined) {
+      request.write(payload);
+    }
     request.end();
   });
 }
 
-// The JSON-in, JSON-out wrapper ai.cjs and the JSON adapters use: same
+function postText(url, headers, payload) {
+  return requestText('POST', url, headers, payload);
+}
+
+// The JSON-in, JSON-out wrappers ai.cjs and the JSON adapters use: same
 // transport, but a 2xx that is not JSON is an error, because these callers
 // read the body.
 async function postJson(url, headers, body) {
   const response = await postText(url, headers, JSON.stringify(body));
+  if (!response.parsed) {
+    throw new Error(`${new URL(url).host} did not answer with JSON`);
+  }
+  return response.parsed;
+}
+
+async function getJson(url, headers) {
+  const response = await requestText('GET', url, headers);
   if (!response.parsed) {
     throw new Error(`${new URL(url).host} did not answer with JSON`);
   }
@@ -277,4 +293,4 @@ async function send({connector, message, subject}) {
   }
 }
 
-module.exports = {REQUEST_TIMEOUT_MS, join, postJson, resolve, send, setConnectors};
+module.exports = {REQUEST_TIMEOUT_MS, getJson, join, postJson, resolve, send, setConnectors};

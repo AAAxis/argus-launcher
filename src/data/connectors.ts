@@ -24,6 +24,52 @@
 
 export type ConnectorCategory = 'ai' | 'message';
 
+// Brand marks, the tagPresets.ts trick: resolved at build time, an absent file
+// costs the preset's lucide glyph rather than a build error, so the catalogue
+// can name every service before any artwork exists. Adding a logo is a drop
+// into src/assets/connectors/<kind>.svg (or .png) with no code change here.
+const CONNECTOR_LOGO_FILES = import.meta.glob('../assets/connectors/*.{svg,png}', {
+  eager: true,
+  import: 'default',
+  query: '?url',
+}) as Record<string, string>;
+
+// The tag catalogue's marks double as a fallback for the services both lists
+// know -- Telegram, Discord, WhatsApp and Google already have full-colour cuts
+// in assets/brands, and shipping a second copy of each would be two files to
+// keep in step.
+const SHARED_BRAND_FILES = import.meta.glob('../assets/brands/*.svg', {
+  eager: true,
+  import: 'default',
+  query: '?url',
+}) as Record<string, string>;
+
+function logoIndex(files: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(files).map(([path, url]) => [
+    path.slice(path.lastIndexOf('/') + 1).replace(/\.(svg|png)$/, ''),
+    url,
+  ]));
+}
+
+const CONNECTOR_LOGOS = logoIndex(CONNECTOR_LOGO_FILES);
+const SHARED_BRAND_LOGOS = logoIndex(SHARED_BRAND_FILES);
+
+// Which assets/brands file stands in when assets/connectors has nothing for a
+// kind. Only genuine matches: X's mark is not xAI's, so 'xai' is absent.
+const BRAND_FALLBACK: Record<string, string> = {
+  telegram: 'telegram',
+  discord: 'discord',
+  whatsapp: 'whatsapp',
+  google: 'google',
+};
+
+// The image for a kind's card and picker tile, or null for the lucide glyph.
+export function connectorLogo(kind: string): string | null {
+  return CONNECTOR_LOGOS[kind] ||
+    (BRAND_FALLBACK[kind] ? SHARED_BRAND_LOGOS[BRAND_FALLBACK[kind]] : undefined) ||
+    null;
+}
+
 export type AiAdapter = 'openai' | 'anthropic';
 
 // One field of a connector's config, as the generated form renders it.
@@ -147,17 +193,11 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
     keyUrl: 'https://console.mistral.ai/api-keys',
     fields: aiFields({needsKey: true}),
   },
-  {
-    kind: 'groq',
-    label: 'Groq',
-    category: 'ai',
-    icon: 'sparkles',
-    adapter: 'openai',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    suggestedModel: 'llama-3.3-70b-versatile',
-    keyUrl: 'https://console.groq.com/keys',
-    fields: aiFields({needsKey: true}),
-  },
+  // 'groq' (the LPU inference cloud) was here and was cut: beside "xAI Grok"
+  // the picker read as offering Grok twice, and clearing that up was worth
+  // more than the eleventh OpenAI-compatible vendor. Nobody had stored one
+  // (the table was empty when this shipped); a row from another build renders
+  // as unrecognised and runs only if it carries its own base_url.
   {
     kind: 'xai',
     label: 'xAI Grok',
