@@ -133,8 +133,17 @@ export type ConnectorPreset = {
 // runtimes authenticate nobody, and demanding one would make the easiest
 // provider to try the hardest to set up), and whether the endpoint is
 // required (only 'custom' has no preset URL to fall back to).
+//
+// The key comes FIRST. The model box under it fills itself from the
+// endpoint's live listing the moment the key works (ConnectorModal), so the
+// order is the workflow: paste the key, pick from what it unlocked. Model
+// before key read as "type a model from memory" with a dead Load button.
 function aiFields({needsKey, custom}: {needsKey: boolean; custom?: boolean}): ConnectorField[] {
   return [
+    ...(needsKey ?
+      [{key: 'api_key', label: 'API key', kind: 'password', required: true, secret: true} as
+        ConnectorField] :
+      []),
     {key: 'model', label: 'Model', kind: 'text', required: true,
       hint: 'The exact model id the provider expects.'},
     {
@@ -146,18 +155,17 @@ function aiFields({needsKey, custom}: {needsKey: boolean; custom?: boolean}): Co
         'The OpenAI-compatible base URL, e.g. https://host/v1.' :
         'Leave empty to use the provider’s standard endpoint.',
     },
-    ...(needsKey ?
-      [{key: 'api_key', label: 'API key', kind: 'password', required: true, secret: true} as
-        ConnectorField] :
-      []),
   ];
 }
 
 export const CONNECTOR_PRESETS: ConnectorPreset[] = [
   // ── AI ────────────────────────────────────────────────────────────────────
+  // Labels are what the picker and cards show; `kind` is what rows store and
+  // must never change. These two carry the product names people search for
+  // rather than the company names on the API bill.
   {
     kind: 'openai',
-    label: 'OpenAI',
+    label: 'ChatGPT',
     category: 'ai',
     icon: 'sparkles',
     adapter: 'openai',
@@ -168,7 +176,7 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
   },
   {
     kind: 'anthropic',
-    label: 'Anthropic',
+    label: 'Claude',
     category: 'ai',
     icon: 'sparkles',
     adapter: 'anthropic',

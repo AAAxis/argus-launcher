@@ -330,8 +330,16 @@ export function ConnectorModal({connector, exists, onClose}: {
           // it stays the plain input.
           if (preset?.category === 'ai' && field.key === 'model') {
             const currentModel = draft.config.model || '';
+            // The hint is the state machine's narration: before the key it
+            // says what will happen, after the load it goes back to being
+            // about the value.
+            const modelHint = models ? field.hint :
+              canLoadModels ? 'Models are loading from the endpoint…' :
+                needsKey ?
+                  'Paste the API key above and the model list loads by itself.' :
+                  'Enter the endpoint and the model list loads by itself.';
             return (
-              <Field key={field.key} label={`${field.label} *`} hint={field.hint}>
+              <Field key={field.key} label={`${field.label} *`} hint={modelHint}>
                 {models && !manualModel ? (
                   <select
                     value={currentModel}
@@ -355,18 +363,23 @@ export function ConnectorModal({connector, exists, onClose}: {
                   </select>
                 ) : control(field)}
                 <div className="connector-models-row">
-                  <BusyButton
-                    busy={loadingModels}
-                    busyLabel="Loading"
-                    className="ghost small"
-                    disabled={!canLoadModels}
-                    onClick={() => void loadModels()}
-                    title={canLoadModels ?
-                      'Ask the endpoint what models it serves' :
-                      (needsKey ? 'Enter the API key first.' : 'Enter the endpoint first.')}
-                  >
-                    {models ? 'Refresh models' : 'Load models'}
-                  </BusyButton>
+                  {/* The title lives on the wrapper: Chromium suppresses
+                      tooltips on a disabled control, so the one moment the
+                      explanation is needed is the one moment a title on the
+                      button itself never shows -- the Run button's lesson. */}
+                  <span title={canLoadModels ?
+                    'Ask the endpoint what models it serves' :
+                    (needsKey ? 'Enter the API key first.' : 'Enter the endpoint first.')}>
+                    <BusyButton
+                      busy={loadingModels}
+                      busyLabel="Loading"
+                      className="ghost small"
+                      disabled={!canLoadModels}
+                      onClick={() => void loadModels()}
+                    >
+                      {models ? 'Refresh models' : 'Load models'}
+                    </BusyButton>
+                  </span>
                   {models && manualModel && (
                     <button
                       className="link-button"
