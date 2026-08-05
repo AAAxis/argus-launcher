@@ -2004,17 +2004,30 @@ td.platform-cell {
  *
  * Column-stacked rather than inline so the chip does not push the host out of a
  * table that already has ten columns. */
+/* One line: the address then its chip. Stacking them made every row in the table
+   two lines tall for the sake of one column, and the chip is short enough now
+   (a flag and a latency) that it costs almost nothing beside the host.
+
+   Laid out inline rather than with `display: flex` on the cell: flex would
+   override the td's own `display: table-cell` and take it out of the table's
+   column-width algorithm, which is how a nine-column table loses its alignment.
+   The chip is already inline-flex, so the two sit on one line on their own. */
 td.profile-proxy-cell {
   white-space: nowrap;
 }
 
-/* 6px, not 3px: the chip has a border and a tinted fill, so at 3px it read as
-   attached to the address above it rather than as a separate fact about it. */
 .profile-proxy-host {
-  display: block;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
-  margin-bottom: 6px;
+  /* Wide enough to read as two facts rather than one run-on value. */
+  margin-right: 8px;
+}
+
+/* Both on the same centre. An inline-flex chip otherwise aligns on the text
+   baseline, which sits it a couple of pixels low against the host beside it. */
+.profile-proxy-host,
+td.profile-proxy-cell > .proxy-check {
+  vertical-align: middle;
 }
 
 /* ── Proxies table cells ────────────────────────────────────────────────────
