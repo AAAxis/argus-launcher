@@ -792,6 +792,7 @@ export function App() {
             apiKeys={apiKeys}
             signedInEmail={org.email}
             onOpenDocs={() => openAccountPage(SITE_LINKS.docs)}
+            onOpenIntegrations={() => setActiveTab('integrations')}
             onKeyCreated={setRevealedKey}
           />
         );

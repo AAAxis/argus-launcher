@@ -149,8 +149,13 @@ export function referenceGroups(): ApiEntryGroup[] {
 
 // What a search box matches on. Path, label and tool name are the three things
 // someone arrives knowing -- "screenshot", "/v1/proxies", "argus_launch".
+//
+// Lowercases the needle itself rather than trusting the caller to. Every caller
+// does today, which is exactly why the one that eventually forgets would ship a
+// search box that silently matches nothing the moment a capital is typed.
 export function entryMatches(entry: ApiEntry, needle: string): boolean {
-  if (!needle) {
+  const query = needle.trim().toLowerCase();
+  if (!query) {
     return true;
   }
   const haystack = [
@@ -158,7 +163,7 @@ export function entryMatches(entry: ApiEntry, needle: string): boolean {
     entry.mcp || '',
     entry.route ? `${entry.route.method} ${entry.route.path}` : '',
   ].join(' ').toLowerCase();
-  return haystack.includes(needle);
+  return haystack.includes(query);
 }
 
 // Every tool an agent brief should name: the ones fronting a route, plus the
