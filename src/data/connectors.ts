@@ -70,6 +70,23 @@ export function connectorLogo(kind: string): string | null {
     null;
 }
 
+// Marks drawn for one background, and how each survives the other -- the
+// assets/brands/README.md taxonomy. The white-only cuts vanish on paper; the
+// currentColor ones resolve to black inside an <img> (nothing to inherit
+// from) and vanish on charcoal. Keyed by kind, checked in both themes when a
+// file is swapped for a different cut.
+const LOGO_ADAPT: Record<string, 'invert-on-light' | 'invert-on-dark'> = {
+  openai: 'invert-on-light',
+  openrouter: 'invert-on-light',
+  ollama: 'invert-on-light',
+  xai: 'invert-on-dark',
+  lmstudio: 'invert-on-dark',
+};
+
+export function connectorLogoAdapt(kind: string): string | null {
+  return LOGO_ADAPT[kind] || null;
+}
+
 export type AiAdapter = 'openai' | 'anthropic';
 
 // One field of a connector's config, as the generated form renders it.

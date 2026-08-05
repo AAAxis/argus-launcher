@@ -12,12 +12,17 @@ Kinds this catalogue currently names:
     together  huggingface  lmstudio  ollama  custom
     telegram  slack  discord  whatsapp  smtp
 
-Four ship without a file here because `assets/brands` already holds the same
-mark for the tag catalogue and `connectorLogo()` falls back to it: `telegram`,
-`discord`, `whatsapp`, `google`. A file dropped here wins over that fallback.
+All are present except `custom` and `smtp`, which deliberately keep their
+lucide glyphs — neither is a brand. `connectorLogo()` also falls back to
+`assets/brands/<slug>.svg` for the services both catalogues know (telegram,
+discord, whatsapp, google); a file here wins over that fallback.
 
 They render through `<img>` (`ConnectorMark` in
 `components/automations/ConnectorsView.tsx`) and keep their own colours — the
 same route the tag marks take; see `assets/brands/README.md` for why a CSS
-mask was rejected and what to check when a mark only reads on one theme.
-Prefer the full-colour cut; keep files small.
+mask was rejected. Five of these cuts are single-colour and only read on one
+theme; which ones, and the fix, is `LOGO_ADAPT` in `src/data/connectors.ts`
+(`invert-on-light` for the white cuts — openai, openrouter, ollama —
+`invert-on-dark` for the currentColor-turned-black ones — xai, lmstudio).
+Check both themes when swapping a file for a different cut and update that
+map to match. Prefer the full-colour cut; keep files small.

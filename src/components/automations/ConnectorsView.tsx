@@ -17,7 +17,9 @@ import {
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {native} from '../../native';
-import {connectorLogo, presetFor, runtimeConnector, secretKeysFor} from '../../data/connectors';
+import {
+  connectorLogo, connectorLogoAdapt, presetFor, runtimeConnector, secretKeysFor,
+} from '../../data/connectors';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ConnectorPreset} from '../../data/connectors';
@@ -50,7 +52,15 @@ export function ConnectorMark({kind, preset, size = 20}: {
 }) {
   const logo = connectorLogo(kind);
   if (logo) {
-    return <img alt="" className="connector-logo" src={logo} style={{height: size - 2}} />;
+    const adapt = connectorLogoAdapt(kind);
+    return (
+      <img
+        alt=""
+        className={adapt ? `connector-logo ${adapt}` : 'connector-logo'}
+        src={logo}
+        style={{height: size - 2}}
+      />
+    );
   }
   const Glyph = connectorGlyph(preset);
   return <Glyph size={size} strokeWidth={1.75} />;

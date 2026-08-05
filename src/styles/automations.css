@@ -861,9 +861,14 @@
 
 /* The modal's kind picker: two headed groups of small tiles. A grid rather
  * than an eighteen-entry select because the choice is the whole first step of
- * the dialog, and a dropdown hides seventeen of the answers. */
+ * the dialog, and a dropdown hides seventeen of the answers.
+ *
+ * No padding of its own: .profile-modal already pads 18px and gaps its
+ * children 14px, and the first cut of these rules added the old Settings
+ * section's 22px on top -- which is why the picker sat in a double inset
+ * against its own title. Same fix on .connector-form below. */
 .connector-pick-group {
-  padding: 4px 22px 14px;
+  padding: 0;
 }
 
 .connector-pick-group h3 {
@@ -907,7 +912,7 @@
 .connector-form {
   display: grid;
   gap: 14px;
-  padding: 4px 22px 18px;
+  padding: 0;
 }
 
 /* The reveal toggle sits inside the field's row, not floating over the input,
@@ -944,4 +949,12 @@
   align-items: center;
   display: flex;
   gap: 10px;
+}
+
+/* One colour only, drawn for one background -- see .tag-logo's note in
+ * styles.css. Which marks carry these classes is LOGO_ADAPT in
+ * src/data/connectors.ts. */
+:root:not([data-theme="dark"]) .connector-logo.invert-on-light,
+:root[data-theme="dark"] .connector-logo.invert-on-dark {
+  filter: invert(1);
 }
