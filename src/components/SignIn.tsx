@@ -1,6 +1,7 @@
 import {Shield} from 'lucide-react';
 import {GoogleMark} from './ui/icons';
-import {OTP_CODE_LENGTH} from '../lib/auth';
+import {OTP_CODE_LENGTH, SITE_URL} from '../lib/auth';
+import {native} from '../native';
 import type {SignIn as SignInState} from '../hooks/useSignIn';
 
 export function SignIn({state}: {state: SignInState}) {
@@ -46,11 +47,33 @@ function EmailStep({state}: {state: SignInState}) {
         </button>
       </form>
       {state.error && <span className="message error">{state.error}</span>}
+      {/* Below both ways in, which is the only position that covers each of
+          them: the Google button is outside the form. Mirrors the same line on
+          the website's AuthForm -- the two sign-in screens say the same thing in
+          the same words, and hooks/useSignIn.ts records the same acceptance. */}
       <div className="login-links">
-        <span className="hint">No password needed — entering your email creates your account.</span>
+        <span className="hint">
+          No password needed — entering your email creates your account. By continuing you agree
+          to our{' '}
+          <button type="button" className="link" onClick={() => openLegal('/terms')}>
+            Terms of Service
+          </button>{' '}
+          and{' '}
+          <button type="button" className="link" onClick={() => openLegal('/privacy')}>
+            Privacy Policy
+          </button>
+          .
+        </span>
       </div>
     </>
   );
+}
+
+// Legal pages open in the system browser rather than in the Electron window:
+// there is no chrome in here to get back from, and a signed-out user reading the
+// Terms should not lose the sign-in panel behind them.
+function openLegal(pathname: string) {
+  void native?.openExternal?.(`${SITE_URL}${pathname}`);
 }
 
 // Google and the divider are deliberately absent here: offering a second way in

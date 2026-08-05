@@ -11,6 +11,7 @@ import {
   writePendingOtp,
 } from '../lib/auth';
 import {native} from '../native';
+import {recordTermsAcceptance} from '../lib/legal';
 import {supabase} from '../supabase';
 import type {PendingOtp} from '../lib/auth';
 
@@ -115,7 +116,7 @@ export function useSignIn() {
       // type 'email' is load-bearing: a new account's code lives in
       // confirmation_token and an existing account's in recovery_token, and
       // 'email' is the only value that resolves to whichever one applies.
-      const {error: verifyError} = await supabase.auth.verifyOtp({
+      const {data, error: verifyError} = await supabase.auth.verifyOtp({
         email: email.trim().toLowerCase(),
         token: code.trim(),
         type: 'email',
@@ -125,6 +126,9 @@ export function useSignIn() {
         setError(describeAuthError(verifyError));
         return;
       }
+      // The notice under the button they just pressed, written down. Never
+      // throws, and never blocks the sign-in -- see lib/legal.ts.
+      await recordTermsAcceptance(data.user);
       writePendingOtp(null);
       setCode('');
     } finally {
@@ -232,7 +236,12 @@ export function useSignIn() {
       setBusy(true);
       setError('');
       supabase.auth.exchangeCodeForSession(payload.code)
-          .then(({error: exchangeError}) => {
+          .then(async ({data, error: exchangeError}) => {
+            if (!exchangeError) {
+              // Same record as the email path. The Google button carries the
+              // same notice, so the same acceptance has to be written.
+              await recordTermsAcceptance(data.user);
+            }
             if (exchangeError) {
               console.log('[deep-link] code exchange failed:', exchangeError.code || exchangeError.message);
               // The verifier is gone because this sign-in was already completed,
