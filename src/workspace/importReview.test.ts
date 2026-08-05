@@ -12,6 +12,7 @@ import {
   planCredentialFix,
   proxyBadge,
   proxyCheckTarget,
+  proxyTextFromFields,
   proxyTextWithCredentials,
   reviewRows,
   reviseReviewRow,
@@ -453,5 +454,95 @@ describe('the real export, end to end', () => {
     expect(second.result.updated).toBe(10);
     expect(second.profiles).toHaveLength(10);
     expect(second.newFolders).toEqual([]);
+  });
+});
+
+// The per-row proxy popover: four fields in, one connection string out.
+describe('proxyTextFromFields', () => {
+  it('composes an address and a login', () => {
+    expect(proxyTextFromFields('198.51.100.10:1080', 'socks5', 'user', 'pass'))
+        .toBe('socks5://user:pass@198.51.100.10:1080');
+  });
+
+  it('leaves out the userinfo when there is no login', () => {
+    expect(proxyTextFromFields('198.51.100.10:1080', 'socks5', '', ''))
+        .toBe('socks5://198.51.100.10:1080');
+  });
+
+  // The regression the type selector exists to prevent: a bare host:port parses
+  // as socks5, so five of the ten rows in the legacy export would silently
+  // change protocol if the selector did not carry the scheme.
+  it('keeps http as http when only the selector says so', () => {
+    expect(proxyTextFromFields('77.47.243.119:48549', 'http', '', ''))
+        .toBe('http://77.47.243.119:48549');
+  });
+
+  it('lets a scheme typed into the address outrank the selector', () => {
+    expect(proxyTextFromFields('http://198.51.100.10:1080', 'socks5', '', ''))
+        .toBe('http://198.51.100.10:1080');
+  });
+
+  // Enter commits without blurring, so a whole vendor line can still be sitting
+  // in the address when this runs. Dropping the login it carried would be worse
+  // than useless -- it is the one thing the row was missing.
+  it('keeps a login left in the address', () => {
+    expect(proxyTextFromFields('1.2.3.4:1080:user:pass', 'socks5', '', ''))
+        .toBe('socks5://user:pass@1.2.3.4:1080');
+  });
+
+  it('lets the fields override a login left in the address', () => {
+    expect(proxyTextFromFields('1.2.3.4:1080:old:oldpass', 'socks5', 'new', 'newpass'))
+        .toBe('socks5://new:newpass@1.2.3.4:1080');
+  });
+
+  it('round-trips a password full of URL syntax', () => {
+    const text = proxyTextFromFields('1.2.3.4:1080', 'socks5', 'user@corp', 'p@ss:word/1');
+    expect(parseProxyLink(text)).toEqual({
+      type: 'socks5', host: '1.2.3.4', port: 1080,
+      username: 'user@corp', password: 'p@ss:word/1',
+    });
+  });
+
+  // Passed through rather than repaired, so resolveRow still reports it.
+  it('hands an unreadable address back untouched', () => {
+    expect(proxyTextFromFields('  nonsense  ', 'socks5', '', '')).toBe('nonsense');
+  });
+});
+
+describe('the popover over the legacy export', () => {
+  const rows = review(legacyCsv);
+
+  it('seeds each row with the type the file named', () => {
+    const types = rows.map((r) => r.row.proxy?.type);
+    expect(types).toEqual(['socks5', 'socks5', 'socks5', 'socks5', 'socks5',
+      'http', 'http', 'http', 'http', 'http']);
+  });
+
+  it('clears the no-credentials badge once a login is applied', () => {
+    const target = rows.find((r) => r.row.proxy?.host === '206.251.200.171') as ReviewRow;
+    expect(proxyBadge(target, empty)).toBe('no-credentials');
+    const proxyText = proxyTextFromFields(
+        '206.251.200.171:47450', 'http', 'Z44tcAIxnefUmXP', 'f44XusFmtomKAQs');
+    const next = reviseReviewRow(target, {proxyText}, empty);
+    expect(next.row.proxy).toEqual({
+      type: 'http', host: '206.251.200.171', port: 47450,
+      username: 'Z44tcAIxnefUmXP', password: 'f44XusFmtomKAQs',
+    });
+    expect(proxyBadge(next, empty)).toBe('new');
+  });
+
+  // Clearing the credential fields is how the user says "I have no login for
+  // this" -- and a saved one for the same endpoint should come back rather than
+  // the row importing a second, unusable copy.
+  it('re-borrows a saved login when the credential fields are emptied', () => {
+    const saved = proxy({id: 'p1', host: '204.252.87.159', port: 47403,
+      username: 'u', password: 'p'});
+    const lib = library({proxies: [saved]});
+    const seeded = review(legacyCsv, lib);
+    expect(proxyBadge(seeded[0], lib)).toBe('saved-credentials');
+    const cleared = reviseReviewRow(seeded[0],
+        {proxyText: proxyTextFromFields('204.252.87.159:47403', 'socks5', '', '')}, lib);
+    expect(proxyBadge(cleared, lib)).toBe('saved-credentials');
+    expect(cleared.row.proxy?.password).toBe('p');
   });
 });

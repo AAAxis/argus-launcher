@@ -16,7 +16,13 @@ export type ApiMethod = 'GET' | 'POST';
 // tree -- an array of objects whose shape comes from step-schema.json, which is
 // too large to inline into every tool description, so the tool points at
 // argus_automation_schema instead.
-export type ApiFieldType = 'string' | 'number' | 'boolean' | 'object' | 'steps' | 'tags';
+//
+// 'strings' and 'tags' generate the same array-of-strings schema and validate
+// identically. Both exist because 'tags' predates any other list-of-strings
+// field and reads as its own type in the API docs -- a `columns: tags` row
+// would say the wrong thing about what that field holds.
+export type ApiFieldType =
+  'string' | 'number' | 'boolean' | 'object' | 'steps' | 'tags' | 'strings';
 
 export type ApiField = {
   key: string;

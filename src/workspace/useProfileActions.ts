@@ -165,54 +165,10 @@ export function useProfileActions(
     return true;
   }
 
-  // Resolves the proxy a launch will actually use, checking it first if its
-  // stored result is missing or stale. Returns null when the launch must be
-  // blocked -- the reason has already been shown by then.
-  //
-  // spawnProfileUnchecked (main process) is the authoritative proxy gate on
-  // every launch regardless; this is a UI convenience that skips re-checking a
-  // proxy already known-good and, unlike the automation path, has somewhere to
-  // show a failure.
-  async function resolveLaunchProxy(profile: ArgusProfile): Promise<ArgusProxy | null | 'blocked'> {
-    if ((profile.proxy_mode || 'assigned') !== 'assigned') {
-      return null;
-    }
-    const assigned = proxyFor(profile);
-    if (!assigned?.host || !assigned.port) {
-      toast.fail('Launch blocked',
-          `Proxy for ${profile.name} is invalid. Fix host and port before launch.`);
-      return 'blocked';
-    }
-    if (assigned.checked_at && !assigned.check_error) {
-      return assigned;
-    }
-    if (!native?.checkProxy) {
-      toast.fail('Launch blocked',
-          'Native proxy checker is not available. Restart Argus Launcher and try again.');
-      return 'blocked';
-    }
-    toast.setMessage(`Checking proxy for ${profile.name}`);
-    beginProxyCheck(assigned.id);
-    let checked: ArgusProxy;
-    try {
-      checked = await proxies.runCheck(assigned);
-      // Only the proxy's check result is new here -- the profile was already
-      // written above if its fingerprint rotated.
-      await proxies.recordCheck(checked);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      toast.fail('Launch blocked', `Proxy for ${profile.name} failed its check: ${message}`);
-      return 'blocked';
-    } finally {
-      endProxyCheck(assigned.id);
-    }
-    if (checked.check_error) {
-      toast.fail('Launch blocked',
-          `Proxy for ${profile.name} failed its check: ${checked.check_error}`);
-      return 'blocked';
-    }
-    return checked;
-  }
+  // The pre-launch proxy gate now lives in useProxyActions as
+  // `resolveForLaunch`. It moved because an automation run launches a profile
+  // too and needs the same gate, and a second copy over there is how the two
+  // would drift.
 
   // Rotate-on-launch profiles get a fresh identity persisted before the browser
   // starts, so the fingerprint the browser applies is the one that was saved.
@@ -238,7 +194,7 @@ export function useProfileActions(
     }
     try {
       const target = await withRotatedFingerprint(profile);
-      const proxy = await resolveLaunchProxy(target);
+      const proxy = await proxies.resolveForLaunch(target);
       if (proxy === 'blocked') {
         return;
       }
@@ -411,6 +367,10 @@ export function useProfileActions(
     const writtenFolders: string[] = [];
     const writtenProxies: string[] = [];
     const writtenProfiles: string[] = [];
+    // Separate from writtenProfiles, which also holds the rows this import
+    // merely updated. The caller assigns what it created and leaves the rest
+    // with whoever already holds them.
+    const createdProfiles: string[] = [];
     const ok = await withDb(async (activeOrgId) => {
       for (const folder of plan.newFolders) {
         await db.folders.create(activeOrgId, folder);
@@ -423,6 +383,9 @@ export function useProfileActions(
       for (const {profile, exists} of plan.touchedProfiles) {
         await db.profiles.save(activeOrgId, profile, exists);
         writtenProfiles.push(profile.id);
+        if (!exists) {
+          createdProfiles.push(profile.id);
+        }
       }
     });
     // Only what actually reached the database goes into local state. Folders
@@ -440,7 +403,11 @@ export function useProfileActions(
     // Returned even when the write failed partway. Returning null meant the
     // dialog showed no summary at all for an import that had already created
     // rows, which is the one case the summary is most needed.
-    return ok ? plan.result : {...plan.result, partial: true};
+    // createdIds carries what actually landed, not what was planned -- so a
+    // write that stopped partway hands back only the ids that really exist.
+    return ok ?
+      {...plan.result, createdIds: createdProfiles} :
+      {...plan.result, createdIds: createdProfiles, partial: true};
   }
 
   return {

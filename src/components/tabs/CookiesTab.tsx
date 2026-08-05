@@ -7,28 +7,32 @@
 // disappears: above it, every tick and untick moved the folder navigation.
 import {useState} from 'react';
 import {
-  BookOpen, Copy, Cookie, FolderInput, FolderPlus, Pencil, SearchX, Trash2, UserPlus,
+  BookOpen, Copy, Cookie, FolderInput, FolderPlus, Pencil, SearchX, Share2, Trash2, UserPlus,
 } from 'lucide-react';
 import {MoveCookieSetsModal} from '../modals/MoveCookieSetsModal';
-import {AssignedCell} from '../ui/AssignedCell';
 import {BusyButton} from '../ui/BusyButton';
 import {PurgeCookieSetsModal} from '../modals/ConfirmModals';
 import {Checkbox} from '../ui/Checkbox';
+import {ColumnsButton} from '../ui/ColumnsButton';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
-import {SortableTh} from '../ui/SortableTh';
-import {TagCell} from '../ui/TagChip';
-import {daysUntilPurge, TRASH_FOLDER_ID} from '../../lib/trash';
-import {formatDateShort} from '../../lib/text';
+import {FolderSelect, TagFilter} from '../ui/TableFilters';
+import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
+import {COOKIE_COLUMNS} from '../../tables/cookieColumns';
+import {sortColumnsFrom} from '../../tables/columns';
+import {useTableColumns} from '../../tables/ColumnLayouts';
+import {TRASH_FOLDER_ID} from '../../lib/trash';
+import {useOrg} from '../../org';
 import {paginate} from '../../lib/paginate';
-import {profileColorStyle} from '../../lib/profileColors';
-import {tagKey, tagLabel} from '../../lib/tags';
+import {tagKey} from '../../lib/tags';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useSelection} from '../../hooks/useSelection';
 import {useTableSort} from '../../hooks/useTableSort';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {CookieColumnContext} from '../../tables/cookieColumns';
 import type {PurgeRequest} from '../modals/ConfirmModals';
+import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusCookie, ArgusFolder} from '../../types';
 
 // Whether a set is attached to anything. Its own filter rather than a column
@@ -46,6 +50,8 @@ export type CookiesTabProps = {
   onNewCookieSet: () => void;
   onNewFolder: () => void;
   onEditFolder: (folder: ArgusFolder) => void;
+  // Raises the share sheet, hosted by App alongside the other cross-tab dialogs.
+  onShare: (request: ShareRequest) => void;
   onShowAbout: () => void;
 };
 
@@ -57,9 +63,11 @@ export function CookiesTab({
   onNewCookieSet,
   onNewFolder,
   onEditFolder,
+  onShare,
   onShowAbout,
 }: CookiesTabProps) {
   const {data, toast, library, cookies, cookieTagOptions} = useWorkspace();
+  const org = useOrg();
   const state = data.state;
   const {run, isPending} = useAsyncAction();
   const selection = useSelection<ArgusCookie>();
@@ -68,6 +76,10 @@ export function CookiesTab({
   // Held as a tagKey, so "Instagram" and "instagram" are one dropdown entry.
   const [tagFilter, setTagFilter] = useState('');
   const [usageFilter, setUsageFilter] = useState<UsageFilter>('');
+  // "Only what I'm on the hook for." Distinct from usageFilter beside it, which
+  // asks whether any PROFILE holds the set -- a different question about a
+  // different subject.
+  const [mineOnly, setMineOnly] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -76,24 +88,42 @@ export function CookiesTab({
   const [purge, setPurge] = useState<PurgeRequest | null>(null);
 
   const inTrash = folderId === TRASH_FOLDER_ID;
-  const filtered = Boolean(search.trim() || tagFilter || usageFilter);
+  const filtered = Boolean(search.trim() || tagFilter || usageFilter || mineOnly);
   const usage = cookies.usageCounts();
 
-  // Cookies and Used by are counts, so they open descending -- "which set has
-  // the most in it" and "what is everything leaning on" are the questions those
-  // columns get asked. A set nobody uses has no count at all rather than a
-  // zero, which keeps the unused ones out of the way of both.
-  const sorting = useTableSort<ArgusCookie>([
-    {key: 'name', value: (cookie) => cookie.name},
-    {key: 'count', value: (cookie) => cookie.count, firstDirection: 'desc'},
-    {key: 'used', value: (cookie) => usage.get(cookie.id) || undefined, firstDirection: 'desc'},
-    {key: 'folder', value: (cookie) =>
-      state.cookie_folders.find((folder) => folder.id === cookie.folder_id)?.name},
-    {key: 'updated', value: (cookie) => cookie.updated_at, firstDirection: 'desc'},
-  ], {onSortChange: () => setPage(0)});
+  // Gates the "Assigned to me" filter chip; the Assigned column is gated by the
+  // same flag inside the registry, which is where teamOnly lives now.
+  const showAssignee = state.members.length > 1;
+
+  const columnContext: CookieColumnContext = {
+    state,
+    folderFor: cookies.folderFor,
+    usage,
+    profilesUsing: cookies.profilesUsing,
+  };
+  const {columns, isVisible, setVisible, reset} =
+    useTableColumns('cookies', COOKIE_COLUMNS, {isTeam: showAssignee});
+
+  // What each column sorts by lives in tables/cookieColumns.tsx, and the whole
+  // registry is registered rather than the visible slice -- see the note there.
+  const sorting = useTableSort<ArgusCookie>(
+      sortColumnsFrom(COOKIE_COLUMNS, columnContext),
+      {onSortChange: () => setPage(0)});
+
+  // Two more than the columns: the selection box and the row actions.
+  const columnCount = columns.length + 2;
+
+  // Hiding the column the table is sorted by returns it to database order.
+  function toggleColumn(columnId: string, visible: boolean) {
+    if (!visible && sorting.sortKey === columnId) {
+      sorting.clear();
+    }
+    setVisible(columnId, visible);
+  }
 
   const visible = sorting.sort(visibleCookieSets(
-      state.cookies, {folderId, tagFilter, usageFilter, search}, usage));
+      state.cookies, {folderId, tagFilter, usageFilter, search}, usage)
+      .filter((cookie) => !mineOnly || cookie.assigned_to === org.userId));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
   const activeFolder = inTrash ? null :
@@ -223,14 +253,7 @@ export function CookiesTab({
         />
         {/* Only tags actually on a set: a dropdown listing every brand when the
           * library uses two of them is a list of ways to empty the table. */}
-        <select value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}>
-          <option value="">All tags</option>
-          {cookieTagOptions.map((option) => (
-            <option key={tagKey(option.tag)} value={tagKey(option.tag)}>
-              {tagLabel(option.tag)} ({option.count})
-            </option>
-          ))}
-        </select>
+        <TagFilter value={tagFilter} options={cookieTagOptions} onChange={setTagFilter} />
         <select
           value={usageFilter}
           onChange={(event) => setUsageFilter(event.target.value as UsageFilter)}
@@ -239,6 +262,16 @@ export function CookiesTab({
           <option value="used">In use</option>
           <option value="unused">Unused</option>
         </select>
+        {/* Only offered on a team; on a one-person workspace every set is
+          * yours and this would never change the list. */}
+        {showAssignee && (
+          <button
+            aria-pressed={mineOnly}
+            className={mineOnly ? 'choice-chip active' : 'choice-chip'}
+            onClick={() => setMineOnly((value) => !value)}
+            type="button"
+          >Assigned to me</button>
+        )}
         {/* In the toolbar, not the selection bar: the point is that it needs no
           * selection. Same placement as the Profiles tab's. */}
         {inTrash && trashCount > 0 && (
@@ -246,6 +279,13 @@ export function CookiesTab({
             <Trash2 size={16} /> Empty Trash ({trashCount})
           </button>
         )}
+        <ColumnsButton
+          registry={COOKIE_COLUMNS}
+          context={{isTeam: showAssignee}}
+          isVisible={isVisible}
+          onToggle={toggleColumn}
+          onReset={reset}
+        />
       </section>
 
       <section className="folder-row" aria-label="Folders">
@@ -255,7 +295,7 @@ export function CookiesTab({
           onClick={() => onFolderId('')}
           type="button"
         >
-          <span className="folder-glyph"><Cookie size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><Cookie size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">All cookie-sets</span>
           <span className="folder-card-count">{allCount}</span>
         </button>
@@ -286,7 +326,7 @@ export function CookiesTab({
                   title={`Edit ${folder.name}`}
                   type="button"
                 >
-                  <Pencil size={13} />
+                  <Pencil size={12} />
                 </button>
                 <button
                   aria-label={`Delete ${folder.name}`}
@@ -295,7 +335,7 @@ export function CookiesTab({
                   title={`Delete ${folder.name}`}
                   type="button"
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={12} />
                 </button>
               </span>
             </div>
@@ -308,13 +348,13 @@ export function CookiesTab({
           onClick={() => onFolderId(TRASH_FOLDER_ID)}
           type="button"
         >
-          <span className="folder-glyph"><Trash2 size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">Trash</span>
           <span className="folder-card-count">{trashCount}</span>
         </button>
 
         <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
-          <span className="folder-glyph"><FolderPlus size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">New folder</span>
         </button>
       </section>
@@ -342,13 +382,11 @@ export function CookiesTab({
               </>
             ) : (
               <>
-                <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
-                  <option value="" disabled>Assign to folder…</option>
-                  <option value="">All cookie-sets</option>
-                  {state.cookie_folders.map((folder) => (
-                    <option key={folder.id} value={folder.id}>{folder.name}</option>
-                  ))}
-                </select>
+                <FolderSelect
+                  folders={state.cookie_folders}
+                  noFolderLabel="All cookie-sets"
+                  onPick={(id) => void moveSelectionToFolder(id)}
+                />
                 {/* One set at a time, because a profile carries exactly one:
                   * assigning three sets to one profile has no meaning, and
                   * silently letting the last one win would be worse. */}
@@ -379,6 +417,16 @@ export function CookiesTab({
                   <option value="json">As JSON</option>
                   <option value="netscape">As cookies.txt</option>
                 </select>
+                {/* Every cookie set is a live session, so unlike the other tabs
+                  * there is no version of this that does not hand over signed-in
+                  * access -- the share sheet says so and the recipient is warned
+                  * again before they accept. */}
+                <button
+                  className="ghost"
+                  onClick={() => onShare({kind: 'cookie_set', ids: [...selection.ids]})}
+                >
+                  <Share2 size={16} /> Share…
+                </button>
                 <button
                   className="danger ghost"
                   onClick={() => void trashSets([...selection.ids], selectionLabel(selection.size))}
@@ -405,19 +453,14 @@ export function CookiesTab({
                   />
                 )}
               </th>
-              <SortableTh label="Name" {...sorting.thProps('name')} />
-              <SortableTh label="Cookies" {...sorting.thProps('count')} />
-              <SortableTh label="Used by" {...sorting.thProps('used')} />
-              <SortableTh label="Folder" {...sorting.thProps('folder')} />
-              <th>Tags</th>
-              <SortableTh label="Updated" {...sorting.thProps('updated')} />
+              {/* Which columns, in what order, and what each sorts by all live
+                * in tables/cookieColumns.tsx. */}
+              <ColumnHeaders columns={columns} sorting={sorting} />
               <th />
             </tr>
           </thead>
           <tbody>
             {items.map((cookie) => {
-              const folder = cookies.folderFor(cookie);
-              const usedBy = usage.get(cookie.id) || 0;
               return (
                 // The row's own click opens the set -- a cookie-set has no
                 // "selected row" concept the way a profile does, so the obvious
@@ -438,101 +481,99 @@ export function CookiesTab({
                       onChange={() => selection.toggle(cookie.id)}
                     />
                   </td>
-                  <td className="name-cell">
-                    <span className="avatar" style={profileColorStyle(folder?.color)}>
-                      <Cookie size={15} strokeWidth={1.75} />
-                    </span>
-                    {cookie.name}
-                  </td>
-                  <td>{cookie.count ?? '-'}</td>
-                  <td>
-                    <AssignedCell
-                      emptyLabel="Unused"
-                      holders={usedBy === 0 ? [] : cookies.profilesUsing(cookie.id)}
-                    />
-                  </td>
-                  <td>
-                    {cookie.deleted_at ?
-                      `${daysUntilPurge(cookie.deleted_at)}d left in Trash` :
-                      <FolderLabel folder={folder} />}
-                  </td>
-                  <td><TagCell tags={cookie.tags} /></td>
-                  <td>{formatDateShort(cookie.updated_at)}</td>
-                  <td>
-                    {cookie.deleted_at ? (
-                      <>
-                        <button className="ghost" onClick={(event) => {
-                          event.stopPropagation();
-                          void restoreSets([cookie.id], `"${cookie.name}"`);
-                        }}>Restore</button>
-                        <button
-                          aria-label={`Permanently delete ${cookie.name}`}
-                          className="icon-button danger-icon"
-                          onClick={(event) => {
+                  <ColumnCells columns={columns} context={columnContext} row={cookie} />
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      {cookie.deleted_at ? (
+                        <>
+                          <button className="ghost" onClick={(event) => {
                             event.stopPropagation();
-                            void purgeSets([cookie.id], `"${cookie.name}"`);
-                          }}
-                          title={`Permanently delete ${cookie.name}`}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className="launch"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onOpenCookieSet(cookie);
-                          }}
-                          type="button"
-                        >
-                          Open
-                        </button>
-                        <button
-                          aria-label={`Assign ${cookie.name} to profiles`}
-                          className="ghost icon-button row-action"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onAssignCookieSet(cookie);
-                          }}
-                          title={`Assign ${cookie.name} to profiles`}
-                        >
-                          <UserPlus size={16} />
-                        </button>
-                        <BusyButton
-                          ariaLabel={`Duplicate ${cookie.name}`}
-                          busy={isPending(`duplicate-${cookie.id}`)}
-                          className="ghost icon-button row-action"
-                          icon={<Copy size={16} />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void run(`duplicate-${cookie.id}`, () => duplicateOne(cookie));
-                          }}
-                          title={`Duplicate ${cookie.name}`}
-                        />
-                        <button
-                          aria-label={`Delete ${cookie.name}`}
-                          className="ghost icon-button row-action row-action-danger"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void trashSets([cookie.id], `"${cookie.name}"`);
-                          }}
-                          title={`Delete ${cookie.name}`}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </>
-                    )}
+                            void restoreSets([cookie.id], `"${cookie.name}"`);
+                          }}>Restore</button>
+                          <button
+                            aria-label={`Permanently delete ${cookie.name}`}
+                            className="icon-button danger-icon"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void purgeSets([cookie.id], `"${cookie.name}"`);
+                            }}
+                            title={`Permanently delete ${cookie.name}`}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="launch"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenCookieSet(cookie);
+                            }}
+                            type="button"
+                          >
+                            Open
+                          </button>
+                          <button
+                            aria-label={`Assign ${cookie.name} to profiles`}
+                            className="ghost icon-button row-action"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onAssignCookieSet(cookie);
+                            }}
+                            title={`Assign ${cookie.name} to profiles`}
+                          >
+                            <UserPlus size={16} />
+                          </button>
+                          {/* Next to Assign on purpose: both answer "who else
+                            * gets this session", one inside the workspace and
+                            * one outside it. */}
+                          <button
+                            aria-label={`Share ${cookie.name}`}
+                            className="ghost icon-button row-action"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onShare({kind: 'cookie_set', ids: [cookie.id]});
+                            }}
+                            title="Share with another workspace"
+                          >
+                            <Share2 size={16} />
+                          </button>
+                          <BusyButton
+                            ariaLabel={`Duplicate ${cookie.name}`}
+                            busy={isPending(`duplicate-${cookie.id}`)}
+                            className="ghost icon-button row-action"
+                            icon={<Copy size={16} />}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void run(`duplicate-${cookie.id}`, () => duplicateOne(cookie));
+                            }}
+                            title={`Duplicate ${cookie.name}`}
+                          />
+                          <button
+                            aria-label={`Delete ${cookie.name}`}
+                            className="ghost icon-button row-action row-action-danger"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void trashSets([cookie.id], `"${cookie.name}"`);
+                            }}
+                            title={`Delete ${cookie.name}`}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
             {items.length === 0 && (
               <tr className="empty-row-tr">
-                {/* Eight columns. A short colSpan leaves a stray empty cell at
+                {/* Eight columns, nine on a team -- the Assigned column comes
+                  * and goes. A short colSpan leaves a stray empty cell at
                   * the end of the row. */}
-                <td colSpan={8}>
+                <td colSpan={columnCount}>
                   <EmptyState
                     icon={<SearchX size={22} />}
                     title={filtered ?
@@ -593,16 +634,6 @@ export function CookiesTab({
     </>
   );
 
-  function FolderLabel({folder}: {folder?: ArgusFolder | null}) {
-    if (!folder) {
-      return <>All cookie-sets</>;
-    }
-    return (
-      <span className="folder-label">
-        <FolderGlyph color={folder.color} icon={folder.icon} size={13} small /> {folder.name}
-      </span>
-    );
-  }
 }
 
 function selectionLabel(size: number): string {

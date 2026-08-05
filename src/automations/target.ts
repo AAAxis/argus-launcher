@@ -1,21 +1,37 @@
-// Which profile an automation acts on when the user has not said.
+// Which profile the step editor's Check button tests a selector against.
 //
-// Two places need the same answer and must not drift: the Run button on the
-// Automations tab, and the Check button in the step editor, which tests a
-// selector against a live page and therefore has to agree about which page
-// that is. Checking one profile and running against another is the kind of
-// disagreement nobody notices until a selector that "passed" fails every run.
+// The Run button used to share this function, and guessing was the whole
+// problem: it picked a profile nobody chose and the first sign of that was the
+// run dying on a proxy belonging to a profile the user was not thinking about.
+// Run now asks (RunAutomationModal), so this has one caller left.
+//
+// The two must still agree. Checking a selector against one profile and running
+// it against another is the kind of disagreement nobody notices until a
+// selector that "passed" fails every run -- so `lastRunProfileId` is consulted
+// first, and it is written by every run of this automation whatever started it.
+// Check therefore tests against the page the last run actually used.
 import type {ArgusAutomation, ArgusProfile, CloudState} from '../types';
 
-// The profile this automation runs on launch when there is exactly one, and
-// otherwise whatever is highlighted on the Profiles tab. Anything more
-// ambiguous than that is the user's call to make, so the caller says so rather
-// than guessing -- which is why null is a normal answer here, not a failure.
+// In order: the profile this automation last ran on, the one it runs on launch
+// when there is exactly one, and otherwise whatever is highlighted on the
+// Profiles tab. Anything more ambiguous than that is the user's call to make,
+// which is why null is a normal answer here, not a failure.
 export function runTarget(
     state: CloudState,
     automation: ArgusAutomation | null,
     selectedProfileId: string | null,
+    lastRunProfileId?: string | null,
 ): ArgusProfile | null {
+  const live = (id: string | null | undefined) => id ?
+    state.profiles.find((profile) => profile.id === id && !profile.deleted_at) || null :
+    null;
+  // Trashed is deliberately excluded rather than merely unlikely: a profile can
+  // be trashed between the run and the next Check, and a Check against a
+  // profile that cannot launch is worse than no answer.
+  const last = live(lastRunProfileId);
+  if (last) {
+    return last;
+  }
   const attached = automation ?
     state.profiles.filter(
         (profile) => !profile.deleted_at && profile.automation_id === automation.id) :
@@ -23,6 +39,5 @@ export function runTarget(
   if (attached.length === 1) {
     return attached[0];
   }
-  return state.profiles.find(
-      (profile) => profile.id === selectedProfileId && !profile.deleted_at) || null;
+  return live(selectedProfileId);
 }

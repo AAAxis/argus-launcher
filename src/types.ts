@@ -140,6 +140,13 @@ export type ArgusProfile = {
   // nothing ever wrote it. Those rows render "—" rather than being backfilled
   // to the owner, because guessing an author is worse than admitting to none.
   created_by?: string | null;
+  // Who is on the hook for this row, as an auth user id. Distinct from
+  // created_by, which never changes: authorship is history, an assignment is a
+  // current fact and moves when work is handed over. Null means unclaimed.
+  //
+  // NOT a permission. Everyone in the org sees every profile either way -- see
+  // the note on Handoff.
+  assigned_to?: string | null;
   // Soft-delete timestamp (ISO 8601). Set when a profile is moved to Trash;
   // the profile is hidden from the normal profiles list but kept for 30 days
   // (auto-purged on the next app launch after that) so an accidental delete
@@ -187,6 +194,8 @@ export type ArgusProxy = {
   ping_ms?: number;
   checked_at?: string;
   check_error?: string;
+  // Who is on the hook for this proxy. See ArgusProfile.assigned_to.
+  assigned_to?: string | null;
 };
 
 // A shared, reusable cookie-set in the Cookies tab library. A set is attached
@@ -221,6 +230,10 @@ export type ArgusCookie = {
   tags?: string[];
   created_at?: string;
   updated_at?: string;
+  // Who is on the hook for this set. See ArgusProfile.assigned_to. Distinct
+  // from "assigned to profiles", which is what cookie_set_id does -- that says
+  // which profiles USE it, this says which person looks after it.
+  assigned_to?: string | null;
   // Soft-delete timestamp, the same 30-day contract as ArgusProfile.deleted_at.
   // Trashing a set also unassigns every profile using it, because a trashed set
   // that could still seed a launch would be a lie.
@@ -306,6 +319,8 @@ export type ArgusAutomation = {
   close_on_finish?: boolean;
   created_at?: string;
   updated_at?: string;
+  // Who is on the hook for this automation. See ArgusProfile.assigned_to.
+  assigned_to?: string | null;
 };
 
 // One execution. Written when the run starts, not when it finishes, so a crash
@@ -352,13 +367,43 @@ export type ArgusOrg = {
   // and the database disagree about plan keys (landing/LANDING.md:96-128), and
   // an integer means the launcher never has to know which spelling is live.
   automation_limit?: number | null;
+  // Who the workspace belongs to, answered once at onboarding and editable in
+  // Settings. Descriptive only -- nothing above this line is derived from it.
+  //
+  // `legal_name` is deliberately not `name`. `name` is what this workspace is
+  // called and an owner may rename it to "Client accounts" whenever they like;
+  // `legal_name` is the business behind it and stays put. Collapsing them would
+  // make "which company is this" unanswerable the first time somebody tidies up
+  // their workspace names.
+  org_type?: OrgType | null;
+  legal_name?: string | null;
+  // ISO 3166-1 alpha-2, uppercase, constrained in the database.
+  country?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  // The gate the setup prompt reads. A timestamp rather than a boolean so
+  // "never asked" and "asked, answered the first question, skipped the rest"
+  // stay distinguishable -- a solo workspace legitimately has null in every
+  // other column here.
+  onboarded_at?: string | null;
 };
 
-export type OrgRole = 'owner' | 'admin' | 'member';
+// Solo or business. The only question onboarding asks that everyone answers.
+export type OrgType = 'solo' | 'business';
 
-// One row of org_members joined to its organization. `role` decides whether the
-// org-wide settings (name, built-in extension toggles) are writable: the RLS
-// UPDATE policy on organizations requires is_org_admin.
+// Two roles, not three. The owner is the account holder -- whoever ran
+// bootstrap_org -- and is the only person who can invite, remove, or mint an API
+// token. Everyone else is a member with full access to the work: every profile,
+// proxy, cookie set and automation, plus the workspace's own name and branding.
+//
+// 'admin' was removed in 2026-08-10-owner-member-roles.sql. Nothing writes it and
+// the check constraint on org_members now refuses it.
+export type OrgRole = 'owner' | 'member';
+
+// One row of org_members joined to its organization. `role` no longer decides
+// whether the org-wide settings are writable -- the UPDATE policy on
+// organizations is is_org_member, and the entitlement columns are held back by
+// column grants rather than by any role. It decides who manages people.
 export type OrgMembership = {
   org: ArgusOrg;
   role: OrgRole;
@@ -391,24 +436,62 @@ export type OrgInviteStatus = 'pending' | 'accepted' | 'revoked';
 
 // An offer of a seat that has not been taken yet.
 //
-// Only owners and admins can read these -- every policy on org_invites is
-// is_org_admin, including select -- so this is Team-tab-local state rather than
-// part of CloudState. A member reading the table gets an empty list, not an
-// error, which is exactly the kind of silent nothing that does not belong in
-// the shared workspace cache.
+// Only the owner can read these -- every policy on org_invites is is_org_owner,
+// including select -- so this is Team-tab-local state rather than part of
+// CloudState. A member reading the table gets an empty list, not an error, which
+// is exactly the kind of silent nothing that does not belong in the shared
+// workspace cache.
 //
-// `role` is narrower than OrgRole on purpose: you cannot invite an owner.
+// `role` is a constant rather than an OrgRole: an invite can only ever offer
+// membership. The column keeps its check constraint (`role = 'member'`) and
+// create_org_invite refuses anything else, so this is the type saying what the
+// database already enforces.
 export type OrgInvite = {
   id: string;
   email: string;
-  role: Exclude<OrgRole, 'owner'>;
+  role: 'member';
   status: OrgInviteStatus;
   // The credential. Minted server-side by create_org_invite and shown once, in
-  // the link the admin copies -- there is no email delivery.
+  // the link the owner copies -- there is no email delivery.
   token: string;
   expires_at: string;
   created_at: string;
   invited_by: string | null;
+};
+
+// What one teammate can hand to another. Deliberately not every table: a folder
+// is a filing decision that belongs to the workspace rather than to a person,
+// and extensions/bookmarks are org-wide settings nobody owns individually.
+export type HandoffKind = 'profile' | 'proxy' | 'cookie_set' | 'automation';
+
+export type HandoffStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
+// An offer to take something over.
+//
+// Read the word "share" carefully here, because it does NOT mean access.
+// Profiles, proxies, cookie sets and automations are scoped by org_id and by
+// nothing else, so every member of the workspace can already see all of them --
+// there is no permission left to grant. What a hand-off moves is
+// responsibility: accepting sets the item's `assigned_to` to you.
+//
+// So the approve step is not a gate on data. It is consent: work does not
+// silently land on your plate because a colleague decided it should.
+export type Handoff = {
+  id: string;
+  kind: HandoffKind;
+  status: HandoffStatus;
+  item_id: string;
+  // The name the item had when it was offered, denormalised server-side. The
+  // four tables share no shape to join to, so rendering an inbox from live rows
+  // would mean a union per notification for one string.
+  item_name: string;
+  // Both are auth user ids. Names are resolved from CloudState.members, which
+  // the launcher already holds -- unlike the cross-org design this replaced,
+  // both parties are in one org, so no server-side identity join is needed.
+  from_user: string | null;
+  to_user: string;
+  note: string;
+  created_at: string;
 };
 
 export type CloudState = {

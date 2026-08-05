@@ -6,24 +6,27 @@
 // than a row's worth to say, and a person here does not.
 //
 // Pending invites are rows in the SAME table, not a second list below it. "Who
-// is on this team" includes the people you have asked, and an admin comparing
+// is on this team" includes the people you have asked, and an owner comparing
 // seats against the plan needs one number to count. They are visually distinct
 // -- envelope instead of an avatar, a Pending badge, different actions -- but
 // they sit in the order they were sent, in the roster they are joining.
 //
 // Nothing here is the security boundary. Every mutation is gated by RLS
-// (is_org_admin on org_members and org_invites) and the seat cap is enforced by
-// trg_seat_limit and create_org_invite. The UI's job is to not offer what will
-// be refused, and to say why when it does not offer it.
+// (is_org_owner on org_invites and on the delete policy on org_members) and the
+// seat cap is enforced by trg_seat_limit and create_org_invite. The UI's job is
+// to not offer what will be refused, and to say why when it does not offer it.
+//
+// There is no role picker. Two roles exist -- owner and member -- and neither is
+// grantable from here: membership arrives by accepting an invite, and ownership
+// belongs to whoever created the workspace.
 import {useEffect, useState} from 'react';
 import {
-  Copy, Crown, LogOut, Mail, Shield, Trash2, UserPlus, Users, X,
+  Copy, Crown, LogOut, Mail, Share2, Shield, Trash2, UserPlus, Users, X,
 } from 'lucide-react';
 import {Badge} from '../ui/Badge';
 import {EmptyState} from '../ui/EmptyState';
 import {Meter} from '../ui/Meter';
 import {Modal} from '../ui/Modal';
-import {Popover} from '../ui/Popover';
 import {InviteMemberModal} from '../modals/InviteMemberModal';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
@@ -31,9 +34,17 @@ import {inviteUrl} from '../../workspace/useTeamActions';
 import {seatCap} from '../../team/limit';
 import {SITE_LINKS} from '../../data/links';
 import {formatDate, initials} from '../../lib/text';
-import type {OrgInvite, OrgMember, OrgRole} from '../../types';
+import type {ShareRequest} from '../modals/ShareModal';
+import type {Handoff, HandoffKind, OrgInvite, OrgMember, OrgRole} from '../../types';
 
-type View = 'all' | 'pending';
+// Three flat chips rather than a Members/Shared split with a second filter row
+// nested inside it. Pending invites and the share inbox are both "the roster,
+// but not yet" -- they belong at the same level as the roster, not one level
+// down from it.
+//
+// Owned by App rather than by this component, because the inbox bell's "View
+// all" has to land on `shared` specifically.
+export type TeamView = 'members' | 'pending' | 'shared';
 
 // "in 5 days" / "5 days ago", to the nearest sensible unit.
 //
@@ -58,8 +69,16 @@ function relativeDays(iso: string): string {
 
 const ROLE_LABEL: Record<OrgRole, string> = {
   owner: 'Owner',
-  admin: 'Admin',
   member: 'Member',
+};
+
+// The same nouns the sidebar uses for the tab each of these lives on, so the
+// hand-off list and the rail are one vocabulary rather than two.
+const KIND_LABEL: Record<HandoffKind, string> = {
+  profile: 'Profile',
+  proxy: 'Proxy',
+  cookie_set: 'Cookie set',
+  automation: 'Automation',
 };
 
 function MemberAvatar({member}: {member: OrgMember}) {
@@ -72,10 +91,17 @@ function MemberAvatar({member}: {member: OrgMember}) {
   return <span className="team-avatar is-initials">{initials(name)}</span>;
 }
 
-export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) {
-  const {data, team} = useWorkspace();
+export function TeamTab({view, onView, onShare, onOpenSite}: {
+  view: TeamView;
+  onView: (view: TeamView) => void;
+  // Raises the share sheet with nothing preselected -- the "from that window"
+  // entry point. The dialog carries its own item list precisely so this can
+  // open cold, with no table selection behind it.
+  onShare: (request: ShareRequest) => void;
+  onOpenSite: (pathname: string) => void;
+}) {
+  const {data, team, shared, reload} = useWorkspace();
   const org = useOrg();
-  const [view, setView] = useState<View>('all');
   const [inviting, setInviting] = useState(false);
   const [removing, setRemoving] = useState<OrgMember | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -83,33 +109,153 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
 
   const members = data.state.members;
   const orgId = org.orgId;
-  const isAdmin = org.isAdmin;
+  const isOwner = org.isOwner;
 
-  // Only an admin can read org_invites -- every policy on it is is_org_admin --
+  // Only the owner can read org_invites -- every policy on it is is_org_owner --
   // so a member's fetch would come back empty rather than forbidden, which is
   // the kind of silent nothing that is worse than not asking.
   useEffect(() => {
-    if (orgId && isAdmin) {
+    if (orgId && isOwner) {
       void team.loadInvites(orgId);
     }
     // team is rebuilt every render; loadInvites is the stable identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, isAdmin, team.loadInvites]);
+  }, [orgId, isOwner, team.loadInvites]);
 
-  const invites = isAdmin ? team.invites : [];
+  // The outbox, unlike the roster, is only worth a round trip when somebody is
+  // looking at it. Unlike invites this needs no owner check: handoffs_select is
+  // is_org_member, so every teammate can read the org's pending hand-offs.
+  const sharedActive = view === 'shared';
+  useEffect(() => {
+    if (orgId && sharedActive) {
+      void shared.load(orgId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, sharedActive, shared.load]);
+
+  const invites = isOwner ? team.invites : [];
   const live = invites.filter((invite) => new Date(invite.expires_at).getTime() > Date.now());
   const cap = seatCap(org.org, members.length, live.length);
 
-  // The plan gate. Shown rather than hidden: a Base customer who cannot find
-  // the feature cannot decide to pay for it, and an empty roster of one would
-  // not explain itself.
+  // The plan gate, and note what it does NOT cover any more.
+  //
+  // It used to return before anything rendered, which was right when this tab
+  // was only a roster. It is not right now that the tab also holds hand-offs.
+  // A one-seat workspace cannot have any -- there is nobody to hand anything
+  // to -- but a workspace that DOWNGRADES still has colleagues and still has
+  // pending offers, and hiding those behind an upsell would strand work on
+  // somebody's plate with no way to see or answer it.
   //
   // `cap.loading` is checked first and falls through to the roster, never to
   // this hero -- putting an upsell in front of a paying team every cold start
   // is exactly the failure src/automations/limit.ts was fixed for.
-  if (!cap.loading && !cap.entitled) {
-    return (
-      <section className="team-tab is-empty">
+  const gated = !cap.loading && !cap.entitled;
+
+  // Members first because they are the answer to "who is here"; invites are the
+  // answer to "who might be".
+  const rows = view === 'pending' ? [] : members;
+  const inviteRows = view === 'members' || view === 'pending' ? invites : [];
+  const nothingYet = members.length <= 1 && invites.length === 0;
+  // The chip counts only what is waiting on ME. The org's other pending
+  // hand-offs are visible in the view, but a badge that counted them would be
+  // telling you about somebody else's decision.
+  const pendingShares = shared.pending.filter((item) => item.to_user === org.userId).length;
+
+  return (
+    <section className="team-tab">
+      <section className="integration-bar">
+        <div className="choice-chips" role="radiogroup" aria-label="Team view">
+          {(['members', 'pending', 'shared'] as const)
+              // Pending invites are an owner-only table, so the chip that shows
+              // nothing but them is owner-only too. Shared is for everyone.
+              .filter((option) => option !== 'pending' || isOwner)
+              .map((option) => (
+                <button
+                  aria-checked={view === option}
+                  className={view === option ? 'choice-chip active' : 'choice-chip'}
+                  key={option}
+                  onClick={() => onView(option)}
+                  role="radio"
+                  type="button"
+                >
+                  {option === 'members' ?
+                    'Members' :
+                    option === 'pending' ?
+                      `Pending${invites.length ? ` · ${invites.length}` : ''}` :
+                      `Shared${pendingShares ? ` · ${pendingShares}` : ''}`}
+                </button>
+              ))}
+        </div>
+
+        {/* The Shared view swaps the roster's controls for the one action it
+            is about. A seat count means nothing beside a list of hand-offs, and
+            Share means nothing beside a list of people. */}
+        {sharedActive ? (
+          <div className="integration-bar-side">
+            <button className="ghost" onClick={() => onShare({kind: 'profile', ids: []})}>
+              <Share2 size={16} /> Share…
+            </button>
+          </div>
+        ) : (
+          <div className="integration-bar-side">
+            {/* Seats, not people: the number the owner is deciding against is
+                members plus outstanding invites, which is what create_org_invite
+                compares to the limit.
+
+                Held back entirely while the org is loading. cap.limit is null
+                until it arrives, and Meter reads null as "of unlimited" -- so
+                rendering early would flash an unlimited seat allowance at someone
+                who has ten, which is the same class of lie the disabled-button
+                bug in automations/limit.ts was. */}
+            {!cap.loading && !gated && (
+              <span className="team-seats">
+                <span className="team-seats-label">Seats</span>
+                <Meter compact used={cap.used} limit={cap.limit} />
+              </span>
+            )}
+            {isOwner && !gated && (
+              <button
+                className="ghost"
+                disabled={cap.atCap}
+                onClick={() => setInviting(true)}
+                title={cap.atCap ?
+                  'Every seat on your plan is taken. Revoke a pending invite, remove ' +
+                    'someone, or upgrade the plan.' :
+                  'Invite someone to this workspace'}
+              >
+                <UserPlus size={16} /> Invite member
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+
+      {sharedActive ? (
+        <SharedView
+          pending={shared.pending}
+          members={members}
+          userId={org.userId}
+          onShare={() => onShare({kind: 'profile', ids: []})}
+          onAccept={(id) => {
+            if (orgId) {
+              void shared.accept(id, orgId, reload);
+            }
+          }}
+          onDecline={(id) => {
+            if (orgId) {
+              void shared.decline(id, orgId);
+            }
+          }}
+          onCancel={(id) => {
+            if (orgId) {
+              void shared.cancel(id, orgId);
+            }
+          }}
+        />
+      ) : gated ? (
+        // The plan gate, for the roster only. Shown rather than hidden: a Base
+        // customer who cannot find the feature cannot decide to pay for it, and
+        // an empty roster of one would not explain itself.
         <EmptyState
           hero
           icon={<Users size={20} strokeWidth={1.75} />}
@@ -122,84 +268,22 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
             See plans
           </button>
         </EmptyState>
-      </section>
-    );
-  }
-
-  // The Pending chip filters the roster down to invites; All shows both, with
-  // members first because they are the answer to "who is here" and invites are
-  // the answer to "who might be".
-  const rows = view === 'pending' ? [] : members;
-  const inviteRows = invites;
-  const nothingYet = members.length <= 1 && inviteRows.length === 0;
-
-  return (
-    <section className="team-tab">
-      <section className="integration-bar">
-        {isAdmin ? (
-          <div className="choice-chips" role="radiogroup" aria-label="Team view">
-            {(['all', 'pending'] as const).map((option) => (
-              <button
-                aria-checked={view === option}
-                className={view === option ? 'choice-chip active' : 'choice-chip'}
-                key={option}
-                onClick={() => setView(option)}
-                role="radio"
-                type="button"
-              >
-                {option === 'all' ? 'All' : `Pending${invites.length ? ` · ${invites.length}` : ''}`}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="integration-bar-count">
-            <strong>{members.length}</strong> {members.length === 1 ? 'person' : 'people'}
-          </span>
-        )}
-
-        <div className="integration-bar-side">
-          {/* Seats, not people: the number an admin is deciding against is
-              members plus outstanding invites, which is what create_org_invite
-              compares to the limit.
-
-              Held back entirely while the org is loading. cap.limit is null
-              until it arrives, and Meter reads null as "of unlimited" -- so
-              rendering early would flash an unlimited seat allowance at someone
-              who has ten, which is the same class of lie the disabled-button
-              bug in automations/limit.ts was. */}
-          {!cap.loading && (
-            <span className="team-seats">
-              <span className="team-seats-label">Seats</span>
-              <Meter used={cap.used} limit={cap.limit} />
-            </span>
+      ) : (
+        <>
+          {!isOwner && (
+            // The standing-fact shape the Extensions tab uses for its own note,
+            // not a toast: this is always true of this screen for this person, not
+            // something that just happened.
+            <section className="api-note">
+              <Shield size={18} />
+              <span>
+                You have full access to this workspace. Only its owner can invite or
+                remove people.
+              </span>
+            </section>
           )}
-          {isAdmin && (
-            <button
-              className="ghost"
-              disabled={cap.atCap}
-              onClick={() => setInviting(true)}
-              title={cap.atCap ?
-                'Every seat on your plan is taken. Revoke a pending invite, remove ' +
-                  'someone, or upgrade the plan.' :
-                'Invite someone to this workspace'}
-            >
-              <UserPlus size={16} /> Invite member
-            </button>
-          )}
-        </div>
-      </section>
 
-      {!isAdmin && (
-        // The standing-fact shape the Extensions tab uses for its admin note,
-        // not a toast: this is always true of this screen for this person, not
-        // something that just happened.
-        <section className="api-note">
-          <Shield size={18} />
-          <span>Only an owner or admin can invite or remove people.</span>
-        </section>
-      )}
-
-      {nothingYet && view === 'all' ? (
+          {nothingYet && view === 'members' ? (
         <EmptyState
           hero
           icon={<Users size={20} strokeWidth={1.75} />}
@@ -207,7 +291,7 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
           body={'Everyone you invite shares this workspace: the same profiles, proxies, ' +
             'cookie sets and automations. Nothing is copied and nothing is per-person.'}
         >
-          {isAdmin && (
+          {isOwner && (
             <button className="primary" onClick={() => setInviting(true)}>
               <UserPlus size={16} /> Invite your first teammate
             </button>
@@ -222,7 +306,11 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
                 <th>Role</th>
                 <th>Joined</th>
                 <th>Invited by</th>
-                <th />
+                {/* Sized by .actions-cell, not by this header. A bare th with
+                    no width let the column stretch to its widest row, which is
+                    how one icon and two icons ended up starting at different
+                    x positions. */}
+                <th className="actions-cell" />
               </tr>
             </thead>
             <tbody>
@@ -231,18 +319,8 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
                   key={member.user_id}
                   member={member}
                   members={members}
-                  isAdmin={isAdmin}
+                  isOwner={isOwner}
                   isSelf={member.user_id === org.userId}
-                  // The last owner is the workspace's only route to billing and
-                  // to promoting anyone else. Removing or demoting them would
-                  // strand the org, so neither is offered.
-                  isLastOwner={member.role === 'owner' &&
-                    members.filter((item) => item.role === 'owner').length === 1}
-                  onRole={(role) => {
-                    if (orgId) {
-                      void team.setRole(orgId, member.user_id, role);
-                    }
-                  }}
                   onRemove={() => setRemoving(member)}
                   onLeave={() => setLeaving(true)}
                 />
@@ -252,6 +330,7 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
                 <InviteRow
                   key={invite.id}
                   invite={invite}
+                  members={members}
                   copied={copiedInviteId === invite.id}
                   onCopy={() => {
                     void navigator.clipboard.writeText(inviteUrl(invite.token))
@@ -282,12 +361,14 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
             </tbody>
           </table>
         </section>
+          )}
+        </>
       )}
 
       {inviting && orgId && (
         <InviteMemberModal
           onClose={() => setInviting(false)}
-          onInvite={(email, role) => team.createInvite(orgId, email, role)}
+          onInvite={(email) => team.createInvite(orgId, email)}
           seatsLeft={cap.limit === null ? null : Math.max(0, cap.limit - cap.used)}
         />
       )}
@@ -318,24 +399,163 @@ export function TeamTab({onOpenSite}: {onOpenSite: (pathname: string) => void}) 
   );
 }
 
+// Every pending hand-off in the workspace, split by who has to answer it.
+//
+// Two groups rather than one feed, because they are answered differently: the
+// top half is a decision you have to make, the bottom half is one you are
+// waiting on. Merging them would bury an Accept button among rows that carry
+// nothing to press.
+//
+// Accepted and declined offers are deliberately absent. An accepted one is
+// already visible as the assignment itself -- it is a name in the Assigned
+// column on the tab where the item lives -- and a settled list here would be a
+// second, staler copy of that.
+function SharedView({pending, members, userId, onShare, onAccept, onDecline, onCancel}: {
+  pending: Handoff[];
+  members: OrgMember[];
+  userId: string | null;
+  onShare: () => void;
+  onAccept: (id: string) => void;
+  onDecline: (id: string) => void;
+  onCancel: (id: string) => void;
+}) {
+  const mine = pending.filter((item) => item.to_user === userId);
+  const theirs = pending.filter((item) => item.to_user !== userId);
+
+  function nameOf(id: string | null) {
+    if (!id) {
+      return 'someone';
+    }
+    const member = members.find((item) => item.user_id === id);
+    if (!member) {
+      return 'a former teammate';
+    }
+    return member.display_name || member.email.split('@')[0] || member.email;
+  }
+
+  if (pending.length === 0) {
+    return (
+      <EmptyState
+        hero
+        icon={<Share2 size={20} strokeWidth={1.75} />}
+        title="Nothing waiting"
+        body={'Sharing hands a profile, proxy, cookie set or automation to someone else ' +
+          'on the team. They accept it, and it shows as theirs under "Assigned to me". ' +
+          'It does not change who can open it — everyone here can already see all of it.'}
+      >
+        <button className="primary" onClick={onShare}>
+          <Share2 size={16} /> Share something
+        </button>
+      </EmptyState>
+    );
+  }
+
+  return (
+    <div className="shared-groups">
+      {mine.length > 0 && (
+        <section>
+          <h2 className="shared-group-title">Waiting for you · {mine.length}</h2>
+          <section className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Type</th>
+                  <th>From</th>
+                  <th>Sent</th>
+                  <th className="actions-cell" />
+                </tr>
+              </thead>
+              <tbody>
+                {mine.map((item) => (
+                  <tr key={item.id}>
+                    <td className="name-cell">
+                      {item.item_name}
+                      {item.note && <span className="shared-note">{item.note}</span>}
+                    </td>
+                    <td><span className="shared-kind">{KIND_LABEL[item.kind]}</span></td>
+                    <td className="team-invited-by">{nameOf(item.from_user)}</td>
+                    <td>{formatDate(item.created_at)}</td>
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        <button className="ghost" onClick={() => onDecline(item.id)}>
+                          Decline
+                        </button>
+                        <button onClick={() => onAccept(item.id)}>Accept</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </section>
+      )}
+
+      {theirs.length > 0 && (
+        <section>
+          <h2 className="shared-group-title">Waiting on someone else</h2>
+          <section className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Type</th>
+                  <th>Waiting on</th>
+                  <th>Sent</th>
+                  <th className="actions-cell" />
+                </tr>
+              </thead>
+              <tbody>
+                {theirs.map((item) => (
+                  <tr key={item.id}>
+                    <td className="name-cell">{item.item_name}</td>
+                    <td><span className="shared-kind">{KIND_LABEL[item.kind]}</span></td>
+                    <td className="team-invited-by">{nameOf(item.to_user)}</td>
+                    <td>{formatDate(item.created_at)}</td>
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        {/* Anyone in the org can withdraw, not just the sender.
+                            handoffs_select and cancel_handoff are both
+                            is_org_member, and an offer left dangling by someone
+                            who is on holiday should not need them to clear it. */}
+                        <button
+                          className="ghost icon-button row-action row-action-danger"
+                          onClick={() => onCancel(item.id)}
+                          title="Withdraw this share"
+                        ><X size={16} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function MemberRow({
-  member, members, isAdmin, isSelf, isLastOwner, onRole, onRemove, onLeave,
+  member, members, isOwner, isSelf, onRemove, onLeave,
 }: {
   member: OrgMember;
   members: OrgMember[];
-  isAdmin: boolean;
+  // Whether the person LOOKING at this row owns the workspace, not whether the
+  // person IN it does -- that is member.role.
+  isOwner: boolean;
   isSelf: boolean;
-  isLastOwner: boolean;
-  onRole: (role: Exclude<OrgRole, 'owner'>) => void;
   onRemove: () => void;
   onLeave: () => void;
 }) {
   const invitedBy = members.find((item) => item.user_id === member.invited_by);
   const name = member.display_name || member.email.split('@')[0] || member.email;
-  // Roles are editable by an admin for anyone who is not an owner. Owners are
-  // never demoted here -- see isLastOwner above, and the fact that ownership
-  // transfer does not exist yet, so demoting the one owner is unrecoverable.
-  const canEditRole = isAdmin && member.role !== 'owner';
+  // Nobody removes the owner and the owner cannot leave: their row is the
+  // workspace's only route to billing and to inviting anyone, and ownership
+  // transfer does not exist yet, so an ownerless org would be unrecoverable.
+  // org_members_delete carries `role <> 'owner'` and refuses it either way.
+  const isTheOwner = member.role === 'owner';
 
   return (
     <tr>
@@ -352,39 +572,11 @@ function MemberRow({
         </span>
       </td>
 
+      {/* A label, not a control. Neither role is grantable from here: membership
+          arrives by accepting an invite, and ownership is not transferable. */}
       <td>
-        {member.role === 'owner' ? (
+        {isTheOwner ? (
           <Badge icon={<Crown size={12} />}>Owner</Badge>
-        ) : canEditRole ? (
-          <span className="status-picker">
-            <Badge>{ROLE_LABEL[member.role]}</Badge>
-            <Popover
-              label={`Change role for ${name}`}
-              panelClassName="status-pop"
-              trigger={<Shield size={13} />}
-              triggerClassName="icon-button status-picker-edit"
-              width={230}
-            >
-              {(close) => (
-                <div className="status-pop-list" role="listbox" aria-label="Role">
-                  {(['member', 'admin'] as const).map((option) => (
-                    <button
-                      aria-selected={option === member.role}
-                      className={option === member.role ?
-                        'status-pop-option active' : 'status-pop-option'}
-                      key={option}
-                      onClick={() => {
-                        onRole(option);
-                        close();
-                      }}
-                      role="option"
-                      type="button"
-                    ><Badge>{ROLE_LABEL[option]}</Badge></button>
-                  ))}
-                </div>
-              )}
-            </Popover>
-          </span>
         ) : (
           <Badge>{ROLE_LABEL[member.role]}</Badge>
         )}
@@ -395,34 +587,42 @@ function MemberRow({
         {invitedBy ? (invitedBy.display_name || invitedBy.email) : '—'}
       </td>
 
-      <td>
-        {/* Your own row offers Leave, never Remove -- and not even that if you
-            are the last owner, who has nobody to hand the workspace to. */}
-        {isSelf ? (
-          !isLastOwner && (
-            <button className="ghost icon-button row-action" onClick={onLeave} title="Leave team">
-              <LogOut size={16} />
-            </button>
-          )
-        ) : isAdmin && !isLastOwner && member.role !== 'owner' ? (
-          <button
-            className="ghost icon-button row-action row-action-danger"
-            onClick={onRemove}
-            title={`Remove ${name}`}
-          ><Trash2 size={16} /></button>
-        ) : null}
+      {/* The wrapper is rendered even when there is no button in it. Most rows
+          here offer nothing -- an owner viewing an owner, a member viewing
+          anyone -- and an empty cell that collapsed to zero height was half of
+          why this table did not line up. */}
+      <td className="actions-cell">
+        <div className="row-actions">
+          {/* Your own row offers Leave, never Remove -- and not even that if you
+              are the owner, who has nobody to hand the workspace to. */}
+          {isSelf ? (
+            !isTheOwner && (
+              <button className="ghost icon-button row-action" onClick={onLeave} title="Leave team">
+                <LogOut size={16} />
+              </button>
+            )
+          ) : isOwner && !isTheOwner ? (
+            <button
+              className="ghost icon-button row-action row-action-danger"
+              onClick={onRemove}
+              title={`Remove ${name}`}
+            ><Trash2 size={16} /></button>
+          ) : null}
+        </div>
       </td>
     </tr>
   );
 }
 
-function InviteRow({invite, copied, onCopy, onRevoke}: {
+function InviteRow({invite, members, copied, onCopy, onRevoke}: {
   invite: OrgInvite;
+  members: OrgMember[];
   copied: boolean;
   onCopy: () => void;
   onRevoke: () => void;
 }) {
   const expired = new Date(invite.expires_at).getTime() <= Date.now();
+  const invitedBy = members.find((item) => item.user_id === invite.invited_by);
   return (
     <tr className="team-invite-row">
       <td className="name-cell">
@@ -437,13 +637,25 @@ function InviteRow({invite, copied, onCopy, onRevoke}: {
         </span>
       </td>
       <td><Badge>{ROLE_LABEL[invite.role]}</Badge></td>
-      <td colSpan={2}>
+
+      {/* One cell per column, no colspan. Merging Joined and Invited-by is what
+          put this badge under the wrong heading and left every cell to its
+          right out of step with the member rows above it.
+
+          The badge belongs in Joined because that is the column answering "when
+          did this person arrive" -- and for an invite the honest answer is that
+          they have not, with the deadline attached. */}
+      <td>
         {expired ?
           <Badge tone="ban">Expired</Badge> :
           <Badge tone="warmup">Pending · expires {relativeDays(invite.expires_at)}</Badge>}
       </td>
-      <td>
-        <span className="team-invite-actions">
+      <td className="team-invited-by">
+        {invitedBy ? (invitedBy.display_name || invitedBy.email) : '—'}
+      </td>
+
+      <td className="actions-cell">
+        <div className="row-actions">
           {/* No copy button on a dead link: the URL still exists but
               accept_org_invite refuses it, so offering it would hand the admin
               something that fails for their teammate rather than for them. */}
@@ -458,7 +670,7 @@ function InviteRow({invite, copied, onCopy, onRevoke}: {
             onClick={onRevoke}
             title="Revoke invite"
           ><X size={16} /></button>
-        </span>
+        </div>
       </td>
     </tr>
   );
@@ -516,9 +728,9 @@ function LeaveTeamModal({orgName, onClose, onConfirm, onLeft}: {
       footer={
         <>
           {/* Rendered here rather than as a toast because the likely failure is
-              an instruction -- org_members_delete is is_org_admin, so a plain
-              member is told to ask an admin -- and that belongs next to the
-              button that produced it. */}
+              an explanation -- org_members_delete carries `role <> 'owner'`, so
+              an owner is told they cannot leave their own workspace -- and that
+              belongs next to the button that produced it. */}
           {error && <p className="settings-error">{error}</p>}
           <button className="ghost" onClick={onClose}>Cancel</button>
           <button className="danger" disabled={busy} onClick={() => {
@@ -540,7 +752,7 @@ function LeaveTeamModal({orgName, onClose, onConfirm, onLeft}: {
     >
       <p className="error-detail">
         You'll lose access to this workspace's profiles, proxies and cookie sets. Nothing
-        is deleted, and an admin can invite you back.
+        is deleted, and its owner can invite you back.
       </p>
     </Modal>
   );

@@ -46,6 +46,8 @@ export type SettingsDialogProps = {
   // Replays the profiles walkthrough. Closes this dialog on the way, so the two
   // are never stacked.
   onOpenIntro: () => void;
+  // Closes this dialog and lands on the Plans tab, for the same reason.
+  onOpenPlans: () => void;
   // The launcher's own update panel, owned by App's updater hook.
   updateControl: ReactNode;
   resourceState: ResourceState | null;
@@ -98,10 +100,10 @@ export function SettingsDialog(props: SettingsDialogProps) {
   // is a live one counting against the cap.
   const automationCount = data.state.automations.length;
 
-  // RLS restricts UPDATE on organizations to is_org_admin, and db.orgs.rename
-  // asks for the row back so a member's attempt surfaces as an error instead of
-  // a rename that reverts on the next load. withDb reports it the way every
-  // other write in the app does.
+  // RLS restricts UPDATE on organizations to is_org_member, so anyone in the
+  // workspace may rename it -- the entitlement columns are withheld by the
+  // column grant, not by the policy. A failure still surfaces through withDb the
+  // way every other write in the app does.
   async function renameOrg(name: string): Promise<boolean> {
     const ok = await data.withDb((activeOrgId) => db.orgs.rename(activeOrgId, name));
     if (!ok) {
@@ -173,6 +175,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
             )}
             {active === 'plan' && (
               <PlanUsageSection
+                onOpenPlans={props.onOpenPlans}
                 onOpenSite={props.onOpenSite}
                 profileCount={profileCount}
                 automationCount={automationCount}

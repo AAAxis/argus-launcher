@@ -18,6 +18,12 @@ import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
 import {supabase} from '../supabase';
 import {newId} from '../workspace/core';
+import {useColumnLayouts} from '../tables/ColumnLayouts';
+import {
+  applyColumnChange, columnChangeProblem, describeAllTables, describeTable,
+} from '../tables/apiColumns';
+import {isTableId, TABLE_IDS} from '../tables/columns';
+import type {ColumnChange} from '../tables/apiColumns';
 import type {CookieFileSelection} from '../native';
 import type {WorkspaceValue} from '../workspace/WorkspaceProvider';
 import type {AutomationStep} from '../automations/types';
@@ -98,6 +104,13 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   const state = data.state;
   const {withDb, patch, setState} = data;
   const cloud = [state] as const;
+  // Column layouts, for the two /v1/tables routes at the end of this file.
+  // App mounts this bridge inside ColumnLayoutsProvider, so an agent and the
+  // picker in the toolbar are writing the same value.
+  const columnLayouts = useColumnLayouts();
+  // The same flag the three tabs pass: on a one-person workspace the team-only
+  // columns are not offered, so the API must not accept them either.
+  const isTeam = state.members.length > 1;
 
   // POST /v1/cookies/bulk-match -- runs against the signed-in cloud state via
   // the same matching logic the "Import cookies" button uses.
@@ -767,4 +780,42 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         return {runId: result.runId, automationId: automation.id, profileId: profile.id};
       },
       cloud);
+
+  // The two routes that let an agent set up a table the way the user would.
+  //
+  // Not folder-scoped: a layout is a property of the person, not of the rows,
+  // and a key granted one folder changing its own user's view harms nothing --
+  // which is why these are `scope: any` where authoring an automation is not.
+
+  // Discovery. An agent that has to guess "browser version" is `fpBrowser` gets
+  // one failed call and no way to learn from it; this says what exists, what is
+  // on, and what cannot be turned off.
+  useApiChannel(
+      'argus:table-columns-request',
+      () => ({tables: describeAllTables(columnLayouts.layouts, {isTeam})}),
+      [columnLayouts.layouts, isTeam]);
+
+  useApiChannel(
+      'argus:set-table-columns-request',
+      (payload: {requestId: string; table?: string} & ColumnChange) => {
+        requireSignedIn();
+        if (!isTableId(payload.table)) {
+          throw new ApiError(
+              `No table called ${payload.table}. There are: ${TABLE_IDS.join(', ')}.`, 400);
+        }
+        const table = payload.table;
+        const context = {isTeam};
+        // Refused whole rather than applied in part: an agent whose typo is
+        // quietly dropped cannot tell that half its request did nothing.
+        const problem = columnChangeProblem(table, payload, context);
+        if (problem) {
+          throw new ApiError(problem, 400);
+        }
+        const next = applyColumnChange(table, payload, columnLayouts.layouts, context);
+        columnLayouts.setLayouts(next);
+        // The table it just changed, in the same shape the GET answers with, so
+        // a caller can check its own write without a second round trip.
+        return describeTable(table, next, context);
+      },
+      [columnLayouts, isTeam]);
 }

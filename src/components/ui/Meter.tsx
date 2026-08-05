@@ -14,10 +14,20 @@
 // The styles stay `.settings-meter*` in styles.css rather than being renamed:
 // the class names are load-bearing in a 6,900-line stylesheet and the component
 // moving does not make them wrong.
-export function Meter({used, limit}: {used: number; limit: number | null}) {
+// `compact` lays the numbers beside the track instead of above it. The stacked
+// form is right in Settings, where a meter owns a row and vertical space is
+// free. In a toolbar it is not: it makes a two-line block standing next to
+// one-line controls, so the numbers ride above the track and nothing in the row
+// shares a centre line with the button the meter exists to qualify.
+export function Meter({used, limit, compact}: {
+  used: number;
+  limit: number | null;
+  compact?: boolean;
+}) {
+  const className = compact ? 'settings-meter is-compact' : 'settings-meter';
   if (limit === null) {
     return (
-      <div className="settings-meter">
+      <div className={className}>
         <strong>{used}</strong>
         <span>of unlimited</span>
       </div>
@@ -25,7 +35,7 @@ export function Meter({used, limit}: {used: number; limit: number | null}) {
   }
   if (limit <= 0) {
     return (
-      <div className="settings-meter">
+      <div className={className}>
         <strong>{used}</strong>
         <span>not included on this plan</span>
       </div>
@@ -33,7 +43,7 @@ export function Meter({used, limit}: {used: number; limit: number | null}) {
   }
   const percent = Math.min(100, Math.round((used / limit) * 100));
   return (
-    <div className="settings-meter">
+    <div className={className}>
       <div className="settings-meter-numbers">
         <strong>{used}</strong>
         <span>of {limit}</span>

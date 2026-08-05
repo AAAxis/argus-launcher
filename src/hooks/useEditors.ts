@@ -8,6 +8,7 @@ import {
   draftFromBookmark, draftFromProfile, draftFromProxy, newBookmarkDraft, newProfileDraft,
   newProxyDraft,
 } from '../drafts';
+import {useOrg} from '../org';
 import {useWorkspace} from '../workspace/WorkspaceProvider';
 import type {
   BookmarkDraft, FolderDraft, ProfileDraft, ProxyDraft, StatusDraft,
@@ -17,6 +18,7 @@ import type {ArgusCookie, ArgusProfile, ArgusProxy, SharedBookmark} from '../typ
 
 export function useEditors() {
   const {data, profiles, setSelectedProfileId} = useWorkspace();
+  const org = useOrg();
 
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
   const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
@@ -47,7 +49,9 @@ export function useEditors() {
     // inside it (cookie picker, proxy editor) that only touch a field or two.
     patchProfileDraft: (patch: Partial<ProfileDraft>) =>
       setProfileDraft((current) => current ? {...current, ...patch} : current),
-    newProfile: () => setProfileDraft(newProfileDraft()),
+    // Seeded with the current user so the assignee picker opens on "You",
+    // matching the column default the insert is about to apply.
+    newProfile: () => setProfileDraft(newProfileDraft(org.userId || '')),
     editProfile: (profile: ArgusProfile) => {
       setSelectedProfileId(profile.id);
       setProfileDraft(draftFromProfile(profile));

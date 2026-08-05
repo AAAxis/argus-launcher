@@ -11,7 +11,7 @@ import type {CookieSetRow} from './rows';
 // them on every load, which useCloudData repeats on each window focus. This
 // list is metadata; loadPayload fetches a body, one set at a time.
 const COLUMNS =
-  'id,org_id,name,updated_at,created_at,source_url,count,folder_id,tags,deleted_at';
+  'id,org_id,name,updated_at,created_at,source_url,count,folder_id,tags,deleted_at,assigned_to';
 
 // Trashed sets come back too, exactly as profiles.list returns soft-deleted
 // profiles: Trash is a view the tab filters into, not a second read.

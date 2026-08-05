@@ -137,6 +137,60 @@ function fromShorthand(trimmed: string): Omit<ArgusProxy, 'id' | 'name'> | null 
   return null;
 }
 
+// One connection string, as it should land in a form that has a field per part.
+//
+// This is the pure half of what the proxy editor has always done on paste, split
+// out because the CSV import's per-row proxy popover needs exactly the same
+// decision and a second copy of it is how this file ended up with two parsers
+// once already (see the note above parseProxyLink).
+//
+// `strict` is for the fields that are not the host: a paste into Password is only
+// a connection string when what parsed out of it really looks like one, because
+// "hunter2:1080" parses just as cleanly as a proxy does.
+export function splitPastedConnection(raw: string, {strict = false} = {}):
+    (Omit<ArgusProxy, 'id' | 'name'> & {explicitType: boolean}) | null {
+  // No colon, nothing to split -- and parseProxyLink would happily read a bare
+  // word as a hostname, which is not what a paste into Username meant.
+  if (!raw.includes(':')) {
+    return null;
+  }
+  const parsed = parseProxyLink(raw);
+  if (!parsed) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  // Two deliberately different tests, and they must stay different. The guard
+  // asks "is this unambiguously a URL", which needs the slashes; explicitType
+  // asks "did the user name a protocol", which the "socks5:host:port" shorthand
+  // does without them. One regex for both would either let a password through
+  // the guard or drop the type off the shorthand.
+  if (strict && !/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) && !looksLikeProxyHost(parsed.host)) {
+    return null;
+  }
+  return {...parsed, explicitType: /^(https?|socks5?):(\/\/)?/i.test(trimmed)};
+}
+
+// A proxy as one string, the inverse of parseProxyLink.
+//
+// Both halves of the userinfo are percent-encoded because provider passwords are
+// full of the characters that would otherwise re-parse as structure -- an @
+// splits userinfo from host, a : splits user from password. parseProxyLink
+// decodes them back, so this round-trips whatever was typed.
+export function formatProxyLink(
+    proxy: Pick<ArgusProxy, 'type' | 'host' | 'port' | 'username' | 'password'>) {
+  const type = proxy.type || 'socks5';
+  const endpoint = `${proxy.host}:${proxy.port}`;
+  // No credentials means no userinfo at all, rather than an empty ":@". Both
+  // parse back to the same proxy, but only one of them is what the user sees in
+  // the cell and would recognise as the line their file contained.
+  if (!proxy.username && !proxy.password) {
+    return `${type}://${endpoint}`;
+  }
+  const user = encodeURIComponent(proxy.username || '');
+  const pass = encodeURIComponent(proxy.password || '');
+  return `${type}://${user}:${pass}@${endpoint}`;
+}
+
 function isPort(value: string | undefined) {
   if (!value || !/^\d{1,5}$/.test(value)) {
     return false;

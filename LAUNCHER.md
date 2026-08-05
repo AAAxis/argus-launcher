@@ -80,10 +80,32 @@ Three consequences worth knowing before changing anything here:
   `save(…, exists)`. The other tables have no limit trigger, so their upserts are fine.
 - **No `updated_at` trigger exists** in the database. `profiles` and `cookie_sets` writes
   set it explicitly.
-- `built_in_extensions` lives on `organizations` and its RLS UPDATE policy requires
-  `is_org_admin`, so the Settings toggles are disabled for plain members. A member's write
-  would otherwise return success with zero rows and silently revert on the next load —
-  `db.orgs.updateBuiltInExtensions` asks for the row back to catch exactly that.
+- `built_in_extensions` lives on `organizations`, whose RLS UPDATE policy is
+  `is_org_member`, so every member can toggle them — the Extensions tab states the org-wide
+  blast radius rather than disabling the switches. What holds the entitlement line is the
+  *column* grant, not the policy: `plan`, `seat_limit`, `profile_limit`,
+  `automation_limit` and `billing_status` are not in it and are service-role only.
+  `db.orgs.updateBuiltInExtensions` still asks for the row back, because RLS filters rows
+  rather than erroring and a silently-reverting toggle is the failure worth catching.
+
+### Roles
+
+Two, since `2026-08-10-owner-member-roles.sql`: **owner** and **member**.
+
+- The **owner** is the account holder — whoever ran `bootstrap_org`. Only they can invite,
+  remove, or mint an API token (`is_org_owner` gates `org_invites`, the delete policy on
+  `org_members`, and the writes on `api_tokens`). Their membership row cannot be deleted by
+  anyone, including themselves: `org_members_delete` carries `role <> 'owner'`, so an org
+  can never be left ownerless. Ownership transfer does not exist yet.
+- A **member** has full access to everything else — every profile, proxy, cookie set and
+  automation, plus the workspace's name, branding and extension toggles. They can leave of
+  their own accord (`user_id = auth.uid()` in the same policy).
+- Nothing changes a role. There is no `setMemberRole`, no role picker, and no UPDATE
+  policy or grant on `org_members` at all — membership arrives only through
+  `accept_org_invite`, which is the only writer of that table and checks the invited
+  address against `auth.users`.
+- `'admin'` was removed. `mappers.orgRole()` reads anything that is not `'owner'` as
+  `'member'`, so a stale database that still holds the value renders safely.
 
 Auth and org context live in `src/org.tsx`: it subscribes to `onAuthStateChange`, loads
 the user's `org_members` rows, calls the idempotent `bootstrap_org()` RPC when they have

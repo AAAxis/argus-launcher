@@ -1,6 +1,7 @@
 // The persistent chrome: the sidebar rail, the topbar, and the corner toasts.
 import {Settings, X} from 'lucide-react';
-import {tabs} from '../data/tabs';
+import {InboxBell} from './InboxBell';
+import {tabs, visibleTabs} from '../data/tabs';
 import {initials, shortenEmail} from '../lib/text';
 import {native} from '../native';
 import {useOrg} from '../org';
@@ -14,6 +15,11 @@ export function Sidebar({activeTab, onTab, onSettings}: {
   onSettings: () => void;
 }) {
   const org = useOrg();
+  // `org.ready ? … : undefined` rather than `org.org?.plan` alone: an unresolved
+  // org has no plan either way, and passing undefined is what stops the Plans
+  // tab appearing for a frame on every cold start -- in front of paying
+  // customers, who are exactly the people it has nothing to say to.
+  const rail = visibleTabs(org.ready ? org.org?.plan : undefined);
   return (
     <aside className="sidebar">
       {/* The mark alone -- the window title already says "Argus Launcher", so
@@ -23,7 +29,7 @@ export function Sidebar({activeTab, onTab, onSettings}: {
         <span className="brand-mark" role="img" aria-label="Argus" />
       </div>
       <nav>
-        {tabs.map((tab) => (
+        {rail.map((tab) => (
           <button
             aria-current={activeTab === tab.id ? 'page' : undefined}
             className={activeTab === tab.id ? 'active' : ''}
@@ -52,7 +58,11 @@ export function Sidebar({activeTab, onTab, onSettings}: {
   );
 }
 
-export function Topbar({activeTab, actions}: {activeTab: TabId; actions: ReactNode}) {
+export function Topbar({activeTab, actions, onViewShares}: {
+  activeTab: TabId;
+  actions: ReactNode;
+  onViewShares: () => void;
+}) {
   const org = useOrg();
   return (
     <header className="topbar">
@@ -63,6 +73,11 @@ export function Topbar({activeTab, actions}: {activeTab: TabId; actions: ReactNo
           again. */}
       <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
       <div className="actions">
+        {/* Left of the org switcher, and left of the tab's own actions: what
+            somebody has sent you is not an action on the current tab, and it
+            should not move when the tab changes. Renders nothing at all when
+            the inbox is empty, which is most of the time. */}
+        <InboxBell onViewAll={onViewShares} />
         {/* Only shown when the user is actually in more than one firm --
             the common case is one org, chosen silently. */}
         {org.orgs.length > 1 && (

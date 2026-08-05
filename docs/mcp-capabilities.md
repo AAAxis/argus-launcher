@@ -1,6 +1,6 @@
 # What an AI agent can do through the Argus MCP server
 
-Scope: the 21 tools in `electron/mcp/tools.cjs`, the loopback automation API in
+Scope: the 23 tools in `electron/mcp/tools.cjs`, the loopback automation API in
 `electron/main.cjs` they call, and the renderer handlers in
 `src/hooks/useAutomationBridge.ts` that actually answer.
 
@@ -18,7 +18,7 @@ reported by the server: `1.0.55`.
 
 ## 1. The surface
 
-**[verified]** `tools/list` returns exactly 21 tools:
+**[verified]** `tools/list` returns exactly 23 tools:
 
 | Tool | Backed by | Verified? |
 |---|---|---|
@@ -43,13 +43,15 @@ reported by the server: `1.0.55`.
 | `argus_update_automation` | `POST /v1/automations/update` | read only |
 | `argus_delete_automation` | `POST /v1/automations/delete` | read only |
 | `argus_run_automation` | `POST /v1/automations/run` | read only |
+| `argus_table_columns` | `GET /v1/tables/columns` | read only |
+| `argus_set_table_columns` | `POST /v1/tables/columns` | read only |
 
-Sixteen tools are thin wrappers over loopback HTTP routes; five need a running
+Eighteen tools are thin wrappers over loopback HTTP routes; five need a running
 browser and speak CDP directly (`electron/mcp/cdp.cjs`).
 
-The seven automations tools are **generated** from `electron/api/routes.json`
-rather than written out, so their names, descriptions and input schemas cannot
-drift from the routes they call. `scripts/verify-api-routes.mjs` checks the rest
+The seven automations tools and the two table-column tools are **generated**
+from `electron/api/routes.json` rather than written out, so their names,
+descriptions and input schemas cannot drift from the routes they call. `scripts/verify-api-routes.mjs` checks the rest
 of the table the same way. The nine profile/proxy wrappers above them are still
 hand-written.
 

@@ -33,6 +33,15 @@ export type ProfileDraft = {
   // ArgusProfile.avatar; parsed in src/lib/profileAvatar.ts.
   avatar: string;
   folder_id: string;
+  // The teammate on the hook for this profile, as an auth user id, or '' for
+  // unassigned.
+  //
+  // Unlike every other field here it does NOT travel through profileFromDraft
+  // into ArgusProfile: profileToRow deliberately omits assigned_to so an
+  // ordinary edit cannot carry a stale value back over an assignment made in
+  // another session. It rides in the draft only so the picker has somewhere to
+  // hold the choice until Save, which then applies it through set_assignee.
+  assigned_to: string;
   // Login credentials for whatever account this profile is signed into --
   // stored plaintext the same way proxy_search/proxy credentials already
   // are (see ArgusProfile.email/password in types.ts). Not used by Anty
@@ -127,7 +136,12 @@ export type StatusDraft = {
   name: string;
 };
 
-export function newProfileDraft(): ProfileDraft {
+// `selfId` seeds the assignee so the picker opens on "You", which is what the
+// profiles.assigned_to column default (auth.uid()) is about to do anyway --
+// showing "Unassigned" there would be the editor contradicting the row it is
+// about to write. Optional because csvImport calls this purely for the
+// fingerprint and colour defaults and has no user id to hand.
+export function newProfileDraft(selfId = ''): ProfileDraft {
   return {
     id: newRowId(),
     saved: false,
@@ -136,6 +150,7 @@ export function newProfileDraft(): ProfileDraft {
     color: DEFAULT_PROFILE_COLOR,
     avatar: '',
     folder_id: '',
+    assigned_to: selfId,
     email: '',
     password: '',
     proxy_id: '',
@@ -190,6 +205,7 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     color: normalizeProfileColor(profile.color),
     avatar: profile.avatar || '',
     folder_id: profile.folder_id || '',
+    assigned_to: profile.assigned_to || '',
     email: profile.email || '',
     password: profile.password || '',
     proxy_id: profile.proxy_id || '',

@@ -18,8 +18,10 @@
 // per action.
 import {useState} from 'react';
 import {
-  BookOpen, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Sparkles, Trash2, Workflow,
+  BookOpen, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Share2, Sparkles, Trash2,
+  Workflow,
 } from 'lucide-react';
+import {Assignee} from '../ui/Assignee';
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {EmptyState} from '../ui/EmptyState';
@@ -28,8 +30,8 @@ import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import {SITE_LINKS} from '../../data/links';
 import {automationCap} from '../../automations/limit';
-import {runTarget} from '../../automations/target';
 import {RUN_LABEL, RUN_TONE} from '../../automations/runStatus';
+import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusAutomation, AutomationRun} from '../../types';
 
 // All, or the ones the browser start pages show. Two chips rather than a
@@ -37,10 +39,10 @@ import type {ArgusAutomation, AutomationRun} from '../../types';
 // already use. `pinned` earns the second chip because it is the one property of
 // an automation with a consequence outside this tab: a pinned workflow is a
 // button inside every profile's session.
-type View = 'all' | 'pinned';
+type View = 'all' | 'pinned' | 'mine';
 
 export function AutomationsTab({
-  onEdit, onNew, onLoadExample, onCreateDemoProfile, onHistory, onOpenSite,
+  onEdit, onNew, onLoadExample, onCreateDemoProfile, onRun, onHistory, onShare, onOpenSite,
 }: {
   onEdit: (automation: ArgusAutomation) => void;
   onNew: () => void;
@@ -52,12 +54,19 @@ export function AutomationsTab({
   // nothing to run against is a dead end, and Direct mode is the one setup that
   // needs no proxy credentials to demonstrate.
   onCreateDemoProfile: () => void;
+  // Opens the profile picker. Running never starts from this button any more:
+  // it used to resolve a target with runTarget() and go, which is how a run
+  // ended up on a profile nobody chose, failing on that profile's dead proxy.
+  onRun: (automation: ArgusAutomation) => void;
   onHistory: (automation: ArgusAutomation) => void;
+  // Raises the share sheet. One automation at a time, unlike the table tabs --
+  // this grid has no selection model to batch with.
+  onShare: (request: ShareRequest) => void;
   // Opens a page on the marketing site in the user's own browser, never in a
   // profile window -- those stay anonymous.
   onOpenSite: (pathname: string) => void;
 }) {
-  const {data, automations, selectedProfileId} = useWorkspace();
+  const {data, automations} = useWorkspace();
   const org = useOrg();
   const [view, setView] = useState<View>('all');
   const {state} = data;
@@ -73,7 +82,13 @@ export function AutomationsTab({
 
   // The newest run per automation, from whatever this session has seen. Older
   // history lives in the database and is opened explicitly -- see onHistory.
+  //
+  // `live` counts alongside it because one automation can now be running on
+  // several profiles at once. The newest run alone would report a batch of five
+  // as one run, and its status would flip to whichever finished last while four
+  // were still going.
   const latest = new Map<string, AutomationRun>();
+  const live = new Map<string, number>();
   for (const run of Object.values(automations.runs)) {
     if (!run.automation_id) {
       continue;
@@ -81,6 +96,9 @@ export function AutomationsTab({
     const seen = latest.get(run.automation_id);
     if (!seen || run.started_at > seen.started_at) {
       latest.set(run.automation_id, run);
+    }
+    if (run.status === 'running') {
+      live.set(run.automation_id, (live.get(run.automation_id) || 0) + 1);
     }
   }
 
@@ -126,9 +144,9 @@ export function AutomationsTab({
             </>
           )}
           {/* A first automation is useless without something to run it on, and
-              the Run button stays disabled until a profile is selected. Direct
-              mode needs no proxy, so this is the one profile we can offer to
-              make outright rather than sending the user to another tab. */}
+              the Run button stays disabled until one exists. Direct mode needs
+              no proxy, so this is the one profile we can offer to make outright
+              rather than sending the user to another tab. */}
           {hasNoProfiles && (
             <button className="ghost" onClick={onCreateDemoProfile}>
               <MonitorSmartphone size={16} /> Create a Demo profile
@@ -142,7 +160,13 @@ export function AutomationsTab({
     );
   }
 
-  const shown = view === 'pinned' ? list.filter((automation) => automation.pinned) : list;
+  const shown = view === 'pinned' ?
+    list.filter((automation) => automation.pinned) :
+    view === 'mine' ?
+      list.filter((automation) => automation.assigned_to === org.userId) :
+      list;
+  // The third chip only earns its place once there is somebody to tell apart.
+  const showAssignee = state.members.length > 1;
 
   return (
     <section className="automations-tab">
@@ -151,18 +175,21 @@ export function AutomationsTab({
           how to make another on the right. */}
       <section className="integration-bar">
         <div className="choice-chips" role="radiogroup" aria-label="Automations view">
-          {(['all', 'pinned'] as const).map((option) => (
-            <button
-              aria-checked={view === option}
-              className={view === option ? 'choice-chip active' : 'choice-chip'}
-              key={option}
-              onClick={() => setView(option)}
-              role="radio"
-              type="button"
-            >
-              {option === 'all' ? 'All' : 'On start pages'}
-            </button>
-          ))}
+          {(['all', 'pinned', 'mine'] as const)
+              .filter((option) => option !== 'mine' || showAssignee)
+              .map((option) => (
+                <button
+                  aria-checked={view === option}
+                  className={view === option ? 'choice-chip active' : 'choice-chip'}
+                  key={option}
+                  onClick={() => setView(option)}
+                  role="radio"
+                  type="button"
+                >
+                  {option === 'all' ? 'All' :
+                    option === 'pinned' ? 'On start pages' : 'Assigned to me'}
+                </button>
+              ))}
         </div>
         <div className="integration-bar-side">
           <span className="integration-bar-count">
@@ -204,7 +231,8 @@ export function AutomationsTab({
           const attachedTo = state.profiles.filter(
               (profile) => !profile.deleted_at && profile.automation_id === automation.id);
           const run = latest.get(automation.id);
-          const busy = run?.status === 'running';
+          const runningCount = live.get(automation.id) || 0;
+          const busy = runningCount > 0;
           return (
             <article className="automation-card" key={automation.id}>
               {/* One flex-wrap row -- mark, name, step count, delete -- like
@@ -245,8 +273,16 @@ export function AutomationsTab({
                   radius, despite the name. Three of them in a row read as one
                   green sentence. Every tab that used it has since moved to
                   <Badge>, and the class is gone. */}
-              {(attachedTo.length > 0 || automation.pinned || (automation.tags || []).length > 0) && (
+              {(attachedTo.length > 0 || automation.pinned || automation.assigned_to ||
+                (automation.tags || []).length > 0) && (
                 <div className="automation-card-meta">
+                  {/* First, because "whose is this" is the question a team asks
+                      of a card before any of the others. Only rendered when
+                      somebody holds it -- an "Unassigned" badge on every card
+                      would be a grid of noise. */}
+                  {automation.assigned_to && (
+                    <Assignee userId={automation.assigned_to} />
+                  )}
                   {attachedTo.length > 0 && (
                     <Badge
                       icon={<Rocket size={12} />}
@@ -265,8 +301,14 @@ export function AutomationsTab({
 
               {run && (
                 <p className="automation-card-run">
-                  <Badge tone={RUN_TONE[run.status]}>{RUN_LABEL[run.status]}</Badge>
-                  {run.status !== 'running' && run.duration_ms ?
+                  <Badge tone={RUN_TONE[run.status]}>
+                    {/* "Running · 3" rather than "Running": one automation can
+                        be in flight on several profiles now, and a single label
+                        would report a batch of five as one run. */}
+                    {RUN_LABEL[run.status]}
+                    {runningCount > 1 ? ` · ${runningCount}` : ''}
+                  </Badge>
+                  {!busy && run.duration_ms ?
                     ` in ${(run.duration_ms / 1000).toFixed(1)}s` :
                     ''}
                   {run.error ? ` — ${run.error}` : ''}
@@ -274,25 +316,33 @@ export function AutomationsTab({
               )}
 
               <div className="extension-card-foot">
+                {/* Opens the picker; it never starts a run itself. It used to
+                    resolve a target with runTarget() and go, which is how a run
+                    landed on a profile nobody chose and died on that profile's
+                    dead proxy. Disabled only when there is nothing to run
+                    against at all -- "which profile" is a question the dialog
+                    asks, not a reason to grey the button out. */}
                 <BusyButton
                   busy={busy}
-                  busyLabel="Running"
+                  busyLabel={runningCount > 1 ? `Running ${runningCount}` : 'Running'}
                   icon={<Play size={14} />}
-                  onClick={() => {
-                    // Shared with the editor's Check button, so the page a
-                    // selector is tested against is the page the run uses.
-                    const target = runTarget(state, automation, selectedProfileId);
-                    if (!target) {
-                      return;
-                    }
-                    void automations.run(automation, target);
-                  }}
-                  disabled={attachedTo.length !== 1 && !selectedProfileId}
-                  title={attachedTo.length === 1 ?
-                    `Run against ${attachedTo[0].name}` :
-                    'Runs against the profile selected on the Profiles tab'}
+                  onClick={() => onRun(automation)}
+                  disabled={hasNoProfiles}
+                  title={hasNoProfiles ?
+                    'Create a profile first — an automation needs one to run against.' :
+                    'Pick profiles and run'}
                 >Run</BusyButton>
                 <button className="ghost" onClick={() => onEdit(automation)}>Edit</button>
+                {/* Per-card rather than on a selection toolbar, because this tab
+                    has no selection model at all -- no checkboxes, no
+                    useSelection. Adding one just to reach parity with the three
+                    table tabs would be a larger change than the button. */}
+                <button
+                  className="ghost"
+                  onClick={() => onShare({kind: 'automation', ids: [automation.id]})}
+                  aria-label={`Share ${automation.name}`}
+                  title="Share with another workspace"
+                ><Share2 size={14} /></button>
                 <button
                   className="ghost automation-card-history"
                   onClick={() => onHistory(automation)}

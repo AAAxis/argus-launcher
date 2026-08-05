@@ -1,31 +1,33 @@
 import {useState} from 'react';
 import {
-  BookOpen, Cookie, Download, FolderInput, FolderPlus, Pencil, Play, SearchX, ShieldCheck,
-  Trash2, UserPlus, UsersRound,
+  BookOpen, Cookie, Download, FolderInput, FolderPlus, Pencil, Play, SearchX, Share2,
+  ShieldCheck, Trash2, UserPlus, UsersRound,
 } from 'lucide-react';
 import {MoveProfilesModal} from '../modals/MoveProfilesModal';
 import {PurgeProfilesModal} from '../modals/ConfirmModals';
 import {BusyButton} from '../ui/BusyButton';
 import {Checkbox} from '../ui/Checkbox';
+import {ColumnsButton} from '../ui/ColumnsButton';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
-import {PlatformIcon} from '../ui/icons';
-import {ProxyCheckCell, storedCheckState} from '../ui/ProxyCheckCell';
-import {ProfileAvatar} from '../ui/ProfileAvatar';
-import {SortableTh} from '../ui/SortableTh';
-import {StatusPicker} from '../ui/StatusChip';
-import {TagCell} from '../ui/TagChip';
-import {daysUntilPurge, TRASH_FOLDER_ID} from '../../lib/trash';
-import {formatDateShort} from '../../lib/text';
+import {FolderSelect, StatusFilter, TagFilter} from '../ui/TableFilters';
+import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
+import {PROFILE_COLUMNS} from '../../tables/profileColumns';
+import {sortColumnsFrom} from '../../tables/columns';
+import {useTableColumns} from '../../tables/ColumnLayouts';
+import {TRASH_FOLDER_ID} from '../../lib/trash';
+import {useOrg} from '../../org';
 import {paginate} from '../../lib/paginate';
-import {tagKey, tagLabel} from '../../lib/tags';
+import {tagKey} from '../../lib/tags';
 import {native} from '../../native';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useSelection} from '../../hooks/useSelection';
 import {useTableSort} from '../../hooks/useTableSort';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {ProfileColumnContext} from '../../tables/profileColumns';
 import type {PurgeRequest} from '../modals/ConfirmModals';
+import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
 
 export type ProfilesTabProps = {
@@ -45,6 +47,9 @@ export type ProfilesTabProps = {
   // Both delete paths funnel through the shared confirmation dialog, which the
   // app shell owns because the profile editor can raise it too.
   onRequestDelete: (profileIds: string[], label: string, onDeleted?: () => void) => void;
+  // Raises the share sheet, hosted by App for the same reason the delete
+  // confirmation is: four tabs open the one dialog.
+  onShare: (request: ShareRequest) => void;
   onShowIntro: () => void;
 };
 
@@ -58,6 +63,7 @@ export function ProfilesTab({
   fillTag,
   onFillTagDone,
   onRequestDelete,
+  onShare,
   onShowIntro,
 }: ProfilesTabProps) {
   const {
@@ -68,8 +74,13 @@ export function ProfilesTab({
   const {run, isPending} = useAsyncAction();
   const selection = useSelection<ArgusProfile>();
 
+  const org = useOrg();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  // "Only what I'm on the hook for." A toggle rather than another dropdown
+  // entry: it is a different question from status or tag, and stacking it into
+  // one of those would hide it.
+  const [mineOnly, setMineOnly] = useState(false);
   // Held as a tagKey, not the tag as typed, so "Instagram" and "instagram" are
   // one entry in the dropdown and one filter rather than two.
   const [tagFilter, setTagFilter] = useState('');
@@ -80,27 +91,51 @@ export function ProfilesTab({
   // Empty Trash -- one dialog, three ways in.
   const [purge, setPurge] = useState<PurgeRequest | null>(null);
 
-  // What each column sorts BY, which is not always what its cell renders:
-  // Platform is the fingerprint's OS behind a brand mark, Folder is a name
-  // resolved from an id, Proxy is the host:port behind "Direct". A profile with
-  // no platform, no folder or no proxy returns undefined and sinks to the
-  // bottom in both directions -- see useTableSort.
-  const sorting = useTableSort<ArgusProfile>([
-    {key: 'name', value: (profile) => profile.name},
-    {key: 'platform', value: (profile) => profile.fingerprint?.os},
-    {key: 'status', value: (profile) => profile.status || 'Ready'},
-    {key: 'created', value: (profile) => profile.created_at, firstDirection: 'desc'},
-    {key: 'folder', value: (profile) => profiles.folderFor(profile)?.name},
-    {key: 'proxy', value: (profile) => {
-      const assigned = profiles.proxyFor(profile);
-      return assigned ? `${assigned.host}:${assigned.port}` : undefined;
-    }},
-  ], {onSortChange: () => setPage(0)});
+  // Team-only -- on a one-person workspace every row answers "you". It gates
+  // the "Assigned to me" filter chip; the Assigned *column* is gated by the
+  // same flag inside the registry, which is where teamOnly lives now.
+  const showAssignee = state.members.length > 1;
+
+  // What the cells need beyond the profile itself. Rebuilt each render on
+  // purpose: every field on it is already state the tab re-renders for.
+  const columnContext: ProfileColumnContext = {
+    state,
+    proxyFor: profiles.proxyFor,
+    folderFor: profiles.folderFor,
+    checkingProxyIds,
+    statusOptions,
+    onStatus: (profile, status) => void profiles.update(profile, {status}),
+  };
+  const {columns, isVisible, setVisible, reset} =
+    useTableColumns('profiles', PROFILE_COLUMNS, {isTeam: showAssignee});
+
+  // Every column in the registry, not just the visible ones: the sort key is
+  // held in the hook's own state, so hiding the column a table is sorted by
+  // would otherwise leave a key nothing answers to.
+  const sorting = useTableSort<ArgusProfile>(
+      sortColumnsFrom(PROFILE_COLUMNS, columnContext),
+      {onSortChange: () => setPage(0)});
+
+  // Two more than the columns: the selection box and the row actions, neither
+  // of which is configurable. This used to be a hand-maintained integer that
+  // had to be edited in step with the header, the row and the Assigned flag.
+  const columnCount = columns.length + 2;
+
+  // Hiding the column you were sorted by returns the table to database order,
+  // which is honest -- the alternative is a header that claims a sort nothing
+  // is performing.
+  function toggleColumn(columnId: string, visible: boolean) {
+    if (!visible && sorting.sortKey === columnId) {
+      sorting.clear();
+    }
+    setVisible(columnId, visible);
+  }
 
   const inTrash = folderId === TRASH_FOLDER_ID;
-  const filtered = Boolean(search.trim() || statusFilter || tagFilter);
+  const filtered = Boolean(search.trim() || statusFilter || tagFilter || mineOnly);
   const visible = sorting.sort(
-      visibleProfiles(state.profiles, {folderId, statusFilter, tagFilter, search}));
+      visibleProfiles(state.profiles, {folderId, statusFilter, tagFilter, search})
+          .filter((profile) => !mineOnly || profile.assigned_to === org.userId));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
   // The real folder the view is pointed at, if any: "" is All profiles and
@@ -268,21 +303,21 @@ export function ProfilesTab({
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search profiles by name or tag"
         />
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="">All statuses</option>
-          {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
-        </select>
+        <StatusFilter value={statusFilter} options={statusOptions} onChange={setStatusFilter} />
         {/* Only tags that are actually on a profile: a dropdown listing all
           * twenty brands when the workspace uses two of them is a list of
           * eighteen ways to empty the table. */}
-        <select value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}>
-          <option value="">All tags</option>
-          {tagOptions.map((option) => (
-            <option key={tagKey(option.tag)} value={tagKey(option.tag)}>
-              {tagLabel(option.tag)} ({option.count})
-            </option>
-          ))}
-        </select>
+        <TagFilter value={tagFilter} options={tagOptions} onChange={setTagFilter} />
+        {/* Only offered on a team. On a one-person workspace every row is
+          * yours, so this would be a control that never changes anything. */}
+        {showAssignee && (
+          <button
+            aria-pressed={mineOnly}
+            className={mineOnly ? 'choice-chip active' : 'choice-chip'}
+            onClick={() => setMineOnly((value) => !value)}
+            type="button"
+          >Assigned to me</button>
+        )}
         {/* In the toolbar rather than the selection bar, because the whole point
           * is that it needs no selection: emptying Trash after a failed import
           * meant ticking every row across every page first. */}
@@ -291,6 +326,15 @@ export function ProfilesTab({
             <Trash2 size={16} /> Empty Trash ({trashCount})
           </button>
         )}
+        {/* Last, and pushed to the far end by its own margin: everything to its
+          * left narrows the rows, this one decides what a row shows. */}
+        <ColumnsButton
+          registry={PROFILE_COLUMNS}
+          context={{isTeam: showAssignee}}
+          isVisible={isVisible}
+          onToggle={toggleColumn}
+          onReset={reset}
+        />
       </section>
 
       {/* The folder navigation, in full: All profiles, the folders themselves,
@@ -304,7 +348,7 @@ export function ProfilesTab({
           onClick={() => onFolderId('')}
           type="button"
         >
-          <span className="folder-glyph"><UsersRound size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><UsersRound size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">All profiles</span>
           <span className="folder-card-count">{allCount}</span>
         </button>
@@ -335,7 +379,7 @@ export function ProfilesTab({
                   title={`Edit ${folder.name}`}
                   type="button"
                 >
-                  <Pencil size={13} />
+                  <Pencil size={12} />
                 </button>
                 <button
                   aria-label={`Delete ${folder.name}`}
@@ -344,7 +388,7 @@ export function ProfilesTab({
                   title={`Delete ${folder.name}`}
                   type="button"
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={12} />
                 </button>
               </span>
             </div>
@@ -357,13 +401,13 @@ export function ProfilesTab({
           onClick={() => onFolderId(TRASH_FOLDER_ID)}
           type="button"
         >
-          <span className="folder-glyph"><Trash2 size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">Trash</span>
           <span className="folder-card-count">{trashCount}</span>
         </button>
 
         <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
-          <span className="folder-glyph"><FolderPlus size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">New folder</span>
         </button>
       </section>
@@ -383,13 +427,11 @@ export function ProfilesTab({
               </>
             ) : (
               <>
-                <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
-                  <option value="" disabled>Assign to folder…</option>
-                  <option value="">All profiles</option>
-                  {state.folders.map((folder) => (
-                    <option key={folder.id} value={folder.id}>{folder.name}</option>
-                  ))}
-                </select>
+                <FolderSelect
+                  folders={state.folders}
+                  noFolderLabel="All profiles"
+                  onPick={(id) => void moveSelectionToFolder(id)}
+                />
                 <button className="ghost" onClick={checkSelectionProxies}>
                   <ShieldCheck size={16} /> Check proxies
                 </button>
@@ -407,6 +449,12 @@ export function ProfilesTab({
                   onClick={() => void profiles.exportToCsv(selection.selectedFrom(state.profiles))}
                 >
                   <Download size={16} /> Export selected
+                </button>
+                <button
+                  className="ghost"
+                  onClick={() => onShare({kind: 'profile', ids: [...selection.ids]})}
+                >
+                  <Share2 size={16} /> Share…
                 </button>
                 <button
                   className="danger ghost"
@@ -437,30 +485,17 @@ export function ProfilesTab({
                   />
                 )}
               </th>
-              <SortableTh label="Name" {...sorting.thProps('name')} />
-              <SortableTh label="Platform" {...sorting.thProps('platform')} />
-              <SortableTh label="Status" {...sorting.thProps('status')} />
-              {/* Only once there is somebody to tell apart. On a one-person
-                * workspace every row would answer "you", which is a column of
-                * noise -- the same judgement that hides the org switcher until
-                * you belong to more than one org. */}
-              {/* "Date added", not "Created": the same created_at, named for
-                * what the reader is actually scanning this column for -- the day
-                * the profile joined this workspace. The sort key stays `created`
-                * because it names the field, not the header. */}
-              <SortableTh label="Date added" {...sorting.thProps('created')} />
-              <SortableTh label="Folder" {...sorting.thProps('folder')} />
-              <SortableTh label="Proxy" {...sorting.thProps('proxy')} />
-              {/* Tags is a set, not a value -- there is no order to sort a row
-                * of chips by that means anything to the person reading it. */}
-              <th>Tags</th>
+              {/* Which columns these are, in what order, and what each sorts
+                * by all live in tables/profileColumns.tsx. */}
+              <ColumnHeaders columns={columns} sorting={sorting} />
               <th />
             </tr>
           </thead>
           <tbody>
             {items.map((profile) => {
+              // Still read here, by the row's check-proxy button. The Proxy and
+              // Proxy check cells look it up themselves, through the context.
               const proxy = profiles.proxyFor(profile);
-              const folder = profiles.folderFor(profile);
               const rowClass = [
                 profile.id === selectedProfileId ? 'selected' : '',
                 selection.has(profile.id) ? 'row-checked' : '',
@@ -474,129 +509,109 @@ export function ProfilesTab({
                       onChange={() => selection.toggle(profile.id)}
                     />
                   </td>
-                  <td className="name-cell">
-                    <ProfileAvatar profile={profile} />
-                    {profile.name}
-                  </td>
-                  <td className="platform-cell">
-                    <PlatformIcon os={profile.fingerprint?.os} />
-                  </td>
-                  {/* stopPropagation because the row itself is a selection
-                    * target -- picking a status should not also select the
-                    * profile underneath the picker. */}
-                  <td onClick={(event) => event.stopPropagation()}>
-                    <StatusPicker
-                      status={profile.status || 'Ready'}
-                      options={statusOptions}
-                      onChange={(status) => void profiles.update(profile, {status})}
-                    />
-                  </td>
-                  <td>{formatDateShort(profile.created_at)}</td>
-                  <td>
-                    {profile.deleted_at ?
-                      `${daysUntilPurge(profile.deleted_at)}d left in Trash` :
-                      <FolderLabel folder={folder} />}
-                  </td>
-                  {/* The connection and its health together. The cell used to be
-                    * host:port alone, so the one thing you actually want from
-                    * this column -- does this profile's proxy work -- meant
-                    * opening the Proxies tab and finding the row by hand. */}
-                  <td className="profile-proxy-cell">
-                    {proxy ? (
-                      <>
-                        <span className="profile-proxy-host">{proxy.host}:{proxy.port}</span>
-                        <ProxyCheckCell
-                          state={checkingProxyIds.has(proxy.id) ?
-                            {status: 'checking'} :
-                            storedCheckState(proxy)}
-                          age={proxy.check_error ? undefined : proxy.checked_at}
-                        />
-                      </>
-                    ) : 'Direct'}
-                  </td>
-                  <td><TagCell tags={profile.tags} /></td>
-                  <td>
-                    {profile.deleted_at ? (
-                      <>
-                        <button className="ghost" onClick={(event) => {
-                          event.stopPropagation();
-                          void restoreOne(profile);
-                        }}>Restore</button>
-                        <button
-                          className="icon-button danger-icon"
-                          aria-label={`Permanently delete ${profile.name}`}
-                          onClick={(event) => {
+                  <ColumnCells columns={columns} context={columnContext} row={profile} />
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      {profile.deleted_at ? (
+                        <>
+                          <button className="ghost" onClick={(event) => {
                             event.stopPropagation();
-                            purgeOne(profile);
-                          }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <BusyButton
-                          className="launch"
-                          busy={isPending(`launch-${profile.id}`)}
-                          icon={<Play size={16} />}
-                          onClick={() => void run(`launch-${profile.id}`, () => profiles.launch(profile))}
-                        >
-                          Launch
-                        </BusyButton>
-                        {/* Only for a profile that has a proxy: a direct one has
-                          * nothing to check, and a disabled button there would
-                          * suggest the check was unavailable rather than
-                          * inapplicable. */}
-                        {proxy && (
+                            void restoreOne(profile);
+                          }}>Restore</button>
                           <button
-                            aria-label={`Check proxy for ${profile.name}`}
-                            className="ghost icon-button row-action"
-                            disabled={checkingProxyIds.has(proxy.id)}
+                            className="icon-button danger-icon"
+                            aria-label={`Permanently delete ${profile.name}`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void proxies.checkOnce(proxy);
+                              purgeOne(profile);
                             }}
-                            title={`Check ${proxy.host}:${proxy.port} now`}
                           >
-                            <ShieldCheck size={16} />
+                            <Trash2 size={16} />
                           </button>
-                        )}
-                        {/* Bordered rather than bare: beside a filled Launch
-                          * button, a naked glyph read as decoration on the
-                          * row instead of as something to press. */}
-                        <button
-                          aria-label={`Edit ${profile.name}`}
-                          className="ghost icon-button row-action"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onEditProfile(profile);
-                          }}
-                          title={`Edit ${profile.name}`}
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          aria-label={`Delete ${profile.name}`}
-                          className="ghost icon-button row-action row-action-danger"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onRequestDelete([profile.id], profile.name);
-                          }}
-                          title={`Delete ${profile.name}`}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </>
-                    )}
+                        </>
+                      ) : (
+                        <>
+                          <BusyButton
+                            className="launch"
+                            busy={isPending(`launch-${profile.id}`)}
+                            icon={<Play size={16} />}
+                            onClick={() => void run(`launch-${profile.id}`, () => profiles.launch(profile))}
+                          >
+                            Launch
+                          </BusyButton>
+                          {/* Only for a profile that has a proxy: a direct one has
+                            * nothing to check, and a disabled button there would
+                            * suggest the check was unavailable rather than
+                            * inapplicable. */}
+                          {proxy && (
+                            <button
+                              aria-label={`Check proxy for ${profile.name}`}
+                              className="ghost icon-button row-action"
+                              disabled={checkingProxyIds.has(proxy.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void proxies.checkOnce(proxy);
+                              }}
+                              title={`Check ${proxy.host}:${proxy.port} now`}
+                            >
+                              <ShieldCheck size={16} />
+                            </button>
+                          )}
+                          {/* Bordered rather than bare: beside a filled Launch
+                            * button, a naked glyph read as decoration on the
+                            * row instead of as something to press. */}
+                          <button
+                            aria-label={`Edit ${profile.name}`}
+                            className="ghost icon-button row-action"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onEditProfile(profile);
+                            }}
+                            title={`Edit ${profile.name}`}
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          {/* Yes, this makes five controls on one row, which is
+                            * one more than it wants. The alternative was leaving
+                            * Share reachable only by ticking a checkbox first,
+                            * and a feature you cannot see is worse than a row
+                            * that is a little busy. If a sixth ever arrives,
+                            * that is the moment for an overflow menu. */}
+                          <button
+                            aria-label={`Share ${profile.name}`}
+                            className="ghost icon-button row-action"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onShare({kind: 'profile', ids: [profile.id]});
+                            }}
+                            title="Share with another workspace"
+                          >
+                            <Share2 size={16} />
+                          </button>
+                          <button
+                            aria-label={`Delete ${profile.name}`}
+                            className="ghost icon-button row-action row-action-danger"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onRequestDelete([profile.id], profile.name);
+                            }}
+                            title={`Delete ${profile.name}`}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
             {items.length === 0 && (
               <tr className="empty-row-tr">
-                {/* Nine columns. A short colSpan leaves a stray empty cell at
-                  * the end of the row. */}
-                <td colSpan={9}>
+                {/* Counted, not written down: the number of columns is now the
+                  * user's to choose. A short colSpan leaves a stray empty cell
+                  * at the end of the row. */}
+                <td colSpan={columnCount}>
                   <EmptyState
                     icon={<SearchX size={22} />}
                     title={filtered ?
@@ -666,19 +681,6 @@ export function ProfilesTab({
       )}
     </>
   );
-
-  // Reads `state` off the closure, which is why it lives in here rather than
-  // beside visibleProfiles below.
-  function FolderLabel({folder}: {folder?: ArgusFolder | null}) {
-    if (!folder) {
-      return <>All profiles</>;
-    }
-    return (
-      <span className="folder-label">
-        <FolderGlyph color={folder.color} icon={folder.icon} size={13} small /> {folder.name}
-      </span>
-    );
-  }
 }
 
 // Trash is a folder in the picker but a flag on the row, so it filters first

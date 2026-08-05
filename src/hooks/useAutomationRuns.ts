@@ -37,6 +37,8 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
   const dirty = useRef(false);
   const orgRef = useRef(orgId);
   orgRef.current = orgId;
+  // Who is waiting for a run to end. See waitForRun below.
+  const waiters = useRef<Map<string, (run: AutomationRun) => void>>(new Map());
 
   // Mirror the ref into state on a timer rather than per event.
   useEffect(() => {
@@ -76,6 +78,14 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
       }
       pending.current[event.runId] = event.run;
       dirty.current = true;
+      // Before the database write, and outside its promise: a batch's pacing
+      // must not wait on Supabase, and an offline machine still has to start
+      // its next run.
+      const waiter = waiters.current.get(event.runId);
+      if (waiter) {
+        waiters.current.delete(event.runId);
+        waiter(event.run);
+      }
       if (org) {
         // upsert, not update: if the insert above failed (offline, signed out)
         // there is no row to update and the run would vanish.
@@ -85,6 +95,42 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
       }
     });
   }, []);
+
+  // Resolves when this run reaches a terminal state.
+  //
+  // A batch needs this because startRun resolves as soon as the run has
+  // STARTED -- runner.cjs deliberately does not await execute() -- so pacing a
+  // queue on startRun would start every profile at once and trip the runner's
+  // own MAX_CONCURRENT_RUNS of 3, which refuses with a 429 rather than
+  // queueing. Pacing on completion is what makes the cap a queue.
+  //
+  // Already-finished runs resolve immediately: the terminal event can arrive
+  // between startRun returning and the caller asking, and a promise that waits
+  // for an event already delivered never settles.
+  //
+  // `timeoutMs` is a stall guard, not a cancel -- the run keeps going and its
+  // record is still written when it does end. Without it a run whose terminal
+  // event never arrives (a killed browser, a main process that went away) would
+  // hold a queue slot forever, so a batch of five could stop after three with
+  // no error anywhere. Resolves null on expiry so the caller can tell the two
+  // apart.
+  const waitForRun = useCallback(
+      (runId: string, timeoutMs: number): Promise<AutomationRun | null> => {
+        const known = pending.current[runId];
+        if (known && known.status !== 'running') {
+          return Promise.resolve(known);
+        }
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            waiters.current.delete(runId);
+            resolve(null);
+          }, timeoutMs);
+          waiters.current.set(runId, (run) => {
+            clearTimeout(timer);
+            resolve(run);
+          });
+        });
+      }, []);
 
   // Runs that finished on disk but never reached the database.
   const flushPending = useCallback(async () => {
@@ -200,5 +246,5 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
     await native?.cancelAutomationRun?.(runId);
   }, []);
 
-  return {runs, startRun, cancelRun, flushPending};
+  return {runs, startRun, cancelRun, waitForRun, flushPending};
 }

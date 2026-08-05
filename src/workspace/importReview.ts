@@ -16,7 +16,7 @@
 // All of it is pure and synchronous, so the dialog can call it on every
 // keystroke and so it can be tested without a workspace or a browser.
 import {reviseRow} from './csvImport';
-import {isProxyAssigned} from '../lib/proxies';
+import {formatProxyLink, isProxyAssigned, parseProxyLink} from '../lib/proxies';
 import type {ImportLibrary, ImportRow, ImportRowInput} from './csvImport';
 import type {ArgusProxy} from '../types';
 
@@ -202,21 +202,46 @@ export function needsProxy(review: ReviewRow) {
   return review.row.proxyMode === 'assigned' && !review.row.proxy;
 }
 
-// The row's connection string with a login attached, in userinfo form.
+// The row's connection string with a login attached.
 //
-// Both halves are percent-encoded because provider passwords are full of the
-// characters that would otherwise re-parse as structure -- an @ splits userinfo
-// from host, a : splits user from password. parseProxyLink decodes them back, so
-// this round-trips whatever was typed.
+// The composing itself is formatProxyLink's, so this and the per-row proxy
+// popover cannot disagree about how a credential is encoded into a line.
 export function proxyTextWithCredentials(
     row: ImportRow, username: string, password: string): string | null {
   const proxy = row.proxy;
-  if (!proxy) {
-    return null;
+  return proxy ? formatProxyLink({...proxy, username, password}) : null;
+}
+
+// The one connection string the per-row proxy popover's four fields describe.
+//
+// Here rather than in the dialog because it is the whole of what that popover
+// decides, and a rule this fiddly is worth being able to test without a browser:
+//
+//   - an address that will not parse is passed through untouched, so resolveRow
+//     raises its own "Could not read a proxy from ..." and the row keeps its
+//     Unreadable badge. Returning null or a repaired guess would lose the only
+//     report the user gets;
+//   - a scheme typed into the address outranks the type selector, because it is
+//     the more specific statement of the two. With no scheme the selector wins,
+//     since a bare host:port parses as socks5 by default and that default would
+//     otherwise silently retype an HTTP proxy;
+//   - the credential fields win over anything the address carried, but an
+//     address that still holds a login is a fallback rather than something to
+//     drop. Enter commits without blurring, so someone who typed a whole vendor
+//     line into Address and hit it never gave the field a chance to split out.
+export function proxyTextFromFields(
+    address: string, type: 'http' | 'socks5', username: string, password: string): string {
+  const raw = address.trim();
+  const endpoint = parseProxyLink(raw);
+  if (!endpoint) {
+    return raw;
   }
-  const user = encodeURIComponent(username);
-  const pass = encodeURIComponent(password);
-  return `${proxy.type || 'socks5'}://${user}:${pass}@${proxy.host}:${proxy.port}`;
+  return formatProxyLink({
+    ...endpoint,
+    type: /^(https?|socks5?):(\/\/)?/i.test(raw) ? endpoint.type : type,
+    username: username.trim() || endpoint.username || '',
+    password: password || endpoint.password || '',
+  });
 }
 
 // What applying one username and password to the whole import should do.

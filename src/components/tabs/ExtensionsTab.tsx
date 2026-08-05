@@ -103,12 +103,16 @@ function InstalledView({onBrowse}: {onBrowse: () => void}) {
           standing fact about the screen rather than a message about something
           that just happened, and a bare grey paragraph above a grid of cards
           reads as a caption for the first card. */}
-      {!org.isAdmin && org.orgId && (
+      {/* Shown to everyone, not only to the people who cannot act on it. It used
+          to be a permission warning for members; as of 2026-08-10 every member
+          may change these, which makes the org-wide blast radius the thing worth
+          saying -- and worth saying to the person about to click. */}
+      {org.orgId && (
         <section className="api-note">
           <ShieldCheck size={18} />
           <span>
             The bundled extensions apply to everyone in {org.org?.name || 'this organization'},
-            so only an owner or admin can change them.
+            so turning one off turns it off for the whole team.
           </span>
         </section>
       )}
@@ -125,7 +129,6 @@ function InstalledView({onBrowse}: {onBrowse: () => void}) {
             onToggle={(next) => void library.setBuiltInExtensionEnabled(entry.key, next)}
             tagline={entry.tagline}
             tint={entry.tint}
-            toggleDisabled={!org.isAdmin}
             verified
           />
         ))}

@@ -7,44 +7,31 @@
 //
 // There is no email delivery anywhere in this product -- Supabase sends OTP
 // codes and nothing else -- so the second state says so outright instead of
-// implying the invite is already on its way. An admin who closes this without
+// implying the invite is already on its way. An owner who closes this without
 // copying the link has to revoke and re-invite, which the copy step is placed
 // to make unlikely.
+//
+// There is no role to pick. Everyone invited joins as a member, with full access
+// to the workspace's contents and settings; the owner is whoever holds the
+// account. The picker that used to be here offered 'admin', which stopped
+// existing in 2026-08-10-owner-member-roles.sql.
 import {useState} from 'react';
 import {Check, Copy, Mail} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {Field} from '../ui/Field';
 import {Modal} from '../ui/Modal';
-import type {OrgRole} from '../../types';
-
-type InvitableRole = Exclude<OrgRole, 'owner'>;
-
-const ROLES: Array<{value: InvitableRole; label: string; hint: string}> = [
-  {
-    value: 'member',
-    label: 'Member',
-    hint: 'Full access to the workspace\'s profiles, proxies, cookies and automations.',
-  },
-  {
-    value: 'admin',
-    label: 'Admin',
-    hint: 'Everything a member can do, plus inviting people, changing roles and ' +
-      'the workspace\'s settings.',
-  },
-];
 
 export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
   onClose: () => void;
   // Returns the link, or the sentence explaining why it could not be created.
   // The same Promise-returns-the-error convention the automation editor uses,
   // except this one carries a value back on success too.
-  onInvite: (email: string, role: InvitableRole) => Promise<{url: string} | {error: string}>;
-  // Shown so the admin can see the cost of what they are about to do before
+  onInvite: (email: string) => Promise<{url: string} | {error: string}>;
+  // Shown so the owner can see the cost of what they are about to do before
   // they do it. null is unlimited.
   seatsLeft: number | null;
 }) {
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<InvitableRole>('member');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [link, setLink] = useState('');
@@ -53,7 +40,7 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
   async function create() {
     setBusy(true);
     setError('');
-    const result = await onInvite(email.trim(), role);
+    const result = await onInvite(email.trim());
     setBusy(false);
     if ('error' in result) {
       setError(result.error);
@@ -80,7 +67,7 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
         className="small-modal invite-modal"
         onClose={onClose}
         title="Invite created"
-        subtitle={`${email.trim()} · joins as ${role}`}
+        subtitle={`${email.trim()} · joins as a member`}
         footer={<button onClick={onClose}>Done</button>}
       >
         <div className="invite-link-row">
@@ -136,23 +123,10 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
         />
       </Field>
 
-      {/* `group` rather than a plain Field: a <label> wrapping a radiogroup
-          fires implicit activation on the first button, so picking Admin by
-          clicking the label's text would silently select Member. */}
-      <Field label="Role" group hint={ROLES.find((item) => item.value === role)?.hint}>
-        <div className="choice-chips" role="radiogroup" aria-label="Role">
-          {ROLES.map((option) => (
-            <button
-              aria-checked={role === option.value}
-              className={role === option.value ? 'choice-chip active' : 'choice-chip'}
-              key={option.value}
-              onClick={() => setRole(option.value)}
-              role="radio"
-              type="button"
-            >{option.label}</button>
-          ))}
-        </div>
-      </Field>
+      <p className="field-hint">
+        They'll join as a member, with full access to this workspace's profiles, proxies,
+        cookies and automations. Only you can invite or remove people.
+      </p>
 
       <p className="field-hint">
         They'll need to sign in with this exact address — the link won't work for any

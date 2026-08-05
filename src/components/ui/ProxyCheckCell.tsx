@@ -9,6 +9,9 @@
 // A chip instead of text because this column is scanned, not read: the shape and
 // the colour carry the verdict, and the detail lives in the title so a table of
 // forty proxies stays a table.
+import {CircleAlert} from 'lucide-react';
+import {CopyButton} from './CopyButton';
+import {Popover} from './Popover';
 import {FlagIcon} from './icons';
 import type {ArgusProxy} from '../../types';
 
@@ -78,13 +81,37 @@ export function ProxyCheckCell({state, age, className = ''}: {
     return <span className={classes('unchecked')}>Not checked</span>;
   }
   if (state.status === 'fail') {
-    // The full error in the title, not the cell. It can be a whole sentence
-    // ("Proxy needs a username and password (407 Proxy Authentication
-    // Required)"), and a column that grows to fit it is a column that has
-    // stopped being scannable.
+    const error = state.error || 'Proxy check failed';
+    // The message is never in the cell. It can be a whole sentence ("Proxy needs
+    // a username and password (407 Proxy Authentication Required)"), and a
+    // column that grows to fit it is a column that has stopped being scannable.
+    //
+    // It used to live only in the title, which meant the one text worth pasting
+    // into a provider's support chat could be read but not taken -- a tooltip is
+    // not selectable. So the chip opens instead, and the panel is where the
+    // message and the copy live. The title stays for the hover that just wants
+    // to know.
     return (
-      <span className={classes('failed')} title={state.error || 'Proxy check failed'}>
-        Failed
+      // Stops the open click reaching a row that has its own handler. None of
+      // today's four call sites do, but this chip is dropped into table rows and
+      // that is exactly the kind of thing a later row grows.
+      <span className="proxy-check-fail" onClick={(event) => event.stopPropagation()}>
+        <Popover
+          label="Why this check failed"
+          width={300}
+          triggerClassName={classes('failed')}
+          trigger={
+            <>
+              <CircleAlert size={12} />
+              Failed
+            </>
+          }
+        >
+          <p className="proxy-fail-message" title={error}>{error}</p>
+          <div className="proxy-fail-actions">
+            <CopyButton value={error} label="Copy error" />
+          </div>
+        </Popover>
       </span>
     );
   }

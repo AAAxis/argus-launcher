@@ -35,6 +35,11 @@ export type TableSort<T> = {
   direction: SortDirection;
   sort: (list: T[]) => T[];
   toggle: (key: string) => void;
+  // Back to the order the database returned. For the case where the column a
+  // table is sorted by has just been hidden: the key would still be set, no
+  // column would answer to it, and sort() would hand back an unsorted list
+  // while the table went on believing it was sorted.
+  clear: () => void;
   // What SortableTh needs to draw and announce itself.
   thProps: (key: string) => {
     active: boolean;
@@ -125,6 +130,7 @@ export function useTableSort<T extends {id: string}>(
     direction,
     sort,
     toggle,
+    clear: () => setSortKey(''),
     thProps: (key: string) => ({
       active: key === sortKey,
       direction,

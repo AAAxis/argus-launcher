@@ -1,7 +1,26 @@
-import type {ArgusOrg, BuiltInExtensionToggles, OrgMembership, OrgRole} from '../types';
+import type {
+  ArgusOrg, BuiltInExtensionToggles, OrgMembership, OrgRole, OrgType,
+} from '../types';
 import {optionalClient, raise, requireClient} from './client';
 import {rowToOrg} from './mappers';
 import type {OrganizationRow} from './rows';
+
+// Every column of `organizations` either app reads, in one place.
+//
+// It is a constant rather than two hand-typed strings because they had drifted
+// before: listMyOrgs and getOrg named their columns separately, so a column
+// added to one and forgotten in the other produced an org that was complete in
+// the switcher and missing a field after a refresh.
+//
+// PostgREST fails the WHOLE select on an unknown column, and useCloudData loads
+// with Promise.allSettled -- so naming a column the database does not have
+// turns into "my profiles and proxies are gone" with no clue pointing here.
+// Apply the SQL before shipping a build that adds to this list.
+const ORG_COLUMNS =
+  'id,name,plan,profile_limit,seat_limit,billing_status,current_period_end,created_at,' +
+  'built_in_extensions,automation_limit,' +
+  // 2026-08-08-org-profile.sql
+  'org_type,legal_name,country,website,logo_url,onboarded_at';
 
 // Every organization the signed-in user belongs to, oldest membership first.
 //
@@ -21,8 +40,7 @@ export async function listMyOrgs(): Promise<OrgMembership[]> {
   }
   const {data, error} = await client
       .from('org_members')
-      .select('role, organizations(id,name,plan,profile_limit,seat_limit,billing_status,' +
-        'current_period_end,created_at,built_in_extensions,automation_limit)')
+      .select(`role, organizations(${ORG_COLUMNS})`)
       .eq('user_id', userId)
       .order('created_at', {ascending: true});
   raise(error, 'listMyOrgs');
@@ -62,8 +80,7 @@ export async function getOrg(orgId: string): Promise<ArgusOrg | null> {
   }
   const {data, error} = await client
       .from('organizations')
-      .select('id,name,plan,profile_limit,seat_limit,billing_status,current_period_end,' +
-        'created_at,built_in_extensions,automation_limit')
+      .select(ORG_COLUMNS)
       .eq('id', orgId)
       .maybeSingle();
   raise(error, 'getOrg');
@@ -85,10 +102,12 @@ export async function createOrg(name?: string): Promise<string> {
   return data as string;
 }
 
-// Org-wide settings. RLS restricts UPDATE on organizations to is_org_admin, and
-// 0002/0005 further narrow the column grant to (name, built_in_extensions) --
-// plan, limits and billing_status are service-role only, so a client cannot
-// grant itself a higher tier.
+// Org-wide settings. RLS restricts UPDATE on organizations to is_org_member --
+// any member may edit the workspace's own details -- and the column grant is
+// what holds the line: only (name, built_in_extensions, org_type, legal_name,
+// country, website, logo_url, onboarded_at) are grantable. plan, the limits and
+// billing_status are service-role only, so no client can grant itself a higher
+// tier whatever its role.
 export async function rename(orgId: string, name: string): Promise<void> {
   const client = requireClient();
   const {error} = await client.from('organizations').update({name}).eq('id', orgId);
@@ -113,7 +132,48 @@ export async function updateBuiltInExtensions(
       .select('id');
   raise(error, 'orgs.updateBuiltInExtensions');
   if (!data || data.length === 0) {
-    throw new Error('Only an owner or admin can change bundled extensions for this organization.');
+    throw new Error('Could not change the bundled extensions for this organization.');
+  }
+}
+
+// Who the workspace belongs to. Written by the setup prompt on first run and by
+// Settings afterwards.
+//
+// A partial: Settings edits one field at a time and the setup prompt writes
+// several at once, and a whole-object update would need every caller to hold
+// values it has no business knowing. Every key it can carry is in the column
+// grant, so a caller cannot smuggle `plan` in through the spread -- Postgres
+// refuses the statement outright if it names a column the role cannot update,
+// which is a hard failure rather than a silent one.
+//
+// The .select() serves the same purpose it does above, and one more here: it is
+// what surfaces a database that has not had 2026-08-08-org-profile.sql applied.
+// Without the grant every write is refused and, because RLS filters rather than
+// errors, the form would otherwise report success and change nothing.
+export type OrgProfilePatch = {
+  org_type?: OrgType | null;
+  legal_name?: string | null;
+  country?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  onboarded_at?: string | null;
+  // Carried here rather than through rename() so the setup prompt adopts the
+  // business name as the workspace name in the SAME statement that records it.
+  // Two writes would leave a window where the workspace is a business with no
+  // name, and a failure between them would need reconciling by hand.
+  name?: string;
+};
+
+export async function updateProfile(orgId: string, patch: OrgProfilePatch): Promise<void> {
+  const client = requireClient();
+  const {data, error} = await client
+      .from('organizations')
+      .update(patch)
+      .eq('id', orgId)
+      .select('id');
+  raise(error, 'orgs.updateProfile');
+  if (!data || data.length === 0) {
+    throw new Error('Could not save the workspace details. You may no longer be a member.');
   }
 }
 

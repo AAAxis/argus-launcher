@@ -21,6 +21,9 @@ import type {
   OrgMember,
   OrgRole,
   ProxyMode,
+  Handoff,
+  HandoffKind,
+  HandoffStatus,
   SharedBookmark,
   SharedExtension,
 } from '../types';
@@ -42,6 +45,7 @@ import type {
   OrgMemberIdentityRow,
   ProfileRow,
   ProxyRow,
+  HandoffRow,
   SharedBookmarkRow,
   SharedExtensionRow,
 } from './rows';
@@ -89,6 +93,20 @@ export function rowToOrg(row: OrganizationRow): ArgusOrg {
     // database that has not had the migration applied would otherwise hand
     // every org an unlimited automation allowance.
     automation_limit: row.automation_limit ?? 0,
+    // Passed through as-is, unlike the limit above. Null here means "not
+    // answered", which is a real state the setup prompt keys on -- collapsing it
+    // to a default would make an un-onboarded workspace look onboarded.
+    //
+    // org_type is narrowed rather than cast: the column has a CHECK constraint,
+    // but this build could be talking to a database where it does not yet, and
+    // an unrecognised value should read as unanswered rather than render as
+    // itself in a sentence that says "You work as a ___".
+    org_type: row.org_type === 'solo' || row.org_type === 'business' ? row.org_type : null,
+    legal_name: row.legal_name,
+    country: row.country,
+    website: row.website,
+    logo_url: row.logo_url,
+    onboarded_at: row.onboarded_at,
   };
 }
 
@@ -122,6 +140,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     fingerprint,
     created_at: undef(row.created_at),
     created_by: row.created_by,
+    assigned_to: row.assigned_to,
     deleted_at: row.deleted_at,
   };
 }
@@ -138,6 +157,11 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
 // that cannot be forged. On update -- `replace` sends every key of this object
 // -- omitting it is what stops a colleague's edit from rewriting authorship to
 // themselves.
+//
+// `assigned_to` is omitted on exactly the same grounds. It is owned by
+// accept_handoff and set_assignee, so an ordinary edit -- by anyone, from a
+// session that may not have seen the hand-off at all -- must not carry a stale
+// value back over it and silently unassign the row.
 //
 // `updated_at` is set here because no trigger maintains it: 0001/0005 give the
 // column a default but nothing refreshes it on update.
@@ -261,6 +285,7 @@ export function rowToProxy(row: ProxyRow): ArgusProxy {
     ping_ms: undef(row.last_latency_ms),
     checked_at: undef(row.last_checked_at),
     check_error: undef(row.last_error),
+    assigned_to: row.assigned_to,
   };
 }
 
@@ -313,6 +338,7 @@ export function rowToCookie(row: CookieSetRow): ArgusCookie {
     tags: row.tags ?? [],
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
+    assigned_to: row.assigned_to,
     deleted_at: row.deleted_at,
   };
 }
@@ -441,6 +467,7 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
     close_on_finish: row.close_on_finish ?? false,
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
+    assigned_to: row.assigned_to,
   };
 }
 
@@ -542,15 +569,19 @@ export function runToRow(orgId: string, run: AutomationRun): Insert<AutomationRu
 
 // ---- team ---------------------------------------------------------------
 
-// An unknown role reads as 'member', the least privileged of the three.
+// Anything that is not 'owner' reads as 'member', the less privileged of the two.
 //
 // The column has a CHECK constraint so this should be unreachable, but the
 // direction of the fallback is the point: if a future role is added and an old
 // build reads it, showing that person as a member under-states what they can do
-// rather than handing the UI's admin controls to someone this build cannot
+// rather than handing the UI's owner controls to someone this build cannot
 // reason about. RLS decides either way; this only decides what is drawn.
+//
+// This is also what carries a database still holding 'admin' -- one that has not
+// had 2026-08-10-owner-member-roles.sql run against it -- into the two-role UI
+// without a crash: those people render, and act, as members.
 function orgRole(value: string): OrgRole {
-  return value === 'owner' || value === 'admin' ? value : 'member';
+  return value === 'owner' ? 'owner' : 'member';
 }
 
 export function rowToMember(row: OrgMemberIdentityRow): OrgMember {
@@ -569,13 +600,45 @@ export function rowToInvite(row: OrgInviteRow): OrgInvite {
   return {
     id: row.id,
     email: row.email,
-    // Never 'owner': the table's own check refuses it, and the type says so.
-    role: row.role === 'admin' ? 'admin' : 'member',
+    // Always 'member'. The column's check constraint permits nothing else and
+    // create_org_invite refuses anything else, so reading the row's own value
+    // would only be a way to render a role that cannot be granted.
+    role: 'member',
     status: row.status === 'accepted' || row.status === 'revoked' ? row.status : 'pending',
     token: row.token,
     expires_at: row.expires_at,
     created_at: row.created_at,
     invited_by: row.invited_by,
+  };
+}
+
+// ---- handoffs ------------------------------------------------------------
+
+// Both open text columns are narrowed here, so an unknown value from a newer
+// server renders as the safe default rather than as a blank chip or an
+// undefined branch. Same reasoning as orgRole above: the table's CHECK decides
+// what is legal, this only decides what is drawn.
+function handoffKind(value: string): HandoffKind {
+  return value === 'proxy' || value === 'cookie_set' || value === 'automation' ?
+    value : 'profile';
+}
+
+function handoffStatus(value: string): HandoffStatus {
+  return value === 'accepted' || value === 'declined' || value === 'cancelled' ?
+    value : 'pending';
+}
+
+export function rowToHandoff(row: HandoffRow): Handoff {
+  return {
+    id: row.id,
+    kind: handoffKind(row.kind),
+    status: handoffStatus(row.status),
+    item_id: row.item_id,
+    item_name: row.item_name || 'Untitled',
+    from_user: row.from_user,
+    to_user: row.to_user,
+    note: row.note || '',
+    created_at: row.created_at,
   };
 }
 

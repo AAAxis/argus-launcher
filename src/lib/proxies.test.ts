@@ -1,5 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {parseProxyLink, proxyDedupeKey, proxyDedupeKeys} from './proxies';
+import {
+  formatProxyLink, parseProxyLink, proxyDedupeKey, proxyDedupeKeys, splitPastedConnection,
+} from './proxies';
 
 describe('parseProxyLink', () => {
   // The shape this app's own profile export writes. The importer used to run it
@@ -106,5 +108,90 @@ describe('proxyDedupeKeys', () => {
   it('ignores case', () => {
     expect(proxyDedupeKey('SOCKS5', 'Host.COM', 1, 'User'))
         .toBe(proxyDedupeKey('socks5', 'host.com', 1, 'user'));
+  });
+});
+
+describe('splitPastedConnection', () => {
+  it('splits a vendor line into every field', () => {
+    expect(splitPastedConnection('206.251.200.171:47450:user:pass')).toEqual({
+      type: 'socks5',
+      host: '206.251.200.171',
+      port: 47450,
+      username: 'user',
+      password: 'pass',
+      explicitType: false,
+    });
+  });
+
+  // The guard that stops a password being eaten as a connection string. Both of
+  // these parse perfectly well; only one of them was meant as a proxy.
+  it('refuses a credential-shaped value when strict', () => {
+    expect(splitPastedConnection('hunter2:1080', {strict: true})).toBeNull();
+  });
+
+  it('accepts the same value when not strict', () => {
+    expect(splitPastedConnection('hunter2:1080')?.host).toBe('hunter2');
+  });
+
+  it('accepts a scheme-prefixed line when strict, whatever the host looks like', () => {
+    expect(splitPastedConnection('socks5://hunter2:1080', {strict: true})?.port).toBe(1080);
+  });
+
+  it('accepts a dotted host when strict', () => {
+    expect(splitPastedConnection('198.51.100.10:1080', {strict: true})?.host)
+        .toBe('198.51.100.10');
+  });
+
+  // Nothing to split, and parseProxyLink would read a bare word as a hostname --
+  // which is not what a paste into Username meant.
+  it('ignores a value with no colon', () => {
+    expect(splitPastedConnection('justausername')).toBeNull();
+  });
+
+  it('ignores a value that is not a proxy at all', () => {
+    expect(splitPastedConnection('not a proxy: really')).toBeNull();
+  });
+
+  // explicitType is what stops a bare line's socks5 default overwriting a type
+  // the user already picked.
+  it('reports an explicit type for a scheme, with or without slashes', () => {
+    expect(splitPastedConnection('http://198.51.100.10:1080')?.explicitType).toBe(true);
+    expect(splitPastedConnection('socks5:198.51.100.10:1080')?.explicitType).toBe(true);
+  });
+
+  it('reports no explicit type for a bare line', () => {
+    expect(splitPastedConnection('198.51.100.10:1080:user:pass')?.explicitType).toBe(false);
+  });
+});
+
+describe('formatProxyLink', () => {
+  it('omits the userinfo when there are no credentials', () => {
+    expect(formatProxyLink({type: 'socks5', host: '198.51.100.10', port: 1080}))
+        .toBe('socks5://198.51.100.10:1080');
+  });
+
+  it('defaults an untyped proxy to socks5', () => {
+    expect(formatProxyLink({type: undefined, host: 'h', port: 1})).toBe('socks5://h:1');
+  });
+
+  // Provider passwords are full of the characters that would otherwise re-parse
+  // as structure: an @ splits userinfo from host, a : splits user from password.
+  it('round-trips a password full of URL syntax', () => {
+    const proxy = {
+      type: 'http' as const,
+      host: '198.51.100.10',
+      port: 1080,
+      username: 'user@corp',
+      password: 'p@ss:word/1',
+    };
+    expect(parseProxyLink(formatProxyLink(proxy))).toEqual(proxy);
+  });
+
+  it('round-trips a username with no password', () => {
+    expect(parseProxyLink(formatProxyLink({
+      type: 'socks5', host: 'h.example.com', port: 1080, username: 'only', password: '',
+    }))).toEqual({
+      type: 'socks5', host: 'h.example.com', port: 1080, username: 'only', password: undefined,
+    });
   });
 });

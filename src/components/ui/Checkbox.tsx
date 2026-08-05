@@ -13,7 +13,9 @@
 import {useEffect, useRef} from 'react';
 import type {ChangeEvent} from 'react';
 
-export function Checkbox({checked, onChange, label, indeterminate = false, className = ''}: {
+export function Checkbox({
+  checked, onChange, label, indeterminate = false, disabled = false, className = '',
+}: {
   checked: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   // The accessible name, for the standalone case: a table header or a cell with
@@ -29,6 +31,10 @@ export function Checkbox({checked, onChange, label, indeterminate = false, class
   // exposes this as a property and not an attribute, so React cannot set it
   // from JSX and it has to be written to the node.
   indeterminate?: boolean;
+  // A row that exists but must not be picked -- the Run dialog's profiles whose
+  // proxy failed its check. Native rather than a class, so the row cannot be
+  // ticked by keyboard or by clicking the label either.
+  disabled?: boolean;
   className?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -44,6 +50,7 @@ export function Checkbox({checked, onChange, label, indeterminate = false, class
       aria-label={label}
       checked={checked}
       className={`selector ${className}`.trim()}
+      disabled={disabled}
       onChange={onChange}
       ref={ref}
       title={label}

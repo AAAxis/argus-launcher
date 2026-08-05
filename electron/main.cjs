@@ -3258,13 +3258,14 @@ function payloadForRoute(route, body) {
       field.type === 'number' ? typeof value === 'number' && Number.isFinite(value) :
       field.type === 'boolean' ? typeof value === 'boolean' :
       field.type === 'steps' ? Array.isArray(value) :
-      field.type === 'tags' ?
+      // Two names for one shape -- see ApiFieldType in src/api/routes.ts.
+      field.type === 'tags' || field.type === 'strings' ?
         Array.isArray(value) && value.every((item) => typeof item === 'string') :
       value !== null && typeof value === 'object' && !Array.isArray(value);
     if (!okType) {
       const expected =
         field.type === 'steps' ? 'list of steps' :
-        field.type === 'tags' ? 'list of strings' :
+        field.type === 'tags' || field.type === 'strings' ? 'list of strings' :
         field.type;
       return {error: `${field.key} must be a ${expected}`};
     }

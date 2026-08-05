@@ -13,7 +13,8 @@
 // inferred from the file -- see the destination step.
 import {useEffect, useMemo, useState} from 'react';
 import {
-  ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Download, FolderPlus, Upload, Wand2,
+  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Download, FolderPlus, Globe,
+  KeyRound, Link2, Tags, TriangleAlert, Upload, UserPlus, UserRoundCog, Wand2,
 } from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {BusyButton} from '../ui/BusyButton';
@@ -26,6 +27,8 @@ import {PlatformSelect} from '../ui/PlatformSelect';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {FlagIcon} from '../ui/icons';
 import {ProxyCheckCell} from '../ui/ProxyCheckCell';
+import {AssigneeSelect} from '../ui/AssigneeSelect';
+import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useSelection} from '../../hooks/useSelection';
@@ -34,7 +37,7 @@ import {parseCsv} from '../../lib/csv';
 import {paginate} from '../../lib/paginate';
 import {mapWithConcurrency} from '../../lib/concurrency';
 import {osPresets} from '../../lib/fingerprintPresets';
-import {proxyOptionLabel, proxySearchText} from '../../lib/proxies';
+import {proxyOptionLabel, proxySearchText, splitPastedConnection} from '../../lib/proxies';
 import {importColumns, profileImportExampleCsv} from '../../data/importTemplate';
 import {
   applyFolderMapping,
@@ -46,6 +49,7 @@ import {
   proxyBadgeLabel,
   proxyBadgeTitle,
   proxyCheckTarget,
+  proxyTextFromFields,
   proxyTextWithCredentials,
   reviewRows,
   reviseReviewRow,
@@ -53,8 +57,10 @@ import {
   setDuplicateAction,
 } from '../../workspace/importReview';
 import {summarize} from '../../workspace/csvImport';
+import type {ClipboardEvent, KeyboardEvent, ReactNode} from 'react';
 import type {DuplicateAction, ReviewRow} from '../../workspace/importReview';
 import type {FolderDecision, ImportLibrary, ImportResult} from '../../workspace/csvImport';
+import type {OrgMember} from '../../types';
 import type {ProxyCheckResult} from '../../native';
 
 // How many proxy checks run at once. Each one is a curl with a 10s ceiling, so
@@ -73,8 +79,10 @@ const keyed = (rows: ReviewRow[]): Keyed[] =>
   rows.map((review) => ({...review, id: String(review.row.line)}));
 
 export function ImportProfilesModal({onClose}: {onClose: () => void}) {
-  const {data, toast, profiles, proxies, statusOptions} = useWorkspace();
+  const {data, toast, profiles, proxies, shared, statusOptions, reload} = useWorkspace();
   const {state} = data;
+  const org = useOrg();
+  const orgId = org.orgId;
   const {run, isPending} = useAsyncAction();
 
   const [step, setStep] = useState<Step>('source');
@@ -98,6 +106,7 @@ export function ImportProfilesModal({onClose}: {onClose: () => void}) {
     newName: '',
     existingId: '',
     mapping: new Map(),
+    assignTo: org.userId || '',
   });
   const selection = useSelection<Keyed>();
 
@@ -145,6 +154,10 @@ export function ImportProfilesModal({onClose}: {onClose: () => void}) {
       existingId: state.folders.find((folder) => (folder.kind || 'profile') === 'profile')?.id || '',
       mapping: new Map(preview.folders.map((request) =>
         [request.name.toLowerCase(), request.name])),
+      // Back to the importer on every new file. Carrying the previous file's
+      // choice into this one would silently hand a colleague a second import
+      // they never saw the dialog for.
+      assignTo: org.userId || '',
     });
     setStep('review');
   }
@@ -316,6 +329,21 @@ export function ImportProfilesModal({onClose}: {onClose: () => void}) {
 
   async function commit(decision: FolderDecision, mapped: ReviewRow[]) {
     const imported = await profiles.importFromCsv(rowsToImport(mapped), decision);
+    // Only when the target is somebody other than the importer: every row was
+    // stamped with auth.uid() by the column default as it was inserted, so
+    // leaving the picker alone needs no second write at all.
+    //
+    // Created rows only -- imported.createdIds excludes the profiles this run
+    // merely updated, which keep whoever already held them.
+    const createdIds = imported.createdIds || [];
+    if (destination.assignTo !== (org.userId || '') && createdIds.length && orgId) {
+      await shared.setAssignees(orgId, 'profile', createdIds, destination.assignTo || null);
+      // importFromCsv already patched the new profiles into local state, but it
+      // put them there carrying the assignee they were INSERTED with. Without
+      // this the Assigned column would show the importer until the next window
+      // focus, contradicting the choice just made in this dialog.
+      reload();
+    }
     setResult(imported);
     toast.setMessage(imported.partial ?
       `Imported ${imported.created} new, updated ${imported.updated} — the write stopped partway` :
@@ -530,6 +558,7 @@ export function ImportProfilesModal({onClose}: {onClose: () => void}) {
           rows={rows}
           library={library}
           folders={state.folders}
+          members={state.members}
           destination={destination}
           onChange={(patch) => setDestination((current) => ({...current, ...patch}))}
         />
@@ -970,7 +999,7 @@ function ProxyCell({review, library, onPatch}: {
   return (
     <Popover
       label="Change proxy"
-      width={340}
+      width={360}
       panelClassName="import-proxy-pop"
       triggerClassName="import-proxy-trigger"
       trigger={
@@ -999,37 +1028,146 @@ function ProxyCell({review, library, onPatch}: {
   );
 }
 
+// The per-row proxy editor, as four fields rather than one connection string.
+//
+// A file exported from another tool names the host and port of every proxy and
+// none of their logins -- so the fields that are empty here are the whole point
+// of the screen, and a single text box hid them behind a syntax the user had to
+// know. The bulk banner above the table answers "all of these share one login";
+// this answers the row that does not.
+//
+// Pasting a full vendor line into any of the four still splits it across all of
+// them, through the same splitPastedConnection the proxy editor uses.
 function ProxyPicker({review, library, onPatch}: {
   review: ReviewRow;
   library: ImportLibrary;
   onPatch: (patch: Parameters<typeof reviseReviewRow>[1]) => void;
 }) {
   const [search, setSearch] = useState('');
-  const [text, setText] = useState(review.row.input.proxyText);
+  // Seeded from the *resolved* proxy, not the raw text: resolveRow has already
+  // filled row.proxy from the picked proxy id when there is one, so a row that
+  // borrowed a saved login opens showing that login. Falling back to the raw
+  // text matters only when the line could not be read at all -- there is no
+  // parsed proxy then, and what the file actually said is what the user needs to
+  // see in order to fix it.
+  const parsed = review.row.proxy;
+  const [type, setType] = useState<'http' | 'socks5'>(parsed?.type || 'socks5');
+  const [address, setAddress] = useState(
+      parsed ? `${parsed.host}:${parsed.port}` : review.row.input.proxyText);
+  const [username, setUsername] = useState(parsed?.username || '');
+  const [password, setPassword] = useState(parsed?.password || '');
+
   const needle = search.trim().toLowerCase();
   const matches = library.proxies
       .filter((proxy) => !needle || proxySearchText(proxy).includes(needle))
       .slice(0, 40);
 
+  // True when this row is pointing at a proxy that is already saved, which is
+  // what makes the username warning below worth showing.
+  const matched = Boolean(review.row.matchedProxyId);
+
+  function absorb(raw: string, strict: boolean) {
+    const split = splitPastedConnection(raw, {strict});
+    if (!split) {
+      return false;
+    }
+    // Only when the pasted line named a protocol. A bare host:port:user:pass
+    // parses as socks5 by default, and letting that default overwrite the
+    // selector would silently retype an HTTP proxy.
+    if (split.explicitType && split.type) {
+      setType(split.type);
+    }
+    setAddress(`${split.host}:${split.port}`);
+    // Only a line that actually carried a login touches the credential fields.
+    // Address re-splits on every blur, and "host:port" always has the colon that
+    // makes it parse -- so overwriting unconditionally meant clicking back into
+    // Address to fix a typo silently emptied the username and password that had
+    // just been typed beside it. Clearing them is what the fields themselves are
+    // for.
+    if (split.username || split.password) {
+      setUsername(split.username || '');
+      setPassword(split.password || '');
+    }
+    return true;
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLInputElement>, strict: boolean) {
+    if (absorb(event.clipboardData.getData('text'), strict)) {
+      event.preventDefault();
+    }
+  }
+
+  function apply() {
+    onPatch({
+      proxyText: proxyTextFromFields(address, type, username, password),
+      proxyId: '',
+      proxyMode: 'assigned',
+    });
+  }
+
+  // Enter commits from any of the four fields, not just the first one.
+  function onFieldKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      apply();
+    }
+  }
+
   return (
     <div className="import-proxy-picker">
-      <Field label="Connection string" hint="http:// or socks5://host:port[:user:pass]">
+      <div className="import-proxy-endpoint">
+        <Field label="Type" compact>
+          <select
+            value={type}
+            onChange={(event) => setType(event.target.value as 'http' | 'socks5')}
+          >
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP</option>
+          </select>
+        </Field>
+        <Field label="Address" compact hint="host:port — or paste the whole line">
+          <input
+            value={address}
+            placeholder="198.51.100.10:1080"
+            onChange={(event) => setAddress(event.target.value)}
+            // Not strict: whatever is pasted here was meant to be an address.
+            // Split on paste rather than on every keystroke, or the fields would
+            // be rewritten while the user was still typing the port.
+            onPaste={(event) => onPaste(event, false)}
+            // Catches the paths onPaste misses -- drag-and-drop, and a line
+            // typed out by hand -- once the user has moved on from the field.
+            onBlur={(event) => absorb(event.target.value, false)}
+            onKeyDown={onFieldKeyDown}
+          />
+        </Field>
+      </div>
+      <Field
+        label="Username"
+        hint={matched ?
+          'A different username is saved as a separate proxy for this host.' :
+          undefined}
+      >
         <input
-          value={text}
-          placeholder="socks5://198.51.100.10:1080:user:pass"
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              onPatch({proxyText: text, proxyId: '', proxyMode: 'assigned'});
-            }
-          }}
+          autoComplete="off"
+          value={username}
+          placeholder="Optional"
+          onChange={(event) => setUsername(event.target.value)}
+          onPaste={(event) => onPaste(event, true)}
+          onKeyDown={onFieldKeyDown}
         />
       </Field>
-      <button
-        className="ghost"
-        onClick={() => onPatch({proxyText: text, proxyId: '', proxyMode: 'assigned'})}
-      >
-        Use this string
+      <Field label="Password">
+        <input
+          autoComplete="off"
+          type="password"
+          value={password}
+          placeholder="Optional"
+          onChange={(event) => setPassword(event.target.value)}
+          onPaste={(event) => onPaste(event, true)}
+          onKeyDown={onFieldKeyDown}
+        />
+      </Field>
+      <button className="ghost" onClick={apply}>
+        Use this proxy
       </button>
 
       <div className="import-proxy-modes">
@@ -1071,6 +1209,15 @@ type Destination = {
   newName: string;
   existingId: string;
   mapping: Map<string, string>;
+  // Who the created profiles end up assigned to: an auth user id, or '' for
+  // nobody. Defaults to the importer, which is also what the profiles.assigned_to
+  // column default does on its own -- this only has to act when it is changed.
+  //
+  // Deliberately NOT read from the file. There is no assignee column in
+  // importColumns and this does not add one: a CSV would carry a name or an
+  // email rather than an auth id, and a file from another tool naming people
+  // who are not on this team would import a column of "Former member".
+  assignTo: string;
 };
 
 // The chosen destination as the engine wants it, plus the per-value renaming
@@ -1101,16 +1248,21 @@ function destinationReady(destination: Destination) {
   return true;
 }
 
-function DestinationStep({rows, library, folders, destination, onChange}: {
+function DestinationStep({rows, library, folders, members, destination, onChange}: {
   rows: ReviewRow[];
   library: ImportLibrary;
   folders: ImportLibrary['folders'];
+  members: OrgMember[];
   destination: Destination;
   onChange: (patch: Partial<Destination>) => void;
 }) {
-  const requests = useMemo(
-      () => summarize(rowsToImport(rows), library).folders, [rows, library]);
-  const {kind, newName, existingId, mapping} = destination;
+  // One summarize for both questions this step asks: which folders the file
+  // wants, and how many rows are new. `createCount` is what the assignee field
+  // is about -- it only touches created rows, so on a re-import of an export it
+  // can be zero while `count` below is two hundred.
+  const {folders: requests, createCount} = useMemo(
+      () => summarize(rowsToImport(rows), library), [rows, library]);
+  const {kind, newName, existingId, mapping, assignTo} = destination;
   const setKind = (next: DestinationKind) => onChange({kind: next});
 
   const count = importableCount(rows);
@@ -1215,6 +1367,26 @@ function DestinationStep({rows, library, folders, destination, onChange}: {
           </p>
         </div>
       )}
+
+      {/* Only on a team, matching the profile editor and the Assigned column.
+          Placed after the folder decision because it is the smaller of the two
+          questions and has a working default -- the folder does not. */}
+      {members.length > 1 && (
+        <Field
+          label="Assign these profiles to"
+          wide
+          hint={createCount === 0 ?
+            'Nothing new to assign — every row in this file updates a profile that already exists, and those keep whoever is looking after them.' :
+            `Applies to the ${createCount} new ${createCount === 1 ? 'profile' : 'profiles'}. Rows that update an existing profile keep their current assignee. This is a label, not a lock — everyone on the team can open them either way.`}
+        >
+          <AssigneeSelect
+            members={members}
+            onChange={(next) => onChange({assignTo: next})}
+            unassignedLabel="Nobody"
+            value={assignTo}
+          />
+        </Field>
+      )}
     </>
   );
 }
@@ -1240,42 +1412,82 @@ function DestinationCard({checked, onSelect, title, body, disabled}: {
   );
 }
 
+// A stat gets its glyph here rather than at the call site so the list below
+// stays one row per number. Icons repeat across the two proxy stats and the two
+// profile stats on purpose: the pairs are the same noun counted twice, and
+// giving each its own mark made five tiles read as five unrelated things.
+type ImportStat = {label: string; value: number; icon: ReactNode};
+
 function ImportSummary({result}: {result: ImportResult}) {
-  const counts: Array<[string, number]> = [
-    ['Profiles created', result.created],
-    ['Profiles updated', result.updated],
-    ['Proxies created', result.proxiesCreated],
-    ['Proxies reused', result.proxiesReused],
-    ['Folders created', result.foldersCreated],
+  const stats: ImportStat[] = [
+    {label: 'Profiles created', value: result.created, icon: <UserPlus size={15} />},
+    {label: 'Profiles updated', value: result.updated, icon: <UserRoundCog size={15} />},
+    {label: 'Proxies created', value: result.proxiesCreated, icon: <Globe size={15} />},
+    {label: 'Proxies reused', value: result.proxiesReused, icon: <Link2 size={15} />},
+    {label: 'Folders created', value: result.foldersCreated, icon: <FolderPlus size={15} />},
   ];
   if (result.proxiesUpdated) {
-    counts.push(['Proxy passwords updated', result.proxiesUpdated]);
+    stats.push({label: 'Proxy passwords updated', value: result.proxiesUpdated,
+      icon: <KeyRound size={15} />});
   }
   if (result.tagsTrimmed) {
-    counts.push(['Rows with tags trimmed', result.tagsTrimmed]);
+    stats.push({label: 'Rows with tags trimmed', value: result.tagsTrimmed,
+      icon: <Tags size={15} />});
   }
+
+  // The one line worth reading if you read nothing else. Zero-valued stats are
+  // left out of it rather than reported as "0 profiles updated", which is not
+  // news; the tiles below still carry every number.
+  const headline = [
+    result.created && `${result.created} ${result.created === 1 ? 'profile' : 'profiles'} created`,
+    result.updated && `${result.updated} updated`,
+    result.proxiesCreated &&
+      `${result.proxiesCreated} ${result.proxiesCreated === 1 ? 'proxy' : 'proxies'} added`,
+    result.foldersCreated &&
+      `${result.foldersCreated} ${result.foldersCreated === 1 ? 'folder' : 'folders'} created`,
+  ].filter(Boolean).join(' · ');
+
   return (
-    <div className="import-summary">
+    <div className="import-done">
+      {/* Green only when the write actually completed. A partial import is not a
+          success and must not be dressed as one -- its own banner says so
+          below, and this mark goes amber to match rather than contradicting it
+          from two inches above. */}
+      <div className={result.partial ? 'import-done-hero partial' : 'import-done-hero'}>
+        <span className="import-done-mark">
+          {result.partial ? <TriangleAlert size={20} /> : <CheckCircle2 size={20} />}
+        </span>
+        <div className="import-done-copy">
+          <strong>{result.partial ? 'Import stopped partway' : 'Import finished'}</strong>
+          {headline && <i>{headline}</i>}
+        </div>
+      </div>
+
       {result.partial && (
-        <div className="summary-item wide import-partial">
-          <span>The write stopped partway</span>
-          <div className="summary-lines">
-            <i>
-              The counts below are what this import planned, not what reached the server.
-              Reload to see what actually landed.
-            </i>
-          </div>
-        </div>
+        <p className="import-done-note">
+          The counts below are what this import planned, not what reached the server.
+          Reload to see what actually landed.
+        </p>
       )}
-      {counts.map(([label, value]) => (
-        <div className="summary-item" key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
-        </div>
-      ))}
+
+      <div className="import-stats">
+        {stats.map((stat) => (
+          // Dimmed at zero: five tiles of equal weight made "0 updated" as loud
+          // as "10 created", and the whole point of this screen is what changed.
+          <div className={stat.value ? 'import-stat' : 'import-stat zero'} key={stat.label}>
+            <span className="import-stat-mark">{stat.icon}</span>
+            <span className="import-stat-label">{stat.label}</span>
+            <strong className="import-stat-value">{stat.value}</strong>
+          </div>
+        ))}
+      </div>
+
       {result.skipped.length > 0 && (
-        <div className="summary-item wide">
-          <span>Skipped ({result.skipped.length})</span>
+        <div className="import-skipped">
+          <span className="import-skipped-head">
+            <TriangleAlert size={14} />
+            Skipped ({result.skipped.length})
+          </span>
           <div className="summary-lines">
             {result.skipped.map((item, index) => (
               <i key={index}>{item.name}: {item.reason}</i>

@@ -121,6 +121,27 @@ Get-CimInstance Win32_Process |
     per row, and routes a row already matched to a stored proxy through
     `testConnectionAndRecord` so that result lands exactly as the sweep would write it.
     A row whose proxy is not saved yet is only tested.
+- **`assigned_to` is a label, not a permission, and it is never written by an ordinary
+  save.** Every member of an org already sees, launches and edits every profile, proxy,
+  cookie set and automation — `org_id` is the only scope on any of them, and the RLS
+  policies are `is_org_member` for select *and* update. Assigning changes who a row
+  *names*; it grants and revokes nothing. So do not add an access check keyed off it, and
+  do not describe it to a user as private.
+  The column is deliberately omitted from `profileToRow`/`profilePatchToRow`
+  (`src/db/mappers.ts`) and is owned by the `set_assignee` / `set_assignees` /
+  `accept_handoff` RPCs alone — otherwise an edit from a session that had not seen a
+  reassignment would carry its stale value back and silently unassign the row. That is
+  why `ProfileModal` keeps the picker in the draft and applies it in a *second* call
+  after `profiles.save()` succeeds, never as a field on the save.
+  Note `docs/schema-changes/2026-08-06-handoffs.sql` describes a model that no longer
+  holds: it made assigning to anybody but yourself impossible, requiring an offer the
+  recipient accepted. **`2026-08-07-assign-directly.sql` replaced that** — assignment to
+  any teammate is now direct, and `ShareModal`'s offer flow is the deliberate alternative
+  for when you want them to agree first. Read the newer file before reasoning about it.
+  New profiles claim their creator through the column's `default auth.uid()`, which is
+  why the insert path sets nothing and the CSV importer only writes assignments when the
+  import dialog's picker names somebody other than the importer — and then only for rows
+  it *created*, never rows it updated.
 - Profile folders and proxy folders share one `public.folders` table, told apart by
   `folders.kind` (`'profile'` / `'proxy'`). `useCloudData` splits the single read into
   `state.folders` and `state.proxy_folders` — that split is the only thing keeping a proxy
@@ -241,6 +262,19 @@ documented `POST /v1/proxies`, `POST /v1/profiles` and
 handed the brief burned its first turns on 404s. Add a route to the table, not
 to the allow-list, and run `scripts/verify-api-routes.mjs`.
 
+**A table's columns are a registry, and the ids are stored.** `src/tables/`
+holds one registry per configurable table (Profiles, Proxies, Cookies); the tabs
+render their headers, their cells and their empty-state colSpan from it, and
+`useTableSort` is fed the whole registry rather than the visible slice so hiding
+a column cannot strand the active sort key. What a user has hidden is stored in
+Supabase auth `user_metadata` under `argus_table_columns`, keyed by column id —
+so **never rename an id**. Renaming one silently hides that column for everyone
+who had saved a layout naming it; retire a column by dropping it from the
+registry and never reusing the id. The stored value is the user's *deviations*
+from the defaults, not the list of visible columns: a list cannot tell "I hid
+this" from "this did not exist when I saved", and it would permanently lose the
+Assigned column for anyone who configured their tables while working alone.
+
 **The automations tools are generated, and the filter is `channel || local`, not
 `mcp`.** Nine profile/proxy routes also carry an `mcp` name so the agent brief
 can list every tool from one file; filtering the generator on `mcp` alone builds
@@ -268,6 +302,36 @@ not rank for "argus browser" and the site is not indexed.
 **Do not add `--remote-allow-origins`.** It used to be `*` on every automation
 launch, which let any web page reach the CDP socket. Our clients send no
 `Origin` and Chromium accepts that.
+
+**The Run button never picks a profile.** It opens `RunAutomationModal`. It used
+to call `runTarget()` — the single attached profile, else whatever row happened
+to be highlighted on the Profiles tab — and the first sign that the guess was
+wrong was the main process refusing the spawn seconds later with "Proxy
+1.2.3.4:5678 did not respond … Fix the proxy in Argus Launcher and try again",
+a sentence about a profile the user never chose. The dialog shows each profile's
+proxy health before the commit and a profile whose proxy failed its check cannot
+be ticked. `runTarget` still exists for the editor's Check button alone, and now
+prefers `automations.lastRunProfileId()` so Check tests against the page the
+last run actually used — the two agreeing is the reason that file exists.
+
+**`RUN_CONCURRENCY` (`src/automations/limit.ts`) must equal
+`MAX_CONCURRENT_RUNS` (`electron/automation/runner.cjs`).** The runner's cap
+does not queue — over it, `start()` throws `Too many runs at once (3 is the
+limit)` with `status = 429`. `runMany` is the renderer-side queue that stops
+that being reached, and it paces on **completion**, not on `startRun` returning:
+`execute()` is deliberately not awaited over there, so a queue built on the
+start alone launches every profile at once and trips the cap. `waitForRun` in
+`useAutomationRuns` is what turns the cap into a queue. Nothing compiles
+`electron/` and no IPC reports the runner's cap, so the pair is hand-kept.
+
+**The automation run path goes through `proxies.resolveForLaunch`, like every
+other launch.** It used to read `state.proxies` directly and hand the result to
+`buildLaunchPayload`, which is why a dead proxy surfaced as a dead run rather
+than as a blocked launch with a reason. That function was `resolveLaunchProxy`
+in `useProfileActions`; it moved to `useProxyActions` so the Launch button and
+the runner share one gate. It resolves through `matchedProxyForProfile`, not a
+find on `proxy_id` — as does `automations/runReadiness.ts`, or the dialog would
+offer a profile the gate then refuses.
 
 **The debugging port is opened when a launch has start-page tiles, not on every
 launch.** `useProfileActions.launch` reserves one when the profile has an

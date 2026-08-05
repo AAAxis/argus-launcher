@@ -329,6 +329,40 @@
           "description": "Seed variables the run starts with, readable as {{vars.<name>}}."
         }
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tables/columns",
+      "group": "Tables",
+      "label": "What each table shows, and every column it could show",
+      "scope": "any",
+      "channel": "argus:table-columns-request",
+      "mcp": "argus_table_columns",
+      "mcpDescription": "The columns the Profiles, Proxies and Cookies tables are showing, and every column they could show. Call this before argus_set_table_columns rather than guessing ids: the reply gives each column's id, label, one-line description, whether it is on, and whether it can be turned off.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tables/columns",
+      "group": "Tables",
+      "label": "Show or hide columns on a table",
+      "scope": "any",
+      "channel": "argus:set-table-columns-request",
+      "mcp": "argus_set_table_columns",
+      "mcpDescription": "Show or hide columns on the Profiles, Proxies or Cookies table. Send `columns` for the exact set, or `show`/`hide` to change a few without restating the rest. Columns always render in the app's own order, so the order you send is ignored. The layout belongs to the signed-in user and follows them to every machine.",
+      "body": "{ \"table\": \"profiles\", \"show\": [\"email\", \"fpTimezone\"], \"hide\": [\"tags\"] }",
+      "fields": [
+        {"key": "table", "type": "string", "required": true,
+         "description": "profiles, proxies or cookies."},
+        {"key": "columns", "type": "strings",
+         "description": "The exact set of visible columns, by id. Locked columns are added back."},
+        {"key": "show", "type": "strings",
+         "description": "Columns to turn on, leaving every other column as it is."},
+        {"key": "hide", "type": "strings",
+         "description": "Columns to turn off. Refusing a locked column is a 400."},
+        {"key": "reset", "type": "boolean",
+         "description": "Put the table back to its default columns. Applied before show and hide."}
+      ]
     }
   ]
 }

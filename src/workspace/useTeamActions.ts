@@ -1,8 +1,8 @@
-// Membership mutations: invite, revoke, change a role, remove someone, leave.
+// Membership mutations: invite, revoke, remove someone, leave.
 //
 // Invites live here rather than in CloudState because every policy on
-// org_invites is is_org_admin -- including select -- so a plain member reading
-// the table gets an empty list rather than an error. A silent nothing in the
+// org_invites is is_org_owner -- including select -- so a member reading the
+// table gets an empty list rather than an error. A silent nothing in the
 // shared workspace cache is exactly the "everything vanished" failure
 // useCloudData's own comments were written about; keeping the list owned by the
 // screen that can read it means a member never sees a half-truth.
@@ -14,7 +14,7 @@ import * as db from '../db';
 import {describeDbError} from '../db/errors';
 import {SITE_URL} from '../lib/auth';
 import type {WorkspaceCore} from './core';
-import type {OrgInvite, OrgRole} from '../types';
+import type {OrgInvite} from '../types';
 
 export type TeamActions = ReturnType<typeof useTeamActions>;
 
@@ -32,7 +32,7 @@ export function useTeamActions({data, toast}: WorkspaceCore) {
   const [invites, setInvites] = useState<OrgInvite[]>([]);
   const [invitesLoaded, setInvitesLoaded] = useState(false);
 
-  // Called by the Team tab when an admin opens it. A member never calls it --
+  // Called by the Team tab when the owner opens it. A member never calls it --
   // the tab does not render the pending view for them -- so a failure here is
   // always worth reporting rather than swallowing.
   const loadInvites = useCallback(async (orgId: string) => {
@@ -71,10 +71,10 @@ export function useTeamActions({data, toast}: WorkspaceCore) {
   // inline next to the field that caused it rather than raising a toast, so
   // both halves of the result are its business.
   async function createInvite(
-      orgId: string, email: string, role: Exclude<OrgRole, 'owner'>,
+      orgId: string, email: string,
   ): Promise<{url: string} | {error: string}> {
     try {
-      const created = await db.team.createInvite(orgId, email, role);
+      const created = await db.team.createInvite(orgId, email);
       await loadInvites(orgId);
       return {url: inviteUrl(created.token)};
     } catch (error) {
@@ -94,23 +94,16 @@ export function useTeamActions({data, toast}: WorkspaceCore) {
     }
   }
 
-  async function setRole(
-      orgId: string, userId: string, role: Exclude<OrgRole, 'owner'>): Promise<void> {
-    if (await withDb(() => db.team.setMemberRole(orgId, userId, role))) {
-      await reloadMembers(orgId);
-    }
-  }
-
   async function remove(orgId: string, userId: string): Promise<void> {
     if (await withDb(() => db.team.removeMember(orgId, userId))) {
       await reloadMembers(orgId);
     }
   }
 
-  // Returns the failure text rather than toasting it: leaving is refused for a
-  // plain member by org_members_delete, and that refusal is an instruction
-  // ("ask an owner or admin to remove you") that belongs in the dialog the user
-  // is looking at, not in a corner toast they may not connect to the click.
+  // Returns the failure text rather than toasting it. Leaving now succeeds for
+  // any member, so the remaining refusal is the owner's -- and "the owner cannot
+  // leave their own workspace" is an explanation that belongs in the dialog the
+  // user is looking at, not in a corner toast they may not connect to the click.
   async function leave(orgId: string, userId: string): Promise<string | null> {
     return withDbError(() => db.team.leaveOrg(orgId, userId));
   }
@@ -121,7 +114,6 @@ export function useTeamActions({data, toast}: WorkspaceCore) {
     loadInvites,
     createInvite,
     revokeInvite,
-    setRole,
     remove,
     leave,
   };

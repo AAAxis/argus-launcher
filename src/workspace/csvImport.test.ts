@@ -239,6 +239,61 @@ describe('updating by profile_id', () => {
   });
 });
 
+// Who a profile is assigned to is set in the app, by a person looking at a
+// roster -- never by a file. A CSV can only carry a name or an email, and one
+// from another tool names people who are not on this team at all, so honouring
+// such a column would import a screenful of "Former member".
+//
+// The import dialog's own "Assign these profiles to" picker is the supported
+// way to do this, and it applies to created rows only.
+describe('an assignee column in the file', () => {
+  const teammate = '11111111-1111-1111-1111-111111111111';
+
+  it('is ignored under every name it might arrive under', () => {
+    const {touchedProfiles} = commit(
+        'name,proxy_mode,assigned_to,assignee,owner,assigned\n' +
+        `A,direct,${teammate},anna@example.com,Anna,Anna`);
+    expect(touchedProfiles).toHaveLength(1);
+    expect(touchedProfiles[0].profile.assigned_to).toBeUndefined();
+  });
+
+  // The column list is the contract the Source step prints and the example CSV
+  // round-trips. Adding an assignee to it later would silently start honouring
+  // files that name people, so the absence is pinned rather than assumed.
+  it('is not one of the documented columns', () => {
+    const names = importColumns.map((column) => column.name);
+    expect(names).not.toContain('assigned_to');
+    expect(names).not.toContain('assignee');
+    expect(names).not.toContain('owner');
+  });
+
+  // An assignment must not survive an export→import round trip either: the
+  // exporting workspace's user ids mean nothing in the importing one.
+  it('is not written out by the exporter', () => {
+    const row = profileExportRow(
+        {id: 'a', name: 'A', proxy_mode: 'direct', assigned_to: teammate}, null, null);
+    expect(Object.keys(row)).not.toContain('assigned_to');
+    expect(Object.values(row)).not.toContain(teammate);
+  });
+});
+
+// createdIds, which the import dialog assigns, is derived from this flag in
+// useProfileActions.importFromCsv. A row that flipped to exists=true would be
+// an update quietly taking on the importer's chosen assignee.
+describe('which rows count as created', () => {
+  const existing: ArgusProfile = {id: 'keep-me', name: 'Old'};
+
+  it('marks new rows as inserts and matched rows as updates', () => {
+    const {touchedProfiles} = commit(
+        'name,proxy_mode,profile_id\nNew,direct,\nOld,direct,keep-me',
+        {...empty, profiles: [existing]});
+    const inserted = touchedProfiles.filter(({exists}) => !exists);
+    const updated = touchedProfiles.filter(({exists}) => exists);
+    expect(inserted.map(({profile}) => profile.name)).toEqual(['New']);
+    expect(updated.map(({profile}) => profile.id)).toEqual(['keep-me']);
+  });
+});
+
 describe('tags', () => {
   it('trims past the limit and says so without blocking', () => {
     const [row] = preview('name,proxy_name,tags\nA,1.2.3.4:1,"a, b, c, d, e, f"').rows;

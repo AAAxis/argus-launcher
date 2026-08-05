@@ -109,7 +109,7 @@ for (const route of routes.filter((item) => item.channel)) {
 pass('table-driven routes declare well-formed channels');
 
 // ── 4. Declared fields are well formed ───────────────────────────────────────
-const FIELD_TYPES = new Set(['string', 'number', 'boolean', 'object', 'steps', 'tags']);
+const FIELD_TYPES = new Set(['string', 'number', 'boolean', 'object', 'steps', 'tags', 'strings']);
 for (const route of routes) {
   for (const field of route.fields || []) {
     check(

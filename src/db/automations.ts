@@ -5,7 +5,7 @@ import type {AutomationRow} from './rows';
 
 const COLUMNS =
   'id,org_id,name,description,steps,variables,tags,pinned,timeout_ms,close_on_finish,' +
-  'created_by,created_at,updated_at';
+  'created_by,created_at,updated_at,assigned_to';
 
 export async function list(orgId: string): Promise<ArgusAutomation[]> {
   const client = optionalClient();

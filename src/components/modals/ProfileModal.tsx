@@ -1,8 +1,9 @@
 import {useState} from 'react';
 import {
   Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
-  Tag, Terminal, Trash2, UserRound, UserRoundCog, Workflow,
+  Tag, Terminal, Trash2, UserCheck, UserRound, UserRoundCog, Workflow,
 } from 'lucide-react';
+import {AssigneeSelect} from '../ui/AssigneeSelect';
 import {AvatarPicker} from '../ui/AvatarPicker';
 import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {BusyButton} from '../ui/BusyButton';
@@ -21,6 +22,7 @@ import {proxyOptionLabel, parseProxyLink} from '../../lib/proxies';
 import {MAX_PROFILE_TAGS} from '../../lib/tags';
 import {profileFromDraft, tagsFromDraft} from '../../drafts';
 import {useAsyncAction} from '../../useAsyncAction';
+import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {SummaryTarget} from './ProfileSummary';
 import type {ProfileDraft, ProxyDraft} from '../../drafts';
@@ -51,7 +53,9 @@ export function ProfileModal({
   onCreateProxy,
   onRequestDelete,
 }: ProfileModalProps) {
-  const {data, toast, profiles, statusOptions, tagOptions} = useWorkspace();
+  const {data, toast, profiles, shared, statusOptions, tagOptions, reload} = useWorkspace();
+  const org = useOrg();
+  const orgId = org.orgId;
   const state = data.state;
   const automations = state.automations;
   const {run, isPending} = useAsyncAction();
@@ -154,10 +158,28 @@ export function ProfileModal({
     // trims it either way; saying so is the difference between a rule and a
     // tag quietly going missing.
     const dropped = tagsFromDraft(draft.tags).length - (profile.tags?.length || 0);
+    // What the row holds now, read before the save: for an existing profile the
+    // stored value, for a new one the auth.uid() default the insert is about to
+    // apply. Both are "where assignment will land if we do nothing".
+    const assignedNow = draft.saved ?
+      state.profiles.find((item) => item.id === draft.id)?.assigned_to || '' :
+      org.userId || '';
     // On failure withDb has already surfaced the real error; don't overwrite it
     // with a false "saved" toast, and keep the dialog open so edits aren't lost.
     if (!await profiles.save(profile)) {
       return;
+    }
+    // A second call rather than a field on the save, because profileToRow omits
+    // assigned_to on purpose -- it is owned by set_assignee so a stale edit
+    // cannot silently unassign a row somebody else just claimed. Only when it
+    // actually changed: an unrelated rename should not rewrite the assignment,
+    // and for a new profile the column default has already done this job.
+    //
+    // After the save, never before: set_assignee is an UPDATE, and on a profile
+    // being created for the first time there is no row yet to update.
+    if (draft.assigned_to !== assignedNow && orgId) {
+      await shared.setAssignee(
+          orgId, 'profile', profile.id, draft.assigned_to || null, reload);
     }
     onClose();
     toast.setMessage(dropped > 0 ?
@@ -358,6 +380,23 @@ export function ProfileModal({
                 ))}
               </select>
             </Field>
+            {/* Only once there is somebody to assign to. A one-person workspace
+                gets a picker whose every option is "you", which is the same
+                reason the Assigned column is teamOnly. */}
+            {state.members.length > 1 && (
+              <Field
+                label="Assigned to"
+                icon={<UserCheck size={14} />}
+                hint="Who's looking after this profile. Everyone on the team can still open it — this is a label, not a lock."
+                wide
+              >
+                <AssigneeSelect
+                  members={state.members}
+                  onChange={(assigned_to) => set({assigned_to})}
+                  value={draft.assigned_to}
+                />
+              </Field>
+            )}
             {/* Above Colour, because they answer the same question -- how do I
                 find this row again in a table of forty -- and the colour plate
                 is what an empty avatar falls back to. */}

@@ -304,7 +304,8 @@ function inputSchemaFor(route) {
     properties[field.key] =
       field.type === 'steps' ?
         {type: 'array', items: {type: 'object'}, description: field.description} :
-      field.type === 'tags' ?
+      // Two names for one shape -- see ApiFieldType in src/api/routes.ts.
+      field.type === 'tags' || field.type === 'strings' ?
         {type: 'array', items: {type: 'string'}, description: field.description} :
         {type: field.type, description: field.description};
     if (field.required) {

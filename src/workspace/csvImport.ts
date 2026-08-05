@@ -153,6 +153,17 @@ export type ImportResult = {
   // True when the write stopped partway. The counts above are then what was
   // planned, not what landed.
   partial?: boolean;
+  // The ids of profiles this import CREATED, as opposed to updated.
+  //
+  // Filled in by importFromCsv rather than by planCsvImport, which is why it is
+  // optional: the planner is pure and cannot know which inserts reached the
+  // database. A partial write must not hand back ids it never wrote, because
+  // the caller's next act is to assign them to somebody.
+  //
+  // Created only. Rows the import updated already belong to whoever holds them,
+  // and re-pointing a colleague's profile because you re-imported an export is
+  // not something the dialog asked for.
+  createdIds?: string[];
 };
 
 export type ImportPlan = {

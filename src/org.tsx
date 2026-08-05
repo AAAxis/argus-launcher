@@ -12,11 +12,13 @@ import {
   accountDisplayName,
   accountHasCustomAvatar,
   accountProviders,
+  accountTableColumns,
 } from './db/account';
 import * as orgsDb from './db/orgs';
 import {describeDbError} from './db/errors';
 import {supabase} from './supabase';
 import type {ArgusOrg, OrgMembership, OrgRole} from './types';
+import type {TableLayouts} from './tables/columns';
 
 export type OrgContextValue = {
   // False while the user's memberships are still being resolved. App waits on
@@ -39,17 +41,36 @@ export type OrgContextValue = {
   providers: string[];
   // ISO timestamp of when the account was created, for "Member since".
   createdAt: string | null;
+  // Which columns this person's tables show, as their deviations from the
+  // defaults. Derived here for the same reason displayName and avatarUrl are:
+  // it lives in user_metadata, so the user record is where it arrives, and one
+  // consumer reading `user` directly would be one consumer that has to know
+  // that. See tables/ColumnLayouts.tsx, which owns the writes.
+  tableColumns: TableLayouts;
   orgs: OrgMembership[];
   orgId: string | null;
   org: ArgusOrg | null;
   role: OrgRole | null;
-  // Org-wide settings (the name, the built-in extension toggles) are writable
-  // only by owners and admins -- the RLS UPDATE policy on organizations checks
-  // is_org_admin, so a member's write would fail silently at the UI layer.
-  isAdmin: boolean;
+  // Whether this person holds the account. The owner is the only one who can
+  // invite, remove, or mint an API token -- org_invites, the delete policy on
+  // org_members, and the write policies on api_tokens are all is_org_owner, so a
+  // member's attempt would fail silently at the UI layer.
+  //
+  // NOT a gate on the workspace's own settings. The name, branding and built-in
+  // extension toggles are is_org_member as of 2026-08-10, and the entitlement
+  // columns are unwritable by anyone -- so neither needs asking about here.
+  isOwner: boolean;
   error: string;
   setOrgId: (id: string) => void;
-  reload: () => Promise<void>;
+  // `quiet` is for a refresh the user did not ask for -- the window-focus one in
+  // WorkspaceProvider. It keeps `ready` true and leaves the current memberships
+  // in place if the read fails, because the loud version of both is wrong for a
+  // background poll: `ready` going false swaps the whole app for the startup
+  // loader (App.tsx gates on it), and clearing `orgs` on a dropped connection
+  // would evict someone from their workspace mid-session. Same word and same
+  // meaning as useCloudData's `load(orgId, {quiet: true})`, which rides the same
+  // trigger.
+  reload: (options?: {quiet?: boolean}) => Promise<void>;
   // Re-reads the user record. Settings calls this after an avatar or name edit
   // so the sidebar and the dialog update without waiting for the next auth
   // event -- updateUser() does not emit one.
@@ -65,11 +86,12 @@ const EMPTY: OrgContextValue = {
   displayName: '',
   providers: [],
   createdAt: null,
+  tableColumns: {},
   orgs: [],
   orgId: null,
   org: null,
   role: null,
-  isAdmin: false,
+  isOwner: false,
   error: '',
   setOrgId: () => {},
   reload: async () => {},
@@ -95,7 +117,7 @@ export function OrgProvider({children}: {children: ReactNode}) {
   // sign-out/sign-in, which would show the previous user's orgs.
   const generation = useRef(0);
 
-  const resolve = useCallback(async (uid: string | null) => {
+  const resolve = useCallback(async (uid: string | null, quiet = false) => {
     const run = ++generation.current;
     if (!uid) {
       setOrgs([]);
@@ -104,7 +126,9 @@ export function OrgProvider({children}: {children: ReactNode}) {
       setReady(true);
       return;
     }
-    setReady(false);
+    if (!quiet) {
+      setReady(false);
+    }
     try {
       let memberships = await orgsDb.listMyOrgs();
       if (memberships.length === 0) {
@@ -125,6 +149,13 @@ export function OrgProvider({children}: {children: ReactNode}) {
       setError('');
     } catch (caught) {
       if (run !== generation.current) {
+        return;
+      }
+      if (quiet) {
+        // Keep what we already had. A background refresh that fails means the
+        // network blinked, not that the workspace went away -- and dropping the
+        // memberships here would take the signed-in user to the startup loader
+        // for as long as it lasted.
         return;
       }
       setOrgs([]);
@@ -180,10 +211,10 @@ export function OrgProvider({children}: {children: ReactNode}) {
     orgsDb.setCurrentOrgId(id);
   }, []);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (options?: {quiet?: boolean}) => {
     const uid = user?.id || null;
     resolvedFor.current = uid;
-    await resolve(uid);
+    await resolve(uid, Boolean(options?.quiet));
   }, [resolve, user]);
 
   // updateUser() returns the new record and emits no auth event, so Settings
@@ -212,11 +243,12 @@ export function OrgProvider({children}: {children: ReactNode}) {
       displayName: accountDisplayName(user),
       providers: accountProviders(user),
       createdAt: user?.created_at || null,
+      tableColumns: accountTableColumns(user),
       orgs,
       orgId,
       org: membership?.org || null,
       role: membership?.role || null,
-      isAdmin: membership?.role === 'owner' || membership?.role === 'admin',
+      isOwner: membership?.role === 'owner',
       error,
       setOrgId,
       reload,

@@ -3,7 +3,7 @@
 // Separate from orgs.ts on purpose: that module answers "which tenant am I
 // looking at" -- the switcher, the active id, the org's own settings. This one
 // answers "who else is in it", which is a different question with a different
-// audience (owners and admins) and a different failure mode.
+// audience (the owner) and a different failure mode.
 //
 // Three of these go through RPCs rather than table access, each for a reason
 // that is not stylistic:
@@ -13,16 +13,16 @@
 //   - createInvite, because the token has to be minted server-side (a
 //     client-chosen token is a forgery surface) and the seat has to be reserved
 //     in the same transaction as the check.
-//   - acceptInvite, because org_members_insert is `with check
-//     is_org_admin(org_id)`. An invitee is not an admin of the org they are
-//     joining, so they can never insert their own membership row. This is the
-//     only way in, and it is why the whole invite flow exists as SQL functions
-//     rather than as three table writes.
+//   - acceptInvite, because there is no INSERT policy on org_members and no
+//     INSERT grant -- 2026-08-10 removed both. Nobody can write a membership
+//     row from a client, not even the owner, which is what stops a seat being
+//     granted to an address that never confirmed it. accept_org_invite is
+//     SECURITY DEFINER and is the only way in.
 //
 // The rest are ordinary RLS-gated table access, following the same two rules
 // the rest of src/db/ follows (see index.ts): orgId is always explicit, and
 // every mutation touches one row.
-import type {OrgInvite, OrgMember, OrgRole} from '../types';
+import type {OrgInvite, OrgMember} from '../types';
 import {optionalClient, raise, requireClient} from './client';
 import {rowToInvite, rowToMember} from './mappers';
 import type {OrgInviteRow, OrgMemberIdentityRow} from './rows';
@@ -46,7 +46,7 @@ export async function listMembers(orgId: string): Promise<OrgMember[]> {
 // revoked ones are noise -- the table keeps both for the audit trail, but the
 // roster has no use for either.
 //
-// Expired invites ARE returned: an admin needs to see that the link they sent
+// Expired invites ARE returned: the owner needs to see that the link they sent
 // last week went stale, which is exactly the thing they would otherwise be
 // waiting on. The UI marks them expired.
 export async function listInvites(orgId: string): Promise<OrgInvite[]> {
@@ -64,6 +64,40 @@ export async function listInvites(orgId: string): Promise<OrgInvite[]> {
   return ((data || []) as unknown as OrgInviteRow[]).map(rowToInvite);
 }
 
+// How many seats the outstanding invites are holding.
+//
+// The predicate is copied from create_org_invite deliberately -- `status =
+// 'pending' AND expires_at > now()`, which is narrower than listInvites above.
+// An expired invite is still worth showing the owner (their link went stale) but
+// it no longer reserves anything, so counting it would report a workspace as
+// fuller than the database considers it.
+//
+// This exists because Settings and the Team tab were reporting different seat
+// usage for the same workspace: the Team tab counted members plus live invites,
+// matching what create_org_invite refuses on, while Settings counted only
+// orgs.countMembers() and showed "1 of 5" beside the Team tab's "4 of 5". Two
+// numbers for one entitlement, and neither screen said which it meant.
+//
+// A head count rather than a fetch: the caller wants the number, not the rows.
+//
+// Owner-only in effect, not by check. Every policy on org_invites is
+// is_org_owner, so a member's count comes back 0 rather than forbidden -- the
+// caller has to know that and say what it is counting.
+export async function countLiveInvites(orgId: string): Promise<number> {
+  const client = optionalClient();
+  if (!client) {
+    return 0;
+  }
+  const {count, error} = await client
+      .from('org_invites')
+      .select('id', {count: 'exact', head: true})
+      .eq('org_id', orgId)
+      .eq('status', 'pending')
+      .gt('expires_at', new Date().toISOString());
+  raise(error, 'team.countLiveInvites');
+  return count || 0;
+}
+
 // The column names are prefixed because `returns table (id, token, expires_at)`
 // would shadow the identically-named columns inside the function's own body --
 // see the note on create_org_invite in 2026-08-05-teams.sql.
@@ -77,15 +111,20 @@ export type CreatedInvite = {id: string; token: string; expires_at: string};
 // user however they arrive.
 //
 // Returns the token so the caller can build the link. This is the only moment
-// it is available to the client; there is no email delivery, so if the admin
+// it is available to the client; there is no email delivery, so if the owner
 // closes the dialog without copying it they have to revoke and re-invite.
+//
+// No role parameter: every invite offers membership, and create_org_invite
+// refuses anything else. p_role is still sent, explicitly, because the function
+// keeps its three-argument signature -- PostgREST resolves an RPC by the names
+// of the arguments it is given, so omitting it here would be a different call.
 export async function createInvite(
-    orgId: string, email: string, role: Exclude<OrgRole, 'owner'>): Promise<CreatedInvite> {
+    orgId: string, email: string): Promise<CreatedInvite> {
   const client = requireClient();
   const {data, error} = await client.rpc('create_org_invite', {
     p_org: orgId,
     p_email: email,
-    p_role: role,
+    p_role: 'member',
   });
   raise(error, 'team.createInvite');
   // `returns table(...)` comes back as an array of one, not as a scalar.
@@ -110,7 +149,7 @@ export async function revokeInvite(orgId: string, id: string): Promise<void> {
       .select('id');
   raise(error, 'team.revokeInvite');
   if (!data || data.length === 0) {
-    throw new Error('Only an owner or admin can revoke an invite.');
+    throw new Error('Only the owner can revoke an invite.');
   }
 }
 
@@ -130,27 +169,22 @@ export async function acceptInvite(token: string): Promise<string> {
   return data as string;
 }
 
-// Roles are 'admin' or 'member'. Promotion to owner is not offered anywhere:
-// ownership belongs to whoever created the org, and transferring it is a
-// separate feature with its own consequences for billing.
-export async function setMemberRole(
-    orgId: string, userId: string, role: Exclude<OrgRole, 'owner'>): Promise<void> {
-  const client = requireClient();
-  const {data, error} = await client
-      .from('org_members')
-      .update({role})
-      .eq('org_id', orgId)
-      .eq('user_id', userId)
-      .select('user_id');
-  raise(error, 'team.setMemberRole');
-  if (!data || data.length === 0) {
-    throw new Error('Only an owner or admin can change roles.');
-  }
-}
+// There is deliberately no setMemberRole. With two roles there is nothing to set:
+// membership is the only role that can be granted, and ownership is held by
+// whoever ran bootstrap_org. Transferring it is a separate feature with its own
+// consequences for billing, and it does not exist yet.
+//
+// The database agrees rather than merely permitting this: 2026-08-10 dropped the
+// UPDATE policy on org_members and revoked the grant, so there is no request
+// this module could send that would change anybody's role.
 
 // Removing someone frees their seat and nothing else. Their profiles, proxies
 // and automations stay -- those belong to the organization, not to them, which
 // is the whole point of the org-scoped model and what the confirm dialog says.
+//
+// The owner's own row cannot be deleted by anyone, including the owner: the
+// policy carries `role <> 'owner'`, which is what stops a workspace being left
+// with billing, data and nobody able to administer it.
 export async function removeMember(orgId: string, userId: string): Promise<void> {
   const client = requireClient();
   const {data, error} = await client
@@ -161,18 +195,19 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
       .select('user_id');
   raise(error, 'team.removeMember');
   if (!data || data.length === 0) {
-    throw new Error('Only an owner or admin can remove someone from the workspace.');
+    throw new Error('Only the owner can remove someone from the workspace.');
   }
 }
 
-// Leaving is a member removing their own row, which org_members_delete does NOT
-// permit -- that policy is is_org_admin(org_id), so a plain member's delete
-// matches nothing and returns success-with-no-rows.
+// Leaving is a member removing their own row, and it works: org_members_delete
+// carries `user_id = auth.uid()` as an alternative to being the owner.
 //
-// So this is honest about what it can do: an admin or owner can leave (their own
-// delete passes the policy), and a member is told to ask. Making it work for
-// everyone would need a fourth SECURITY DEFINER function, and "ask an admin to
-// remove you" is a real answer rather than a broken button.
+// It did not before 2026-08-10 -- the policy was is_org_admin(org_id), so a plain
+// member's delete matched nothing and returned success-with-no-rows, which is to
+// say Leave was a button that quietly did nothing.
+//
+// The one person this still refuses is the owner, who has nowhere to hand the
+// workspace to. The Team tab does not offer them the button.
 export async function leaveOrg(orgId: string, userId: string): Promise<void> {
   const client = requireClient();
   const {data, error} = await client
@@ -183,6 +218,6 @@ export async function leaveOrg(orgId: string, userId: string): Promise<void> {
       .select('user_id');
   raise(error, 'team.leaveOrg');
   if (!data || data.length === 0) {
-    throw new Error('Ask an owner or admin of this workspace to remove you.');
+    throw new Error('The owner cannot leave their own workspace.');
   }
 }
