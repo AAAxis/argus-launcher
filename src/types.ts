@@ -329,38 +329,74 @@ export type ArgusAutomation = {
   // (This comment used to describe a default that varied by trigger. It never
   // did: nothing read this field at all until the runner learned to.)
   close_on_finish?: boolean;
+  // "Tell me when this finishes." null/undefined means it does not notify;
+  // 'failure' also covers a partial run, whose continue-past step failure is
+  // still a failure the user asked to hear about. Cancelling never notifies --
+  // the user just did it themselves.
+  notify_on?: 'always' | 'failure' | null;
+  // Where the finish message additionally goes: a message connector's id, or
+  // null for delivery to Argus alone (the topbar bell and a desktop
+  // notification, which fire whenever notify_on says to regardless of this
+  // field). Deliberately no FK behind it -- a deleted connector fails the send
+  // with a sentence naming it rather than silently notifying nobody.
+  notify_connector_id?: string | null;
   created_at?: string;
   updated_at?: string;
   // Who is on the hook for this automation. See ArgusProfile.assigned_to.
   assigned_to?: string | null;
 };
 
-// A model endpoint an AI step can talk to, shared by the whole workspace.
+// An outside service automations can call, shared by the whole workspace: an
+// AI endpoint an aiPrompt/aiCheck step asks, or a messaging target a notify
+// step sends through. `category` is which of those it is; `kind` is which
+// service; `config` is everything service-specific, shaped by the preset
+// catalogue in src/data/connectors.ts.
 //
 // Workspace-wide rather than per-machine so a shared automation runs for
-// everyone who opens it, which is also why `api_key` is readable by every
-// member -- see the migration for the full reasoning, including why a plaintext
-// column is the consistent choice in an app whose proxy and profile passwords
-// are already stored the same way.
-export type ArgusAiProvider = {
+// everyone who opens it, which is also why `config` -- credentials included --
+// is readable by every member. See the migration for the full reasoning,
+// including why plaintext columns are the consistent choice in an app whose
+// proxy and profile passwords are already stored the same way.
+export type ArgusConnector = {
   id: string;
-  // What the workspace calls it. This is what an AI step's dropdown lists, so
+  // What the workspace calls it. This is what a step's dropdown lists, so
   // renaming one changes how every workflow using it reads.
   name: string;
-  // A preset id from src/data/aiProviders.ts, or 'custom'. Unknown values are
-  // shown as unrecognised rather than treated as an error -- the catalogue can
-  // move ahead of a row written by an older build.
+  // What the connector is for, which is what a step filters on. The default is
+  // per category too: an AI step and a notify step each want their own.
+  category: 'ai' | 'message';
+  // A preset id from src/data/connectors.ts. Unknown values are shown as
+  // unrecognised rather than treated as an error -- the catalogue can move
+  // ahead of a row written by an older build.
   kind: string;
-  // Overrides the preset's endpoint. Required for 'custom'.
-  base_url?: string | null;
-  model: string;
-  // Null for the local runtimes, which authenticate nobody.
-  api_key?: string | null;
-  // Used by an AI step that names no provider. At most one per org, enforced by
-  // a partial unique index rather than by the client.
+  // The service-specific fields, as strings under the keys the preset
+  // declares. Which of them are secret is the preset's call too.
+  config: Record<string, string>;
+  // Used by a step that names no connector. At most one per (org, category),
+  // enforced by a partial unique index rather than by the client.
   is_default?: boolean;
   created_at?: string;
   updated_at?: string;
+};
+
+// One "a run finished" record, org-wide -- the bell's second kind next to
+// teammate handoffs, and what the OS notification mirrored. Composed by the
+// main process off the run record and written by the renderer (the only side
+// with Supabase); `status` is reported from that record, never recomputed.
+export type ArgusNotification = {
+  id: string;
+  // What produced this. 'automation_run' today; a column rather than an
+  // assumption so a third bell kind is a row here, not another table.
+  kind: string;
+  title: string;
+  body: string;
+  status?: string | null;
+  // What to open when the row is clicked. Null when there is nothing to open.
+  automation_id?: string | null;
+  run_id?: string | null;
+  // Who set the run going -- what the bell renders, not an access rule.
+  created_by?: string | null;
+  created_at: string;
 };
 
 // One execution. Written when the run starts, not when it finishes, so a crash
@@ -557,11 +593,16 @@ export type CloudState = {
   // only the history view wants them, so they are read on demand -- the same
   // reason cookie_sets.list() leaves the `cookies` column out.
   automations: ArgusAutomation[];
-  // The workspace's model endpoints, for the AI steps. Loaded with everything
-  // else rather than on demand because the automation editor needs the names to
-  // render a step's provider dropdown, and the main process needs the whole
-  // list -- keys included -- before any run can make a call.
-  ai_providers: ArgusAiProvider[];
+  // The workspace's connectors -- AI endpoints and messaging targets. Loaded
+  // with everything else rather than on demand because the automation editor
+  // needs the names to render a step's connector dropdown, and the main
+  // process needs the whole list -- credentials included -- before any run can
+  // make a call.
+  connectors: ArgusConnector[];
+  // Run-finished notifications, newest first, each carrying whether THIS user
+  // has read it (joined from notification_reads at load). The bell renders
+  // these next to handoffs.
+  notifications: (ArgusNotification & {read: boolean})[];
   // Everyone in this org. Here rather than local to the Team tab because the
   // Profiles table needs it too -- it is what turns profiles.created_by from a
   // uuid into a name -- and reading it twice for two surfaces would be two

@@ -16,7 +16,8 @@ import {repairProxyAssignments} from '../lib/proxies';
 import {trashCutoffIso} from '../lib/trash';
 import type {Toast} from '../hooks/useToast';
 import type {
-  ArgusAiProvider, ArgusAutomation, ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy,
+  ArgusAutomation, ArgusConnector, ArgusCookie, ArgusFolder, ArgusNotification, ArgusProfile,
+  ArgusProxy,
   CloudState, OrgMember,
   SharedBookmark, SharedExtension,
 } from '../types';
@@ -81,8 +82,11 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setState((current) => ({...current, shared_bookmarks: fn(current.shared_bookmarks)})),
     automations: (fn: (list: ArgusAutomation[]) => ArgusAutomation[]) =>
       setState((current) => ({...current, automations: fn(current.automations)})),
-    aiProviders: (fn: (list: ArgusAiProvider[]) => ArgusAiProvider[]) =>
-      setState((current) => ({...current, ai_providers: fn(current.ai_providers)})),
+    connectors: (fn: (list: ArgusConnector[]) => ArgusConnector[]) =>
+      setState((current) => ({...current, connectors: fn(current.connectors)})),
+    notifications: (fn: (list: (ArgusNotification & {read: boolean})[]) =>
+      (ArgusNotification & {read: boolean})[]) =>
+      setState((current) => ({...current, notifications: fn(current.notifications)})),
     members: (fn: (list: OrgMember[]) => OrgMember[]) =>
       setState((current) => ({...current, members: fn(current.members)})),
   };
@@ -99,7 +103,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setLoading(true);
     }
     try {
-      // allSettled, not all. These ten reads are independent, and Promise.all
+      // allSettled, not all. These reads are independent, and Promise.all
       // rejects the whole batch on the first failure -- which meant one table
       // the client could not read left `loaded` unassigned, setState never
       // called, and the entire workspace rendering as defaultCloudState. A
@@ -108,7 +112,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       // while the rows sat untouched in Postgres. Read failures must degrade to
       // the tables they actually affect.
       const [profilesResult, proxiesResult, foldersResult, cookiesResult, extensionsResult,
-        bookmarksResult, statusesResult, automationsResult, aiProvidersResult,
+        bookmarksResult, statusesResult, automationsResult, connectorsResult,
+        notificationsResult, notificationReadsResult,
         organizationResult, membersResult] = await Promise.allSettled([
         db.profiles.list(targetOrgId),
         db.proxies.list(targetOrgId),
@@ -118,7 +123,9 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         db.bookmarks.list(targetOrgId),
         db.statuses.list(targetOrgId),
         db.automations.list(targetOrgId),
-        db.aiProviders.list(targetOrgId),
+        db.connectors.list(targetOrgId),
+        db.notifications.list(targetOrgId),
+        db.notifications.listReads(),
         db.orgs.getOrg(targetOrgId),
         // The roster. Read here rather than by the Team tab because the
         // Profiles table needs it too -- it is what turns created_by into a
@@ -154,7 +161,15 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       const bookmarkRows = take('bookmarks', bookmarksResult, []);
       const customStatuses = take('statuses', statusesResult, []);
       const automations = take('automations', automationsResult, []);
-      const aiProviders = take('AI providers', aiProvidersResult, []);
+      const connectors = take('connectors', connectorsResult, []);
+      const notificationRows = take('notifications', notificationsResult, []);
+      const readIds = take('notification read state', notificationReadsResult, []);
+      // Joined once, at load, so the bell renders a boolean instead of doing
+      // set membership per row per render.
+      const notifications = notificationRows.map((row) => ({
+        ...row,
+        read: readIds.includes(row.id),
+      }));
       const organization = take('organization', organizationResult, null);
       const members = take('team members', membersResult, []);
       const mergedBookmarks = mergeBookmarks(bookmarkRows, socialBookmarks);
@@ -182,7 +197,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
             {shared_bookmarks: mergedBookmarks.bookmarks} : {}),
           ...(statusesResult.status === 'fulfilled' ? {custom_statuses: customStatuses} : {}),
           ...(automationsResult.status === 'fulfilled' ? {automations} : {}),
-          ...(aiProvidersResult.status === 'fulfilled' ? {ai_providers: aiProviders} : {}),
+          ...(connectorsResult.status === 'fulfilled' ? {connectors} : {}),
+          ...(notificationsResult.status === 'fulfilled' ? {notifications} : {}),
           ...(organizationResult.status === 'fulfilled' ?
             {built_in_extensions: organization?.built_in_extensions} : {}),
           ...(membersResult.status === 'fulfilled' ? {members} : {}),
@@ -207,7 +223,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         shared_bookmarks: mergedBookmarks.bookmarks,
         custom_statuses: customStatuses,
         automations,
-        ai_providers: aiProviders,
+        connectors,
+        notifications,
         members,
         built_in_extensions: organization?.built_in_extensions,
       };

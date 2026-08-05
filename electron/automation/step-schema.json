@@ -158,7 +158,7 @@
     "summary": "Ask AI into {into}",
     "cdp": ["Runtime"],
     "fields": [
-      {"key": "provider", "kind": "provider", "label": "Provider",
+      {"key": "provider", "kind": "connector", "category": "ai", "label": "Provider",
        "hint": "Leave as the workspace default unless this step needs a specific model."},
       {"key": "prompt", "kind": "textarea", "label": "Prompt", "required": true,
        "interpolate": true,
@@ -184,7 +184,7 @@
     "summary": "AI check: {question}",
     "cdp": ["Runtime"],
     "fields": [
-      {"key": "provider", "kind": "provider", "label": "Provider"},
+      {"key": "provider", "kind": "connector", "category": "ai", "label": "Provider"},
       {"key": "question", "kind": "textarea", "label": "Yes/no question", "required": true,
        "interpolate": true,
        "placeholder": "Is this a captcha or bot-check page?"},
@@ -200,6 +200,23 @@
        "hint": "\"fail\" makes this an assertion: the step fails and On failure decides the rest."}
     ],
     "note": "The model is asked for one word and nothing else. Anything it says that is not yes or no fails the step rather than being guessed at."
+  },
+  "notify": {
+    "label": "Send message",
+    "icon": "send",
+    "summary": "Send message",
+    "cdp": [],
+    "fields": [
+      {"key": "connector", "kind": "connector", "category": "message", "label": "Send via",
+       "hint": "Leave as the workspace default message connector."},
+      {"key": "message", "kind": "textarea", "label": "Message", "required": true,
+       "interpolate": true,
+       "placeholder": "Done: {{vars.summary}}",
+       "hint": "Supports {{vars.x}} and {{profile.name}} -- this is how an AI step's answer gets sent."},
+      {"key": "subject", "kind": "text", "label": "Subject", "interpolate": true,
+       "hint": "Used by email connectors; chat connectors ignore it."}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
   },
   "if": {
     "label": "If",

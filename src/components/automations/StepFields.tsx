@@ -186,9 +186,10 @@ function control(
     field: FieldSpec,
     value: unknown,
     set: (next: unknown) => void,
-    // The workspace's AI providers, for the one field kind whose options are
-    // data rather than a list in step-schema.json.
-    providers: {id: string; name: string; is_default?: boolean}[],
+    // The workspace's connectors, for the one field kind whose options are
+    // data rather than a list in step-schema.json. Names and ids only -- no
+    // config ever reaches the editor.
+    connectors: {id: string; name: string; category: string; is_default?: boolean}[],
 ): ReactNode {
   switch (field.kind) {
     case 'textarea':
@@ -239,7 +240,12 @@ function control(
       );
     case 'condition':
       return <ConditionFields value={value as Condition} onChange={set} />;
-    case 'provider':
+    case 'connector': {
+      // The dropdown offers only the field's category: an AI step lists the
+      // workspace's models, a notify step its messaging targets. The default
+      // named in the first option is that category's default too.
+      const options = connectors.filter(
+          (entry) => !field.category || entry.category === field.category);
       return (
         <select value={String(value ?? '')} onChange={(event) => set(event.target.value)}>
           {/* Empty means "whichever the workspace has marked default", which is
@@ -247,21 +253,22 @@ function control(
               correct after the default changes, and an agent authoring one over
               MCP can leave the field out entirely. */}
           <option value="">
-            Workspace default{providers.some((entry) => entry.is_default) ?
-              ` (${providers.find((entry) => entry.is_default)?.name})` :
+            Workspace default{options.some((entry) => entry.is_default) ?
+              ` (${options.find((entry) => entry.is_default)?.name})` :
               ' — none set yet'}
           </option>
-          {providers.map((provider) => (
-            <option key={provider.id} value={provider.id}>{provider.name}</option>
+          {options.map((connector) => (
+            <option key={connector.id} value={connector.id}>{connector.name}</option>
           ))}
-          {/* A provider that has been deleted, or one from another workspace.
+          {/* A connector that has been deleted, or one from another workspace.
               Listed so the step keeps showing what it actually names instead of
               silently snapping back to the default. */}
-          {Boolean(value) && !providers.some((provider) => provider.id === value) && (
-            <option value={String(value)}>Missing provider</option>
+          {Boolean(value) && !options.some((connector) => connector.id === value) && (
+            <option value={String(value)}>Missing connector</option>
           )}
         </select>
       );
+    }
     default:
       return (
         <input
@@ -273,13 +280,13 @@ function control(
   }
 }
 
-export function StepFields({step, onChange, checkProfile, providers = []}: {
+export function StepFields({step, onChange, checkProfile, connectors = []}: {
   step: AutomationStep;
   onChange: (next: AutomationStep) => void;
   // Threaded from the editor rather than read from context, exactly as
   // checkProfile is: StepList is also the recursion, and a branch's steps
   // choose from the same list.
-  providers?: {id: string; name: string; is_default?: boolean}[];
+  connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
   // The profile a Check tests against. See automations/target.ts -- the same
   // rule the Run button uses, so the page you check is the page you run on.
   checkProfile?: {id: string; name: string} | null;
@@ -308,7 +315,7 @@ export function StepFields({step, onChange, checkProfile, providers = []}: {
         if (field.kind === 'boolean') {
           return (
             <div className="automation-field" key={field.key}>
-              {control(field, values[field.key], set, providers)}
+              {control(field, values[field.key], set, connectors)}
               {field.hint && <p className="field-hint">{field.hint}</p>}
             </div>
           );
@@ -319,7 +326,7 @@ export function StepFields({step, onChange, checkProfile, providers = []}: {
             label={field.required ? `${field.label} *` : field.label}
             hint={field.hint}
           >
-            {control(field, values[field.key], set, providers)}
+            {control(field, values[field.key], set, connectors)}
             {/* Keyed on the selector's current value, so editing the input
                 clears a stale verdict rather than leaving "1 match" sitting
                 under a selector that has since been changed. */}

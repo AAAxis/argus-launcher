@@ -2,7 +2,7 @@
 // gate in front of both. Everything with real logic behind it lives in
 // workspace/ (data and mutations), hooks/ (effects) or components/.
 import {useEffect, useState} from 'react';
-import type {ArgusAutomation} from './types';
+import type {ArgusAutomation, ArgusConnector} from './types';
 import {BookOpen, CircleAlert, CircleCheck, Plus, Upload, UserPlus} from 'lucide-react';
 import {CopyButton} from './components/ui/CopyButton';
 import {SignIn} from './components/SignIn';
@@ -20,6 +20,7 @@ import {TeamTab} from './components/tabs/TeamTab';
 import type {TeamView} from './components/tabs/TeamTab';
 import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
 import {AutomationModal} from './components/modals/AutomationModal';
+import {ConnectorModal} from './components/modals/ConnectorModal';
 import {RunAutomationModal} from './components/modals/RunAutomationModal';
 import {RunLogModal} from './components/modals/RunLogModal';
 import {CookieSetModal} from './components/modals/CookieSetModal';
@@ -109,6 +110,11 @@ export function App() {
   // dialog has to carry which one this is rather than infer it.
   const [automationDraft, setAutomationDraft] =
     useState<{automation: ArgusAutomation; exists: boolean} | null>(null);
+  // The connector being added or edited, on the automationDraft pattern and
+  // for the same reason: create and replace are separate writes. A new one
+  // starts with kind '' -- the modal's picker fills it in.
+  const [connectorDraft, setConnectorDraft] =
+    useState<{connector: ArgusConnector; exists: boolean} | null>(null);
   const [historyFor, setHistoryFor] = useState<ArgusAutomation | null>(null);
   // The automation whose delete confirmation is open. Beside automationDraft
   // rather than in useEditors because only the editor raises it -- the card in
@@ -301,6 +307,19 @@ export function App() {
           onViewShares={() => {
             setTeamView('shared');
             setActiveTab('team');
+          }}
+          // A bell notification opens the run history it reports on. The
+          // automation may have been deleted since -- then the Automations tab
+          // is the closest true answer, and its runs are still readable there
+          // through their denormalised names.
+          onOpenAutomationHistory={(automationId) => {
+            const automation = data.state.automations.find(
+                (item) => item.id === automationId);
+            if (automation) {
+              setHistoryFor(automation);
+            } else {
+              setActiveTab('automations');
+            }
           }}
         />
         {data.loading ? (
@@ -524,6 +543,13 @@ export function App() {
           }}
         />
       )}
+      {connectorDraft && (
+        <ConnectorModal
+          connector={connectorDraft.connector}
+          exists={connectorDraft.exists}
+          onClose={() => setConnectorDraft(null)}
+        />
+      )}
       {automationDraft && (
         <AutomationModal
           automation={automationDraft.automation}
@@ -538,13 +564,14 @@ export function App() {
               workspace.selectedProfileId,
               workspace.automations.lastRunProfileId(automationDraft.automation.id),
           )}
-          // Names and ids only. The key stays out of the editor entirely -- a
-          // step stores a provider id, and the main process is the only thing
-          // that ever turns one into a credential.
-          providers={data.state.ai_providers.map((provider) => ({
-            id: provider.id,
-            name: provider.name,
-            is_default: provider.is_default,
+          // Names and ids only. The config stays out of the editor entirely --
+          // a step stores a connector id, and the main process is the only
+          // thing that ever turns one into a credential.
+          connectors={data.state.connectors.map((connector) => ({
+            id: connector.id,
+            name: connector.name,
+            category: connector.category,
+            is_default: connector.is_default,
           }))}
           onClose={() => setAutomationDraft(null)}
           onRun={setRunningAutomation}
@@ -731,6 +758,11 @@ export function App() {
             onHistory={setHistoryFor}
             onShare={setSharing}
             onOpenSite={openAccountPage}
+            onNewConnector={() => setConnectorDraft({
+              connector: workspace.connectors.blank(''),
+              exists: false,
+            })}
+            onEditConnector={(connector) => setConnectorDraft({connector, exists: true})}
           />
         );
       case 'extensions':

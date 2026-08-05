@@ -809,3 +809,122 @@
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+
+/* ── Connectors ──────────────────────────────────────────────────────────────
+ * The Connectors view reuses .automation-card wholesale -- same grid, same
+ * head, same foot -- so only what a connector card has and an automation card
+ * does not needs rules: the masked secret, the test verdict, and the modal's
+ * kind picker. */
+
+/* The masked secret, monospace so the four visible characters can actually be
+ * compared against the credential in hand -- the only thing they are for. */
+.connector-card-secret {
+  color: var(--ink-soft);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Test says what the service said, in the service's own words. Green and red
+ * because there are exactly two answers and no third state worth a colour. */
+.connector-card-test {
+  align-items: flex-start;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0;
+}
+
+.connector-card-test > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.connector-card-test.is-ok {
+  color: var(--status-active-ink);
+}
+
+.connector-card-test.is-bad {
+  color: var(--danger);
+}
+
+/* Delete keeps to the far edge of the foot so the safe actions read as one
+ * group and the destructive one stands apart. */
+.connector-card-delete {
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+
+.connector-card-delete:hover {
+  color: var(--danger);
+}
+
+/* The modal's kind picker: two headed groups of small tiles. A grid rather
+ * than an eighteen-entry select because the choice is the whole first step of
+ * the dialog, and a dropdown hides seventeen of the answers. */
+.connector-pick-group {
+  padding: 4px 22px 14px;
+}
+
+.connector-pick-group h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.connector-pick-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.connector-pick-tile {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.connector-pick-tile:hover {
+  border-color: var(--accent);
+}
+
+.connector-pick-tile > svg {
+  color: var(--ink-soft);
+  flex: none;
+}
+
+.connector-form {
+  display: grid;
+  gap: 14px;
+  padding: 4px 22px 18px;
+}
+
+/* The reveal toggle sits inside the field's row, not floating over the input,
+ * so the input keeps its full click target and the toggle keeps a real one. */
+.connector-secret-input {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.connector-secret-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Back-to-the-picker leans left so Test / Cancel / Save keep the right edge
+ * the app's other modal footers use. */
+.connector-modal-back {
+  margin-right: auto;
+}

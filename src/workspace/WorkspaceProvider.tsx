@@ -13,7 +13,7 @@ import {useCloudData} from './useCloudData';
 import {useCookieActions} from './useCookieActions';
 import {useLibraryActions} from './useLibraryActions';
 import {useProfileActions} from './useProfileActions';
-import {useAiProviderActions} from './useAiProviderActions';
+import {useConnectorActions} from './useConnectorActions';
 import {useAutomationActions} from './useAutomationActions';
 import {useProxyActions} from './useProxyActions';
 import {useSharedActions} from './useSharedActions';
@@ -25,7 +25,7 @@ import type {CloudData} from './useCloudData';
 import type {CookieActions} from './useCookieActions';
 import type {LibraryActions} from './useLibraryActions';
 import type {ProfileActions} from './useProfileActions';
-import type {AiProviderActions} from './useAiProviderActions';
+import type {ConnectorActions} from './useConnectorActions';
 import type {AutomationActions} from './useAutomationActions';
 import type {ProxyActions} from './useProxyActions';
 import type {SharedActions} from './useSharedActions';
@@ -39,7 +39,7 @@ export type WorkspaceValue = {
   library: LibraryActions;
   cookies: CookieActions;
   automations: AutomationActions;
-  aiProviders: AiProviderActions;
+  connectors: ConnectorActions;
   // Members and invites. The roster itself is in data.state.members, since the
   // Profiles table reads it too; this is the mutations plus the invite list,
   // which only the owner can see.
@@ -127,10 +127,10 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   // records are written by whoever is signed in, and a run that starts while
   // signed out has to buffer to disk instead of failing.
   const automations = useAutomationActions(core, proxies, orgId, Boolean(org.userId));
-  // Mounted here rather than in the settings dialog: it pushes the provider
+  // Mounted here rather than in the Connectors view: it pushes the connector
   // list into the main process on every change, and that has to keep happening
-  // whether or not anyone has Settings open.
-  const aiProviders = useAiProviderActions(core);
+  // whether or not that view is open.
+  const connectors = useConnectorActions(core);
   const team = useTeamActions(core);
   const shared = useSharedActions(core);
 
@@ -253,7 +253,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     library,
     cookies,
     automations,
-    aiProviders,
+    connectors,
     team,
     shared,
     selectedProfileId,

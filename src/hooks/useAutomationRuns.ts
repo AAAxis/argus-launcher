@@ -30,7 +30,30 @@ export type StartRunResult =
   | {ok: true; runId: string}
   | {ok: false; error: string};
 
-export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
+// The notify-on-finish payload riding a finished event: composed by the main
+// process off the sealed run record, delivered here because the renderer is
+// the only side that can write the `notifications` row. `sendError` is the
+// connector delivery failure, if any -- already logged into the run record by
+// the runner, so it is not stored again.
+export type RunNotification = {
+  kind: string;
+  title: string;
+  body: string;
+  status?: string | null;
+  automation_id?: string | null;
+  run_id?: string | null;
+  sendError?: string | null;
+};
+
+export function useAutomationRuns(
+    orgId: string | null,
+    signedIn: boolean,
+    // Called when a finished event carries a notification. The caller owns
+    // what that means (the Supabase insert and the bell patch); this hook only
+    // hands it over, so its "runs are the only thing written here" header
+    // stays true.
+    onNotification?: (notification: RunNotification) => void,
+) {
   // runId -> run, for anything in flight or just finished this session.
   const [runs, setRuns] = useState<Record<string, AutomationRun>>({});
   const pending = useRef<Record<string, AutomationRun>>({});
@@ -39,6 +62,10 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
   orgRef.current = orgId;
   // Who is waiting for a run to end. See waitForRun below.
   const waiters = useRef<Map<string, (run: AutomationRun) => void>>(new Map());
+  // A ref because the event subscription below deliberately mounts once; a
+  // closure over the prop would go stale on the first re-render.
+  const notifyRef = useRef(onNotification);
+  notifyRef.current = onNotification;
 
   // Mirror the ref into state on a timer rather than per event.
   useEffect(() => {
@@ -78,6 +105,12 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
       }
       pending.current[event.runId] = event.run;
       dirty.current = true;
+      // Notify-on-finish: the composed notification rides the finished event.
+      // Handed to the owner before the run write for the same reason waiters
+      // are resolved first -- neither should wait on Supabase.
+      if (event.notification) {
+        notifyRef.current?.(event.notification);
+      }
       // Before the database write, and outside its promise: a batch's pacing
       // must not wait on Supabase, and an offline machine still has to start
       // its next run.

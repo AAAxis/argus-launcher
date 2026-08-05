@@ -1,4 +1,6 @@
-const {app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell} = require('electron');
+const {
+  app, BrowserWindow, Notification, dialog, ipcMain, nativeImage, nativeTheme, shell,
+} = require('electron');
 const {autoUpdater} = require('electron-updater');
 const {spawn, spawnSync} = require('node:child_process');
 const crypto = require('node:crypto');
@@ -18,6 +20,8 @@ const automationRunner = require('./automation/runner.cjs');
 const automationStore = require('./automation/store.cjs');
 const automationSteps = require('./automation/steps.cjs');
 const automationAi = require('./automation/ai.cjs');
+const automationConnectors = require('./automation/connectors.cjs');
+const automationNotify = require('./automation/notify.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
   createRunTokens, handleRecheckFromPage, handleRunFromPage,
@@ -3616,6 +3620,31 @@ function sendRunEvent(event) {
   }
 }
 
+// A run's outcome, as a desktop notification. Skipped while the window is
+// focused -- the topbar bell already shows it there, and an OS banner on top
+// of the app you are looking at is a knock on a door that is open. Clicking
+// one raises the window, which is the whole thing a banner about a background
+// event is for.
+function raiseOsNotification(title, body) {
+  if (!Notification.isSupported()) {
+    return;
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+    return;
+  }
+  const notification = new Notification({title, body});
+  notification.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  notification.show();
+}
+
 // ── start-page run tokens ───────────────────────────────────────────────────
 //
 // The store and the endpoint live in ./automation/run-token.cjs so their
@@ -3727,6 +3756,50 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
       onFinish: payload.automation?.close_on_finish && payload.ownsSession ?
         () => killAutomationLaunch(payload.profile.id) :
         undefined,
+      // Notify-on-finish. The runner calls this between sealing the record and
+      // flushing it, so the message reports the final verdict and a failed
+      // send still lands in the record the user reads. This side owns the
+      // connector registry and the OS notification; the returned row rides the
+      // finished event to the renderer, which is the only side that can write
+      // it to Supabase.
+      onNotify: payload.automation?.notify_on ? (record) => {
+        const {notify_on: notifyOn, notify_connector_id: connectorId} = payload.automation;
+        if (!automationNotify.shouldNotify(notifyOn, record.status)) {
+          return null;
+        }
+        const {title, body} = automationNotify.composeFinishMessage(record);
+        // "Straight to Argus" is the built-in delivery: the bell row and the
+        // desktop notification fire whenever the setting says notify, and a
+        // connector -- when one is named -- is an additional channel out.
+        raiseOsNotification(title, body);
+        const notification = {
+          kind: 'automation_run',
+          title,
+          body,
+          status: record.status,
+          automation_id: record.automation_id,
+          run_id: record.id,
+        };
+        if (!connectorId) {
+          return notification;
+        }
+        // The connector resolve AND send are caught HERE, not thrown to the
+        // runner: a deleted connector or a dead webhook must not also cost the
+        // user the bell row that would have told them about it. The failure
+        // travels as sendError, which the runner logs into the record -- for a
+        // deleted connector that is the sentence naming it.
+        return Promise.resolve()
+            .then(() => automationConnectors.send({
+              connector: automationConnectors.resolve(connectorId, 'message'),
+              message: `${title}\n${body}`,
+              subject: title,
+            }))
+            .then(() => notification)
+            .catch((error) => ({
+              ...notification,
+              sendError: error?.message || String(error),
+            }));
+      } : undefined,
     });
     return {ok: true, runId};
   } catch (error) {
@@ -3740,31 +3813,42 @@ ipcMain.handle('argus:cancel-automation-run', async (_event, {runId}) => {
   return {ok: automationRunner.cancel(runId)};
 });
 
-// The workspace's model endpoints, pushed over from the renderer.
+// The workspace's connectors, pushed over from the renderer.
 //
 // It is a push and not a pull because this process holds no Supabase
-// credentials and must never start: the renderer is the only side that can read
-// ai_providers, so it hands the resolved list across whenever it changes.
+// credentials and must never start: the renderer is the only side that can
+// read `connectors`, so it hands the resolved list across whenever it changes.
 // Memory only -- nothing here is written to disk, exactly as run tokens are
 // handled, and for the same reason.
-ipcMain.handle('argus:set-ai-providers', async (_event, {providers}) => {
-  automationAi.setProviders(providers);
+ipcMain.handle('argus:set-connectors', async (_event, {connectors}) => {
+  automationConnectors.setConnectors(connectors);
   return {ok: true};
 });
 
-// The Test button in Settings → AI providers. Deliberately the cheapest call
-// the API will accept: this answers "does this key reach this model", and a
-// longer answer would cost the user money to learn nothing more.
-ipcMain.handle('argus:test-ai-provider', async (_event, {provider}) => {
+// The Test button on a connector card: the smallest real thing that service
+// allows. For an AI connector that is the cheapest completion the API will
+// accept -- this answers "does this key reach this model", and a longer answer
+// would cost the user money to learn nothing more. For a message connector it
+// is one real message, because there is no cheaper way to prove a webhook or a
+// chat id than to use it.
+ipcMain.handle('argus:test-connector', async (_event, {connector}) => {
   try {
-    await automationAi.complete({
-      provider,
-      user: 'Reply with the single word: ok',
-      maxTokens: 8,
-    });
+    if (connector?.category === 'message') {
+      await automationConnectors.send({
+        connector,
+        message: 'Test message from Argus. Your connector works.',
+        subject: 'Argus connector test',
+      });
+    } else {
+      await automationAi.complete({
+        provider: connector,
+        user: 'Reply with the single word: ok',
+        maxTokens: 8,
+      });
+    }
     return {ok: true};
   } catch (error) {
-    // The provider's own words. describeDbError has no equivalent here and a
+    // The service's own words. describeDbError has no equivalent here and a
     // generic "the test failed" would hide the one useful sentence.
     return {ok: false, error: error?.message || String(error)};
   }

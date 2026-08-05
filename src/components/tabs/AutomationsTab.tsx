@@ -24,6 +24,7 @@ import {
 import {Assignee} from '../ui/Assignee';
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
+import {ConnectorsView} from '../automations/ConnectorsView';
 import {TagChip} from '../ui/TagChip';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
@@ -32,17 +33,20 @@ import {automationCap} from '../../automations/limit';
 import {describeRunBlock} from '../../automations/runReadiness';
 import {RUN_LABEL, RUN_TONE} from '../../automations/runStatus';
 import type {ShareRequest} from '../modals/ShareModal';
-import type {ArgusAutomation, AutomationRun} from '../../types';
+import type {ArgusAutomation, ArgusConnector, AutomationRun} from '../../types';
 
-// All, or the ones the browser start pages show. Two chips rather than a
-// filter dropdown, on the control Extensions and the proxy-mode selector
-// already use. `pinned` earns the second chip because it is the one property of
-// an automation with a consequence outside this tab: a pinned workflow is a
-// button inside every profile's session.
-type View = 'all' | 'pinned' | 'mine';
+// All, or the ones the browser start pages show. Chips rather than a filter
+// dropdown, on the control Extensions and the proxy-mode selector already use.
+// `pinned` earns its chip because it is the one property of an automation with
+// a consequence outside this tab: a pinned workflow is a button inside every
+// profile's session. `connectors` is not a filter at all but the tab's second
+// collection -- the services automations call -- which lives here rather than
+// in Settings because it is only ever used from this tab.
+type View = 'all' | 'pinned' | 'mine' | 'connectors';
 
 export function AutomationsTab({
   onEdit, onNew, onLoadExample, onCreateDemoProfile, onRun, onHistory, onShare, onOpenSite,
+  onNewConnector, onEditConnector,
 }: {
   onEdit: (automation: ArgusAutomation) => void;
   onNew: () => void;
@@ -65,6 +69,9 @@ export function AutomationsTab({
   // Opens a page on the marketing site in the user's own browser, never in a
   // profile window -- those stay anonymous.
   onOpenSite: (pathname: string) => void;
+  // The connector editor, mounted from App like every other modal.
+  onNewConnector: () => void;
+  onEditConnector: (connector: ArgusConnector) => void;
 }) {
   const {data, automations} = useWorkspace();
   const org = useOrg();
@@ -110,18 +117,22 @@ export function AutomationsTab({
     }
   }
 
-  if (list.length === 0) {
-    return (
-      // .tab-empty, the shape an empty Profiles, Proxies, Cookies or Start tab
-      // takes: a centred column under the topbar with the mark at a fixed 56px,
-      // so the glyph lands on the same line whichever of them you arrive at.
-      // This used to centre itself in 60vh instead, which put it lower than all
-      // four and moved as the window resized.
-      //
-      // The block survives the restyle -- Extensions has no empty state and says
-      // so, but its add-tile stands in for four words of encouragement, and this
-      // one carries four distinct offers (create, load the example, mint a Demo
-      // profile, read the docs) that no tile can hold.
+  const automationsEmpty = list.length === 0;
+
+  // .tab-empty, the shape an empty Profiles, Proxies, Cookies or Start tab
+  // takes: a centred column with the mark at a fixed 56px, so the glyph lands
+  // on the same line whichever of them you arrive at.
+  //
+  // No longer an early return: the integration bar has to render above it,
+  // because the Connectors chip must stay reachable in a workspace that has
+  // not written its first automation yet -- connectors are this tab's second
+  // collection, not a view of the first.
+  //
+  // The block survives the restyle -- Extensions has no empty state and says
+  // so, but its add-tile stands in for four words of encouragement, and this
+  // one carries four distinct offers (create, load the example, mint a Demo
+  // profile, read the docs) that no tile can hold.
+  const automationsEmptyState = (
       <section className="tab-empty">
         <span className="tab-empty-mark">
           <Workflow size={26} strokeWidth={1.5} />
@@ -169,8 +180,7 @@ export function AutomationsTab({
           </button>
         </div>
       </section>
-    );
-  }
+  );
 
   const shown = view === 'pinned' ?
     list.filter((automation) => automation.pinned) :
@@ -187,7 +197,7 @@ export function AutomationsTab({
           how to make another on the right. */}
       <section className="integration-bar">
         <div className="choice-chips" role="radiogroup" aria-label="Automations view">
-          {(['all', 'pinned', 'mine'] as const)
+          {(['all', 'pinned', 'mine', 'connectors'] as const)
               .filter((option) => option !== 'mine' || showAssignee)
               .map((option) => (
                 <button
@@ -199,27 +209,52 @@ export function AutomationsTab({
                   type="button"
                 >
                   {option === 'all' ? 'All' :
-                    option === 'pinned' ? 'On start pages' : 'Assigned to me'}
+                    option === 'pinned' ? 'On start pages' :
+                      option === 'mine' ? 'Assigned to me' : 'Connectors'}
                 </button>
               ))}
         </div>
-        <div className="integration-bar-side">
-          <span className="integration-bar-count">
-            <strong>{shown.length}</strong> {shown.length === 1 ? 'automation' : 'automations'}
-          </span>
-          <button
-            className="ghost"
-            disabled={atCap}
-            onClick={onNew}
-            title={atCap ?
-              'Your plan doesn\'t include any more automations.' :
-              'Create an automation'}
-          >
-            <Plus size={16} /> New automation
-          </button>
-        </div>
+        {view === 'connectors' ? (
+          <div className="integration-bar-side">
+            <span className="integration-bar-count">
+              <strong>{state.connectors.length}</strong>{' '}
+              {state.connectors.length === 1 ? 'connector' : 'connectors'}
+            </span>
+            {/* Owners get the button; members get nothing rather than a
+                disabled one -- there is no action they could take to enable
+                it, and the read-only view says who can. */}
+            {org.isOwner && (
+              <button className="ghost" onClick={onNewConnector} title="Add a connector">
+                <Plus size={16} /> New connector
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="integration-bar-side">
+            <span className="integration-bar-count">
+              <strong>{shown.length}</strong> {shown.length === 1 ? 'automation' : 'automations'}
+            </span>
+            <button
+              className="ghost"
+              disabled={atCap}
+              onClick={onNew}
+              title={atCap ?
+                'Your plan doesn\'t include any more automations.' :
+                'Create an automation'}
+            >
+              <Plus size={16} /> New automation
+            </button>
+          </div>
+        )}
       </section>
 
+      {view === 'connectors' && (
+        <ConnectorsView onNew={onNewConnector} onEdit={onEditConnector} />
+      )}
+
+      {view !== 'connectors' && automationsEmpty && automationsEmptyState}
+
+      {view !== 'connectors' && !automationsEmpty && <>
       {/* Repeated from the empty state on purpose. That copy of the offer goes
           away the instant the first automation is saved, so someone who loads
           the example before making a profile would otherwise be left with a Run
@@ -387,6 +422,7 @@ export function AutomationsTab({
           from the Start page tab.
         </p>
       )}
+      </>}
     </section>
   );
 }

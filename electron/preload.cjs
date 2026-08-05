@@ -60,16 +60,17 @@ contextBridge.exposeInMainWorld('argusNative', {
     return () => ipcRenderer.removeListener('argus:automation-run-event', listener);
   },
 
-  // ── AI providers ─────────────────────────────────────────────────────────
-  // One way, renderer to main. The renderer reads ai_providers from Supabase --
+  // ── Connectors ───────────────────────────────────────────────────────────
+  // One way, renderer to main. The renderer reads `connectors` from Supabase --
   // this process holds no Supabase credentials and must not start -- and hands
-  // the resolved list over so an AI step can make its outbound call. Held in
-  // memory over there and never written to disk.
-  setAiProviders: (providers) => ipcRenderer.invoke('argus:set-ai-providers', {providers}),
-  // A single cheap completion against one provider, for the Test button. Takes
-  // the config directly rather than an id so an unsaved edit can be tried
-  // before it is written.
-  testAiProvider: (provider) => ipcRenderer.invoke('argus:test-ai-provider', {provider}),
+  // the resolved list over so an AI or notify step can make its outbound call.
+  // Held in memory over there and never written to disk.
+  setConnectors: (connectors) => ipcRenderer.invoke('argus:set-connectors', {connectors}),
+  // The Test button: the smallest real thing the service allows -- one tiny
+  // completion for an AI connector, one real message for a messaging one.
+  // Takes the config directly rather than an id so an unsaved edit can be
+  // tried before it is written.
+  testConnector: (connector) => ipcRenderer.invoke('argus:test-connector', {connector}),
   onDeepLink: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:deep-link', listener);

@@ -61,10 +61,11 @@ export function Sidebar({activeTab, onTab, onSettings}: {
   );
 }
 
-export function Topbar({activeTab, actions, onViewShares}: {
+export function Topbar({activeTab, actions, onViewShares, onOpenAutomationHistory}: {
   activeTab: TabId;
   actions: ReactNode;
   onViewShares: () => void;
+  onOpenAutomationHistory: (automationId: string) => void;
 }) {
   const org = useOrg();
   return (
@@ -80,7 +81,10 @@ export function Topbar({activeTab, actions, onViewShares}: {
             somebody has sent you is not an action on the current tab, and it
             should not move when the tab changes. Renders nothing at all when
             the inbox is empty, which is most of the time. */}
-        <InboxBell onViewAll={onViewShares} />
+        <InboxBell
+          onViewAll={onViewShares}
+          onOpenAutomationHistory={onOpenAutomationHistory}
+        />
         {/* Only shown when the user is actually in more than one firm --
             the common case is one org, chosen silently. */}
         {org.orgs.length > 1 && (

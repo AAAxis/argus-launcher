@@ -207,7 +207,7 @@ function TimeoutField({value, onChange}: {
 }
 
 export function AutomationModal({
-  automation, exists, tagOptions = [], checkProfile, providers = [], onClose, onSave, onRun,
+  automation, exists, tagOptions = [], checkProfile, connectors = [], onClose, onSave, onRun,
   onDelete,
 }: {
   automation: ArgusAutomation;
@@ -216,9 +216,9 @@ export function AutomationModal({
   tagOptions?: TagUsage[];
   // The profile a step's Check button tests its selector against.
   checkProfile?: {id: string; name: string} | null;
-  // The workspace's AI providers, for an AI step's provider dropdown. Names
+  // The workspace's connectors, for a step's connector dropdown. Names
   // only -- the key never comes near the editor.
-  providers?: {id: string; name: string; is_default?: boolean}[];
+  connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
   onClose: () => void;
   onSave: (next: ArgusAutomation) => Promise<string | null>;
   onRun?: (next: ArgusAutomation) => void;
@@ -331,7 +331,7 @@ export function AutomationModal({
             <StepList
               steps={draft.steps}
               checkProfile={checkProfile}
-              providers={providers}
+              connectors={connectors}
               onChange={(steps) => setDraft({...draft, steps})}
             />
           ) : (
@@ -429,6 +429,64 @@ export function AutomationModal({
                 Only a browser this run opened. A window you already had open is left alone.
               </p>
             </div>
+            <Field
+              label="When it finishes"
+              hint={draft.notify_on === 'failure' ?
+                'Includes runs where a failed step was set to continue. ' +
+                  'Cancelling a run never notifies.' :
+                draft.notify_on === 'always' ?
+                  'Cancelling a run never notifies — you just did it yourself.' :
+                  undefined}
+            >
+              <select
+                value={draft.notify_on || ''}
+                onChange={(event) => {
+                  const notify_on = (event.target.value || null) as
+                    'always' | 'failure' | null;
+                  // Turning it off clears the target too: a connector id
+                  // behind a null notify_on is dead state a later edit would
+                  // resurrect by surprise.
+                  setDraft(notify_on ?
+                    {...draft, notify_on} :
+                    {...draft, notify_on: null, notify_connector_id: null});
+                }}
+              >
+                <option value="">Don&apos;t notify</option>
+                <option value="always">Notify when it finishes</option>
+                <option value="failure">Notify on failure</option>
+              </select>
+            </Field>
+            {draft.notify_on && (
+              <Field
+                label="Send to"
+                hint="Argus always rings the bell and raises a desktop notification;
+                  a connector additionally sends the outcome out of Argus."
+              >
+                <select
+                  value={draft.notify_connector_id || ''}
+                  onChange={(event) => setDraft({
+                    ...draft,
+                    notify_connector_id: event.target.value || null,
+                  })}
+                >
+                  <option value="">Argus (bell + desktop)</option>
+                  {connectors
+                      .filter((connector) => connector.category === 'message')
+                      .map((connector) => (
+                        <option key={connector.id} value={connector.id}>
+                          {connector.name}
+                        </option>
+                      ))}
+                  {/* A connector that has been deleted. Listed so the setting
+                      keeps showing what it names instead of silently snapping
+                      to Argus-only -- the run will say the connector is gone. */}
+                  {Boolean(draft.notify_connector_id) &&
+                    !connectors.some((c) => c.id === draft.notify_connector_id) && (
+                    <option value={String(draft.notify_connector_id)}>Missing connector</option>
+                  )}
+                </select>
+              </Field>
+            )}
             <TimeoutField
               value={draft.timeout_ms ?? DEFAULT_TIMEOUT_MS}
               onChange={(timeout_ms) => setDraft({...draft, timeout_ms})}

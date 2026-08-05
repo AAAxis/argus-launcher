@@ -138,8 +138,14 @@ for (const route of routes.filter((item) => item.mcp)) {
 }
 for (const tool of sessionTools) {
   check(
-      toolsSource.includes(`name: '${tool}'`),
-      `sessionTools names ${tool}, which tools.cjs does not define`);
+      toolsSource.includes(`name: '${tool.mcp}'`),
+      `sessionTools names ${tool.mcp}, which tools.cjs does not define`);
+  // The label is what the API tab prints for a tool with no route to describe
+  // it. An entry without one renders as a bare name, which is the drift this
+  // table exists to prevent.
+  check(
+      Boolean(tool.label) && Boolean(tool.group),
+      `sessionTools entry ${tool.mcp} needs both a group and a label`);
 }
 pass('every MCP tool named in the table is defined');
 

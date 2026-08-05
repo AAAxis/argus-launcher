@@ -10,6 +10,7 @@ const https = require('node:https');
 const http = require('node:http');
 const {LOAD_TIMEOUT_MS} = require('../cdp-core.cjs');
 const ai = require('./ai.cjs');
+const connectors = require('./connectors.cjs');
 
 const POLL_INTERVAL_MS = 100;
 
@@ -332,7 +333,7 @@ const EXECUTORS = {
   },
 
   async aiPrompt({cdp, step, log}) {
-    const provider = ai.resolve(step.provider);
+    const provider = connectors.resolve(step.provider, 'ai');
     const context = await pageContext(cdp, step);
     const answer = await ai.complete({
       provider,
@@ -366,7 +367,7 @@ const EXECUTORS = {
   },
 
   async aiCheck({cdp, step, log}) {
-    const provider = ai.resolve(step.provider);
+    const provider = connectors.resolve(step.provider, 'ai');
     const context = await pageContext(cdp, step);
     const answer = await ai.complete({
       provider,
@@ -398,6 +399,19 @@ const EXECUTORS = {
       throw new Error(`AI check failed: ${step.question}`);
     }
     return step.into ? {vars: {[step.into]: word}} : undefined;
+  },
+
+  async notify({step, log}) {
+    // No CDP, like httpRequest, and sent from the launcher for the same
+    // reason: a send from the page would traverse the profile's proxy and
+    // carry its cookies. `message` arrives already interpolated -- that is how
+    // an AI step's answer travels: "Done: {{vars.summary}}".
+    const connector = connectors.resolve(step.connector, 'message');
+    await connectors.send({connector, message: step.message, subject: step.subject});
+    // The length, not the body. The body may hold interpolated page data and
+    // the log is flushed to the cloud with the run record -- same rule as the
+    // aiPrompt prompt above.
+    log('info', `Sent ${String(step.message || '').length} characters via ${connector.name}`);
   },
 };
 

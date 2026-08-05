@@ -25,6 +25,7 @@ export type StepType =
   | 'httpRequest'
   | 'aiPrompt'
   | 'aiCheck'
+  | 'notify'
   | 'if'
   | 'loop';
 
@@ -148,10 +149,10 @@ export type AutomationStep =
       // reason -- a call from the page would traverse the profile's proxy and
       // carry its cookies.
       //
-      // `provider` is an ai_providers id, or empty for the workspace default.
-      // The key is never here: the main process resolves the id against the
-      // list the renderer pushed it, which is what keeps the credential out of
-      // the steps, the vars, the log and run.json.
+      // `provider` is a connector id (category 'ai'), or empty for the
+      // workspace default. The key is never here: the main process resolves
+      // the id against the list the renderer pushed it, which is what keeps
+      // the credential out of the steps, the vars, the log and run.json.
       type: 'aiPrompt';
       provider?: string;
       prompt: string;
@@ -176,6 +177,19 @@ export type AutomationStep =
       selector?: string;
       into?: string;
       onFalse?: 'continue' | 'fail';
+    })
+  | (StepBase & {
+      // Sends a message out of the run, through a message connector. Like the
+      // AI steps it runs in the main process and stores only a connector id --
+      // no token ever sits in a step. `message` is interpolated, which is how
+      // an AI step's answer gets sent: "Done: {{vars.summary}}".
+      type: 'notify';
+      // A connector id (category 'message'), or empty for the workspace's
+      // default message connector.
+      connector?: string;
+      message: string;
+      // Used by email connectors; chat connectors ignore it.
+      subject?: string;
     })
   | (StepBase & {
       type: 'if';

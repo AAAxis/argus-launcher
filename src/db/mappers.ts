@@ -9,14 +9,15 @@
 // translation lives here instead and the UI keeps reading what it always read.
 import {normalizeTags} from '../lib/tags';
 import type {
-  ArgusAiProvider,
   ArgusAutomation,
+  ArgusConnector,
   ArgusCookie,
   ArgusFolder,
   ArgusOrg,
   ArgusProfile,
   ArgusProxy,
   AutomationRun,
+  ArgusNotification,
   BuiltInExtensionToggles,
   OrgInvite,
   OrgMember,
@@ -36,12 +37,13 @@ import type {
   RunTrigger,
 } from '../automations/types';
 import type {
-  AiProviderRow,
   AutomationRow,
   AutomationRunRow,
+  ConnectorRow,
   CookieSetRow,
   CustomStatusRow,
   FolderRow,
+  NotificationRow,
   OrganizationRow,
   OrgInviteRow,
   OrgMemberIdentityRow,
@@ -456,35 +458,43 @@ export function rowToStatus(row: CustomStatusRow): string {
 // only coerces null to undefined and fills defaults for a row written before a
 // column existed.
 
-export function rowToAiProvider(row: AiProviderRow): ArgusAiProvider {
+// config is guarded back to an object even though the table has a CHECK
+// constraint saying it is one: a row read through a future view or a cast
+// that loses the guarantee must deserialise into "no fields set", not crash
+// whatever reads a field off null.
+export function rowToConnector(row: ConnectorRow): ArgusConnector {
+  const config = row.config && typeof row.config === 'object' && !Array.isArray(row.config) ?
+    row.config : {};
   return {
     id: row.id,
     name: row.name,
+    category: row.category === 'message' ? 'message' : 'ai',
     kind: row.kind,
-    base_url: row.base_url,
-    model: row.model,
-    api_key: row.api_key,
+    config: Object.fromEntries(Object.entries(config)
+        .filter(([, value]) => value !== null && value !== undefined)
+        .map(([key, value]) => [key, String(value)])),
     is_default: row.is_default ?? false,
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
   };
 }
 
-// Blank strings become null rather than being written through. An empty
+// Blank config values are dropped rather than written through. An empty
 // base_url means "use the preset's endpoint", and '' is not that -- it would
-// resolve to a request against the empty URL.
-export function aiProviderToRow(
-    orgId: string, provider: ArgusAiProvider): Insert<AiProviderRow> {
+// resolve to a request against the empty URL. Same for a blank api_key.
+export function connectorToRow(
+    orgId: string, connector: ArgusConnector): Insert<ConnectorRow> {
   return {
-    id: provider.id,
+    id: connector.id,
     org_id: orgId,
-    name: provider.name.trim(),
-    kind: provider.kind,
-    base_url: provider.base_url?.trim() || null,
-    model: provider.model.trim(),
-    api_key: provider.api_key?.trim() || null,
-    is_default: provider.is_default ?? false,
-    created_at: provider.created_at || new Date().toISOString(),
+    name: connector.name.trim(),
+    category: connector.category,
+    kind: connector.kind,
+    config: Object.fromEntries(Object.entries(connector.config || {})
+        .map(([key, value]) => [key, value.trim()])
+        .filter(([, value]) => value !== '')),
+    is_default: connector.is_default ?? false,
+    created_at: connector.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }
@@ -500,6 +510,11 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
     pinned: row.pinned ?? false,
     timeout_ms: row.timeout_ms ?? undefined,
     close_on_finish: row.close_on_finish ?? false,
+    // Null-preserving on purpose: a row written before these columns existed
+    // must map to "does not notify", not to a default that starts sending.
+    notify_connector_id: row.notify_connector_id ?? null,
+    notify_on: row.notify_on === 'always' || row.notify_on === 'failure' ?
+      row.notify_on : null,
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
     assigned_to: row.assigned_to,
@@ -524,6 +539,8 @@ export function automationToRow(
     pinned: automation.pinned ?? false,
     timeout_ms: automation.timeout_ms ?? 300000,
     close_on_finish: automation.close_on_finish ?? false,
+    notify_connector_id: automation.notify_connector_id ?? null,
+    notify_on: automation.notify_on ?? null,
     created_at: automation.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -555,6 +572,12 @@ export function automationPatchToRow(
   }
   if ('close_on_finish' in patch) {
     row.close_on_finish = patch.close_on_finish ?? false;
+  }
+  if ('notify_connector_id' in patch) {
+    row.notify_connector_id = patch.notify_connector_id ?? null;
+  }
+  if ('notify_on' in patch) {
+    row.notify_on = patch.notify_on ?? null;
   }
   return row;
 }
@@ -599,6 +622,39 @@ export function runToRow(orgId: string, run: AutomationRun): Insert<AutomationRu
     error: run.error ?? null,
     vars: (run.vars || {}) as Record<string, unknown>,
     log: (run.log || []) as unknown[],
+  };
+}
+
+// ---- notifications ------------------------------------------------------
+
+export function rowToNotification(row: NotificationRow): ArgusNotification {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    body: row.body,
+    // Reported off the run record when the row was written, never recomputed
+    // here -- the run record decided the verdict.
+    status: row.status,
+    automation_id: row.automation_id,
+    run_id: row.run_id,
+    created_by: row.created_by,
+    created_at: row.created_at,
+  };
+}
+
+export function notificationToRow(
+    orgId: string, notification: ArgusNotification): Insert<NotificationRow> {
+  return {
+    id: notification.id,
+    org_id: orgId,
+    kind: notification.kind,
+    title: notification.title,
+    body: notification.body,
+    status: notification.status ?? null,
+    automation_id: notification.automation_id ?? null,
+    run_id: notification.run_id ?? null,
+    created_at: notification.created_at || new Date().toISOString(),
   };
 }
 

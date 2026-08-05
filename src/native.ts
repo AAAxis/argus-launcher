@@ -8,7 +8,7 @@ import type {
   SharedExtension,
 } from './types';
 import type {AutomationVars, RunLogEntry, RunTrigger} from './automations/types';
-import type {RuntimeAiProvider} from './data/aiProviders';
+import type {RuntimeConnector} from './data/connectors';
 
 export type ProxyConfig = {
   id?: string;
@@ -349,14 +349,15 @@ type ArgusNative = {
     // than worked out over there.
     ownsSession?: boolean;
   }): Promise<{ok: boolean; runId?: string; error?: string; status?: number}>;
-  // Hands the workspace's model endpoints to the main process, which is the
-  // only side that can make an outbound call. One way, and memory-only over
-  // there -- see electron/automation/ai.cjs. Called on every change, including
-  // the change to an empty list.
-  setAiProviders?(providers: RuntimeAiProvider[]): Promise<{ok: boolean}>;
-  // The Test button. Takes a resolved provider rather than an id so an unsaved
-  // draft can be tried before it is written.
-  testAiProvider?(provider: RuntimeAiProvider): Promise<{ok: boolean; error?: string}>;
+  // Hands the workspace's connectors to the main process, which is the only
+  // side that can make an outbound call. One way, and memory-only over there
+  // -- see electron/automation/connectors.cjs. Called on every change,
+  // including the change to an empty list.
+  setConnectors?(connectors: RuntimeConnector[]): Promise<{ok: boolean}>;
+  // The Test button. Takes a resolved connector rather than an id so an
+  // unsaved draft can be tried before it is written. For an AI connector this
+  // is one tiny completion; for a messaging one it sends a real test message.
+  testConnector?(connector: RuntimeConnector): Promise<{ok: boolean; error?: string}>;
   cancelAutomationRun?(runId: string): Promise<{ok: boolean}>;
   // Runs in flight right now, so a window that reopens mid-run rejoins it
   // rather than showing nothing.
@@ -371,7 +372,19 @@ type ArgusNative = {
     callback: (event:
       | {type: 'started'; runId: string; run: AutomationRun}
       | {type: 'log'; runId: string; entry: RunLogEntry}
-      | {type: 'finished'; runId: string; run: AutomationRun}) => void,
+      // `notification` rides along when the automation's notify-on-finish
+      // setting fired: main composed it off the sealed record, and the
+      // renderer writes it to the `notifications` table (this side of the
+      // boundary is the one with Supabase).
+      | {type: 'finished'; runId: string; run: AutomationRun; notification?: {
+          kind: string;
+          title: string;
+          body: string;
+          status?: string | null;
+          automation_id?: string | null;
+          run_id?: string | null;
+          sendError?: string | null;
+        };}) => void,
   ): () => void;
 
   // argus:// deep links. `auth` carries the PKCE authorization code back from

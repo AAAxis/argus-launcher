@@ -31,15 +31,44 @@
   "$sessionToolsComment": [
     "MCP tools that drive an open page over CDP directly and so have no route of",
     "their own -- they resolve a port through POST /v1/profiles/cdp and then talk",
-    "to the browser. Listed here only so an agent brief can name every tool from",
-    "one file; the definitions live in electron/mcp/tools.cjs."
+    "to the browser. The definitions live in electron/mcp/tools.cjs.",
+    "",
+    "These carry a label and a group because they are the half of the tool surface",
+    "the API tab could not show. The tab renders the route table, and a tool with",
+    "no route was simply absent from it -- so the one screen that answers 'what can",
+    "reach my profiles' was missing the five tools that touch the page itself.",
+    "They render as MCP-only rows: no curl, because there is no endpoint to call.",
+    "",
+    "The design at docs/superpowers/specs/2026-08-05-api-mcp-browser-control-design.md",
+    "gives all five a real /v1/pages/* route, at which point they become ordinary",
+    "entries in `routes` below and this array goes away."
   ],
   "sessionTools": [
-    "argus_list_tabs",
-    "argus_navigate",
-    "argus_read_page",
-    "argus_screenshot",
-    "argus_eval"
+    {
+      "mcp": "argus_list_tabs",
+      "group": "Driving a page",
+      "label": "List the open pages in a running profile"
+    },
+    {
+      "mcp": "argus_navigate",
+      "group": "Driving a page",
+      "label": "Point a page at a URL and wait for it to settle"
+    },
+    {
+      "mcp": "argus_read_page",
+      "group": "Driving a page",
+      "label": "Read a page's visible text, whole or by CSS selector"
+    },
+    {
+      "mcp": "argus_screenshot",
+      "group": "Driving a page",
+      "label": "Screenshot a page — JPEG by default, PNG on request"
+    },
+    {
+      "mcp": "argus_eval",
+      "group": "Driving a page",
+      "label": "Evaluate a JavaScript expression in a page and return its value"
+    }
   ],
   "routes": [
     {

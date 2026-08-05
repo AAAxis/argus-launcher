@@ -29,7 +29,31 @@ export function useAutomationActions(
     signedIn: boolean,
 ) {
   const {state, withDb, withDbError, patch} = data;
-  const {runs, startRun, cancelRun, waitForRun} = useAutomationRuns(orgId, signedIn);
+  const {runs, startRun, cancelRun, waitForRun} = useAutomationRuns(orgId, signedIn,
+      // Notify-on-finish delivered to Argus: one row in `notifications` (main
+      // composed it; only this side can write it) and the same row patched
+      // into the bell immediately -- the reload-on-focus would show it anyway,
+      // but the machine that ran the automation should not have to lose focus
+      // to see its own bell ring. Offline, the insert fails quietly and the
+      // local row lasts until the next reload; the flushed run record remains
+      // the durable truth.
+      (notification) => {
+        const row = {
+          id: newId(),
+          kind: notification.kind,
+          title: notification.title,
+          body: notification.body,
+          status: notification.status ?? null,
+          automation_id: notification.automation_id ?? null,
+          run_id: notification.run_id ?? null,
+          created_at: new Date().toISOString(),
+          read: false,
+        };
+        if (orgId) {
+          void db.notifications.create(orgId, row).catch(() => undefined);
+        }
+        patch.notifications((list) => [row, ...list]);
+      });
   // automationId -> the profile it last ran on, this session. State the editor's
   // Check button reads through runTarget so it tests a selector against the page
   // the last run actually used. A ref, not state: nothing re-renders on it, and

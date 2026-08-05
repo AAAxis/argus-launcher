@@ -1509,65 +1509,6 @@ nav button.active svg {
   padding: 10px 22px;
 }
 
-/* ── AI providers ────────────────────────────────────────────────────────────
- * The list reuses SettingsRow; only the right-hand actions, the key preview and
- * the add/edit form need rules of their own. */
-
-.ai-provider-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
-}
-
-/* The masked key, in the row's description line. Monospace so the four visible
-   characters can actually be compared against the key you have in hand --
-   which is the only thing they are for. */
-.ai-provider-key {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  white-space: nowrap;
-}
-
-/* The form replaces the list rather than expanding inside it: five fields in a
-   settings row would have to squeeze into the right-hand track, and this is a
-   record you are filling in, not a setting you are flipping. */
-.ai-provider-form {
-  display: grid;
-  gap: 16px;
-  padding: 4px 22px 18px;
-}
-
-.ai-provider-form-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding-top: 2px;
-}
-
-/* Test says what the provider said, in the provider's own words. Green and red
-   because there are exactly two answers and no third state worth a colour. */
-.ai-provider-test {
-  align-items: flex-start;
-  display: flex;
-  font-size: 12px;
-  gap: 6px;
-  margin: 0;
-}
-
-.ai-provider-test > svg {
-  flex: none;
-  margin-top: 1px;
-}
-
-.ai-provider-test.is-ok {
-  color: var(--status-active-ink);
-}
-
-.ai-provider-test.is-bad {
-  color: var(--danger);
-}
-
 /* ── Account identity block ── */
 .settings-identity {
   align-items: center;
@@ -8593,6 +8534,76 @@ td.cookie-value-cell input:focus {
   font-size: 12px;
   min-height: var(--control-h-sm);
   padding: 0 12px;
+}
+
+/* ── Run notifications in the bell ──
+ * The second kind. A notification row is quieter than a handoff -- it reports
+ * a decision rather than demanding one -- so it carries no action buttons,
+ * only the title-as-link, a clear, and the unread dot. */
+
+.inbox-divider {
+  background: var(--border);
+  height: 1px;
+  margin: 2px 0;
+}
+
+/* Tone from the run's own status tokens, reported off the record -- the bell
+ * never recomputes a verdict, it only colours the one it was given. */
+.inbox-status.is-active {
+  color: var(--status-active-ink);
+}
+
+.inbox-status.is-warmup {
+  color: var(--status-warmup-ink);
+}
+
+.inbox-status.is-ban {
+  color: var(--danger);
+}
+
+.inbox-status.is-neutral {
+  color: var(--ink-faint);
+}
+
+/* The title doubles as the row's one action; styled as text with an underline
+ * on hover so the row does not read as a wall of buttons. */
+.inbox-item-open {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.inbox-item-open:hover {
+  text-decoration: underline;
+}
+
+.inbox-unread-dot {
+  background: var(--accent);
+  border-radius: 999px;
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+
+.inbox-item-clear {
+  color: var(--ink-faint);
+  height: 22px;
+  margin-left: auto;
+  min-height: 22px;
+  padding: 0;
+  width: 22px;
+}
+
+.inbox-item-clear:hover {
+  color: var(--danger);
+}
+
+.inbox-item.is-unread {
+  background: var(--surface);
 }
 
 .inbox-foot {

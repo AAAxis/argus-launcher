@@ -321,23 +321,63 @@ both halves of the process boundary in one file. `run.finish()` moved into
 so a browser that will not die is logged into the run the user reads rather
 than into a record that was already flushed.
 
-**The AI steps' key never leaves the main process.** `aiPrompt`/`aiCheck` store
-a provider *id*; the renderer reads `ai_providers` from Supabase and pushes the
-resolved list over `argus:set-ai-providers`, where `automation/ai.cjs` holds it
-in a module-level Map — memory only, like run tokens. That is what keeps the
-credential out of the steps, the vars, the log and `run.json`, which is what
-makes it safe for a run record to be flushed to the cloud and read by the org.
-Do not add a step field that carries a key, and do not let any MCP tool list
-providers with `api_key` — `useAutomationBridge` already strips proxy
-credentials for exactly this reason.
+**Connectors are the one table for every outside service** (`public.connectors`,
+category `'ai' | 'message'`), replacing the short-lived `ai_providers`. The UI
+lives under **Automations → Connectors** (fourth chip), NOT in Settings — the
+old `AiProvidersSection` is deleted. The preset catalogue is
+`src/data/connectors.ts`: each kind declares its config fields (`secret` is
+what masking and the password inputs key off), and both the connector form and
+validation are generated from it — adding a kind is a catalogue entry plus a
+send adapter in `electron/automation/connectors.cjs`, never a schema change.
+`is_default` is per `(org_id, category)`; `db/connectors.setDefault` demotes
+then promotes AND scopes both statements by category.
+
+**A connector's secret never leaves the main process.** Steps store a
+connector *id*; the renderer reads `connectors` from Supabase and pushes the
+resolved list over `argus:set-connectors`, where `automation/connectors.cjs`
+holds it in a module-level Map — memory only, like run tokens. That is what
+keeps the credential out of the steps, the vars, the log and `run.json`, which
+is what makes it safe for a run record to be flushed to the cloud and read by
+the org. Do not add a step field that carries a token, and do not let any MCP
+tool list connectors with `config` — `useAutomationBridge` already strips
+proxy credentials for exactly this reason.
 
 The **adapter and base URL are resolved on the renderer side**
-(`runtimeProvider` in `src/data/aiProviders.ts`) before the push. Nothing
+(`runtimeConnector` in `src/data/connectors.ts`) before the push. Nothing
 compiles `electron/`, so the alternative is a second hand-kept copy of thirteen
 base URLs over there — the same drift `step-schema.json` exists to prevent.
-There are two adapters for thirteen providers because eleven of them publish an
-OpenAI-compatible `/chat/completions`. Do not write a third without checking
-first.
+There are two AI adapters for thirteen providers because eleven of them publish
+an OpenAI-compatible `/chat/completions` (`automation/ai.cjs`, which now holds
+ONLY the completion protocol — the Map and the HTTP transport moved to
+`connectors.cjs`). Do not write a third without checking first. Message kinds
+get one send adapter each in `connectors.cjs`; its `postText` treats 2xx
+non-JSON as success on purpose — Slack's webhook answers the literal text `ok`
+and Discord answers 204, and "fixing" that fails every send that worked.
+
+**Notify-on-finish runs between `seal()` and `flush()`** — the old
+`run.finish()` split in two (`electron/automation/runner.cjs`). The order in
+`execute()`'s finally is: close the browser → `seal` the verdict → `onNotify`
+(awaited; composes title/body off the sealed record via `automation/notify.cjs`
+and sends through a connector) → `flush` (persist + finished event). A send
+that fails is logged into the record the user reads; move the send after
+`flush` and it is logged into a record already gone. `onNotify` never throws
+for a dead connector — it returns `sendError` on the notification instead, so
+a broken webhook cannot also silence the bell row. Cancelled never notifies,
+even on `'always'`; `'failure'` includes `partial`. Both rules live in
+`notify.cjs` `shouldNotify` and are tested from
+`src/automations/notifyOnFinish.test.ts` through the hand-kept `notify.d.cts`.
+
+**The `notifications` row is written by the renderer, not by main.** Main has
+no Supabase; it composes the notification, raises the OS `Notification` (first
+use in the repo — skipped while the window is focused, `raiseOsNotification`
+in `main.cjs`) and rides the row on the `finished` event;
+`useAutomationRuns`'s `onNotification` callback (wired in
+`useAutomationActions`) inserts it and patches the bell. The bell
+(`InboxBell.tsx`) renders two kinds — handoffs first, then run notifications —
+and tones a notification from its stored `status`, never recomputing the
+verdict. Read state is `notification_reads`, insert-only, one row per
+(notification, user); `markRead` swallows 23505 one id at a time because a
+batched insert fails atomically.
 
 **`aiCheck` stores `'yes'`/`'no'` as a string, not a boolean.**
 `evaluateCondition` compares with `String()` on both sides, so a boolean would
@@ -424,9 +464,10 @@ npm run typecheck
 npm run build
 ```
 
-Both must be clean. There is no test suite, but there are three end-to-end
-verification scripts, and anything touching the runner, the start-page token or
-the local API should run them:
+Both must be clean. `npm test` runs the vitest suite (pure functions only —
+no jsdom is configured), and there are three end-to-end verification scripts;
+anything touching the runner, the start-page token or the local API should run
+them:
 
 ```
 node scripts/verify-automation.mjs   # drives a real browser through a workflow

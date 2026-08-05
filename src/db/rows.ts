@@ -261,27 +261,58 @@ export type AutomationRow = {
   pinned: boolean | null;
   timeout_ms: number | null;
   close_on_finish: boolean | null;
+  // "Tell me when this finishes." notify_on is 'always' | 'failure' | null,
+  // null meaning the automation does not notify. notify_connector_id names a
+  // message connector, or null for delivery to Argus alone (the bell and a
+  // desktop notification); deliberately no FK -- see the migration.
+  notify_connector_id: string | null;
+  notify_on: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
   assigned_to: string | null;
 };
 
-// A model endpoint for the AI steps. Org-scoped, owner-writable, member-
-// readable -- api_key included, which is what lets a teammate run a shared
-// workflow. See supabase/migrations/20260805200000_ai_providers.sql.
-export type AiProviderRow = {
+// An outside service automations talk to: an AI endpoint or a messaging
+// target, told apart by `category`. Org-scoped, owner-writable, member-
+// readable -- `config` (credentials included) selected in full, which is what
+// lets a teammate run a shared workflow. See
+// supabase/migrations/20260805201923_connectors.sql.
+export type ConnectorRow = {
   id: string;
   org_id: string;
   name: string;
+  category: string;
   kind: string;
-  base_url: string | null;
-  model: string;
-  api_key: string | null;
+  config: Record<string, unknown> | null;
   is_default: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// One "a run finished" row for the whole org -- the bell's second kind, next
+// to handoffs. `status` is copied off the run record, never recomputed.
+export type NotificationRow = {
+  id: string;
+  org_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  status: string | null;
+  automation_id: string | null;
+  run_id: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+// Per-user read state for the table above, insert-only -- a row per
+// (notification, person) rather than an array column, so marking one read is
+// an insert that cannot lose a concurrent one.
+export type NotificationReadRow = {
+  notification_id: string;
+  user_id: string;
+  read_at: string;
 };
 
 // One execution. Inserted when the run starts and updated when it ends, so an
