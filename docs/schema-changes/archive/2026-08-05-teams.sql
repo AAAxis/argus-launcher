@@ -415,6 +415,10 @@ begin
     raise exception 'not a member of that organization' using errcode = '42501';
   end if;
 
+  -- SUPERSEDED -- DO NOT COPY THIS QUERY. It has no `where m.org_id = p_org`,
+  -- so the membership check above is decorative: pass it for any org you belong
+  -- to and this returns every user of the product. Fixed 2026-08-09; see
+  -- 2026-08-09-roster-leak-and-grants.sql for the version that is live.
   return query
   select m.user_id,
          u.email::text,
