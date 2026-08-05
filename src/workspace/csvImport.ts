@@ -25,7 +25,7 @@ import {
   osPresets,
   timezoneGroups,
 } from '../lib/fingerprintPresets';
-import {DEFAULT_PROFILE_COLOR} from '../lib/profileColors';
+import {randomProfileColor} from '../lib/profileColors';
 import {newId} from './core';
 import type {ParsedCsvRow} from '../lib/csv';
 import type {ArgusFolder, ArgusProfile, ArgusProxy, ProxyMode} from '../types';
@@ -633,7 +633,11 @@ export function planCsvImport(
       id: importId,
       name: row.name,
       status: row.status,
-      color: existing?.color ?? DEFAULT_PROFILE_COLOR,
+      // An update keeps whatever colour the row already had; only a genuinely
+      // new profile draws one, and it draws its own rather than sharing one
+      // with the rest of the file -- importing 200 rows that all launch the
+      // same blue tile is exactly the case the per-profile icon is for.
+      color: existing?.color ?? randomProfileColor(),
       folder_id: folderId,
       proxy_id: proxyId,
       proxy_mode: row.proxyMode,

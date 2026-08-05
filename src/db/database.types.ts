@@ -29,56 +29,6 @@ export type Database = {
         }
         Relationships: []
       }
-      ai_providers: {
-        Row: {
-          api_key: string | null
-          base_url: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          is_default: boolean
-          kind: string
-          model: string
-          name: string
-          org_id: string
-          updated_at: string
-        }
-        Insert: {
-          api_key?: string | null
-          base_url?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          is_default?: boolean
-          kind: string
-          model: string
-          name: string
-          org_id: string
-          updated_at?: string
-        }
-        Update: {
-          api_key?: string | null
-          base_url?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          is_default?: boolean
-          kind?: string
-          model?: string
-          name?: string
-          org_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ai_providers_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       api_tokens: {
         Row: {
           created_at: string
@@ -207,6 +157,8 @@ export type Database = {
           description: string | null
           id: string
           name: string
+          notify_connector_id: string | null
+          notify_on: string | null
           org_id: string
           pinned: boolean
           steps: Json
@@ -223,6 +175,8 @@ export type Database = {
           description?: string | null
           id: string
           name: string
+          notify_connector_id?: string | null
+          notify_on?: string | null
           org_id: string
           pinned?: boolean
           steps?: Json
@@ -239,6 +193,8 @@ export type Database = {
           description?: string | null
           id?: string
           name?: string
+          notify_connector_id?: string | null
+          notify_on?: string | null
           org_id?: string
           pinned?: boolean
           steps?: Json
@@ -250,6 +206,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "automations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      connectors: {
+        Row: {
+          category: string
+          config: Json
+          created_at: string
+          created_by: string | null
+          id: string
+          is_default: boolean
+          kind: string
+          name: string
+          org_id: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          config?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          kind: string
+          name: string
+          org_id: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          config?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          kind?: string
+          name?: string
+          org_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connectors_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -437,6 +440,79 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "handoffs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_reads: {
+        Row: {
+          notification_id: string
+          read_at: string
+          user_id: string
+        }
+        Insert: {
+          notification_id: string
+          read_at?: string
+          user_id: string
+        }
+        Update: {
+          notification_id?: string
+          read_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_reads_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "notifications"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          automation_id: string | null
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          org_id: string
+          run_id: string | null
+          status: string | null
+          title: string
+        }
+        Insert: {
+          automation_id?: string | null
+          body: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          org_id: string
+          run_id?: string | null
+          status?: string | null
+          title: string
+        }
+        Update: {
+          automation_id?: string | null
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          org_id?: string
+          run_id?: string | null
+          status?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"

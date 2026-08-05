@@ -9,7 +9,7 @@ import {
   mediaDevicePresets,
   normalizeOsPreset,
 } from './lib/fingerprintPresets';
-import {DEFAULT_PROFILE_COLOR, normalizeProfileColor} from './lib/profileColors';
+import {DEFAULT_PROFILE_COLOR, normalizeProfileColor, randomProfileColor} from './lib/profileColors';
 import {newRowId} from './lib/random';
 import {normalizeTags} from './lib/tags';
 import {numberOrNull} from './lib/text';
@@ -147,7 +147,9 @@ export function newProfileDraft(selfId = ''): ProfileDraft {
     saved: false,
     name: `Profile ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`,
     status: 'Ready',
-    color: DEFAULT_PROFILE_COLOR,
+    // Random, not the default: this is a profile being created, and the colour
+    // decides which tile its browser window gets in the Dock.
+    color: randomProfileColor(),
     avatar: '',
     folder_id: '',
     assigned_to: selfId,
