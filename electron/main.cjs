@@ -1,4 +1,6 @@
-const {app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell} = require('electron');
+const {
+  app, BrowserWindow, Notification, dialog, ipcMain, nativeImage, nativeTheme, shell,
+} = require('electron');
 const {autoUpdater} = require('electron-updater');
 const {spawn, spawnSync} = require('node:child_process');
 const crypto = require('node:crypto');
@@ -9,11 +11,22 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
+const builtInExtensions = require('./built-in-extensions.cjs');
 const {resolveFavicon} = require('./favicons.cjs');
 const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
+const cdpCore = require('./cdp-core.cjs');
 const automationRunner = require('./automation/runner.cjs');
 const automationStore = require('./automation/store.cjs');
+const automationSteps = require('./automation/steps.cjs');
+const automationAi = require('./automation/ai.cjs');
+const automationConnectors = require('./automation/connectors.cjs');
+const automationNotify = require('./automation/notify.cjs');
+const stepSchema = require('./automation/step-schema.json');
+const {
+  createRunTokens, handleRecheckFromPage, handleRunFromPage,
+} = require('./automation/run-token.cjs');
+const {routes: apiRoutes} = require('./api/routes.json');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
 // Two shapes, and nothing else is honoured:
@@ -1006,94 +1019,21 @@ function launchSafeSwitches(raw) {
   });
 }
 
-function cookieManagerSourcePath() {
-  const candidate = path.join(__dirname, '../extensions/cookie-manager');
-  return isLoadableExtensionDir(candidate) ? candidate : '';
+// Every enabled built-in extension's ready-to-load directory. What each one is
+// and where its copy goes lives in built-in-extensions.cjs; this only supplies
+// the file helpers and the cache root that module deliberately does not own.
+function builtInExtensionDeps() {
+  return {
+    isLoadableExtensionDir,
+    copyDirectoryContents,
+    parseCookieFile,
+    parseCookieUrl,
+    webstoreCachePath,
+  };
 }
 
-// onlinesim-sms is bundled for every profile regardless of proxy mode, unless
-// the Extensions tab's global toggle turns it off.
-function bundledExtensionPaths(payload) {
-  if (payload.enableSmsActivate === false) {
-    return [];
-  }
-  const bundled = [
-    {name: 'SMSActivate', source: path.join(__dirname, '../extensions/onlinesim-sms')},
-  ];
-  return bundled
-      .map((entry) => materializeBundledExtension(payload, entry.name, entry.source))
-      .filter(Boolean);
-}
-
-function materializeBundledExtension(payload, name, sourceDir) {
-  if (!payload?.userDataDir) {
-    return '';
-  }
-  if (!isLoadableExtensionDir(sourceDir)) {
-    console.warn(
-        `Skipping bundled extension "${name}": source folder is missing or has no valid ` +
-        `manifest.json (${sourceDir}). Profile launch will continue without it.`);
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, 'ArgysBundled', name);
-  fs.rmSync(extensionDir, {recursive: true, force: true});
-  copyDirectoryContents(sourceDir, extensionDir);
-  if (!isLoadableExtensionDir(extensionDir)) {
-    console.warn(
-        `Skipping bundled extension "${name}": copy to ${extensionDir} did not produce a ` +
-        `readable manifest.json. Profile launch will continue without it.`);
-    fs.rmSync(extensionDir, {recursive: true, force: true});
-    return '';
-  }
-  return extensionDir;
-}
-
-const FREE_PROXY_SOURCE_PATH = path.join(__dirname, '../extensions/foxywall');
-
-// Chrome caches an unpacked (--load-extension) service worker's script body
-// independently of its manifest version or file content -- reloading the
-// browser against the same stable path on an already-used profile can keep
-// running a stale background.js from hours earlier no matter how many times
-// the source file changes or its manifest version is bumped (confirmed via
-// live CDP inspection: chrome.runtime.getManifest().version reflected a fresh
-// bump, but functions/consts only present in newer source were still
-// undefined). Copying into a fresh, uniquely-named per-launch directory --
-// same pattern as writeProfileCookieManagerExtension below -- gives Chrome a
-// genuinely new extension identity every time, so it can never reuse a stale
-// cached service worker.
-function writeProfileFreeProxyExtension(payload) {
-  if (!isLoadableExtensionDir(FREE_PROXY_SOURCE_PATH)) {
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, `ArgysFreeProxy-${Date.now()}`);
-  copyDirectoryContents(FREE_PROXY_SOURCE_PATH, extensionDir);
-  // FoxyWall is now bundled for every profile (so its toolbar icon/manual
-  // toggle is always available), but must only auto-connect on launch when
-  // the user actually picked Free Proxy mode -- never for 'direct' (no proxy
-  // at all) or 'assigned' (a real proxy already owns the connection; this
-  // would be a second, competing proxy source). This config file is the
-  // signal background.js reads before deciding whether to auto-connect.
-  fs.writeFileSync(path.join(extensionDir, 'argus-config.json'), JSON.stringify({
-    autoConnect: Boolean(payload.useFreeProxy),
-  }));
-  return extensionDir;
-}
-
-// Stale per-launch free-proxy extension copies (see writeProfileFreeProxyExtension
-// above) accumulate one fresh directory per launch forever otherwise -- prune
-// old ones for this profile before writing today's.
-function pruneStaleFreeProxyExtensions(userDataDir) {
-  let entries;
-  try {
-    entries = fs.readdirSync(userDataDir, {withFileTypes: true});
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.startsWith('ArgysFreeProxy-')) {
-      fs.rmSync(path.join(userDataDir, entry.name), {recursive: true, force: true});
-    }
-  }
+function builtInExtensionPaths(payload) {
+  return builtInExtensions.materializeBuiltIns(payload, builtInExtensionDeps());
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,7 +1050,19 @@ function sharedExtensionsRoot() {
   return path.join(app.getPath('userData'), 'SharedExtensions');
 }
 
-function downloadBuffer(url, redirectsLeft = 5) {
+// Where a Web Store extension's unpacked copy lives on this machine, keyed by
+// its store id. One copy per machine shared by every profile -- which is why
+// built-in-extensions.cjs can list an 80 MB extension without it being copied
+// into each profile's user-data-dir the way the vendored folders are.
+function webstoreCachePath(extensionId) {
+  return path.join(sharedExtensionsRoot(), extensionId);
+}
+
+// `onProgress({receivedBytes, totalBytes})` is optional and fires as bytes
+// arrive; totalBytes is 0 when the server sends no content-length. Only the
+// CaptchaPlugin enable flow passes it -- at ~56 MB that download is long enough
+// that a card with no progress bar reads as a frozen one.
+function downloadBuffer(url, redirectsLeft = 5, onProgress = null) {
   if (url.startsWith('data:')) {
     const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url);
     if (!match) {
@@ -1123,7 +1075,8 @@ function downloadBuffer(url, redirectsLeft = 5) {
     https.get(url, {headers: {'User-Agent': 'ArgysAnty/1.0'}}, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
         res.resume();
-        resolve(downloadBuffer(new URL(res.headers.location, url).toString(), redirectsLeft - 1));
+        resolve(downloadBuffer(
+            new URL(res.headers.location, url).toString(), redirectsLeft - 1, onProgress));
         return;
       }
       if (res.statusCode !== 200) {
@@ -1131,8 +1084,16 @@ function downloadBuffer(url, redirectsLeft = 5) {
         reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
         return;
       }
+      const totalBytes = Number(res.headers['content-length']) || 0;
+      let receivedBytes = 0;
       const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('data', (chunk) => {
+        chunks.push(chunk);
+        if (onProgress) {
+          receivedBytes += chunk.length;
+          onProgress({receivedBytes, totalBytes});
+        }
+      });
       res.on('end', () => resolve(Buffer.concat(chunks)));
       res.on('error', reject);
     }).on('error', reject);
@@ -1256,11 +1217,11 @@ function copyPathRecursive(from, to, dirent = null) {
 // Google's public CRX update endpoint -- the same one Chrome itself uses to
 // fetch/update webstore extensions, so this always gets whatever the
 // developer currently has published, with no re-hosting on our side.
-async function downloadWebstoreExtension(extensionId, destDir) {
+async function downloadWebstoreExtension(extensionId, destDir, onProgress = null) {
   const url = 'https://clients2.google.com/service/update2/crx?response=redirect' +
       '&acceptformat=crx2,crx3&prodversion=124.0.0.0' +
       `&x=id%3D${extensionId}%26installsource%3Dondemand%26uc`;
-  const crxBuffer = await downloadBuffer(url);
+  const crxBuffer = await downloadBuffer(url, 5, onProgress);
   const zipOffset = crxZipOffset(crxBuffer);
   unzipBufferTo(crxBuffer.subarray(zipOffset), destDir);
 }
@@ -1306,6 +1267,111 @@ async function materializeSharedExtension(entry) {
     console.error(`Failed to materialize shared extension ${entry.id}:`, error);
     fs.rmSync(destDir, {recursive: true, force: true});
     return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Web Store built-ins (see built-in-extensions.cjs; currently CaptchaPlugin
+// alone). These are the built-ins whose files are not vendored in extensions/
+// but downloaded once per machine, because they are far too large to copy into
+// every profile.
+//
+// The org-wide toggle and the bytes live in different places: the toggle is
+// cloud state shared by the team, the bytes are local to one machine. So there
+// are two ways in. The enable click downloads with progress and only then
+// writes the toggle. A colleague's machine never clicks anything, so it also
+// gets a quiet catch-up pass at app start for "toggle on, files missing".
+// ---------------------------------------------------------------------------
+
+// key -> in-flight promise, so the enable click and the catch-up pass can never
+// run two 56 MB downloads of the same extension at once.
+const webstoreBuiltInDownloads = new Map();
+
+// A CRX whose zip has a single top-level folder unpacks one level too deep.
+// Shared extensions handle that by returning the nested path, but a built-in's
+// location has to stay derivable from its id alone -- launch looks it up via
+// webstoreCachePath() with nothing else to go on -- so flatten instead.
+function flattenNestedExtensionDir(destDir) {
+  if (fs.existsSync(path.join(destDir, 'manifest.json'))) {
+    return;
+  }
+  const entries = isDirectory(destDir) ?
+    fs.readdirSync(destDir, {withFileTypes: true}) : [];
+  const nested = entries.length === 1 && entries[0].isDirectory() ? entries[0] : null;
+  if (!nested || !isLoadableExtensionDir(path.join(destDir, nested.name))) {
+    return;
+  }
+  const nestedPath = path.join(destDir, nested.name);
+  for (const entry of fs.readdirSync(nestedPath, {withFileTypes: true})) {
+    fs.renameSync(path.join(nestedPath, entry.name), path.join(destDir, entry.name));
+  }
+  fs.rmSync(nestedPath, {recursive: true, force: true});
+}
+
+function sendBuiltInDownloadProgress(key, progress) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('argus:built-in-download-progress', {key, ...progress});
+  }
+}
+
+// Downloads a Web Store built-in into this machine's cache if it is not already
+// there. Never throws: returns {ok} so the enable click can leave the toggle
+// off and say why. `notify` is false for the unattended catch-up pass, which
+// has no card waiting on a progress bar.
+async function ensureWebstoreBuiltIn(key, {notify = false} = {}) {
+  const entry = builtInExtensions.builtInExtension(key);
+  if (!entry || entry.source.kind !== 'webstore') {
+    return {ok: false, error: `"${key}" is not a Web Store built-in extension.`};
+  }
+  const destDir = webstoreCachePath(entry.source.id);
+  if (isLoadableExtensionDir(destDir)) {
+    return {ok: true, alreadyInstalled: true};
+  }
+  const inFlight = webstoreBuiltInDownloads.get(key);
+  if (inFlight) {
+    return inFlight;
+  }
+  const run = (async () => {
+    try {
+      fs.rmSync(destDir, {recursive: true, force: true});
+      // Throttled to whole percent: a 56 MB body arrives in thousands of
+      // chunks, and one IPC message per chunk would cost more than the
+      // download.
+      let lastPercent = -1;
+      await downloadWebstoreExtension(entry.source.id, destDir, !notify ? null : (progress) => {
+        const percent = progress.totalBytes ?
+          Math.floor((progress.receivedBytes / progress.totalBytes) * 100) : -1;
+        if (percent !== lastPercent) {
+          lastPercent = percent;
+          sendBuiltInDownloadProgress(key, progress);
+        }
+      });
+      flattenNestedExtensionDir(destDir);
+      if (!isLoadableExtensionDir(destDir)) {
+        throw new Error('downloaded package has no readable manifest.json');
+      }
+      return {ok: true};
+    } catch (error) {
+      fs.rmSync(destDir, {recursive: true, force: true});
+      console.error(`Failed to download built-in extension "${key}":`, error);
+      return {ok: false, error: error?.message || String(error)};
+    } finally {
+      webstoreBuiltInDownloads.delete(key);
+    }
+  })();
+  webstoreBuiltInDownloads.set(key, run);
+  return run;
+}
+
+// "Toggle on, files missing" -- the state a machine lands in when someone else
+// on the team enabled it. Runs unattended at app start; launches never wait on
+// it, so until it finishes those profiles simply launch without the extension.
+function catchUpWebstoreBuiltIns(toggles) {
+  for (const entry of builtInExtensions.BUILT_IN_EXTENSIONS) {
+    if (entry.source.kind !== 'webstore') continue;
+    if (!builtInExtensions.builtInEnabled(toggles, entry)) continue;
+    if (isLoadableExtensionDir(webstoreCachePath(entry.source.id))) continue;
+    void ensureWebstoreBuiltIn(entry.key);
   }
 }
 
@@ -1430,61 +1496,6 @@ async function parseCookieUrl(url) {
   return parseCookieContent(buffer.toString('utf8'));
 }
 
-// Writes one merged "Argus Cookie Manager" extension per launch, into the
-// profile's own user-data-dir: a copy of extensions/cookie-manager's manual
-// export/import UI, plus (only when this profile has a cookie file assigned)
-// a seed-cookies.json the extension's own background.js auto-imports once on
-// first run. Previously this shipped as two separate extensions (a shared
-// "Argus Cookie Manager" plus a per-profile "Argus Cookie Seed <name>"
-// generated from an inline script) -- merged so each profile shows exactly
-// one cookie extension that both seeds and manages.
-async function writeProfileCookieManagerExtension(payload) {
-  const sourceDir = cookieManagerSourcePath();
-  if (!isLoadableExtensionDir(sourceDir)) {
-    console.warn(
-        `Skipping Cookie Manager extension: source folder is missing or has no valid ` +
-        `manifest.json (${sourceDir}). Profile launch will continue without it.`);
-    return '';
-  }
-  const extensionDir = path.join(payload.userDataDir, 'ArgysCookieManager');
-  fs.rmSync(extensionDir, {recursive: true, force: true});
-  copyDirectoryContents(sourceDir, extensionDir);
-  if (!isLoadableExtensionDir(extensionDir)) {
-    console.warn(
-        `Skipping Cookie Manager extension: copy to ${extensionDir} did not produce a ` +
-        `readable manifest.json. Profile launch will continue without it.`);
-    fs.rmSync(extensionDir, {recursive: true, force: true});
-    return '';
-  }
-  // Lets the popup show which profile it's attached to (Argys Browser windows
-  // are otherwise unlabeled from the extension's point of view).
-  fs.writeFileSync(path.join(extensionDir, 'profile-meta.json'), JSON.stringify({
-    id: payload.id || '',
-    name: payload.name || '',
-  }, null, 2));
-  const writeSeedCookies = (cookies) => {
-    if (cookies.length) {
-      fs.writeFileSync(path.join(extensionDir, 'seed-cookies.json'), JSON.stringify({cookies}, null, 2));
-    }
-  };
-  if (payload.cookieImportUrl) {
-    try {
-      writeSeedCookies(await parseCookieUrl(payload.cookieImportUrl));
-    } catch {
-      // Fall back to a local path below if one is still available.
-    }
-  }
-  if (!fs.existsSync(path.join(extensionDir, 'seed-cookies.json')) && payload.cookieImportPath) {
-    try {
-      writeSeedCookies(parseCookieFile(payload.cookieImportPath));
-    } catch {
-      // No seed file written: the extension's own fetch() of seed-cookies.json
-      // simply finds nothing and skips seeding, so this fails soft.
-    }
-  }
-  return extensionDir;
-}
-
 function proxyArgs(proxy) {
   if (!proxy?.host || !proxy.port) {
     return [];
@@ -1558,6 +1569,21 @@ function writeProfileProxyAssignment(userDataDir, proxy) {
     profileData.proxy_http_port = 0;
     profileData.proxy_username = '';
     profileData.proxy_password = '';
+    // Cleared too, or a profile that once ran on an HTTP proxy keeps
+    // proxy_transport: "http" beside a zeroed proxy_http_port -- a shape no
+    // launch ever produces, left for the next reader to puzzle over.
+    profileData.proxy_transport = '';
+    // And Chromium's OWN proxy pref, which is a different key entirely and the
+    // one that actually routes traffic. On a proxied launch the browser writes
+    // socks5://127.0.0.1:<bridge port> into it (argus::ApplySocksProxyToProfile),
+    // and nothing clears it on the way back out: ArgusProfileService's startup
+    // fail-safe is deliberately skipped for --argus-profile-launch sessions,
+    // and InitializeAsync returns early on the now-empty assigned_proxy_id
+    // above, so RevertToDirect/ClearProxyFromProfile never runs. Without this
+    // line, switching a profile to Direct and relaunching it points the browser
+    // at a SOCKS bridge that no longer exists and every navigation fails --
+    // including loopback, since the applicator sets no bypass rules.
+    prefs.proxy = {mode: 'direct'};
   }
   prefs.argus = {...(prefs.argus || {}), profile_data: profileData};
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
@@ -1610,6 +1636,81 @@ function proxyCheckCurlBinary() {
   return process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl';
 }
 
+// How bad a proxy failure is to *act on*, worst-actionable first. checkProxy
+// reports the highest-ranked failure of its three attempts rather than pasting
+// all three together, and this is the order.
+//
+// Auth outranks everything because all three attempts share one proxy: an auth
+// failure is a fact about the proxy, whereas a timeout may be the geolocation
+// service having a bad minute. 'unknown' sorts last so a real diagnosis always
+// beats a raw curl string.
+// 'lookup' sorts last: curl reached the internet through the proxy and the
+// geolocation service refused, which is not the proxy's fault and must never
+// outrank an actual connection failure.
+const PROXY_FAILURE_RANK = [
+  'auth-rejected', 'auth-required', 'dns', 'unreachable', 'timeout', 'unknown', 'lookup',
+];
+
+// Turn a curl exit code + stderr into a cause and a sentence a person can act on.
+//
+// The reason this exists: the raw curl text never contains the word
+// "credentials". A SOCKS5 proxy that wants a username and password answers an
+// anonymous handshake by hanging up, and curl reports that as "connection to
+// proxy closed" -- so a whole CSV of credential-less proxies used to fail with a
+// message that read like the proxies were dead. They were not; they were
+// unauthenticated. Verified against a live provider:
+//
+//   socks5, no credentials    -> 97 "connection to proxy closed"
+//   socks5, wrong credentials -> 97 "User was rejected by the SOCKS5 server"
+//   http,   no credentials    -> 56 "CONNECT tunnel failed, response 407"
+//   http,   wrong credentials -> 56 "CONNECT tunnel failed, response 401"
+//
+// `sentCredentials` is what separates "needs credentials" from "these
+// credentials are wrong" for 407, which is returned in both cases.
+function classifyProxyFailure(code, rawMessage, sentCredentials) {
+  const message = String(rawMessage || '').trim();
+  const lower = message.toLowerCase();
+  const fallback = message || `curl exited ${code}`;
+
+  if (lower.includes('user was rejected by the socks5 server')) {
+    return {reason: 'auth-rejected', error: 'Proxy rejected these credentials (SOCKS5 refused the login)'};
+  }
+  if (lower.includes('no authentication method was acceptable') ||
+      lower.includes('unacceptable authentication method')) {
+    return {reason: 'auth-required', error: 'Proxy needs a username and password (it does not allow anonymous access)'};
+  }
+  const status = lower.match(/response (\d{3})/);
+  if (status) {
+    if (status[1] === '407') {
+      return sentCredentials ?
+        {reason: 'auth-rejected', error: 'Proxy rejected these credentials (407 Proxy Authentication Required)'} :
+        {reason: 'auth-required', error: 'Proxy needs a username and password (407 Proxy Authentication Required)'};
+    }
+    if (status[1] === '401' || status[1] === '403') {
+      return {reason: 'auth-rejected', error: `Proxy rejected these credentials (${status[1]})`};
+    }
+  }
+  // Inferred rather than reported, so the wording hedges. Only when we sent
+  // nothing -- a proxy that hangs up on credentials we did supply is a
+  // different problem, and claiming "needs a password" there would be wrong.
+  if (lower.includes('connection to proxy closed') && !sentCredentials) {
+    return {
+      reason: 'auth-required',
+      error: 'Proxy closed the connection without a login — it needs a username and password',
+    };
+  }
+  if (lower.includes('could not resolve proxy')) {
+    return {reason: 'dns', error: 'Proxy host could not be resolved — check the hostname'};
+  }
+  if (code === 28 || lower.includes('timed out') || lower.includes('timeout')) {
+    return {reason: 'timeout', error: 'Proxy did not respond in time'};
+  }
+  if (code === 7 || lower.includes('failed to connect') || lower.includes('connection refused')) {
+    return {reason: 'unreachable', error: 'Could not connect to the proxy — check the host and port'};
+  }
+  return {reason: 'unknown', error: fallback};
+}
+
 // Runs one curl attempt against `endpoint` through the proxy and resolves to a
 // normalized result -- never rejects, so Promise.allSettled/race logic upstream
 // doesn't need try/catch around each attempt.
@@ -1627,7 +1728,8 @@ function checkProxyEndpoint(proxy, endpoint) {
       '--max-time', '10',
       '--proxy', proxyUrl(proxy),
     ];
-    if (proxy.username || proxy.password) {
+    const sentCredentials = Boolean(proxy.username || proxy.password);
+    if (sentCredentials) {
       args.push('--proxy-user', `${proxy.username || ''}:${proxy.password || ''}`);
     }
     args.push(endpoint);
@@ -1637,18 +1739,29 @@ function checkProxyEndpoint(proxy, endpoint) {
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', (error) => {
-      resolve({ok: false, endpoint, error: error.message});
+      // Spawn failed -- curl never ran, so there is nothing about the proxy to
+      // classify. 'unknown' keeps it ranked below any real diagnosis.
+      resolve({ok: false, endpoint, reason: 'unknown', error: error.message});
     });
     child.on('close', (code) => {
       const pingMs = Date.now() - startedAt;
       if (code !== 0) {
-        resolve({ok: false, endpoint, error: (stderr || stdout || `curl exited ${code}`).trim()});
+        const failure = classifyProxyFailure(code, stderr || stdout, sentCredentials);
+        resolve({ok: false, endpoint, reason: failure.reason, error: failure.error});
         return;
       }
       try {
         const data = JSON.parse(stdout);
         if (data.error || data.status === 'fail') {
-          resolve({ok: false, endpoint, error: data.reason || data.message || `Lookup failed at ${endpoint}`});
+          // curl got through the proxy and the geolocation service answered with
+          // a refusal, so this says nothing bad about the proxy -- hence its own
+          // reason, ranked below every real proxy fault.
+          resolve({
+            ok: false,
+            endpoint,
+            reason: 'lookup',
+            error: data.reason || data.message || `Lookup failed at ${endpoint}`,
+          });
           return;
         }
         const country = data.country_name || data.countryName || data.country;
@@ -1656,7 +1769,7 @@ function checkProxyEndpoint(proxy, endpoint) {
           (typeof data.country === 'string' && data.country.length === 2 ? data.country : undefined);
         resolve({ok: true, endpoint, ip: data.ip || data.query, country, countryCode, pingMs});
       } catch {
-        resolve({ok: false, endpoint, error: `Invalid response from ${endpoint}`});
+        resolve({ok: false, endpoint, reason: 'lookup', error: `Invalid response from ${endpoint}`});
       }
     });
   });
@@ -1680,10 +1793,27 @@ async function checkProxy(proxy) {
   if (success) {
     return {ok: true, ip: success.ip, country: success.country, countryCode: success.countryCode, pingMs: success.pingMs};
   }
+  // All three attempts go through the same proxy, so joining their errors used
+  // to print the same sentence three times over ("connection to proxy closed ·
+  // connection to proxy closed · connection to proxy closed"). Report the single
+  // most actionable failure instead, and only mention a differing second cause.
+  const ranked = results
+      .filter((result) => result.error)
+      .sort((a, b) =>
+        PROXY_FAILURE_RANK.indexOf(a.reason || 'unknown') -
+        PROXY_FAILURE_RANK.indexOf(b.reason || 'unknown'));
+  const best = ranked[0];
+  if (!best) {
+    return {ok: false, pingMs: Date.now() - started, error: 'Proxy check failed'};
+  }
+  const alsoSaw = [...new Set(ranked.slice(1)
+      .filter((result) => result.error !== best.error)
+      .map((result) => result.error))];
   return {
     ok: false,
     pingMs: Date.now() - started,
-    error: results.map((result) => result.error).filter(Boolean).join(' · ') || 'Proxy check failed',
+    reason: best.reason || 'unknown',
+    error: alsoSaw.length ? `${best.error} (also: ${alsoSaw.join('; ')})` : best.error,
   };
 }
 
@@ -1733,13 +1863,19 @@ function killExistingProfileProcess(profileId, userDataDir) {
   }
 }
 
+// Only reached when the renderer sent no homeHtml -- a launch driven by the
+// local API before cloud state has loaded, say. It carries its own colours
+// because it cannot import src/lib/palette.ts (nothing compiles electron/), so
+// they are written out here to match: --surface/--ink/--ink-soft in both
+// themes, with prefers-color-scheme doing the choosing since a payload this
+// degraded carries no theme either.
 function fallbackHomeHtml(profileName) {
   const safeName = String(profileName || 'Profile')
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${safeName}</title>
-<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf8;color:#1d1c18;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{text-align:center}h1{font-size:36px;margin:0 0 10px}p{color:#716b62;font-size:17px}</style>
+<style>:root{color-scheme:light dark;--surface:#f7f7f7;--ink:#1f1f1f;--ink-soft:#676767}@media (prefers-color-scheme:dark){:root{--surface:#1b1b1b;--ink:#e9e9e9;--ink-soft:#9e9e9e}}body{margin:0;display:grid;min-height:100vh;place-items:center;background:var(--surface);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{text-align:center}h1{font-size:20px;letter-spacing:-0.01em;margin:0 0 4px}p{color:var(--ink-soft);font-size:13px}</style>
 </head><body><main><h1>${safeName}</h1><p>Anonymous Argys Browser session</p></main></body></html>`;
 }
 
@@ -1749,12 +1885,30 @@ function writeHomeFile(payload) {
   const homeDir = path.join(root, 'ArgysHome');
   ensureDirectoryPath(homeDir);
   const homePath = path.join(homeDir, 'home.html');
-  fs.writeFileSync(homePath, html);
+  // 0600 because this file can carry a run token (see mintRunToken). It is a
+  // small real improvement regardless: the generated page also names the
+  // profile and its proxy, and there was no reason for it to be world-readable.
+  //
+  // Not a security boundary on its own -- a process running as this user
+  // already wins, and automation-keys.json sits nearby granting strictly more.
+  // It just stops the token being the easiest thing on the disk to read.
+  fs.writeFileSync(homePath, html, {mode: 0o600});
   return pathToFileURL(homePath).toString();
 }
 
-function writeProfileStartupPrefs(userDataDir, launchUrl) {
-  if (!userDataDir || !launchUrl) {
+// Two URLs, not one. `startupUrl` is where the *first* tab goes -- the profile's
+// start_url when it has one. `argusHomeUrl` is the generated ArgysHome/home.html,
+// and it is where *every other* tab goes: the new-tab page and the home button.
+//
+// These used to be a single `launchUrl` argument, which meant a profile with a
+// start_url had newtab_page_location_override pointed at it too, so every Cmd+T
+// for the life of that profile opened the start URL instead of the Argus home
+// page. The four Android rows in a customer's CSV import were the only ones
+// carrying start_url=facebook.com, which made it look like a mobile-fingerprint
+// bug; it was neither mobile nor fingerprint. The first tab never needed the
+// override -- it is opened by the positional URL arg and session.startup_urls.
+function writeProfileStartupPrefs(userDataDir, startupUrl, argusHomeUrl) {
+  if (!userDataDir || !startupUrl) {
     return;
   }
   const defaultDir = path.join(userDataDir, 'Default');
@@ -1766,14 +1920,20 @@ function writeProfileStartupPrefs(userDataDir, launchUrl) {
   } catch {
     prefs = {};
   }
-  prefs.homepage = launchUrl;
+  // Falling back to startupUrl keeps a caller that only knows one URL working,
+  // rather than silently clearing the override and handing back Chromium's own
+  // new-tab page.
+  const newTabUrl = argusHomeUrl || startupUrl;
+  prefs.homepage = newTabUrl;
+  // The Argus home page is a file:// page, not the NTP, so the home button has
+  // to be told to use `homepage` rather than treat it as the new-tab page.
   prefs.homepage_is_newtabpage = false;
-  prefs.newtab_page_location_override = launchUrl;
+  prefs.newtab_page_location_override = newTabUrl;
   prefs.session = {
     ...(prefs.session || {}),
     restore_on_startup: 4,
-    startup_urls: [launchUrl],
-    urls_to_restore_on_startup: [launchUrl],
+    startup_urls: [startupUrl],
+    urls_to_restore_on_startup: [startupUrl],
   };
   prefs.pinned_tabs = [];
   prefs.tabs = {
@@ -2064,10 +2224,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
       };
     }
   }
-  const extensionPaths = [
-    ...bundledExtensionPaths(payload),
-    ...(payload.extensionPaths || []),
-  ].filter(Boolean);
+  const extensionPaths = [...(payload.extensionPaths || [])].filter(Boolean);
   // Team-shared extensions (see SharedExtension in src/types.ts): each is a
   // reference (webstore id, or a Storage URL), materialized into a local
   // cache on first use on this machine. A missing/offline one resolves to ''
@@ -2082,26 +2239,26 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   // omitted and the browser keeps the shared bundle icon.
   const profileDockIcon =
     profileIconPng(payload.color, nativeTheme.shouldUseDarkColors);
-  const launchUrl = payload.startUrl || writeHomeFile(payload);
-  writeProfileStartupPrefs(payload.userDataDir, launchUrl);
+  // Always written, even when the profile has a start_url: the home page is the
+  // new-tab page for the whole session, not just the fallback for the first tab.
+  const argusHomeUrl = writeHomeFile(payload);
+  const launchUrl = payload.startUrl || argusHomeUrl;
+  writeProfileStartupPrefs(payload.userDataDir, launchUrl, argusHomeUrl);
   writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
-  const cookieManagerPath = payload.enableCookieManager !== false ?
-    await writeProfileCookieManagerExtension(payload) : '';
-  if (cookieManagerPath) {
-    extensionPaths.push(cookieManagerPath);
-  }
-  // Bundled for every profile (so its toolbar icon/manual toggle is always
-  // available) unless the Extensions tab's global switch turns it off
-  // entirely. writeProfileFreeProxyExtension's own argus-config.json still
-  // gates auto-connect to payload.useFreeProxy only -- being merely installed
-  // never makes it touch chrome.proxy.settings on its own, so an
+  // Built-in extensions (see built-in-extensions.cjs): the folders vendored in
+  // extensions/, copied into this profile's own user-data-dir, plus any Web
+  // Store one already sitting in this machine's shared cache. Each resolves to
+  // '' rather than throwing, so a missing or unreadable one is skipped instead
+  // of blocking the launch.
+  //
+  // After killExistingProfileProcess above, not before: these write into the
+  // user-data-dir of a browser that may still be running until that call.
+  //
+  // Being bundled is not the same as being active -- FoxyWall's own
+  // argus-config.json still gates auto-connect to payload.useFreeProxy, so
+  // merely installing it never makes it touch chrome.proxy.settings and an
   // assigned-proxy profile's connection is never contested.
-  pruneStaleFreeProxyExtensions(payload.userDataDir);
-  const freeProxyPath = payload.enableFoxywallFreeProxy !== false ?
-    writeProfileFreeProxyExtension(payload) : '';
-  if (freeProxyPath) {
-    extensionPaths.push(freeProxyPath);
-  }
+  extensionPaths.push(...await builtInExtensionPaths(payload));
   const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);
   const switches = launchSafeSwitches(payload.commandLineSwitches);
   const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
@@ -2817,6 +2974,32 @@ ipcMain.handle('argus:install-update', async () => {
   return {ok: true};
 });
 
+// Downloads a Web Store built-in on demand -- the enable click. Resolves
+// {ok:false, error} rather than throwing so the Extensions tab can leave the
+// switch off and show why, instead of writing a toggle every profile then
+// silently launches without.
+ipcMain.handle('argus:install-built-in-extension', async (_event, {key}) =>
+  ensureWebstoreBuiltIn(key, {notify: true}));
+
+// Which Web Store built-ins this machine actually has on disk. The toggle is
+// org-wide, the bytes are per machine, so the card needs both to know whether
+// to offer Enable, a progress bar, or nothing.
+ipcMain.handle('argus:built-in-extension-status', async () => {
+  const installed = {};
+  for (const entry of builtInExtensions.BUILT_IN_EXTENSIONS) {
+    if (entry.source.kind !== 'webstore') continue;
+    installed[entry.key] = isLoadableExtensionDir(webstoreCachePath(entry.source.id));
+  }
+  return {installed};
+});
+
+// Fired once when the workspace's cloud state loads: picks up anything a
+// teammate enabled on their machine. Fire-and-forget by design.
+ipcMain.handle('argus:catch-up-built-in-extensions', async (_event, {toggles}) => {
+  catchUpWebstoreBuiltIns(toggles);
+  return {ok: true};
+});
+
 ipcMain.handle('argus:select-extension-folder', async () => {
   const result = await dialog.showOpenDialog({
     title: 'Select unpacked extension folder',
@@ -2999,6 +3182,133 @@ ipcMain.handle('argus:set-browser-path', async (_event, nextBrowserAppPath) => {
 const AUTOMATION_API_PORT = 39219;
 const pendingAutomationRequests = new Map();
 const AUTOMATION_REQUEST_TIMEOUT_MS = 20000;
+
+// Every route this server answers, from electron/api/routes.json. The allow-list
+// below the bearer gate is derived from it rather than written out again, which
+// is what stops the served surface and the documented surface disagreeing --
+// scripts/verify-api-routes.mjs asserts the two still match.
+const ROUTE_BY_KEY = new Map(apiRoutes.map((route) => [`${route.method} ${route.path}`, route]));
+
+// Routes carrying a `channel` are dispatched straight from the table: validate
+// the declared fields, forward to the renderer, wait. The older routes keep
+// their hand-written blocks further down.
+const TABLE_ROUTES = apiRoutes.filter((route) => route.channel || route.local);
+
+// One request/response round trip to the renderer.
+//
+// The dozen ipcMain.on('...-result') handlers above are the same fifteen lines
+// each -- look up the pending request, clear its timeout, unwrap {result,
+// error} -- copied once per route. New routes share this pair instead of adding
+// a thirteenth copy.
+function askRenderer(res, channel, payload) {
+  if (!mainWindow) {
+    sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
+    return;
+  }
+  const requestId = crypto.randomUUID();
+  const timeout = setTimeout(() => {
+    pendingAutomationRequests.delete(requestId);
+    sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argus Launcher to respond'});
+  }, AUTOMATION_REQUEST_TIMEOUT_MS);
+  pendingAutomationRequests.set(requestId, {res, timeout});
+  mainWindow.webContents.send(channel, {requestId, ...payload});
+}
+
+ipcMain.on('argus:api-result', (_event, {requestId, result, error, status}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    // The renderer chooses the code: 404 for a missing row, 403 for one this
+    // key may not see, 400 for steps that do not validate. Defaulting to 500
+    // would report every one of those as our fault.
+    sendJson(pending.res, status || 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, ...result});
+});
+
+// Reads and parses a JSON request body, answering 400 itself if it is not
+// JSON. Capped because the table routes accept a step tree, which is the only
+// body on this server that is not a handful of ids -- an unbounded read on a
+// loopback port any local process can reach is a way to spend all our memory.
+const MAX_API_BODY_BYTES = 512 * 1024;
+
+function readJsonBody(req, res, next) {
+  let body = '';
+  let tooLarge = false;
+  req.on('data', (chunk) => {
+    if (tooLarge) {
+      return;
+    }
+    body += chunk;
+    if (body.length > MAX_API_BODY_BYTES) {
+      tooLarge = true;
+      sendJson(res, 413, {status: false, msg: 'Request body is too large'});
+      req.destroy();
+    }
+  });
+  req.on('end', () => {
+    if (tooLarge) {
+      return;
+    }
+    try {
+      next(JSON.parse(body || '{}'));
+    } catch {
+      sendJson(res, 400, {status: false, msg: 'Invalid JSON body'});
+    }
+  });
+}
+
+// Checks a body against the route's declared fields and returns either the
+// forwarded payload or an error string. Only declared fields travel: the same
+// rule the MCP tools follow, for the same reason -- an undeclared key that
+// happens to match a column downstream is a write nobody documented.
+function payloadForRoute(route, body) {
+  const out = {};
+  for (const field of route.fields || []) {
+    const value = body[field.key];
+    if (value === undefined || value === null) {
+      if (field.required) {
+        return {error: `${field.key} is required`};
+      }
+      continue;
+    }
+    const okType =
+      field.type === 'string' ? typeof value === 'string' :
+      field.type === 'number' ? typeof value === 'number' && Number.isFinite(value) :
+      field.type === 'boolean' ? typeof value === 'boolean' :
+      field.type === 'steps' ? Array.isArray(value) :
+      // Two names for one shape -- see ApiFieldType in src/api/routes.ts.
+      field.type === 'tags' || field.type === 'strings' ?
+        Array.isArray(value) && value.every((item) => typeof item === 'string') :
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!okType) {
+      const expected =
+        field.type === 'steps' ? 'list of steps' :
+        field.type === 'tags' || field.type === 'strings' ? 'list of strings' :
+        field.type;
+      return {error: `${field.key} must be a ${expected}`};
+    }
+    if (field.type === 'string' && !value.trim() && field.required) {
+      return {error: `${field.key} is required`};
+    }
+    out[field.key] = value;
+  }
+  // Validated here rather than in the renderer so a workflow the runner would
+  // refuse never reaches the database. validateSteps produces path-addressed
+  // messages ("steps[2].then[0].selector is required") written for agents.
+  if (out.steps) {
+    const problems = automationSteps.validateSteps(out.steps, stepSchema);
+    if (problems.length > 0) {
+      return {error: `These steps are not valid: ${problems.slice(0, 5).join('; ')}`};
+    }
+  }
+  return {payload: out};
+}
 
 // Loopback-only isn't the same as trusted: any local process (including a
 // page open in an ordinary browser tab, since this server answers with
@@ -3260,6 +3570,9 @@ function maySeeAutomationSession(key, session) {
 }
 
 function killAutomationLaunch(profileId) {
+  // The token is only good for a live session; outliving one would leave a
+  // credential on disk that still works against whatever opens next.
+  runTokens.dropForProfile(profileId);
   const tracked = automationLaunches.get(profileId);
   if (!tracked) {
     return false;
@@ -3307,6 +3620,43 @@ function sendRunEvent(event) {
   }
 }
 
+// A run's outcome, as a desktop notification. Skipped while the window is
+// focused -- the topbar bell already shows it there, and an OS banner on top
+// of the app you are looking at is a knock on a door that is open. Clicking
+// one raises the window, which is the whole thing a banner about a background
+// event is for.
+function raiseOsNotification(title, body) {
+  if (!Notification.isSupported()) {
+    return;
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+    return;
+  }
+  const notification = new Notification({title, body});
+  notification.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  notification.show();
+}
+
+// ── start-page run tokens ───────────────────────────────────────────────────
+//
+// The store and the endpoint live in ./automation/run-token.cjs so their
+// refusal paths can be tested against the real code rather than a copy --
+// scripts/verify-run-token.mjs drives exactly that module. See its header for
+// what a token does and does not authorize.
+const runTokens = createRunTokens();
+
+ipcMain.handle('argus:mint-run-token',
+    async (_event, {profileId, profileName, cdpPort, automations}) =>
+      runTokens.mint({profileId, profileName, cdpPort, automations}));
+
 ipcMain.handle('argus:reserve-cdp-port', async () => {
   // The renderer has no node:net, so port allocation lives here even though
   // the launch it belongs to is driven from there.
@@ -3321,6 +3671,53 @@ ipcMain.handle('argus:resolve-profile-cdp', async (_event, {profileId}) => {
     return await resolveProfileCdp(profileId);
   } catch (error) {
     return {running: false, error: error?.message || String(error)};
+  }
+});
+
+// How many elements a selector matches on a profile's open page.
+//
+// The editor's Check button. Read-only by construction: it evaluates
+// querySelectorAll(...).length and returns a number, so there is no argument
+// about whether "testing" a click step might submit a form. The selector is
+// JSON-encoded into the expression rather than concatenated -- it is text the
+// user typed, and this is the one place in the editor that puts it into a
+// string that a page will execute.
+//
+// Reuses withPage, which opens a socket and closes it in a finally. A pool was
+// rejected for the MCP tools for the same reason it is not wanted here: a
+// stale handle is worth more debugging than a connection is worth saving.
+ipcMain.handle('argus:check-selector', async (_event, {profileId, selector}) => {
+  const query = String(selector || '').trim();
+  if (!query) {
+    return {ok: false, error: 'Enter a selector first.'};
+  }
+  try {
+    const session = await resolveProfileCdp(profileId);
+    if (!session.running || !session.cdpUrl) {
+      return {ok: false, notRunning: true, error: 'That profile is not open.'};
+    }
+    return await cdpCore.withPage(session.cdpUrl, async (page) => {
+      const result = await page.send('Runtime.evaluate', {
+        // The try/catch is inside the page: an invalid selector throws
+        // SyntaxError from querySelectorAll, and "h1[" is a typo to report as
+        // one, not a failure of the check itself.
+        expression: `(() => {
+          try {
+            return {count: document.querySelectorAll(${JSON.stringify(query)}).length};
+          } catch (error) {
+            return {invalid: String(error && error.message || error)};
+          }
+        })()`,
+        returnByValue: true,
+      });
+      const value = result.result?.value || {};
+      if (value.invalid) {
+        return {ok: false, error: `Not a valid CSS selector: ${value.invalid}`};
+      }
+      return {ok: true, count: Number(value.count) || 0};
+    });
+  } catch (error) {
+    return {ok: false, error: error?.message || String(error)};
   }
 });
 
@@ -3349,6 +3746,60 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
       cdpUrl: payload.cdpUrl,
       vars: payload.vars,
       onEvent: sendRunEvent,
+      // close_on_finish, which until now was a checkbox that saved and did
+      // nothing. Two conditions, not one: the automation has to ask for it AND
+      // this run has to have opened the browser itself. ownsSession comes from
+      // the renderer, which is the only side that knows -- it is the half of
+      // startRun that had to launch the profile because it was not already
+      // open. Without it, ticking the box would close the window a user was
+      // working in the moment they ran anything against that profile.
+      onFinish: payload.automation?.close_on_finish && payload.ownsSession ?
+        () => killAutomationLaunch(payload.profile.id) :
+        undefined,
+      // Notify-on-finish. The runner calls this between sealing the record and
+      // flushing it, so the message reports the final verdict and a failed
+      // send still lands in the record the user reads. This side owns the
+      // connector registry and the OS notification; the returned row rides the
+      // finished event to the renderer, which is the only side that can write
+      // it to Supabase.
+      onNotify: payload.automation?.notify_on ? (record) => {
+        const {notify_on: notifyOn, notify_connector_id: connectorId} = payload.automation;
+        if (!automationNotify.shouldNotify(notifyOn, record.status)) {
+          return null;
+        }
+        const {title, body} = automationNotify.composeFinishMessage(record);
+        // "Straight to Argus" is the built-in delivery: the bell row and the
+        // desktop notification fire whenever the setting says notify, and a
+        // connector -- when one is named -- is an additional channel out.
+        raiseOsNotification(title, body);
+        const notification = {
+          kind: 'automation_run',
+          title,
+          body,
+          status: record.status,
+          automation_id: record.automation_id,
+          run_id: record.id,
+        };
+        if (!connectorId) {
+          return notification;
+        }
+        // The connector resolve AND send are caught HERE, not thrown to the
+        // runner: a deleted connector or a dead webhook must not also cost the
+        // user the bell row that would have told them about it. The failure
+        // travels as sendError, which the runner logs into the record -- for a
+        // deleted connector that is the sentence naming it.
+        return Promise.resolve()
+            .then(() => automationConnectors.send({
+              connector: automationConnectors.resolve(connectorId, 'message'),
+              message: `${title}\n${body}`,
+              subject: title,
+            }))
+            .then(() => notification)
+            .catch((error) => ({
+              ...notification,
+              sendError: error?.message || String(error),
+            }));
+      } : undefined,
     });
     return {ok: true, runId};
   } catch (error) {
@@ -3360,6 +3811,61 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
 
 ipcMain.handle('argus:cancel-automation-run', async (_event, {runId}) => {
   return {ok: automationRunner.cancel(runId)};
+});
+
+// The workspace's connectors, pushed over from the renderer.
+//
+// It is a push and not a pull because this process holds no Supabase
+// credentials and must never start: the renderer is the only side that can
+// read `connectors`, so it hands the resolved list across whenever it changes.
+// Memory only -- nothing here is written to disk, exactly as run tokens are
+// handled, and for the same reason.
+ipcMain.handle('argus:set-connectors', async (_event, {connectors}) => {
+  automationConnectors.setConnectors(connectors);
+  return {ok: true};
+});
+
+// The Test button on a connector card: the smallest real thing that service
+// allows. For an AI connector that is the cheapest completion the API will
+// accept -- this answers "does this key reach this model", and a longer answer
+// would cost the user money to learn nothing more. For a message connector it
+// is one real message, because there is no cheaper way to prove a webhook or a
+// chat id than to use it.
+// What models an AI connector's endpoint actually serves, for the connector
+// form's model picker. Takes the draft (key included) rather than an id for
+// the same reason the Test button does: the endpoint being asked is the one
+// about to be saved, not whatever the last save wrote.
+ipcMain.handle('argus:list-connector-models', async (_event, {connector}) => {
+  try {
+    const models = await automationAi.listModels({provider: connector});
+    return {ok: true, models};
+  } catch (error) {
+    // The provider's own words -- "invalid x-api-key" beats "could not load".
+    return {ok: false, error: error?.message || String(error)};
+  }
+});
+
+ipcMain.handle('argus:test-connector', async (_event, {connector}) => {
+  try {
+    if (connector?.category === 'message') {
+      await automationConnectors.send({
+        connector,
+        message: 'Test message from Argus. Your connector works.',
+        subject: 'Argus connector test',
+      });
+    } else {
+      await automationAi.complete({
+        provider: connector,
+        user: 'Reply with the single word: ok',
+        maxTokens: 8,
+      });
+    }
+    return {ok: true};
+  } catch (error) {
+    // The service's own words. describeDbError has no equivalent here and a
+    // generic "the test failed" would hide the one useful sentence.
+    return {ok: false, error: error?.message || String(error)};
+  }
 });
 
 // A run that is in flight right now, so a reopened window can rejoin one that
@@ -3684,6 +4190,92 @@ function handleOAuthAuthorize(req, res, parsedUrl) {
   });
 }
 
+// Runs one of a launch's own automations, asked for by that launch's start page.
+// The authorization and the refusal semantics live in run-token.cjs; this is
+// only the part that needs the runner and the session.
+function runFromPage(req, res) {
+  handleRunFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    startRun: async (entry, automation) => {
+      const session = await resolveProfileCdp(entry.profileId);
+      // A token whose automations list is non-empty was minted alongside a
+      // reserved port, so this cannot normally be reached -- but a run with
+      // nowhere to connect has to say so rather than dial http://127.0.0.1:null.
+      if (!session.running && !entry.cdpPort) {
+        throw Object.assign(new Error('This session has no debugging port'), {status: 409});
+      }
+      const cdpUrl = session.running && session.cdpUrl ?
+        session.cdpUrl :
+        `http://127.0.0.1:${entry.cdpPort}`;
+      return automationRunner.start({
+        app,
+        automation,
+        profile: {id: entry.profileId, name: entry.profileName || ''},
+        trigger: 'start-page',
+        cdpUrl,
+        onEvent: sendRunEvent,
+      });
+    },
+  });
+}
+
+// Re-checks the proxy assigned to a launch's profile, asked for by that
+// launch's start page.
+//
+// It goes through the renderer rather than calling checkProxy() here, which
+// would be shorter. The renderer owns the cloud data: it can record the result
+// against the proxy row (useProxyActions.recordCheck), so the Proxies tab and
+// every other profile using that proxy agree with what the page now says, and
+// it owns homeProxyStatus, which is the one place the panel's wording is
+// decided. Answering from here would mean a second copy of both.
+const pendingPageRequests = new Map();
+
+function askRendererForRecheck(profileId) {
+  return new Promise((resolve, reject) => {
+    if (!mainWindow) {
+      reject(Object.assign(new Error('Argus Launcher is not open'), {status: 503}));
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    // A proxy check is three concurrent curl runs with --max-time 10, so it
+    // fits inside the standard automation timeout with room to spare.
+    const timeout = setTimeout(() => {
+      pendingPageRequests.delete(requestId);
+      reject(Object.assign(
+          new Error('Timed out waiting for Argus Launcher to answer'), {status: 504}));
+    }, AUTOMATION_REQUEST_TIMEOUT_MS);
+    pendingPageRequests.set(requestId, {resolve, reject, timeout});
+    mainWindow.webContents.send('argus:recheck-proxy-request', {requestId, profileId});
+  });
+}
+
+ipcMain.on('argus:recheck-proxy-result', (_event, {requestId, result, error}) => {
+  const pending = pendingPageRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingPageRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.reject(Object.assign(new Error(error), {status: 500}));
+    return;
+  }
+  pending.resolve(result);
+});
+
+function recheckFromPage(req, res) {
+  handleRecheckFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    recheck: (entry) => askRendererForRecheck(entry.profileId),
+  });
+}
+
 function handleOAuthTokenExchange(req, res) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -3767,11 +4359,66 @@ function startAutomationApiServer() {
       return;
     }
 
+    // Above the bearer gate on purpose: the caller is a file:// page, which has
+    // no key and must never be given one. Both authenticate with a per-launch
+    // run token instead -- see runTokens for what that does and does not
+    // authorize. Neither is in electron/api/routes.json: they are not part of
+    // the keyed surface and must never be advertised as one, which is why
+    // verify-api-routes skips them by name.
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/run-from-page') {
+      runFromPage(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/proxies/recheck-from-page') {
+      recheckFromPage(req, res);
+      return;
+    }
+
     const key = resolveAutomationKey(req);
     if (!key) {
       sendJson(res, 401, {status: false, msg: 'Missing or invalid Authorization bearer token'});
       return;
     }
+
+    // Table-driven routes, ahead of the hand-written blocks below.
+    //
+    // Automations are org-wide objects with no folder of their own, so folder
+    // scope cannot be applied to them the way it is applied to a profile. A
+    // scoped key may therefore list, read and run them -- running still checks
+    // the profile's folder in the renderer -- but may not author them. Anything
+    // else would let a key granted one folder rewrite a workflow every other
+    // folder runs.
+    const tableRoute = ROUTE_BY_KEY.get(`${req.method} ${parsedUrl.pathname}`);
+    if (tableRoute && (tableRoute.channel || tableRoute.local)) {
+      if (tableRoute.scope === 'unscoped' && key.folderScope) {
+        sendJson(res, 403, {
+          status: false,
+          msg: 'This key is scoped to a folder, and automations are shared across all of them. ' +
+            'Use an unscoped key to create, change or delete one.',
+        });
+        return;
+      }
+      if (tableRoute.local) {
+        // Answered here: the step catalogue is a static file in this process,
+        // and a renderer round trip for it would only add a way to fail.
+        sendJson(res, 200, {status: true, steps: stepSchema});
+        return;
+      }
+      if (req.method === 'GET') {
+        askRenderer(res, tableRoute.channel, {allowedFolders: key.folderScope});
+        return;
+      }
+      readJsonBody(req, res, (payload) => {
+        const {payload: forwarded, error} = payloadForRoute(tableRoute, payload);
+        if (error) {
+          sendJson(res, 400, {status: false, msg: error});
+          return;
+        }
+        askRenderer(res, tableRoute.channel, {...forwarded, allowedFolders: key.folderScope});
+      });
+      return;
+    }
+
     if (req.method === 'GET' && parsedUrl.pathname === '/v1/profiles') {
       if (!mainWindow) {
         sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
@@ -3804,23 +4451,10 @@ function startAutomationApiServer() {
       mainWindow.webContents.send('argus:list-proxies-request', {requestId});
       return;
     }
-    if (req.method !== 'POST' ||
-        (parsedUrl.pathname !== '/v1/cookies/bulk-match' &&
-         parsedUrl.pathname !== '/v1/cookies/push-local' &&
-         parsedUrl.pathname !== '/v1/proxies/reimport' &&
-         parsedUrl.pathname !== '/v1/proxies/create' &&
-         parsedUrl.pathname !== '/v1/proxies/update' &&
-         parsedUrl.pathname !== '/v1/proxies/delete' &&
-         parsedUrl.pathname !== '/v1/proxies/check' &&
-         parsedUrl.pathname !== '/v1/profiles/assign-proxy' &&
-         parsedUrl.pathname !== '/v1/profiles/get' &&
-         parsedUrl.pathname !== '/v1/profiles/update' &&
-         parsedUrl.pathname !== '/v1/profiles/delete' &&
-         parsedUrl.pathname !== '/v1/profiles/update-fingerprint' &&
-         parsedUrl.pathname !== '/v1/profiles/launch-automation' &&
-         parsedUrl.pathname !== '/v1/profiles/close-automation' &&
-         parsedUrl.pathname !== '/v1/profiles/cdp' &&
-         parsedUrl.pathname !== '/v1/monitoring/report')) {
+    // Was sixteen chained pathname comparisons. Same set, read off the table
+    // that also documents them, so a route cannot be served without being
+    // documented or documented without being served.
+    if (req.method !== 'POST' || !ROUTE_BY_KEY.has(`POST ${parsedUrl.pathname}`)) {
       sendJson(res, 404, {status: false, msg: 'Not found'});
       return;
     }
@@ -4110,6 +4744,16 @@ function startAutomationApiServer() {
         if (Array.isArray(payload.tags)) fields.tags = payload.tags.filter((tag) => typeof tag === 'string');
         if (typeof payload.status === 'string') fields.status = payload.status;
         if (typeof payload.color === 'string') fields.color = payload.color;
+        // Brand marks only, and the empty string to clear. ArgusProfile.avatar
+        // also accepts an https URL, but that half is the editor's: a URL here
+        // would let a key holder point every avatar in the org at a host of
+        // their choosing and have the launcher fetch it on every render. A
+        // `brand:` slug is a dozen bytes resolved against a catalog that ships
+        // with the app, so it cannot reach the network at all.
+        if (payload.avatar === '' ||
+            (typeof payload.avatar === 'string' && payload.avatar.startsWith('brand:'))) {
+          fields.avatar = payload.avatar;
+        }
         if (typeof payload.folderId === 'string' || payload.folderId === null) fields.folder_id = payload.folderId;
         if (typeof payload.email === 'string') fields.email = payload.email;
         if (typeof payload.password === 'string') fields.password = payload.password;
@@ -4149,12 +4793,25 @@ function startAutomationApiServer() {
           detail: typeof payload.detail === 'string' ? payload.detail : '',
           screenshotBase64: typeof payload.screenshotBase64 === 'string' ? payload.screenshotBase64 : null,
         });
-      } else {
+      } else if (parsedUrl.pathname === '/v1/cookies/bulk-match') {
         mainWindow.webContents.send('argus:bulk-match-cookies-request', {
           requestId,
           folderPath: payload.folderPath,
           // profileIds omitted/empty means "match against every profile".
           profileIds: Array.isArray(payload.profileIds) ? payload.profileIds : null,
+        });
+      } else {
+        // bulk-match used to be this branch, reached by elimination. That was
+        // survivable while the allow-list above was written out by hand -- the
+        // two lists were edited together or not at all. Now that the allow-list
+        // is derived from routes.json, a route added to the table without a
+        // handler here would have been silently answered as a cookie import
+        // against whatever folderPath the caller happened to send.
+        pendingAutomationRequests.delete(requestId);
+        clearTimeout(timeout);
+        sendJson(res, 501, {
+          status: false,
+          msg: `${parsedUrl.pathname} is documented but not implemented`,
         });
       }
     });
@@ -4197,6 +4854,13 @@ app.whenReady().then(() => {
       // A sweep that cannot run is not worth a startup failure.
     }
   }, 10000).unref();
+});
+
+// Tokens live in memory only -- they are never written to automation-keys.json
+// and never logged -- so quitting is already the end of them. Cleared
+// explicitly so a future change that persists this map has to think about it.
+app.on('will-quit', () => {
+  runTokens.clear();
 });
 
 app.on('window-all-closed', () => {

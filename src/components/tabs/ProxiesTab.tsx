@@ -1,15 +1,22 @@
 import {useState} from 'react';
 import {
-  Download, FolderInput, FolderPlus, Pencil, Plus, SearchX, Trash2, Upload, Waypoints, X,
+  Download, FolderInput, FolderPlus, KeyRound, Pencil, Plus, SearchX, Share2, ShieldCheck,
+  Trash2, Upload, Waypoints, X,
 } from 'lucide-react';
 import {MoveProxiesModal} from '../modals/MoveProxiesModal';
-import {AssignedCell} from '../ui/AssignedCell';
+import {SetProxyCredentialsModal} from '../modals/SetProxyCredentialsModal';
+import {Checkbox} from '../ui/Checkbox';
+import {ColumnsButton} from '../ui/ColumnsButton';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
-import {FlagIcon} from '../ui/icons';
 import {PaginationBar} from '../ui/PaginationBar';
+import {FolderSelect} from '../ui/TableFilters';
+import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
+import {PROXY_COLUMNS} from '../../tables/proxyColumns';
+import {sortColumnsFrom} from '../../tables/columns';
+import {useTableColumns} from '../../tables/ColumnLayouts';
 import {
-  isProxyAssigned, profilesUsingProxy, proxyCountryLabel, proxySearchText,
+  isProxyAssigned, profilesUsingProxy, proxySearchText,
 } from '../../lib/proxies';
 import {paginate} from '../../lib/paginate';
 import {profileColorStyle} from '../../lib/profileColors';
@@ -17,8 +24,12 @@ import {initials} from '../../lib/text';
 import {SITE_URL} from '../../lib/auth';
 import {PROXY_PROVIDERS, providerPath} from '../../data/proxyProviders';
 import {native} from '../../native';
+import {useOrg} from '../../org';
 import {useSelection} from '../../hooks/useSelection';
+import {useTableSort} from '../../hooks/useTableSort';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {ProxyColumnContext} from '../../tables/proxyColumns';
+import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
 
 export type ProxiesTabProps = {
@@ -37,6 +48,9 @@ export type ProxiesTabProps = {
   fillCountry: string;
   onFillCountryDone: () => void;
   onRequestDelete: (proxyIds: string[], label: string, onDeleted?: () => void) => void;
+  // Raises the share sheet. Hosted by App, like the delete confirmations, since
+  // four tabs open the same dialog.
+  onShare: (request: ShareRequest) => void;
 };
 
 export function ProxiesTab({
@@ -50,20 +64,57 @@ export function ProxiesTab({
   fillCountry,
   onFillCountryDone,
   onRequestDelete,
+  onShare,
 }: ProxiesTabProps) {
-  const {data, toast, library, proxies, checkingProxyId} = useWorkspace();
+  const {data, toast, library, proxies, checkingProxyIds} = useWorkspace();
+  const org = useOrg();
   const state = data.state;
   const selection = useSelection<ArgusProxy>();
 
+  // "Only what I'm on the hook for". A toggle rather than a third entry in the
+  // assigned dropdown beside it: that one filters by whether a PROFILE holds
+  // the proxy, which is a different question about a different subject, and
+  // stacking both meanings in one control is how the label collision this
+  // column just fixed happened in the first place.
+  const [mineOnly, setMineOnly] = useState(false);
   const [search, setSearch] = useState('');
+  // Gates the "Assigned to me" filter chip. The Assigned *column* is gated by
+  // the same flag inside the registry, which is where teamOnly lives now.
+  const showAssignee = state.members.length > 1;
   const [assignedFilter, setAssignedFilter] = useState<'' | 'assigned' | 'unassigned'>('');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
 
   const assigned = (proxy: ArgusProxy) => isProxyAssigned(proxy, state.profiles);
-  const filtered = Boolean(search.trim() || assignedFilter);
-  const visible = visibleProxies(state.proxies, {folderId, search, assignedFilter, assigned});
+
+  const columnContext: ProxyColumnContext = {state, checkingProxyIds};
+  const {columns, isVisible, setVisible, reset} =
+    useTableColumns('proxies', PROXY_COLUMNS, {isTeam: showAssignee});
+
+  // What each column sorts by lives in tables/proxyColumns.tsx, and the whole
+  // registry is registered rather than the visible slice -- see the note there.
+  const sorting = useTableSort<ArgusProxy>(
+      sortColumnsFrom(PROXY_COLUMNS, columnContext),
+      {onSortChange: () => setPage(0)});
+
+  // Two more than the columns: the selection box and the row actions.
+  const columnCount = columns.length + 2;
+
+  // Hiding the column the table is sorted by returns it to database order,
+  // rather than leaving a header claiming a sort nothing performs.
+  function toggleColumn(columnId: string, visible: boolean) {
+    if (!visible && sorting.sortKey === columnId) {
+      sorting.clear();
+    }
+    setVisible(columnId, visible);
+  }
+
+  const filtered = Boolean(search.trim() || assignedFilter || mineOnly);
+  const visible = sorting.sort(
+      visibleProxies(state.proxies, {folderId, search, assignedFilter, assigned})
+          .filter((proxy) => !mineOnly || proxy.assigned_to === org.userId));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
   const activeFolder = state.proxy_folders.find((folder) => folder.id === folderId) || null;
@@ -131,44 +182,42 @@ export function ProxiesTab({
           onChange={(event) => setAssignedFilter(event.target.value as '' | 'assigned' | 'unassigned')}
         >
           <option value="">All proxies</option>
-          <option value="assigned">Assigned to a profile</option>
-          <option value="unassigned">Not assigned</option>
+          <option value="assigned">Used by a profile</option>
+          <option value="unassigned">Not used by any profile</option>
         </select>
+        {/* Only offered on a team. On a one-person workspace every row is
+            yours, so the filter would be a control that never changes
+            anything. */}
+        {state.members.length > 1 && (
+          <button
+            aria-pressed={mineOnly}
+            className={mineOnly ? 'choice-chip active' : 'choice-chip'}
+            onClick={() => setMineOnly((value) => !value)}
+            type="button"
+          >Assigned to me</button>
+        )}
+        {visible.length > 0 && (
+          <button
+            className="ghost"
+            onClick={() => void proxies.checkMany(visible)}
+            title="Check every proxy this filter is showing"
+          >
+            <ShieldCheck size={16} /> Check all
+          </button>
+        )}
         {visible.length > 0 && (
           <button className="ghost" onClick={() => void proxies.exportToCsv(visible)}>
             <Download size={16} /> Export all
           </button>
         )}
+        <ColumnsButton
+          registry={PROXY_COLUMNS}
+          context={{isTeam: showAssignee}}
+          isVisible={isVisible}
+          onToggle={toggleColumn}
+          onReset={reset}
+        />
       </section>
-
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
-              <option value="" disabled>Assign to folder…</option>
-              <option value="">All proxies</option>
-              {state.proxy_folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>{folder.name}</option>
-              ))}
-            </select>
-            <button
-              className="ghost"
-              onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
-            >
-              <Download size={16} /> Export selected
-            </button>
-            <button
-              className="danger ghost"
-              onClick={() => onRequestDelete(
-                  [...selection.ids],
-                  `${selection.size} selected ${selection.size === 1 ? 'proxy' : 'proxies'}`,
-                  selection.clear)}
-            >
-              <Trash2 size={16} /> Delete selected
-            </button>
-          </div>
-        </section>
-      )}
 
       {/* The same folder navigation the Profiles tab has, minus Trash: a proxy
         * is deleted outright, there is no soft-delete to hold it. */}
@@ -179,7 +228,7 @@ export function ProxiesTab({
           onClick={() => onFolderId('')}
           type="button"
         >
-          <span className="folder-glyph"><Waypoints size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><Waypoints size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">All proxies</span>
           <span className="folder-card-count">{state.proxies.length}</span>
         </button>
@@ -209,7 +258,7 @@ export function ProxiesTab({
                   title={`Edit ${folder.name}`}
                   type="button"
                 >
-                  <Pencil size={13} />
+                  <Pencil size={12} />
                 </button>
                 <button
                   aria-label={`Delete ${folder.name}`}
@@ -218,7 +267,7 @@ export function ProxiesTab({
                   title={`Delete ${folder.name}`}
                   type="button"
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={12} />
                 </button>
               </span>
             </div>
@@ -226,10 +275,59 @@ export function ProxiesTab({
         })}
 
         <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
-          <span className="folder-glyph"><FolderPlus size={17} strokeWidth={1.75} /></span>
+          <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
           <span className="folder-card-name">New folder</span>
         </button>
       </section>
+
+      {/* Below the folder rail, not above it. Ticking a row used to insert this
+        * between the filters and the folders, which pushed the folder cards and
+        * the whole table down by its height -- the navigation moving because of
+        * a selection made inside it. */}
+      {selection.size > 0 && (
+        <section className="selection-toolbar">
+          <div className="selection-toolbar-actions">
+            <FolderSelect
+              folders={state.proxy_folders}
+              noFolderLabel="All proxies"
+              onPick={(id) => void moveSelectionToFolder(id)}
+            />
+            <button
+              className="ghost"
+              onClick={() => void proxies.checkMany(selection.selectedFrom(state.proxies))}
+            >
+              <ShieldCheck size={16} /> Check selected
+            </button>
+            {/* The fix for a library imported from a file that carried no
+              * credentials: the proxies are already saved and already assigned,
+              * so setting the login here repairs those profiles in place. */}
+            <button className="ghost" onClick={() => setCredentialsOpen(true)}>
+              <KeyRound size={16} /> Set credentials…
+            </button>
+            <button
+              className="ghost"
+              onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
+            >
+              <Download size={16} /> Export selected
+            </button>
+            <button
+              className="ghost"
+              onClick={() => onShare({kind: 'proxy', ids: [...selection.ids]})}
+            >
+              <Share2 size={16} /> Share…
+            </button>
+            <button
+              className="danger ghost"
+              onClick={() => onRequestDelete(
+                  [...selection.ids],
+                  `${selection.size} selected ${selection.size === 1 ? 'proxy' : 'proxies'}`,
+                  selection.clear)}
+            >
+              <Trash2 size={16} /> Delete selected
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="table-wrap">
         <table>
@@ -237,84 +335,79 @@ export function ProxiesTab({
             <tr>
               <th>
                 {visible.length > 0 && (
-                  <input
-                    type="checkbox"
-                    aria-label="Select all"
+                  <Checkbox
+                    label={`Select all ${visible.length} proxies on this page`}
                     checked={selection.allSelected(visible)}
+                    indeterminate={visible.some((item) => selection.has(item.id))}
                     onChange={() => selection.toggleAll(visible)}
                   />
                 )}
               </th>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Host</th>
-              <th>Country</th>
-              <th>Last check</th>
-              <th>Folder</th>
-              <th>Assigned to</th>
+              {/* Which columns, in what order, and what each sorts by all live
+                * in tables/proxyColumns.tsx. */}
+              <ColumnHeaders columns={columns} sorting={sorting} />
               <th />
             </tr>
           </thead>
           <tbody>
             {items.map((proxy) => {
-              const folder = state.proxy_folders.find((item) => item.id === proxy.folder_id);
               const label = proxy.name || proxy.host;
               return (
                 <tr key={proxy.id} className={selection.has(proxy.id) ? 'row-checked' : ''}>
                   <td className="checkbox-cell">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      label={`Select ${proxy.name || proxy.host}`}
                       checked={selection.has(proxy.id)}
                       onChange={() => selection.toggle(proxy.id)}
                     />
                   </td>
-                  <td className="name-cell">
-                    <span className="proxy-flag" title={proxyCountryLabel(proxy) || 'Country not checked'}>
-                      <FlagIcon countryCode={proxy.country_code} />
-                    </span>
-                    {label}
-                  </td>
-                  <td>{(proxy.type || 'http').toUpperCase()}</td>
-                  <td className="proxy-host-cell">{proxy.host}:{proxy.port}</td>
-                  <td>{proxyCountryLabel(proxy) || '-'}</td>
-                  <td className={proxy.check_error ? 'proxy-check-cell failed' : 'proxy-check-cell'}>
-                    {checkingProxyId === proxy.id ? 'Checking…' : describeLastCheck(proxy)}
-                  </td>
-                  <td>
-                    {folder ? (
-                      <span className="folder-label">
-                        <FolderGlyph color={folder.color} icon={folder.icon} size={13} small />
-                        {folder.name}
-                      </span>
-                    ) : 'All proxies'}
-                  </td>
-                  <td><AssignedCell holders={profilesUsingProxy(proxy, state.profiles)} /></td>
-                  <td>
-                    <button
-                      aria-label={`Edit ${label}`}
-                      className="ghost icon-button row-action"
-                      onClick={() => onEditProxy(proxy)}
-                      title={`Edit ${label}`}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      aria-label={`Delete ${label}`}
-                      className="ghost icon-button row-action row-action-danger"
-                      onClick={() => onRequestDelete([proxy.id], label)}
-                      title={`Delete ${label}`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                  <ColumnCells columns={columns} context={columnContext} row={proxy} />
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      <button
+                        aria-label={`Check ${label}`}
+                        className="ghost icon-button row-action"
+                        disabled={checkingProxyIds.has(proxy.id)}
+                        onClick={() => void proxies.checkOnce(proxy)}
+                        title={`Check ${label} now`}
+                      >
+                        <ShieldCheck size={16} />
+                      </button>
+                      <button
+                        aria-label={`Share ${label}`}
+                        className="ghost icon-button row-action"
+                        onClick={() => onShare({kind: 'proxy', ids: [proxy.id]})}
+                        title="Share with another workspace"
+                      >
+                        <Share2 size={16} />
+                      </button>
+                      <button
+                        aria-label={`Edit ${label}`}
+                        className="ghost icon-button row-action"
+                        onClick={() => onEditProxy(proxy)}
+                        title={`Edit ${label}`}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        aria-label={`Delete ${label}`}
+                        className="ghost icon-button row-action row-action-danger"
+                        onClick={() => onRequestDelete([proxy.id], label)}
+                        title={`Delete ${label}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
             })}
             {items.length === 0 && (
               <tr className="empty-row-tr">
-                {/* Nine columns. A short colSpan leaves a stray empty cell at
-                  * the end of the row. */}
-                <td colSpan={9}>
+                {/* Counted rather than written down -- the number of columns is
+                  * the user's to choose now. A short colSpan leaves a stray
+                  * empty cell at the end of the row. */}
+                <td colSpan={columnCount}>
                   <EmptyState
                     icon={<SearchX size={22} />}
                     title={filtered ? 'Nothing matches those filters' : 'This folder is empty'}
@@ -366,6 +459,14 @@ export function ProxiesTab({
             setMoveOpen(false);
             onFillCountryDone();
           }}
+        />
+      )}
+
+      {credentialsOpen && (
+        <SetProxyCredentialsModal
+          targets={selection.selectedFrom(state.proxies)}
+          onClose={() => setCredentialsOpen(false)}
+          onDone={selection.clear}
         />
       )}
     </>
@@ -487,40 +588,10 @@ function ProviderStrip({onDismiss}: {onDismiss: () => void}) {
   );
 }
 
-// Short enough for a table cell. The card had room for country, IP and ping on
-// one line; the country and the flag now have columns of their own, so what is
-// left to say here is how it went and how long ago.
-function describeLastCheck(proxy: ArgusProxy) {
-  if (!proxy.checked_at) {
-    return 'Not checked';
-  }
-  if (proxy.check_error) {
-    return `Failed · ${proxy.check_error}`;
-  }
-  return `${proxy.ping_ms || 0} ms · ${sinceLabel(proxy.checked_at)}`;
-}
-
-// Coarse on purpose: a check is a background sweep, and "3h ago" is the only
-// resolution anyone acts on. Anything older than a week is a date.
-function sinceLabel(iso: string) {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) {
-    return 'unknown';
-  }
-  const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) {
-    return 'just now';
-  }
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-  const days = Math.floor(hours / 24);
-  return days <= 7 ? `${days}d ago` : iso.slice(0, 10);
-}
+// describeLastCheck and sinceLabel used to live here. They are in
+// components/ui/ProxyCheckCell.tsx now, because the Profiles tab and the import
+// review table ask the same question of the same data and were each answering it
+// their own way.
 
 // Folder first, then the assignment filter, then the search narrows whatever
 // those left -- the same order the Profiles tab filters in.

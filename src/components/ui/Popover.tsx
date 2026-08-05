@@ -22,6 +22,7 @@ export function Popover({
   triggerClassName = 'icon-button',
   panelClassName = '',
   width = 300,
+  disabled = false,
   children,
 }: {
   // Accessible name for the trigger button; the trigger itself is a glyph.
@@ -30,6 +31,9 @@ export function Popover({
   triggerClassName?: string;
   panelClassName?: string;
   width?: number;
+  // For a picker whose list is momentarily empty. Shown and greyed rather than
+  // removed: the trigger is how you learn the choice exists at all.
+  disabled?: boolean;
   // A function when the contents need to dismiss the panel themselves (picking
   // an option); a plain node when they are only there to be read.
   children: ReactNode | ((close: () => void) => ReactNode);
@@ -110,13 +114,14 @@ export function Popover({
         aria-expanded={open}
         aria-label={label}
         className={triggerClassName}
+        disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         ref={anchor}
         type="button"
       >
         {trigger}
       </button>
-      {open && (
+      {open && !disabled && (
         <div
           className={panelClassName ? `popover-panel ${panelClassName}` : 'popover-panel'}
           ref={panel}

@@ -1,17 +1,24 @@
 import * as db from '../db';
+import {mapWithConcurrency} from '../lib/concurrency';
 import {toCsv} from '../lib/csv';
-import {defaultProxyName} from '../lib/proxies';
+import {defaultProxyName, matchedProxyForProfile} from '../lib/proxies';
 import {native} from '../native';
 import {newId} from './core';
 import type {WorkspaceCore} from './core';
 import type {ProxyCheckResult, ProxyConfig} from '../native';
-import type {ArgusProxy} from '../types';
+import type {ArgusProfile, ArgusProxy} from '../types';
 
 const NO_CHECKER = 'Native proxy checker is not available. Restart Argus Launcher and try again.';
 
+// How many checks run at once in a batch. Kept the same as the import dialog's
+// limit, and for the same reason: each check is a curl with a 10s ceiling, so
+// this is the difference between forty processes and five.
+const CHECK_CONCURRENCY = 5;
+
 export type ProxyActions = ReturnType<typeof useProxyActions>;
 
-export function useProxyActions({data, toast}: WorkspaceCore) {
+export function useProxyActions(
+    {data, toast, beginProxyCheck, endProxyCheck}: WorkspaceCore) {
   const {state, withDb, withDbError, patch} = data;
 
   // Every proxy-check path (background loop, manual re-check, pre-launch check)
@@ -102,23 +109,196 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
     return result;
   }
 
+  // Resolves the proxy a launch will actually use, checking it first if its
+  // stored result is missing or stale. Returns null when the profile needs no
+  // proxy, and 'blocked' when the launch must not happen -- the reason has
+  // already been shown by then.
+  //
+  // spawnProfileUnchecked (main process) is the authoritative gate on every
+  // launch regardless. This is the copy that runs where there is somewhere to
+  // show a failure, and it skips re-checking a proxy already known-good.
+  //
+  // It lives here rather than in useProfileActions, where it was written,
+  // because it is not only the Launch button's any more: an automation run
+  // launches a profile too, and going straight to buildLaunchPayload is exactly
+  // how that path ended up reporting a dead proxy as a dead run several seconds
+  // later, in a sentence about a profile the user never picked.
+  async function resolveForLaunch(
+      profile: ArgusProfile): Promise<ArgusProxy | null | 'blocked'> {
+    if ((profile.proxy_mode || 'assigned') !== 'assigned') {
+      return null;
+    }
+    // matchedProxyForProfile, not a find on proxy_id: it carries the name-based
+    // fallback that keeps an imported profile whose id never matched working,
+    // and runReadiness resolves the proxy the same way so the Run dialog and
+    // this gate cannot name two different rows.
+    const assigned = matchedProxyForProfile(profile, state.proxies);
+    if (!assigned?.host || !assigned.port) {
+      toast.fail('Launch blocked',
+          `Proxy for ${profile.name} is invalid. Fix host and port before launch.`);
+      return 'blocked';
+    }
+    if (assigned.checked_at && !assigned.check_error) {
+      return assigned;
+    }
+    if (!native?.checkProxy) {
+      toast.fail('Launch blocked', NO_CHECKER);
+      return 'blocked';
+    }
+    toast.setMessage(`Checking proxy for ${profile.name}`);
+    beginProxyCheck(assigned.id);
+    let checked: ArgusProxy;
+    try {
+      checked = await runCheck(assigned);
+      await recordCheck(checked);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.fail('Launch blocked', `Proxy for ${profile.name} failed its check: ${message}`);
+      return 'blocked';
+    } finally {
+      endProxyCheck(assigned.id);
+    }
+    if (checked.check_error) {
+      toast.fail('Launch blocked',
+          `Proxy for ${profile.name} failed its check: ${checked.check_error}`);
+      return 'blocked';
+    }
+    return checked;
+  }
+
+  // One proxy, checked because the user asked -- the per-row check button in the
+  // Proxies and Profiles tables.
+  //
+  // Drives the shared checkingProxyIds set so the row it belongs to says
+  // "Checking…" while it runs, and reports through a toast because the click that
+  // started it may well have scrolled out of view by the time curl gives up ten
+  // seconds later.
   async function checkOnce(proxy: ArgusProxy) {
     if (!native?.checkProxy) {
       toast.setMessage(NO_CHECKER);
       return;
     }
+    beginProxyCheck(proxy.id);
     try {
       const checked = await runCheck(proxy);
       if (!await recordCheck(checked)) {
         return;
       }
       const label = proxy.name || proxy.host;
-      toast.setMessage(checked.check_error ?
-        `${label} check failed · ${checked.check_error}` :
-        `${label} checked · ${checked.country || checked.country_code || checked.egress_ip || 'OK'} · ${checked.ping_ms}ms`);
+      // The error goes in `detail` as well as the message: it is what the user
+      // takes to their provider, and a banner that clears itself is no place to
+      // leave the only copy of it.
+      if (checked.check_error) {
+        toast.notify(`${label} check failed · ${checked.check_error}`,
+            {tone: 'fail', detail: checked.check_error});
+      } else {
+        toast.notify(
+            `${label} checked · ${checked.country || checked.country_code || checked.egress_ip || 'OK'} · ${checked.ping_ms}ms`,
+            {tone: 'ok'});
+      }
     } catch (error) {
-      toast.setMessage(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      toast.notify(message, {tone: 'fail', detail: message});
+    } finally {
+      endProxyCheck(proxy.id);
     }
+  }
+
+  // A batch of proxies, checked concurrently so spotting the bad ones in a
+  // library of forty is one action rather than forty.
+  //
+  // CHECK_CONCURRENCY rather than all-at-once for the reason the import dialog
+  // uses the same number: each check is a curl with a 10s ceiling, and a hundred
+  // of them at once is a hundred processes. Failures are counted rather than
+  // toasted one by one -- the per-row chips carry which ones, and forty toasts
+  // would bury the summary.
+  //
+  // `quiet` suppresses the summary for a sweep the user did not ask for -- the
+  // one the Run dialog fires on open to freshen what it is about to show. The
+  // per-row chips report it there, and a toast about work nobody requested,
+  // arriving while they are still reading the list, is noise.
+  async function checkMany(list: ArgusProxy[], {quiet = false} = {}) {
+    const targets = list.filter((proxy) => proxy.host && proxy.port);
+    if (!targets.length) {
+      if (!quiet) {
+        toast.setMessage('No proxies to check.');
+      }
+      return;
+    }
+    if (!native?.checkProxy) {
+      if (!quiet) {
+        toast.setMessage(NO_CHECKER);
+      }
+      return;
+    }
+    targets.forEach((proxy) => beginProxyCheck(proxy.id));
+    let failed = 0;
+    await mapWithConcurrency(targets, CHECK_CONCURRENCY, async (proxy) => {
+      try {
+        const checked = await runCheck(proxy);
+        await recordCheck(checked);
+        if (checked.check_error) {
+          failed++;
+        }
+      } catch (error) {
+        failed++;
+        // Recorded, not swallowed: a check that threw is a check that failed,
+        // and the row has to say so rather than staying on its old result.
+        await recordCheck({
+          ...proxy,
+          checked_at: new Date().toISOString(),
+          check_error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        endProxyCheck(proxy.id);
+      }
+    });
+    if (quiet) {
+      return;
+    }
+    const passed = targets.length - failed;
+    const noun = targets.length === 1 ? 'proxy' : 'proxies';
+    // No `detail` on the batch: there are `failed` different errors and the
+    // per-row chips are where each one is. Copying a summary line would hand
+    // over the one text that names no proxy at all.
+    toast.notify(failed ?
+      `Checked ${targets.length} ${noun} · ${passed} passed, ${failed} failed` :
+      `Checked ${targets.length} ${noun} · all passed`,
+    {tone: failed ? 'fail' : 'ok'});
+  }
+
+  // Gives a batch of saved proxies one username and password.
+  //
+  // The fix for a library imported from a file that carried no credentials: the
+  // proxies are already saved and already assigned to profiles, so updating them
+  // in place fixes those profiles too -- where re-importing with credentials
+  // would mint a second proxy per host and leave the profiles on the dead one.
+  async function setCredentials(
+      list: ArgusProxy[], username: string, password: string): Promise<number> {
+    let updated = 0;
+    for (const proxy of list) {
+      // Every check column cleared, not just the error: the stored result
+      // describes the proxy as it was without a login, and a country left behind
+      // with no timestamp reads as a check that passed.
+      const next: ArgusProxy = {
+        ...proxy,
+        username: username || undefined,
+        password: password || undefined,
+        country: undefined,
+        country_code: undefined,
+        egress_ip: undefined,
+        ping_ms: undefined,
+        checked_at: undefined,
+        check_error: undefined,
+      };
+      if (await update(next)) {
+        updated++;
+      }
+    }
+    toast.setMessage(updated ?
+      `Set credentials on ${updated} ${updated === 1 ? 'proxy' : 'proxies'} · check them to confirm` :
+      'No proxies were updated');
+    return updated;
   }
 
   // Returns the failure text rather than toasting it: the only caller is the
@@ -279,7 +459,8 @@ export function useProxyActions({data, toast}: WorkspaceCore) {
   }
 
   return {
-    recordCheck, runCheck, checkOnce, testConnection, testConnectionAndRecord,
+    recordCheck, runCheck, checkOnce, checkMany, setCredentials, resolveForLaunch,
+    testConnection, testConnectionAndRecord,
     save, create, update, remove, assignToFolder, importList, exportToCsv,
   };
 }

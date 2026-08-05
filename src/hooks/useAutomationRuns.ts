@@ -30,13 +30,42 @@ export type StartRunResult =
   | {ok: true; runId: string}
   | {ok: false; error: string};
 
-export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
+// The notify-on-finish payload riding a finished event: composed by the main
+// process off the sealed run record, delivered here because the renderer is
+// the only side that can write the `notifications` row. `sendError` is the
+// connector delivery failure, if any -- already logged into the run record by
+// the runner, so it is not stored again.
+export type RunNotification = {
+  kind: string;
+  title: string;
+  body: string;
+  status?: string | null;
+  automation_id?: string | null;
+  run_id?: string | null;
+  sendError?: string | null;
+};
+
+export function useAutomationRuns(
+    orgId: string | null,
+    signedIn: boolean,
+    // Called when a finished event carries a notification. The caller owns
+    // what that means (the Supabase insert and the bell patch); this hook only
+    // hands it over, so its "runs are the only thing written here" header
+    // stays true.
+    onNotification?: (notification: RunNotification) => void,
+) {
   // runId -> run, for anything in flight or just finished this session.
   const [runs, setRuns] = useState<Record<string, AutomationRun>>({});
   const pending = useRef<Record<string, AutomationRun>>({});
   const dirty = useRef(false);
   const orgRef = useRef(orgId);
   orgRef.current = orgId;
+  // Who is waiting for a run to end. See waitForRun below.
+  const waiters = useRef<Map<string, (run: AutomationRun) => void>>(new Map());
+  // A ref because the event subscription below deliberately mounts once; a
+  // closure over the prop would go stale on the first re-render.
+  const notifyRef = useRef(onNotification);
+  notifyRef.current = onNotification;
 
   // Mirror the ref into state on a timer rather than per event.
   useEffect(() => {
@@ -76,6 +105,20 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
       }
       pending.current[event.runId] = event.run;
       dirty.current = true;
+      // Notify-on-finish: the composed notification rides the finished event.
+      // Handed to the owner before the run write for the same reason waiters
+      // are resolved first -- neither should wait on Supabase.
+      if (event.notification) {
+        notifyRef.current?.(event.notification);
+      }
+      // Before the database write, and outside its promise: a batch's pacing
+      // must not wait on Supabase, and an offline machine still has to start
+      // its next run.
+      const waiter = waiters.current.get(event.runId);
+      if (waiter) {
+        waiters.current.delete(event.runId);
+        waiter(event.run);
+      }
       if (org) {
         // upsert, not update: if the insert above failed (offline, signed out)
         // there is no row to update and the run would vanish.
@@ -85,6 +128,42 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
       }
     });
   }, []);
+
+  // Resolves when this run reaches a terminal state.
+  //
+  // A batch needs this because startRun resolves as soon as the run has
+  // STARTED -- runner.cjs deliberately does not await execute() -- so pacing a
+  // queue on startRun would start every profile at once and trip the runner's
+  // own MAX_CONCURRENT_RUNS of 3, which refuses with a 429 rather than
+  // queueing. Pacing on completion is what makes the cap a queue.
+  //
+  // Already-finished runs resolve immediately: the terminal event can arrive
+  // between startRun returning and the caller asking, and a promise that waits
+  // for an event already delivered never settles.
+  //
+  // `timeoutMs` is a stall guard, not a cancel -- the run keeps going and its
+  // record is still written when it does end. Without it a run whose terminal
+  // event never arrives (a killed browser, a main process that went away) would
+  // hold a queue slot forever, so a batch of five could stop after three with
+  // no error anywhere. Resolves null on expiry so the caller can tell the two
+  // apart.
+  const waitForRun = useCallback(
+      (runId: string, timeoutMs: number): Promise<AutomationRun | null> => {
+        const known = pending.current[runId];
+        if (known && known.status !== 'running') {
+          return Promise.resolve(known);
+        }
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            waiters.current.delete(runId);
+            resolve(null);
+          }, timeoutMs);
+          waiters.current.set(runId, (run) => {
+            clearTimeout(timer);
+            resolve(run);
+          });
+        });
+      }, []);
 
   // Runs that finished on disk but never reached the database.
   const flushPending = useCallback(async () => {
@@ -148,6 +227,10 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
     }
     try {
       let session = await native.resolveProfileCdp(profile.id);
+      // Whether this run is the reason the browser is open. It decides whether
+      // close_on_finish may close it: a window that was already there belongs
+      // to whoever opened it, and a run is a guest in it.
+      let ownsSession = false;
       if (!session.running) {
         if (!options.buildLaunch) {
           return {ok: false, error: `${profile.name} is not open.`};
@@ -160,10 +243,26 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
         if (!launched.ok) {
           return {ok: false, error: launched.error || 'The profile did not launch.'};
         }
-        session = await native.resolveProfileCdp(profile.id);
-        if (!session.running || !session.cdpUrl) {
-          return {ok: false, error: 'The browser started but never answered on its debugging port.'};
+        // Waited for, not re-resolved. Chromium binds --remote-debugging-port
+        // and writes DevToolsActivePort a second or two after spawn, so asking
+        // resolveProfileCdp again here loses the race almost every time and
+        // reports a window that is opening as one that never answered.
+        // waitForCdp polls the port this process just handed out, which is the
+        // same thing the on-launch trigger does (useProfileActions) and the
+        // HTTP launch-automation route does (waitForCdpReady in main.cjs).
+        //
+        // The already-open branch above stays on resolveProfileCdp on purpose:
+        // there is no port in hand there, and its two-tier lookup is what lets
+        // a run attach to a session this process did not start.
+        const ready = await native.waitForCdp?.(port, 20000);
+        if (!ready?.ok || !ready.cdpUrl) {
+          return {
+            ok: false,
+            error: ready?.error || 'The browser started but never answered on its debugging port.',
+          };
         }
+        session = {running: true, cdpUrl: ready.cdpUrl, pid: null};
+        ownsSession = true;
       }
       const result = await native.startAutomationRun({
         automation,
@@ -171,6 +270,7 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
         trigger: options.trigger || 'manual',
         cdpUrl: session.cdpUrl as string,
         vars: options.vars,
+        ownsSession,
       });
       if (!result.ok || !result.runId) {
         return {ok: false, error: result.error || 'The run did not start.'};
@@ -185,5 +285,5 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
     await native?.cancelAutomationRun?.(runId);
   }, []);
 
-  return {runs, startRun, cancelRun, flushPending};
+  return {runs, startRun, cancelRun, waitForRun, flushPending};
 }

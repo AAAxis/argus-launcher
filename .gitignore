@@ -9,3 +9,8 @@ bundled-browser/*
 !.env.example
 .DS_Store
 *.log
+
+# Supabase CLI local state. `.temp` caches the linked project ref and pooler
+# URL; `.branches` is per-developer. Neither belongs in the repo.
+supabase/.temp
+supabase/.branches

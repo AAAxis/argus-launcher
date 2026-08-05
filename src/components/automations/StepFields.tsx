@@ -4,13 +4,99 @@
 // keeping the catalogue in JSON: adding a step type means an entry in the JSON,
 // a member of the StepType union and an executor -- and no change to this file
 // or to any other component.
+import {useState} from 'react';
+import {Check} from 'lucide-react';
+import {BusyButton} from '../ui/BusyButton';
 import {Field} from '../ui/Field';
+import {native} from '../../native';
 import {fieldVisible, specFor} from '../../automations/schema';
 import type {FieldSpec} from '../../automations/schema';
 import type {AutomationStep, Condition} from '../../automations/types';
 import type {ReactNode} from 'react';
 
 type Values = Record<string, unknown>;
+
+// What a selector matched, as a sentence and a tone. Kept together because the
+// count alone is not the answer: one match is good, seven is a step that will
+// act on whichever the browser happens to return first.
+type CheckResult = {tone: 'ok' | 'warn' | 'bad' | 'idle'; message: string};
+
+// Counts what a selector matches on the open profile's current page.
+//
+// Read-only: the main process evaluates querySelectorAll(...).length and
+// nothing else, so checking a `click` step cannot click anything.
+function SelectorCheck({selector, profileId, profileName}: {
+  selector: string;
+  // Null when no profile is open or selected -- the button says so rather than
+  // being hidden, because "there is nothing to check against" is the answer
+  // most often needed and a missing button explains nothing.
+  profileId: string | null;
+  profileName: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CheckResult | null>(null);
+
+  async function run() {
+    if (!profileId || !native?.checkSelector) {
+      setResult({tone: 'idle', message: 'Select a profile on the Profiles tab first.'});
+      return;
+    }
+    // A template resolves from run-time variables that do not exist yet, so
+    // testing it literally would report "no match" for a selector that is
+    // going to be correct. Say which, rather than being wrong confidently.
+    if (selector.includes('{{')) {
+      setResult({
+        tone: 'idle',
+        message: 'This selector fills in from a variable, so it can only be checked during a run.',
+      });
+      return;
+    }
+    setBusy(true);
+    const answer = await native.checkSelector(profileId, selector);
+    setBusy(false);
+    if (!answer.ok) {
+      setResult({
+        tone: answer.notRunning ? 'idle' : 'bad',
+        message: answer.notRunning ?
+          `Launch ${profileName || 'the profile'} to check against its page.` :
+          answer.error || 'The check did not run.',
+      });
+      return;
+    }
+    const count = answer.count ?? 0;
+    if (count === 0) {
+      setResult({tone: 'bad', message: `Nothing on ${profileName}'s page matches this.`});
+      return;
+    }
+    if (count === 1) {
+      setResult({tone: 'ok', message: `1 match on ${profileName}'s page.`});
+      return;
+    }
+    setResult({
+      tone: 'warn',
+      message: `${count} matches. This step acts on the first unless you set a match index.`,
+    });
+  }
+
+  return (
+    <div className="automation-check">
+      <BusyButton
+        busy={busy}
+        busyLabel="Checking"
+        icon={<Check size={14} />}
+        className="ghost small automation-check-run"
+        disabled={!selector.trim()}
+        onClick={() => void run()}
+        title={profileId ?
+          `Count what this matches on ${profileName}'s open page` :
+          'Select a profile on the Profiles tab first'}
+      >Check</BusyButton>
+      {result && (
+        <span className={`automation-check-result is-${result.tone}`}>{result.message}</span>
+      )}
+    </div>
+  );
+}
 
 // A string->string map, edited as rows. Used by evaluate.args and
 // httpRequest.headers.
@@ -100,6 +186,10 @@ function control(
     field: FieldSpec,
     value: unknown,
     set: (next: unknown) => void,
+    // The workspace's connectors, for the one field kind whose options are
+    // data rather than a list in step-schema.json. Names and ids only -- no
+    // config ever reaches the editor.
+    connectors: {id: string; name: string; category: string; is_default?: boolean}[],
 ): ReactNode {
   switch (field.kind) {
     case 'textarea':
@@ -150,6 +240,35 @@ function control(
       );
     case 'condition':
       return <ConditionFields value={value as Condition} onChange={set} />;
+    case 'connector': {
+      // The dropdown offers only the field's category: an AI step lists the
+      // workspace's models, a notify step its messaging targets. The default
+      // named in the first option is that category's default too.
+      const options = connectors.filter(
+          (entry) => !field.category || entry.category === field.category);
+      return (
+        <select value={String(value ?? '')} onChange={(event) => set(event.target.value)}>
+          {/* Empty means "whichever the workspace has marked default", which is
+              resolved at run time and not here -- so an automation stays
+              correct after the default changes, and an agent authoring one over
+              MCP can leave the field out entirely. */}
+          <option value="">
+            Workspace default{options.some((entry) => entry.is_default) ?
+              ` (${options.find((entry) => entry.is_default)?.name})` :
+              ' — none set yet'}
+          </option>
+          {options.map((connector) => (
+            <option key={connector.id} value={connector.id}>{connector.name}</option>
+          ))}
+          {/* A connector that has been deleted, or one from another workspace.
+              Listed so the step keeps showing what it actually names instead of
+              silently snapping back to the default. */}
+          {Boolean(value) && !options.some((connector) => connector.id === value) && (
+            <option value={String(value)}>Missing connector</option>
+          )}
+        </select>
+      );
+    }
     default:
       return (
         <input
@@ -161,12 +280,16 @@ function control(
   }
 }
 
-export function StepFields({step, onChange, renderSteps}: {
+export function StepFields({step, onChange, checkProfile, connectors = []}: {
   step: AutomationStep;
   onChange: (next: AutomationStep) => void;
-  // Nested lists (if/loop) are rendered by the parent, which owns the
-  // recursion and the depth cap.
-  renderSteps: (key: string, label: string) => ReactNode;
+  // Threaded from the editor rather than read from context, exactly as
+  // checkProfile is: StepList is also the recursion, and a branch's steps
+  // choose from the same list.
+  connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
+  // The profile a Check tests against. See automations/target.ts -- the same
+  // rule the Run button uses, so the page you check is the page you run on.
+  checkProfile?: {id: string; name: string} | null;
 }) {
   const spec = specFor(step.type);
   const values = step as unknown as Values;
@@ -177,8 +300,14 @@ export function StepFields({step, onChange, renderSteps}: {
         if (!fieldVisible(field, values)) {
           return null;
         }
+        // Nested lists are not fields. StepList renders them below the card,
+        // outside this panel, so an `if` shows its Yes and No branches and a
+        // `loop` shows its body whether or not the step is expanded. They used
+        // to live in here, which meant a collapsed branch step displayed
+        // nothing about its own shape -- the single most common complaint
+        // about this editor.
         if (field.kind === 'steps') {
-          return <div key={field.key}>{renderSteps(field.key, field.label)}</div>;
+          return null;
         }
         const set = (next: unknown) => onChange({...step, [field.key]: next} as AutomationStep);
         // A checkbox already carries its own label, so wrapping it in a Field
@@ -186,7 +315,7 @@ export function StepFields({step, onChange, renderSteps}: {
         if (field.kind === 'boolean') {
           return (
             <div className="automation-field" key={field.key}>
-              {control(field, values[field.key], set)}
+              {control(field, values[field.key], set, connectors)}
               {field.hint && <p className="field-hint">{field.hint}</p>}
             </div>
           );
@@ -197,7 +326,18 @@ export function StepFields({step, onChange, renderSteps}: {
             label={field.required ? `${field.label} *` : field.label}
             hint={field.hint}
           >
-            {control(field, values[field.key], set)}
+            {control(field, values[field.key], set, connectors)}
+            {/* Keyed on the selector's current value, so editing the input
+                clears a stale verdict rather than leaving "1 match" sitting
+                under a selector that has since been changed. */}
+            {field.check === 'selector' && (
+              <SelectorCheck
+                key={String(values[field.key] ?? '')}
+                selector={String(values[field.key] ?? '')}
+                profileId={checkProfile?.id || null}
+                profileName={checkProfile?.name || null}
+              />
+            )}
           </Field>
         );
       })}

@@ -3,10 +3,12 @@ import type {
   ArgusProfile,
   ArgusProxy,
   AutomationRun,
+  BuiltInExtensionToggles,
   RuntimeFingerprint,
   SharedExtension,
 } from './types';
 import type {AutomationVars, RunLogEntry, RunTrigger} from './automations/types';
+import type {RuntimeConnector} from './data/connectors';
 
 export type ProxyConfig = {
   id?: string;
@@ -48,11 +50,12 @@ export type LaunchProfilePayload = {
   cookieImportPath?: string | null;
   cookieImportUrl?: string | null;
   cookieImportName?: string | null;
-  // Global on/off switches for the bundled "stock" extensions (Extensions
-  // tab). Undefined/missing means enabled, for backward compatibility.
-  enableCookieManager?: boolean;
-  enableSmsActivate?: boolean;
-  enableFoxywallFreeProxy?: boolean;
+  // The org's on/off switches for the built-in "stock" extensions (Extensions
+  // tab), passed through as one map rather than a boolean per extension: which
+  // extensions exist, and what a missing value means for each, is
+  // electron/built-in-extensions.cjs's business alone. Adding a fifth is a row
+  // in that table, not another field here.
+  builtInExtensions?: BuiltInExtensionToggles;
 };
 
 export type CookieFileSelection = {
@@ -62,12 +65,22 @@ export type CookieFileSelection = {
   base64?: string;
 };
 
+// `reason` is why the check failed, classified in main by classifyProxyFailure.
+// `error` is already a sentence written for a person, so nothing has to switch on
+// this to produce copy -- it is here so the UI can treat a credentials problem
+// differently from a dead host (offer the credentials editor, say) without
+// pattern-matching English.
+export type ProxyFailureReason =
+  | 'auth-required' | 'auth-rejected' | 'dns' | 'unreachable' | 'timeout'
+  | 'lookup' | 'unknown';
+
 export type ProxyCheckResult = {
   ok: boolean;
   ip?: string;
   country?: string;
   countryCode?: string;
   pingMs?: number;
+  reason?: ProxyFailureReason;
   error?: string;
 };
 
@@ -244,6 +257,16 @@ type ArgusNative = {
   // Which agent tools look present on this machine, in one call.
   detectIntegrations?(): Promise<Record<string, boolean>>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
+  // How many elements a selector matches on a profile's open page. Read-only:
+  // it evaluates querySelectorAll(...).length and nothing else, so the step
+  // editor's Check button cannot submit the form it is describing.
+  checkSelector?(profileId: string, selector: string): Promise<{
+    ok: boolean;
+    count?: number;
+    // The profile is not open, which is a thing to say rather than an error.
+    notRunning?: boolean;
+    error?: string;
+  }>;
   // Opens a page in the user's real browser. The main process only honours
   // https: URLs on hosts we own (plus localhost in dev), so a rejected URL
   // resolves false rather than throwing.
@@ -287,6 +310,21 @@ type ArgusNative = {
     pid?: number | null;
     error?: string;
   }>;
+  // A per-launch credential for the generated start page, which is a file://
+  // document with no key of its own. It authorizes exactly two things: running
+  // one of the listed automations against this profile on this port, and
+  // re-checking this profile's assigned proxy. Nothing else.
+  //
+  // cdpPort is null on a launch with nothing to run -- there is no debugging
+  // port on those, and the token is minted anyway so the page can still
+  // re-check its proxy. An empty `automations` list matches no id, so such a
+  // token can run nothing.
+  mintRunToken?(
+    profileId: string,
+    profileName: string,
+    cdpPort: number | null,
+    automations: Array<{id: string; name: string; steps: unknown[]}>,
+  ): Promise<string>;
   // Waits for a port this process handed out to start answering. The on-launch
   // trigger needs it: the browser takes a moment to bind the port after being
   // spawned with it, so resolving immediately would report "not open" for a
@@ -304,7 +342,26 @@ type ArgusNative = {
     trigger: RunTrigger;
     cdpUrl: string;
     vars?: AutomationVars;
+    // True when this run had to launch the profile, false when it attached to a
+    // window that was already open. The main process will only honour the
+    // automation's close_on_finish for the first kind -- see the handler in
+    // main.cjs. Only startRun can answer it, which is why it is sent rather
+    // than worked out over there.
+    ownsSession?: boolean;
   }): Promise<{ok: boolean; runId?: string; error?: string; status?: number}>;
+  // Hands the workspace's connectors to the main process, which is the only
+  // side that can make an outbound call. One way, and memory-only over there
+  // -- see electron/automation/connectors.cjs. Called on every change,
+  // including the change to an empty list.
+  setConnectors?(connectors: RuntimeConnector[]): Promise<{ok: boolean}>;
+  // The Test button. Takes a resolved connector rather than an id so an
+  // unsaved draft can be tried before it is written. For an AI connector this
+  // is one tiny completion; for a messaging one it sends a real test message.
+  testConnector?(connector: RuntimeConnector): Promise<{ok: boolean; error?: string}>;
+  // What models an AI connector's endpoint serves, so the form offers a real
+  // choice. Takes the resolved draft, key included, like testConnector.
+  listConnectorModels?(connector: RuntimeConnector):
+    Promise<{ok: boolean; models?: string[]; error?: string}>;
   cancelAutomationRun?(runId: string): Promise<{ok: boolean}>;
   // Runs in flight right now, so a window that reopens mid-run rejoins it
   // rather than showing nothing.
@@ -319,7 +376,19 @@ type ArgusNative = {
     callback: (event:
       | {type: 'started'; runId: string; run: AutomationRun}
       | {type: 'log'; runId: string; entry: RunLogEntry}
-      | {type: 'finished'; runId: string; run: AutomationRun}) => void,
+      // `notification` rides along when the automation's notify-on-finish
+      // setting fired: main composed it off the sealed record, and the
+      // renderer writes it to the `notifications` table (this side of the
+      // boundary is the one with Supabase).
+      | {type: 'finished'; runId: string; run: AutomationRun; notification?: {
+          kind: string;
+          title: string;
+          body: string;
+          status?: string | null;
+          automation_id?: string | null;
+          run_id?: string | null;
+          sendError?: string | null;
+        };}) => void,
   ): () => void;
 
   // argus:// deep links. `auth` carries the PKCE authorization code back from
@@ -342,6 +411,20 @@ type ArgusNative = {
   onApiState?(callback: (state: ApiState) => void): () => void;
   selectExtensionFolder?(): Promise<string | null>;
   zipExtensionFolder?(folderPath: string): Promise<{ok: boolean; base64?: string; error?: string}>;
+  // Downloads a built-in whose files are not vendored in extensions/ (currently
+  // CaptchaPlugin alone, ~56 MB). Resolves {ok:false} instead of throwing so the
+  // caller can leave the org's toggle off and surface the reason.
+  installBuiltInExtension?(
+    key: keyof BuiltInExtensionToggles,
+  ): Promise<{ok: boolean; error?: string; alreadyInstalled?: boolean}>;
+  // Which of those this machine has on disk. The toggle is org-wide but the
+  // bytes are local, so a card needs both to know what to offer.
+  builtInExtensionStatus?(): Promise<{installed: Partial<Record<string, boolean>>}>;
+  // Picks up anything a teammate enabled on their own machine.
+  catchUpBuiltInExtensions?(toggles: BuiltInExtensionToggles | undefined): Promise<{ok: boolean}>;
+  onBuiltInDownloadProgress?(
+    callback: (payload: {key: string; receivedBytes: number; totalBytes: number}) => void,
+  ): () => void;
   selectCookieFile?(): Promise<CookieFileSelection | null>;
   selectCookieFolder?(): Promise<string | null>;
   matchCookieFiles?(
@@ -462,7 +545,11 @@ type ArgusNative = {
     result?: {deleted: boolean; unassignedProfileIds: string[]},
     error?: string,
   ): void;
-  // POST /v1/profiles/update: partial field patch (name/tags/status/color/folder_id/email/password).
+  // POST /v1/profiles/update: partial field patch
+  // (name/tags/status/color/avatar/folder_id/email/password). `avatar` is
+  // narrowed to `brand:<slug>` or '' in main.cjs -- the https-URL half of the
+  // field is the editor's only, so a key cannot make the launcher fetch a
+  // picture from a host of the caller's choosing.
   // Proxy has its own endpoint (assign-proxy, above) and fingerprint has its
   // own endpoint (update-fingerprint, below) since both need extra handling
   // beyond a plain field overwrite.
@@ -470,7 +557,8 @@ type ArgusNative = {
     callback: (payload: {
       requestId: string;
       profileId: string;
-      fields: Partial<Pick<ArgusProfile, 'name' | 'tags' | 'status' | 'color' | 'folder_id' | 'email' | 'password'>>;
+      fields: Partial<Pick<ArgusProfile,
+        'name' | 'tags' | 'status' | 'color' | 'avatar' | 'folder_id' | 'email' | 'password'>>;
       // null grants every folder; an array is the allow-list this key may
       // write to. Both ends of a folder move are checked against it.
       allowedFolders: string[] | null;
@@ -533,6 +621,25 @@ type ArgusNative = {
     result?: {ok: boolean; pid?: number; error?: string},
     error?: string,
   ): void;
+  // The shared pair for routes declared in electron/api/routes.json, in place
+  // of a named on*/send* pair each. `channel` is checked against the table in
+  // preload before anything is subscribed, so an unknown name is inert rather
+  // than a way to listen in on every other channel.
+  //
+  // The payload is deliberately loose here: main.cjs has already checked it
+  // against the route's declared fields, and each handler in
+  // useAutomationBridge narrows it to the shape that route sends.
+  onApiRequest?(
+    channel: string,
+    callback: (payload: never) => void,
+  ): () => void;
+  sendApiResult?(
+    requestId: string,
+    result?: unknown,
+    error?: string,
+    // The HTTP code to answer with. Omitted means 500.
+    status?: number,
+  ): void;
   onListProfilesRequest?(
     callback: (payload: {requestId: string; folder: string | null; allowedFolders: string[] | null}) => void,
   ): () => void;
@@ -565,6 +672,20 @@ type ArgusNative = {
     approved: boolean,
     folderScope: string[] | null,
     keyName: string,
+  ): void;
+  // POST /v1/proxies/recheck-from-page: a launch's start page asking for its
+  // own proxy line to be brought up to date. main.cjs has already verified the
+  // run token and takes profileId off that token's entry, so nothing the page
+  // sent chooses which proxy is tested. The answer is the panel's next three
+  // fields, composed by homeProxyStatus -- the same function that wrote the
+  // wording the page launched with.
+  onRecheckProxyRequest?(
+    callback: (payload: {requestId: string; profileId: string}) => void,
+  ): () => void;
+  sendRecheckProxyResult?(
+    requestId: string,
+    result?: {proxyOk: boolean; title: string; detail: string},
+    error?: string,
   ): void;
 };
 

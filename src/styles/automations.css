@@ -1,0 +1,960 @@
+/* ── Automations ─────────────────────────────────────────────────────────────
+ * Split out of styles.css, which is 6,000 lines and was the only home every
+ * area had. Imported from main.tsx directly after it, so the cascade order is
+ * exactly what it was when these rules sat at the bottom of that file.
+ *
+ * The step list borrows the surface tokens the rest of the app uses rather
+ * than inventing a palette: a step row is a .data-card at rest and gains its
+ * own border only when expanded, so a list of twenty does not read as twenty
+ * competing boxes.
+ *
+ * Every border in here used to say var(--line). That token belongs to the
+ * landing site's design system and is not defined in the launcher, and an
+ * undefined var() inside the `border` shorthand is invalid at computed-value
+ * time -- which resets every longhand to `unset`, and border-style's initial
+ * value is `none`. So none of these borders rendered at all. The launcher's
+ * token is --border; the whole file now uses it. */
+
+/* .automations-tab carries no padding of its own. It used to say
+ * `padding: 24px`, nested inside .content's own 24px -- so the automation grid
+ * was the one page in the app inset 48px from the window edge and pushed a
+ * further 24px below the header, which is what made this tab look like it
+ * began somewhere different from every other one. .content owns page padding
+ * for all eight tabs.
+ *
+ * The rest of the wrapper -- the 1080px cap, the column, the 16px gap -- is the
+ * shared `.api-panel, .automations-tab, .extensions-tab` rule in styles.css,
+ * which this tab joined when it was restyled to match Extensions.
+ *
+ * A tab with no automations at all does not use this wrapper: it returns
+ * .tab-empty (styles.css) instead, the shared whole-tab empty state that
+ * Profiles, Proxies, Cookies and the Start page all sit in. There used to be an
+ * `.is-empty` override here that centred the hero in 60vh, which is why the
+ * glyph on this tab sat lower than on those and moved as the window resized. */
+
+/* The one .api-note in the app that carries an action. It is a standing fact
+   *and* the way out of it -- load the example before making a profile and this
+   note is the only thing on the tab that can unstick you, because the same
+   offer in the hero vanished with the first saved automation. So the button is
+   pushed to the far edge and the note is allowed to wrap, neither of which the
+   read-only notes on API, Integrations and Extensions need. */
+.automation-profile-note {
+  flex-wrap: wrap;
+}
+
+.automation-profile-note > button {
+  margin-left: auto;
+}
+
+/* Why an empty grid can happen: nothing is pinned by default, so the "On start
+   pages" chip has a legitimate zero state. Left in the flow rather than
+   centred like the hero -- the toolbar above it is still the subject of the
+   page, and this is a footnote under the chip that caused it. */
+.automation-view-empty {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Was 320px at 16px. Now the same 300/12 as .extension-grid and
+   .integration-grid: inside the 1080px cap those settle at three columns
+   rather than three-and-a-gap, so the three card tabs deal the same hand at
+   the same window width. */
+.automation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+/* .extension-card's metrics, deliberately duplicated rather than aliased: the
+   two grids hold different things and only one of them has a description doing
+   the flex work below. Was 20px padding and no shadow, which is what made an
+   automation card read as a heavier object than an extension card sitting one
+   tab away. */
+.automation-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+
+/* Mark, name, step count, delete -- one wrapping row, like
+   .extension-card-head. The h2 became an h3 with it: the tab's own title in
+   the Topbar is the h1, and a grid of twelve h2s claimed twelve sections. */
+.automation-card-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.automation-card-head h3 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+  /* min-width rather than a truncation: a name is how you tell two automations
+     apart, so it wraps to a second line instead of ending in an ellipsis. */
+  min-width: 0;
+}
+
+/* The head's delete button is gone -- deleting a workflow is done from the
+   editor's footer now, beside Cancel and Save. Its rules went with it. */
+
+/* Why Run is grey is a tooltip on the wrapper around it, not a banner on the
+   card: the tab already carries one standing note about having no profiles, and
+   a second amber box repeating it on every card in the grid says the same thing
+   twelve times. The wrapper exists only to hold that title -- a disabled button
+   suppresses its own. */
+.extension-card-foot > span {
+  display: inline-flex;
+}
+
+/* The description, and the reason every card's foot lands on the same line
+   across a row -- flex: 1 gives it the slack. Rendered even when empty, so a
+   card with no description still pushes its buttons down to meet its
+   neighbours'. Same rule as .extension-card p. */
+.automation-card > p {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.automation-card-meta {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A badge followed by the duration and, when there is one, the error. Wraps
+   rather than truncates: an error the card cannot show is an error nobody
+   reads. flex: 0 0 auto so it is never the element the row's spare height is
+   taken out of -- that is the description's job, above. */
+.automation-card-run {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0;
+}
+
+/* The button row is .extension-card-foot now (styles.css), so there is no
+   .automation-card-actions rule left. Run keeps the visual lead by being the
+   only filled button in it rather than by being pushed to the far side with
+   `margin-right: auto` -- with three buttons and a right-aligned foot, that
+   split the row into two clusters with a gap in the middle.
+
+   One override that foot needs here: it gives every direct button `flex: 1`,
+   which is right for the Extensions cards because they hold exactly one. This
+   foot holds three, and the third is a glyph -- History at a third of the card
+   is a wide empty box with a small clock in the middle. It sizes to its
+   content; Run and Edit split what is left. */
+.extension-card-foot > .automation-card-history {
+  flex: 0 0 auto;
+  padding: 0 10px;
+}
+
+/* The add tile is card-shaped but not a card: an outline standing where the
+   next automation goes. These four declarations undo .automation-card's
+   surface, and they have to be written at this specificity because
+   automations.css loads after styles.css -- at equal weight the plain
+   .extension-add-tile rule there loses to .automation-card above, and the tile
+   comes out as a filled card with a dashed border. */
+.automation-card.extension-add-tile {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  gap: 6px;
+}
+
+.automation-card.extension-add-tile:not(:disabled):hover {
+  background: var(--raised);
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+/* ── The step flow ───────────────────────────────────────────────────────────
+ * Node cards joined by a drawn connector, in one column. The connector is the
+ * point: a plain 6px gap between rounded boxes reads as a list of unrelated
+ * settings, and this is a program that runs top to bottom.
+ *
+ * Everything here is pseudo-elements on the existing boxes -- no SVG, no canvas
+ * library, no stored node positions. The model is a tree and the run log
+ * addresses steps by their path through it ('5.body.2'), so a flow that can be
+ * drawn from the tree alone is the flow that stays honest. */
+
+.automation-flow {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+}
+
+.automation-flow.is-nested {
+  margin-top: 0;
+}
+
+.automation-steps-empty {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* The gutter under each node is where its connector is drawn, so it is padding
+ * rather than a gap -- a gap belongs to neither neighbour and cannot be drawn
+ * into. --arm is the connector's x-offset: it lines up with the middle of the
+ * icon tile, so the line appears to leave the node from its glyph. */
+.automation-node {
+  --arm: 30px;
+  --gutter: 20px;
+  padding-bottom: var(--gutter);
+  position: relative;
+}
+
+/* Anchored bottom + height, not top + bottom. `top: 100%; bottom: 0` reads as
+   if it should span the gutter and does not: both percentages resolve against
+   this box's own height, so top lands below bottom, the height computes
+   negative and the line does not render at all. That shipped for exactly one
+   screenshot -- the arrowheads below drew fine, so the flow looked like a
+   column of cards with small triangles floating between them. */
+.automation-node::after {
+  background: var(--border);
+  bottom: 0;
+  content: '';
+  height: var(--gutter);
+  left: var(--arm);
+  position: absolute;
+  width: 2px;
+}
+
+/* The arrowhead, sitting at the foot of the line so the eye picks up direction
+ * without having to read the numbers. */
+.automation-node::before {
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--border);
+  bottom: 0;
+  content: '';
+  left: calc(var(--arm) - 3px);
+  position: absolute;
+  z-index: 1;
+}
+
+.automation-node-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-xs);
+}
+
+.automation-node-card.is-off {
+  opacity: 0.55;
+}
+
+.automation-node-card.is-open {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.automation-node-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.automation-node-handle {
+  color: var(--ink-faint);
+  cursor: grab;
+  display: inline-flex;
+}
+
+/* The tinted tile is what makes a row scannable as a kind at a glance -- the
+ * schema has named an icon for every step type since the catalogue was
+ * written, and until now nothing rendered it. */
+.automation-node-icon {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.automation-node-index {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 16px;
+}
+
+.automation-node-label {
+  align-items: baseline;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The pencil is the row's primary action, so it holds a tint at rest rather
+   than only on hover -- an icon button that is invisible until you find it is
+   the problem the chevron already had. */
+.automation-node-edit {
+  color: var(--ink-soft);
+  flex: none;
+}
+
+.automation-node-edit:hover {
+  color: var(--ink);
+}
+
+.automation-node-edit.is-editing {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-strong);
+}
+
+.automation-node-title {
+  flex: none;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* The generated summary is the one thing that must survive a narrow window,
+ * so it takes the slack and truncates rather than wrapping the row. */
+.automation-node-summary {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-node-enabled {
+  display: inline-flex;
+}
+
+.automation-node-fields {
+  border-top: 1px solid var(--border);
+  padding: 12px 12px 14px 46px;
+}
+
+.automation-step-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.automation-step-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 6px 0 0 var(--arm);
+}
+
+.automation-step-advanced summary {
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.automation-step-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+/* ── Branches ────────────────────────────────────────────────────────────────
+ * One box per 'steps' field on the node above: two for an if, one for a loop.
+ * They hang off the connector rather than sitting beside the node, so the
+ * reading order stays vertical and a branch is unambiguously *inside* the step
+ * that owns it.
+ *
+ * Two branches sit side by side when there is room and stack when there is not;
+ * a single-branch step (loop) always takes the full width, because a loop body
+ * squeezed into half a column for symmetry helps nobody. */
+
+/* margin-top is load-bearing, and its absence was the bug. The container sat
+ * flush against the node card above it while ::before reached 20px *up* from
+ * its own top edge -- so the trunk was drawn twenty pixels inside the card,
+ * over its bottom border and up towards the icon tile, which is exactly what
+ * made the line look like it came out of the step's glyph. The two numbers have
+ * to agree: the margin is the gap the line has to cross, and ::before's
+ * negative top is that same gap. */
+.automation-branches {
+  display: grid;
+  gap: 12px;
+  margin-left: var(--arm);
+  margin-top: 12px;
+  padding: 0 0 0 16px;
+  position: relative;
+}
+
+.automation-branches[data-count='2'] {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+/* The elbow: the node's connector runs down past the branches, and each branch
+ * taps off it. Drawn on the container so it spans however many there are. */
+.automation-branches::before {
+  background: var(--border);
+  bottom: 12px;
+  content: '';
+  left: 0;
+  position: absolute;
+  top: -12px;
+  width: 2px;
+}
+
+.automation-branch {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px 10px;
+  position: relative;
+}
+
+/* The stub joining this branch to the trunk. It lands on the label's line, so
+   it moved down 2px with the box's top padding. */
+.automation-branch::before {
+  background: var(--border);
+  content: '';
+  height: 2px;
+  left: -16px;
+  position: absolute;
+  top: 24px;
+  width: 16px;
+}
+
+.automation-branch-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+/* Yes and No carry the app's existing green and red, mixed back toward the
+   surface so a branch reads as a labelled region rather than as a status. The
+   loop body gets the violet, which is not used by any step state.
+   The fill is the same three status tokens as the border and the label, so the
+   branch is one colour stated three ways. Held well back toward --paper: the
+   step cards inside are --raised and have to stay the foreground, and a branch
+   at full --status-*-bg reads as an alert about the steps rather than as the
+   region containing them. Both themes define these, so nothing here needs a
+   dark-mode counterpart. */
+.automation-branch[data-branch='then'] {
+  background: color-mix(in srgb, var(--status-active-bg) 55%, var(--paper));
+  border-color: color-mix(in srgb, var(--status-active-border) 45%, var(--border));
+}
+
+.automation-branch[data-branch='then'] .automation-branch-label {
+  color: var(--status-active-ink);
+}
+
+.automation-branch[data-branch='else'] {
+  background: color-mix(in srgb, var(--status-ban-bg) 55%, var(--paper));
+  border-color: color-mix(in srgb, var(--status-ban-border) 45%, var(--border));
+}
+
+.automation-branch[data-branch='else'] .automation-branch-label {
+  color: var(--status-ban-ink);
+}
+
+.automation-branch[data-branch='body'] {
+  background: color-mix(in srgb, var(--status-review-bg) 55%, var(--paper));
+  border-color: color-mix(in srgb, var(--status-review-border) 45%, var(--border));
+}
+
+.automation-branch[data-branch='body'] .automation-branch-label {
+  color: var(--status-review-ink);
+}
+
+/* The last node inside a branch still gets its connector stub down to the
+ * branch's own Add step, which is the correct reading -- but the box should not
+ * end on 20px of empty gutter. */
+.automation-branch .automation-node:last-of-type {
+  --gutter: 14px;
+}
+
+.automation-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── The editor's right-hand column ──────────────────────────────────────────
+ * .profile-editor-side had no rule anywhere in either stylesheet. It is a plain
+ * block, so its five controls stacked with whatever margins they brought with
+ * them -- which for a <label class="field"> is none at all. That is why the
+ * timeout's hint appeared to be glued to the checkbox under it: nothing
+ * separated them. The gap belongs to the column, not to each field.
+ *
+ * Scoped to the automation editor. The profile editor uses the same layout
+ * class and settled its own spacing long ago inside .profile-summary. */
+.automation-modal .profile-editor-side {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+}
+
+/* Full width, because it is the column's action rather than one control in a
+   row of them. */
+.automation-run-now {
+  justify-content: center;
+  width: 100%;
+}
+
+/* The settings, on their own surface. --paper against the dialog's --raised is
+   the same inset relationship .automation-node-icon uses against its card, so
+   this reads as a recessed panel rather than as a new kind of box. */
+.automation-settings-card {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* ── The dialog's editable title ── */
+
+.automation-title {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.automation-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sized to the heading it replaces, so switching in and out of edit does not
+   move the dialog's first line. */
+.automation-title-input {
+  font-size: inherit;
+  font-weight: inherit;
+  max-width: 420px;
+  min-width: 220px;
+}
+
+/* ── The selector Check ── */
+
+.automation-check {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.automation-check-run {
+  flex: none;
+}
+
+.automation-check-result {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* One match is the answer you want; several is a step that will act on
+   whichever the browser returns first, which is a warning and not an error. */
+.automation-check-result.is-ok {
+  color: var(--status-active-ink);
+}
+
+.automation-check-result.is-warn {
+  color: var(--status-warmup-ink);
+}
+
+.automation-check-result.is-bad {
+  color: var(--danger);
+}
+
+.automation-check-result.is-idle {
+  color: var(--ink-soft);
+}
+
+/* ── Add-step menu ── */
+
+/* The end of the flow, and the only way to add anything to it, so it carries
+   the accent. The first cut was a dashed ghost in --ink-soft, on the theory
+   that it should not compete with the nodes above it; at 12px, greyed, behind
+   a dashed hairline, it lost to them so completely that it read as a disabled
+   control. It is the primary action on this screen -- the flow stays empty
+   until it is pressed -- and it should look like one.
+
+   The top margin matters as much as the colour did: it sat flush under the
+   last node's connector, so the arrow appeared to point at nothing. */
+.automation-add {
+  align-items: center;
+  align-self: flex-start;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--accent-ink);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 650;
+  gap: 7px;
+  margin-top: 6px;
+  min-height: var(--control-h-sm);
+  padding: 0 16px;
+}
+
+.automation-add:hover {
+  background: var(--accent-strong);
+}
+
+/* Inside a branch it is one of three or four on screen at once, and a stack of
+   filled pills would outweigh the steps they belong to -- so it keeps the
+   weight and the shape but states itself in ink rather than in fill. */
+.automation-add.is-subtle {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.automation-add.is-subtle:hover {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.automation-add-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* The colour is the point. These override the base button rule's background
+   but used to inherit its `color: var(--accent-ink)` -- which is #ffffff in
+   light mode, on a --surface of #f7f7f6. Every step type in the picker was
+   white text on a white chip, at about 1.03:1. */
+.automation-add-menu button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 4px 10px;
+}
+
+.automation-add-menu button:hover {
+  background: var(--hover);
+}
+
+.automation-add-menu .automation-add-cancel {
+  border-style: dashed;
+  color: var(--ink-soft);
+}
+
+/* ── Key/value and condition editors ── */
+
+.automation-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.automation-kv-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+}
+
+.automation-condition {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.automation-problems {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.automation-json textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Run log ── */
+
+.run-log-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 16px;
+  min-height: 360px;
+}
+
+.run-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+/* Same white-on-white bug the add-step picker had: a transparent background
+   over the base button rule's --accent-ink. */
+.run-log-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.run-log-entry.is-active {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.run-log-entry-meta,
+.run-log-entry-time {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.run-log-detail {
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.run-log-lines {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+/* Indentation is inline (padding-left from the entry's path depth), so the
+ * log lines up with the editor's nesting without a class per level. */
+.run-log-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+/* Warn and error tint the whole line, message included. The ink tokens are the
+   ones the status chips use, so a warn line and a warmup chip are the same
+   amber in both themes. */
+.run-log-line.is-warn {
+  color: var(--status-warmup-ink);
+}
+
+.run-log-line.is-error {
+  color: var(--danger);
+}
+
+.run-log-line-path {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  min-width: 46px;
+}
+
+.run-log-line-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-log-line-ms {
+  color: var(--ink-soft);
+}
+
+.run-log-shot {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ── Connectors ──────────────────────────────────────────────────────────────
+ * The Connectors view reuses .automation-card wholesale -- same grid, same
+ * head, same foot -- so only what a connector card has and an automation card
+ * does not needs rules: the masked secret, the test verdict, and the modal's
+ * kind picker. */
+
+/* The masked secret, monospace so the four visible characters can actually be
+ * compared against the credential in hand -- the only thing they are for. */
+.connector-card-secret {
+  color: var(--ink-soft);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Test says what the service said, in the service's own words. Green and red
+ * because there are exactly two answers and no third state worth a colour. */
+.connector-card-test {
+  align-items: flex-start;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0;
+}
+
+.connector-card-test > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.connector-card-test.is-ok {
+  color: var(--status-active-ink);
+}
+
+.connector-card-test.is-bad {
+  color: var(--danger);
+}
+
+/* Delete keeps to the far edge of the foot so the safe actions read as one
+ * group and the destructive one stands apart. */
+.connector-card-delete {
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+
+.connector-card-delete:hover {
+  color: var(--danger);
+}
+
+/* The modal's kind picker: two headed groups of small tiles. A grid rather
+ * than an eighteen-entry select because the choice is the whole first step of
+ * the dialog, and a dropdown hides seventeen of the answers.
+ *
+ * No padding of its own: .profile-modal already pads 18px and gaps its
+ * children 14px, and the first cut of these rules added the old Settings
+ * section's 22px on top -- which is why the picker sat in a double inset
+ * against its own title. Same fix on .connector-form below. */
+.connector-pick-group {
+  padding: 0;
+}
+
+.connector-pick-group h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.connector-pick-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.connector-pick-tile {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.connector-pick-tile:hover {
+  border-color: var(--accent);
+}
+
+.connector-pick-tile > svg {
+  color: var(--ink-soft);
+  flex: none;
+}
+
+.connector-form {
+  display: grid;
+  gap: 14px;
+  padding: 0;
+}
+
+/* The reveal toggle sits inside the field's row, not floating over the input,
+ * so the input keeps its full click target and the toggle keeps a real one. */
+.connector-secret-input {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.connector-secret-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Back-to-the-picker leans left so Test / Cancel / Save keep the right edge
+ * the app's other modal footers use. */
+.connector-modal-back {
+  margin-right: auto;
+}
+
+/* Brand marks keep their own colours and their own aspect -- height fixed,
+ * width left to the artwork, exactly as .tag-logo does and for the same
+ * reason: several brand cuts are not square. */
+.connector-logo {
+  max-width: 30px;
+  object-fit: contain;
+  width: auto;
+}
+
+/* Load/Refresh models sits under the model box, beside the way back to the
+ * list when the user chose to type. */
+.connector-models-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+/* One colour only, drawn for one background -- see .tag-logo's note in
+ * styles.css. Which marks carry these classes is LOGO_ADAPT in
+ * src/data/connectors.ts. */
+:root:not([data-theme="dark"]) .connector-logo.invert-on-light,
+:root[data-theme="dark"] .connector-logo.invert-on-dark {
+  filter: invert(1);
+}

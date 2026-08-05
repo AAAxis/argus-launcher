@@ -12,6 +12,7 @@
 import {useMemo, useState} from 'react';
 import {AlertTriangle, SearchX, UserPlus} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
+import {Checkbox} from '../ui/Checkbox';
 import {Modal} from '../ui/Modal';
 import {StatusChip} from '../ui/StatusChip';
 import {useAsyncAction} from '../../useAsyncAction';
@@ -109,7 +110,7 @@ export function AssignCookieSetModal({cookie, onClose}: {
           const willReplace = ticked && profile.cookie_id && profile.cookie_id !== cookie.id;
           return (
             <label className="move-profiles-row assign-cookies-row" key={profile.id}>
-              <input checked={ticked} onChange={() => toggle(profile.id)} type="checkbox" />
+              <Checkbox checked={ticked} onChange={() => toggle(profile.id)} />
               <span className="move-profiles-name">{profile.name}</span>
               <StatusChip status={profile.status || 'Ready'} />
               {willReplace ? (

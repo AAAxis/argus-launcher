@@ -9,7 +9,9 @@
 // mounted above App.
 import {useEffect, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
-import {CreditCard, PackageOpen, Palette, SlidersHorizontal, User, X} from 'lucide-react';
+import {
+  CreditCard, PackageOpen, Palette, SlidersHorizontal, User, X,
+} from 'lucide-react';
 import * as db from '../db';
 import type {ResourceState} from '../native';
 import {useOrg} from '../org';
@@ -20,7 +22,8 @@ import {BrowserUpdatesSection} from './sections/BrowserUpdatesSection';
 import {GeneralSection} from './sections/GeneralSection';
 import {PlanUsageSection} from './sections/PlanUsageSection';
 
-export type SettingsSectionId = 'account' | 'plan' | 'appearance' | 'general' | 'browser';
+export type SettingsSectionId =
+  'account' | 'plan' | 'appearance' | 'general' | 'browser';
 
 type SectionDef = {
   id: SettingsSectionId;
@@ -32,6 +35,9 @@ type SectionDef = {
 const SECTIONS: SectionDef[] = [
   {id: 'account', label: 'Account', group: 'Account', icon: User},
   {id: 'plan', label: 'Plan & usage', group: 'Account', icon: CreditCard},
+  // AI providers used to live here as its own Workspace group. They became
+  // connectors -- one kind among several, only ever used from automations --
+  // and moved to Automations → Connectors, taking the group with them.
   {id: 'appearance', label: 'Appearance', group: 'App', icon: Palette},
   {id: 'general', label: 'General', group: 'App', icon: SlidersHorizontal},
   {id: 'browser', label: 'Browser & updates', group: 'App', icon: PackageOpen},
@@ -46,6 +52,8 @@ export type SettingsDialogProps = {
   // Replays the profiles walkthrough. Closes this dialog on the way, so the two
   // are never stacked.
   onOpenIntro: () => void;
+  // Closes this dialog and lands on the Plans tab, for the same reason.
+  onOpenPlans: () => void;
   // The launcher's own update panel, owned by App's updater hook.
   updateControl: ReactNode;
   resourceState: ResourceState | null;
@@ -94,11 +102,14 @@ export function SettingsDialog(props: SettingsDialogProps) {
   // Trash is excluded because the limit trigger excludes it too: a soft-deleted
   // profile only counts against the plan again once it is restored.
   const profileCount = data.state.profiles.filter((profile) => !profile.deleted_at).length;
+  // No deleted_at filter: automations are hard-deleted, so every row in state
+  // is a live one counting against the cap.
+  const automationCount = data.state.automations.length;
 
-  // RLS restricts UPDATE on organizations to is_org_admin, and db.orgs.rename
-  // asks for the row back so a member's attempt surfaces as an error instead of
-  // a rename that reverts on the next load. withDb reports it the way every
-  // other write in the app does.
+  // RLS restricts UPDATE on organizations to is_org_member, so anyone in the
+  // workspace may rename it -- the entitlement columns are withheld by the
+  // column grant, not by the policy. A failure still surfaces through withDb the
+  // way every other write in the app does.
   async function renameOrg(name: string): Promise<boolean> {
     const ok = await data.withDb((activeOrgId) => db.orgs.rename(activeOrgId, name));
     if (!ok) {
@@ -170,8 +181,10 @@ export function SettingsDialog(props: SettingsDialogProps) {
             )}
             {active === 'plan' && (
               <PlanUsageSection
+                onOpenPlans={props.onOpenPlans}
                 onOpenSite={props.onOpenSite}
                 profileCount={profileCount}
+                automationCount={automationCount}
               />
             )}
             {active === 'appearance' && <AppearanceSection />}

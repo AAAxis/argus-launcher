@@ -6,13 +6,26 @@
 import {anonymousHomeHtml, browserStartUrl, profileDataDir} from './homePage';
 import {buildRuntimeFingerprint, fingerprintSwitches} from './fingerprint';
 import {readSearchEngine} from './searchEngines';
+import {startPageAutomations} from './startPageAutomations';
+import {readStoredPreference} from '../theme';
 import type {LaunchProfilePayload} from '../native';
 import type {ArgusProfile, ArgusProxy, CloudState} from '../types';
 
 export function buildLaunchPayload(
     profile: ArgusProfile,
     proxy: ArgusProxy | null,
-    state: CloudState): LaunchProfilePayload {
+    state: CloudState,
+    // This launch's page credential and the port to spend it on. Supplied on
+    // every launch: the start page needs it to re-check its own proxy even when
+    // there is nothing to run. Null only when the launcher could not mint one,
+    // which makes the page read-only rather than broken.
+    startPage?: {port: number; token: string} | null): LaunchProfilePayload {
+  // The profile's own automation plus every pinned one -- the same list
+  // useProfileActions uses to decide whether this launch needs a debugging
+  // port. Read from one place so the tiles on the page and the port behind them
+  // cannot disagree, which they could when this was keyed off `startPage`.
+  const tileAutomations = startPageAutomations(state.automations, profile)
+      .map((item) => ({id: item.id, name: item.name}));
   // A saved cookie-set (Cookies tab) takes priority over the legacy
   // pasted/uploaded cookie_import_* fields -- both resolve to the same
   // cookieImportUrl the launch payload consumes, just from a different source.
@@ -54,11 +67,14 @@ export function buildLaunchPayload(
     ].filter(Boolean).join('\n'),
     runtimeFingerprint: buildRuntimeFingerprint(profile),
     startUrl: browserStartUrl(profile),
-    // Read here rather than inside anonymousHomeHtml so the html builder stays
-    // a pure function of its arguments. Both callers of this file -- the Launch
-    // button and the local automation API -- run in the renderer, so
-    // localStorage is available on either path.
-    homeHtml: anonymousHomeHtml(profile, state.shared_bookmarks, proxy, readSearchEngine()),
+    // The search engine and the theme are read here rather than inside
+    // anonymousHomeHtml so the html builder stays a pure function of its
+    // arguments. Both callers of this file -- the Launch button and the local
+    // automation API -- run in the renderer, so localStorage is available on
+    // either path.
+    homeHtml: anonymousHomeHtml(
+      profile, state.shared_bookmarks, proxy, readSearchEngine(),
+      readStoredPreference(), tileAutomations, startPage || null),
     cookieImportPath: savedMode ? null : (profile.cookie_import_path || null),
     cookieImportUrl: savedMode ?
       (savedCookie?.url || null) :
@@ -66,8 +82,10 @@ export function buildLaunchPayload(
     cookieImportName: savedMode ?
       (savedCookie?.name || null) :
       (profile.cookie_import_name || null),
-    enableCookieManager: state.built_in_extensions?.cookie_manager !== false,
-    enableSmsActivate: state.built_in_extensions?.sms_activate !== false,
-    enableFoxywallFreeProxy: state.built_in_extensions?.foxywall_free_proxy !== false,
+    // Passed through as saved, not normalized here: what a missing key means
+    // differs per extension (the three original ones default on so state saved
+    // before their toggles existed keeps them; CaptchaPlugin defaults off
+    // because it costs a download), and that polarity lives in the registry.
+    builtInExtensions: state.built_in_extensions,
   };
 }

@@ -2,14 +2,14 @@
 // things it can hand you -- a curl line, a runnable example script, and a
 // ready-to-paste brief for a coding agent.
 
+import {mcpToolNames, routeGroups} from '../api/routes';
+import type {ApiRoute} from '../api/routes';
+
 export const API_BASE_URL = 'http://127.0.0.1:39219';
 
-export type ApiEndpoint = {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
-  path: string;
-  label: string;
-  body?: string;
-};
+// Kept as the tab's own vocabulary so ApiTab did not have to change, but it is
+// now a view of ApiRoute rather than a second list of endpoints.
+export type ApiEndpoint = ApiRoute;
 
 export type ApiGroup = {
   title: string;
@@ -25,10 +25,12 @@ export type AgentTool = {
   wiring: string;
 };
 
+// The tool names come from the route table, so a tool added there shows up in
+// every agent brief without a second edit. Six of them used to be listed by
+// hand here and the list had already stopped being complete.
 function preferMcp(where: string) {
   return `If an "argus" MCP server is registered in ${where}, prefer its tools ` +
-    '(argus_list_profiles, argus_launch_profile, argus_navigate, argus_read_page, ' +
-    'argus_screenshot, argus_close_profile) over raw HTTP; otherwise call the HTTP ' +
+    `(${mcpToolNames().join(', ')}) over raw HTTP; otherwise call the HTTP ` +
     'API below directly.';
 }
 
@@ -40,96 +42,18 @@ export const AGENT_TOOLS: AgentTool[] = [
   {id: 'vscode', name: 'VS Code', wiring: preferMcp('the user mcp.json')},
 ];
 
-// These must match what electron/main.cjs actually routes, because agentPrompt()
-// below ships this list to a coding agent as fact.
+// Derived from electron/api/routes.json, which is what electron/main.cjs also
+// builds its allow-list from -- so what this tab documents and what the server
+// answers cannot disagree. scripts/verify-api-routes.mjs asserts that.
 //
-// It previously did not. Of the sixteen endpoints documented here, only the two
-// GETs existed: the rest were a REST-shaped design (POST /v1/profiles,
-// PATCH/DELETE /v1/profiles/{id}, /launch, /close) that was never built, plus a
-// whole "Shared data" group for bookmarks and extensions with no server behind
-// it at all. Every agent handed the brief spent its first turns on 404s. The
-// implemented routes are verb-suffixed; keep this list in step with the
-// pathname checks in the automation server.
-export const API_GROUPS: ApiGroup[] = [
-  {
-    title: 'Profiles',
-    endpoints: [
-      {method: 'GET', path: '/v1/profiles', label: 'List profiles (optional ?folder=<id>)'},
-      {
-        method: 'POST',
-        path: '/v1/profiles/get',
-        label: 'Read one profile',
-        body: '{ "profileId": "<id>" }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/profiles/update',
-        label: 'Update name, status, tags, notes, colour or folder',
-        body: '{ "profileId": "<id>", "status": "Ready", "tags": ["warmup"] }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/profiles/assign-proxy',
-        label: 'Put a profile on a proxy from the library',
-        body: '{ "profileId": "<id>", "proxyId": "<id>" }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/profiles/launch-automation',
-        label: 'Open a profile for automation; returns its CDP url. Reuses a running session unless relaunch is set',
-        body: '{ "profileId": "<id>", "relaunch": false }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/profiles/cdp',
-        label: 'Where a running profile\'s CDP endpoint is, without launching it',
-        body: '{ "profileId": "<id>" }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/profiles/close-automation',
-        label: 'Close a session this key opened',
-        body: '{ "profileId": "<id>" }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/profiles/delete',
-        label: 'Move a profile to Trash (permanent: true to purge)',
-        body: '{ "profileId": "<id>", "permanent": false }',
-      },
-    ],
-  },
-  {
-    title: 'Proxies',
-    endpoints: [
-      {method: 'GET', path: '/v1/proxies', label: 'List proxies'},
-      {
-        method: 'POST',
-        path: '/v1/proxies/create',
-        label: 'Add proxy',
-        body: '{ "name": "US proxy", "type": "socks5", "host": "1.2.3.4", "port": 1080 }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/proxies/update',
-        label: 'Update a proxy',
-        body: '{ "proxyId": "<id>", "name": "US proxy" }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/proxies/check',
-        label: 'Check reachability and egress IP',
-        body: '{ "host": "1.2.3.4", "port": 1080, "type": "socks5" }',
-      },
-      {
-        method: 'POST',
-        path: '/v1/proxies/delete',
-        label: 'Remove a proxy',
-        body: '{ "proxyId": "<id>" }',
-      },
-    ],
-  },
-];
+// It used to be a hand-written list, and it had drifted badly: of the sixteen
+// endpoints it documented, several were a REST-shaped design (POST /v1/profiles,
+// POST /v1/proxies, POST /v1/profiles/{id}/launch) that was never built, and it
+// advertised a `notes` field on /v1/profiles/update that the handler's whitelist
+// does not have. agentPrompt() ships this to a coding agent as fact, so every
+// agent handed the brief spent its first turns on 404s.
+export const API_GROUPS: ApiGroup[] = routeGroups()
+    .map((group) => ({title: group.title, endpoints: group.routes}));
 
 export function authHeader() {
   return 'Authorization: Bearer <YOUR_API_KEY>';
@@ -177,34 +101,37 @@ async function argys(method, path, body) {
 async function main() {
   console.log('Health:', await argys('GET', '/health'));
 
-  const profiles = await argys('GET', '/v1/profiles');
+  // Profiles are created in the app, not over the API -- each one is an
+  // identity with a fingerprint and a proxy, and minting those from a script
+  // is how you end up with fifty profiles that look alike.
+  const {profiles} = await argys('GET', '/v1/profiles');
   console.log('Profiles:', profiles);
+  const profile = profiles[0];
+  if (!profile) {
+    throw new Error('Create a profile in Argus Launcher first.');
+  }
 
-  const proxy = await argys('POST', '/v1/proxies', {
-    name: 'Example US proxy',
-    type: 'socks5',
-    host: '1.2.3.4',
-    port: 1080,
-    username: 'user',
-    password: 'pass',
+  // The step vocabulary, so nothing below is guesswork.
+  const {steps} = await argys('GET', '/v1/automations/schema');
+  console.log('Step types:', Object.keys(steps).join(', '));
+
+  const {automation} = await argys('POST', '/v1/automations/create', {
+    name: 'Example: read a heading',
+    steps: [
+      {id: 's1', type: 'goto', url: 'https://example.com'},
+      {id: 's2', type: 'waitFor', for: 'selector', selector: 'h1'},
+      {id: 's3', type: 'extract', selector: 'h1', what: 'text', into: 'heading'},
+    ],
   });
-  console.log('Created proxy:', proxy);
+  console.log('Created automation:', automation.id);
 
-  const profile = await argys('POST', '/v1/profiles', {
-    name: 'API example profile',
-    proxyId: proxy.id,
-    startUrl: 'https://browserargus.com/',
+  // Launches the profile if it is not already open, and returns as soon as the
+  // run is registered -- it continues in the background.
+  const run = await argys('POST', '/v1/automations/run', {
+    automationId: automation.id,
+    profileId: profile.id,
   });
-  console.log('Created profile:', profile);
-
-  console.log('Launch:', await argys('POST', \`/v1/profiles/\${profile.id}/launch\`));
-
-  // Optional cookie import helper. Replace folderPath with the folder that
-  // contains exported cookie txt/json files named after profile names.
-  // console.log('Cookie match:', await argys('POST', '/v1/cookies/bulk-match', {
-  //   folderPath: '/Users/name/Downloads/cookies',
-  //   profileIds: [profile.id],
-  // }));
+  console.log('Run started:', run.runId);
 }
 
 main().catch((error) => {
@@ -244,7 +171,14 @@ export function agentPrompt(tool: AgentTool) {
     '',
     'Argus manages anti-detect browser profiles. Each profile is an isolated',
     'browser identity with its own proxy, fingerprint and cookie jar. The API',
-    'lets you list, create, update and launch them.',
+    'lets you list, update and launch them, and author the automations that run',
+    'against them.',
+    '',
+    'An automation is a tree of steps -- goto, click, type, extract, if, loop --',
+    'run against one profile. Call GET /v1/automations/schema (or',
+    'argus_automation_schema) for the step vocabulary before writing one; the',
+    'field names are not guessable and the server rejects a tree that does not',
+    'validate, naming the exact path that failed.',
     '',
     '## Endpoints',
     '',
@@ -254,6 +188,11 @@ export function agentPrompt(tool: AgentTool) {
     '',
     '- A key may be scoped to specific folders. A 403 means the key cannot see',
     '  that profile, not that the profile is missing — do not retry.',
+    '- Automations are shared across every folder, so a folder-scoped key may',
+    '  list, read and run them but cannot create, change or delete one. That is',
+    '  also a 403, and also not worth retrying.',
+    '- Every step needs a unique `id` you supply. The run log addresses steps by',
+    '  it, so do not reuse one across steps.',
     '- Never hardcode the token in committed files. Read it from the',
     '  ARGYS_API_TOKEN environment variable.',
     '- Launching a profile starts a separate anonymous browser process. Never',

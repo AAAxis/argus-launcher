@@ -6,13 +6,14 @@ import {
 } from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {BusyButton} from '../ui/BusyButton';
+import {CopyButton} from '../ui/CopyButton';
 import {ColorPicker} from '../ui/ColorPicker';
 import {Field} from '../ui/Field';
 import {IconPicker} from '../ui/IconPicker';
 import {TagChip} from '../ui/TagChip';
 import {FlagIcon} from '../ui/icons';
 import {normalizeBookmarkUrl} from '../../lib/bookmarks';
-import {defaultProxyName, looksLikeProxyHost, parseProxyLink} from '../../lib/proxies';
+import {defaultProxyName, splitPastedConnection} from '../../lib/proxies';
 import {tagKey, tagLabel} from '../../lib/tags';
 import {
   countryName, DEFAULT_FOLDER_ICON, flagCodeFromIcon, flagIconKey,
@@ -69,23 +70,16 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
   // Vendors hand out proxies as one "host:port:username:password" string, and
   // pasting that into Host is the obvious thing to do -- it used to be stored
   // verbatim as the hostname, which curl then rejected outright ("Unsupported
-  // proxy syntax"). Anything parseProxyLink recognises is spread across the
-  // fields it belongs in; anything else is left alone as a literal hostname.
+  // proxy syntax"). Anything splitPastedConnection recognises is spread across
+  // the fields it belongs in; anything else is left alone as a literal hostname.
   //
-  // parseProxyLink locates the port rather than trusting its position, so
+  // The parse underneath locates the port rather than trusting its position, so
   // "user:pass@host:port" and "user:pass:host:port" land in the same fields as
-  // the usual order.
-  //
-  // `strict` is set everywhere except Host: a paste into Password is only
-  // treated as a connection string when what parsed out of it really looks like
-  // a host, because "hunter2:1080" parses just as cleanly as a proxy does.
+  // the usual order. `strict` is set everywhere except Host -- see
+  // splitPastedConnection for why Password needs it.
   function applyPastedConnection(raw: string, strict = false) {
-    const parsed = raw.includes(':') ? parseProxyLink(raw) : null;
+    const parsed = splitPastedConnection(raw, {strict});
     if (!parsed) {
-      return false;
-    }
-    const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim());
-    if (strict && !scheme && !looksLikeProxyHost(parsed.host)) {
       return false;
     }
     testRun.current++;
@@ -94,10 +88,10 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
     setError(null);
     onChange({
       ...draft,
-      // A bare host:port:user:pass carries no scheme, and parseProxyLink
-      // defaults those to socks5; keep whatever the user already picked
-      // instead of silently switching the type under them.
-      type: /^(https?|socks5?):(\/\/)?/i.test(raw.trim()) ? parsed.type || draft.type : draft.type,
+      // A bare host:port:user:pass carries no scheme, and the parse defaults
+      // those to socks5; keep whatever the user already picked instead of
+      // silently switching the type under them.
+      type: parsed.explicitType ? parsed.type || draft.type : draft.type,
       // The line the user pasted is usually all they have: there is no name in
       // it, and an unnamed proxy is saved as host:port anyway. Filling it now
       // means the field they pasted into does not sit empty while the fields
@@ -313,10 +307,15 @@ export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequest
 // and a failure they have to re-read is worth more than one that times out.
 function ProxyTestResult({result}: {result: ProxyCheckResult}) {
   if (!result.ok) {
+    const error = result.error || 'Proxy check failed';
     return (
+      // The failure is the one result worth taking somewhere else -- a provider's
+      // support chat usually wants the message verbatim -- so it is copyable
+      // here rather than something to retype off the screen.
       <p className="proxy-test-result failed">
         <AlertCircle size={16} />
-        <span>{result.error || 'Proxy check failed'}</span>
+        <span>{error}</span>
+        <CopyButton className="link-button proxy-test-copy" value={error} label="Copy" />
       </p>
     );
   }

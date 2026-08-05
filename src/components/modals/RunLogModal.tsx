@@ -6,17 +6,24 @@
 // the record, because a run with twenty captures would otherwise be megabytes
 // of base64 in a jsonb column.
 import {useEffect, useState} from 'react';
+import {Badge} from '../ui/Badge';
 import {Modal} from '../ui/Modal';
 import {native} from '../../native';
 import * as db from '../../db';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import {RUN_LABEL, RUN_TONE} from '../../automations/runStatus';
+import type {RunLogEntry} from '../../automations/types';
 import type {ArgusAutomation, AutomationRun} from '../../types';
 
-const TONE: Record<string, string> = {
+// A log line's own class, not a badge -- these are lines of text, and a pill on
+// every warn line would out-shout the message. `apply-status-warn` used to be
+// named here and is defined in no stylesheet, so a warn line was indenting
+// correctly and rendering as an ordinary line.
+const LEVEL_CLASS: Record<RunLogEntry['level'], string> = {
   info: '',
-  warn: 'apply-status-warn',
-  error: 'apply-status-error',
+  warn: 'is-warn',
+  error: 'is-error',
 };
 
 function depthOf(path: string): number {
@@ -115,9 +122,7 @@ export function RunLogModal({automation, onClose}: {
               className={`run-log-entry${selected?.id === run.id ? ' is-active' : ''}`}
               onClick={() => setSelectedId(run.id)}
             >
-              <span className={`status-pill ${run.status === 'ok' ?
-                'apply-status-ok' :
-                run.status === 'running' ? '' : 'apply-status-error'}`}>{run.status}</span>
+              <Badge tone={RUN_TONE[run.status]}>{RUN_LABEL[run.status]}</Badge>
               <span className="run-log-entry-meta">
                 {run.profile_name || 'unknown profile'} · {run.trigger}
               </span>
@@ -145,7 +150,7 @@ export function RunLogModal({automation, onClose}: {
                 {selected.log.map((entry, index) => (
                   <li
                     key={index}
-                    className={`run-log-line ${TONE[entry.level] || ''}`}
+                    className={`run-log-line ${LEVEL_CLASS[entry.level] || ''}`}
                     style={{paddingLeft: `${12 + depthOf(entry.path) * 14}px`}}
                   >
                     <span className="run-log-line-path">{entry.path}</span>

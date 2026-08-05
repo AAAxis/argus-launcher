@@ -1,7 +1,8 @@
 // The persistent chrome: the sidebar rail, the topbar, and the corner toasts.
 import {Settings, X} from 'lucide-react';
-import {tabs} from '../data/tabs';
-import {initials, shortenEmail} from '../lib/text';
+import {InboxBell} from './InboxBell';
+import {tabs, visibleTabs} from '../data/tabs';
+import {accountLabel, initials} from '../lib/text';
 import {native} from '../native';
 import {useOrg} from '../org';
 import type {ReactNode} from 'react';
@@ -14,6 +15,11 @@ export function Sidebar({activeTab, onTab, onSettings}: {
   onSettings: () => void;
 }) {
   const org = useOrg();
+  // `org.ready ? … : undefined` rather than `org.org?.plan` alone: an unresolved
+  // org has no plan either way, and passing undefined is what stops the Plans
+  // tab appearing for a frame on every cold start -- in front of paying
+  // customers, who are exactly the people it has nothing to say to.
+  const rail = visibleTabs(org.ready ? org.org?.plan : undefined);
   return (
     <aside className="sidebar">
       {/* The mark alone -- the window title already says "Argus Launcher", so
@@ -23,7 +29,7 @@ export function Sidebar({activeTab, onTab, onSettings}: {
         <span className="brand-mark" role="img" aria-label="Argus" />
       </div>
       <nav>
-        {tabs.map((tab) => (
+        {rail.map((tab) => (
           <button
             aria-current={activeTab === tab.id ? 'page' : undefined}
             className={activeTab === tab.id ? 'active' : ''}
@@ -41,10 +47,13 @@ export function Sidebar({activeTab, onTab, onSettings}: {
           onClick={onSettings}
           title={`${org.email} -- open settings`}
         >
+          {/* Initials off the same string the row is labelled with, so the
+              circle and the name agree. From the address they are whatever the
+              local part starts with, which is a fallback and reads as one. */}
           {org.avatarUrl ?
             <img alt="" className="account-avatar" referrerPolicy="no-referrer" src={org.avatarUrl} /> :
-            <span>{initials(org.email)}</span>}
-          <strong>{shortenEmail(org.email)}</strong>
+            <span>{initials(org.displayName || org.email)}</span>}
+          <strong>{accountLabel(org.displayName, org.email)}</strong>
           <Settings className="account-gear" size={15} strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
@@ -52,15 +61,30 @@ export function Sidebar({activeTab, onTab, onSettings}: {
   );
 }
 
-export function Topbar({activeTab, actions}: {activeTab: TabId; actions: ReactNode}) {
+export function Topbar({activeTab, actions, onViewShares, onOpenAutomationHistory}: {
+  activeTab: TabId;
+  actions: ReactNode;
+  onViewShares: () => void;
+  onOpenAutomationHistory: (automationId: string) => void;
+}) {
   const org = useOrg();
   return (
     <header className="topbar">
-      <div>
-        <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
-        <p>Argus Launcher owns cloud data. Argys Browser starts as a separate anonymous process.</p>
-      </div>
+      {/* The title alone. There used to be a line under it -- "Argus Launcher
+          owns cloud data. Argys Browser starts as a separate anonymous
+          process." -- which was the same sentence on all nine tabs, so it said
+          nothing about the one you were on and was read once and then never
+          again. */}
+      <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
       <div className="actions">
+        {/* Left of the org switcher, and left of the tab's own actions: what
+            somebody has sent you is not an action on the current tab, and it
+            should not move when the tab changes. Renders nothing at all when
+            the inbox is empty, which is most of the time. */}
+        <InboxBell
+          onViewAll={onViewShares}
+          onOpenAutomationHistory={onOpenAutomationHistory}
+        />
         {/* Only shown when the user is actually in more than one firm --
             the common case is one org, chosen silently. */}
         {org.orgs.length > 1 && (

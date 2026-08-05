@@ -7,6 +7,8 @@
 // none of it is org-scoped: an account belongs to a user, not to a tenant.
 import type {User} from '@supabase/supabase-js';
 import {optionalClient, requireClient, STORAGE_BUCKET} from './client';
+import {readLayouts} from '../tables/columns';
+import type {TableLayouts} from '../tables/columns';
 
 // Our own avatar key, deliberately NOT `avatar_url`.
 //
@@ -16,6 +18,15 @@ import {optionalClient, requireClient, STORAGE_BUCKET} from './client';
 // time the user signs in. A private key survives that.
 const AVATAR_KEY = 'argus_avatar_url';
 const NAME_KEY = 'argus_display_name';
+// Which columns each table shows. Under the same private-key rule as the two
+// above, and here rather than in a preferences table because a table layout
+// belongs to a person and not to the org they are currently looking at -- and
+// because a new table would need SQL applied by hand in the Supabase console
+// before the picker did anything at all.
+//
+// It rides in the JWT, so the value stored is only the user's deviations from
+// the defaults. See tables/columns.ts.
+const COLUMNS_KEY = 'argus_table_columns';
 
 // 5 MB. The bucket itself allows 50 (see docs/supabase-migrations.sql), which is
 // sized for extension zips; an avatar that large is a mistake worth catching at
@@ -109,12 +120,45 @@ export async function updateDisplayName(name: string): Promise<User | null> {
   return data.user;
 }
 
+// The stored table layouts, sanitised. What comes back here was decoded from a
+// JWT and could be anything -- readLayouts drops whatever is not a boolean
+// under a string under a table we know about, rather than trying to repair it.
+export function accountTableColumns(user: User | null | undefined): TableLayouts {
+  return readLayouts(metadata(user)[COLUMNS_KEY]);
+}
+
+// A whole-object replace, like the two above: every caller already holds the
+// complete layout, and a merge here would make two tabs saved in quick
+// succession depend on which write landed second.
+export async function updateTableColumns(next: TableLayouts): Promise<User | null> {
+  const client = requireClient();
+  const {data, error} = await client.auth.updateUser({data: {[COLUMNS_KEY]: next}});
+  if (error) {
+    throw new Error(error.message || 'Could not save your column layout.');
+  }
+  return data.user;
+}
+
 const EXTENSION_BY_TYPE: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
 };
+
+// The object-path suffix for a picked image. Exported because profiles.ts
+// uploads avatars too and a second copy of this map would be a second place for
+// "we accept webp" to be answered differently.
+//
+// The browser is the authority on the type, but a file dragged from a share or
+// picked on a system with no mapping arrives with an empty `type`, so the name
+// is the fallback and `png` the last resort -- Storage needs *a* suffix and a
+// wrong one costs a content-type header, not the picture.
+export function imageExtensionFor(file: File): string {
+  return EXTENSION_BY_TYPE[file.type] ||
+    (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') ||
+    'png';
+}
 
 // Uploads to `avatars/<user id>/<timestamp>.<ext>` and records the public URL on
 // the user's metadata, which is what both this app and the website read.
@@ -134,9 +178,7 @@ export async function uploadAvatar(file: File): Promise<User | null> {
   if (!userId) {
     throw new Error('You are not signed in.');
   }
-  const extension = EXTENSION_BY_TYPE[file.type] ||
-    (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
-  const objectPath = `avatars/${userId}/${Date.now()}.${extension}`;
+  const objectPath = `avatars/${userId}/${Date.now()}.${imageExtensionFor(file)}`;
   const {error: uploadError} = await client.storage
       .from(STORAGE_BUCKET)
       .upload(objectPath, file, {contentType: file.type || 'image/png', upsert: true});

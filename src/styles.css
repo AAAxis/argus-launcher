@@ -1,47 +1,104 @@
-/* Design tokens. These deliberately mirror the landing site's vocabulary
- * (landing/app/globals.css) so the marketing site and the desktop app finally
- * share one palette -- warm paper in light, warm charcoal in dark. The accent
- * is ink rather than a hue, so it inverts with the theme (see --accent below).
- * The surface ladder is paper (sunken: sidebar, code blocks) <
- * surface (the app background and modals) < raised (cards, inputs, tables).
+/* Design tokens. Neutral grey in light, neutral charcoal in dark. The accent is
+ * ink rather than a hue, so it inverts with the theme (see --accent below). The
+ * surface ladder is paper (sunken: sidebar, code blocks) < surface (the app
+ * background and modals) < raised (cards, inputs, tables).
+ *
+ * These share a token vocabulary with the landing site (landing/app/globals.css)
+ * but no longer share values: the landing site is still on the warm paper and
+ * the cyan accent both of these started from. Porting it across is a separate
+ * job -- do not assume a change here is already reflected there.
+ *
+ * Every neutral here is achromatic -- R, G and B are equal in each one. The
+ * ramp used to be warm (a beige paper over a warm charcoal), which tinted the
+ * whole chrome and made the status pills and profile colours read as if they
+ * were sitting on stained paper. Greys leave the hue budget entirely to the
+ * things that use hue to mean something: status, HTTP verb, profile colour and
+ * danger. Do not reintroduce a tint here -- if a neutral needs to shift, shift
+ * its lightness and keep the three channels equal.
  *
  * Nothing below this block may hardcode a colour: the dark theme is a straight
  * token swap, so any literal that escapes stays light and looks broken. */
 :root {
   color-scheme: light;
 
-  --paper: #f5f2f0;
-  --surface: #f7f7f6;
+  --paper: #f2f2f2;
+  --surface: #f7f7f7;
   --raised: #ffffff;
-  --hover: #f0ecea;
-  --selected: #eeeae8;
+  --hover: #ededed;
+  --selected: #e9e9e9;
 
-  --ink: #20201d;
-  --ink-soft: #6b6862;
-  --ink-faint: #918c82;
+  /* Half a step under --raised, for a control that sits directly on the page
+   * rather than inside a card. A ghost button filled with --raised is pure white
+   * on a #f7f7f7 page -- the hardest edge in the chrome, on the quietest control
+   * in it, and eight of them in a selection bar read as eight cut-outs. This
+   * lands between the two, so a toolbar button lifts off the page without
+   * punching a hole in it.
+   *
+   * Only the ghost buttons take it. Cards, inputs, tables and popovers are
+   * genuinely raised surfaces and stay on --raised.
+   *
+   * The dark theme's value is --raised's own: #222 is already only seven points
+   * above the #1b1b1b page, and anything softer stops reading as a button at
+   * all. The token exists in both themes so no rule has to branch on the theme
+   * -- see the note at the top of this file. */
+  --raised-soft: #fbfbfb;
 
-  --border: #e4dfdc;
-  --border-soft: #eeeae7;
+  --ink: #1f1f1f;
+  --ink-soft: #676767;
+  --ink-faint: #8c8c8c;
+
+  --border: #e0e0e0;
+  --border-soft: #ebebeb;
 
   /* The accent is ink, not a hue: near-black in light, near-white in dark. It
    * fills every primary control, so it inverts with the theme rather than
    * staying one colour across both. --accent-strong is the pressed/hover step
    * (further from the surface, not a different hue); --accent-ink is whatever
    * has to stay legible on top of a filled accent surface. */
-  --accent: #1a1a19;
+  --accent: #1a1a1a;
   --accent-strong: #000000;
   --accent-ink: #ffffff;
 
-  /* The sidebar selection is a deeper beige than the rail, so it reads as
+  /* The sidebar selection is a deeper grey than the rail, so it reads as
    * pressed in rather than floating. The sidebar ramp runs paper > hover >
    * active, each step a shade deeper. It deliberately does not take the accent:
    * a solid ink chip in the rail would out-shout the content area. */
-  --nav-active-bg: #eeeae8;
+  --nav-active-bg: #e9e9e9;
+
+  /* The one hue allowed into the chrome, and the single exception to the rule
+   * above -- these are the landing site's --accent and --accent-strong verbatim
+   * (landing/app/globals.css), light and dark.
+   *
+   * Why an exception at all: buying a plan is one journey across two products.
+   * It starts on a plan card in here, moves to a checkout page and a receipt in
+   * the browser, and comes back to a welcome screen in here. Drawn in the
+   * launcher's ink accent, the two halves would look like two companies; drawn
+   * in the site's cyan, the whole path is recognisably one.
+   *
+   * Scope is the price of it, and it is not negotiable: ONLY the Plans tab, the
+   * plan welcome modal, Settings > Plan & usage and the sign-in mark may use
+   * these. The sidebar, tables, buttons, links and focus rings stay ink. If a
+   * fifth surface ever wants them, that is a decision to take deliberately, not
+   * by reaching for the token because it is there.
+   *
+   * The sign-in mark was added as the fourth on exactly that basis. It is the
+   * same argument as the other three, one seam earlier: the account is created
+   * on the site, in cyan, and the panel it lands on is the first thing the app
+   * shows. One mark, not the whole panel -- see .login-mark. */
+  --plan-accent: #0e8aa6;
+  --plan-accent-strong: #0a6f87;
+  --plan-accent-ink: #ffffff;
 
   --success: #2e9e5b;
   --danger: #c5453c;
   --danger-strong: #a5322a;
   --danger-bg: #fdf2f1;
+  /* Whatever stays legible on a filled --danger surface, the same way
+   * --accent-ink does for the accent. A destructive primary button is the only
+   * thing that fills with danger, and it needs an ink that inverts with the
+   * theme: the light red is dark enough to carry white, the dark theme's is
+   * light enough to need near-black back. */
+  --danger-ink: #ffffff;
 
   /* Profile status pills. Each needs its own fill/border/ink triple because the
    * light tints are far too pale to survive on a charcoal background. */
@@ -62,6 +119,16 @@
   --status-neutral-bg: var(--paper);
   --status-neutral-border: var(--border);
   --status-neutral-ink: var(--ink-soft);
+  /* The one tone here that is not a profile status: <Badge tone="info">, for a
+     fact the app went and checked rather than a state anything is in. Blue
+     because the four above are already spoken for -- green is Connected on the
+     Integrations tab, and colouring "Found on this machine" green would read as
+     a second Connected. Same blue the GET chip and a blue profile are drawn in,
+     written out rather than aliased onto either: they agree today, and retuning
+     one scale should not silently recolour the others. */
+  --status-info-bg: #eef2fb;
+  --status-info-border: #4a7fd6;
+  --status-info-ink: #2f5bb7;
 
   /* HTTP verb chips on the API tab. Conventional hues, so they are their own
    * scale rather than being forced through the brand palette -- but muted, and
@@ -90,9 +157,11 @@
    * both themes -- fine in neither. Written out rather than aliased onto the
    * verb chips they are drawn from: the two scales happen to agree today, and
    * retuning GET should not silently recolour every blue profile. */
-  --profile-slate-bg: #edeae7;
-  --profile-slate-border: #ddd7d2;
-  --profile-slate-ink: #57534e;
+  /* Slate is the no-hue member of the six and is drawn off the neutral ramp,
+     so it neutralised with everything else. The other five are signal. */
+  --profile-slate-bg: #ededed;
+  --profile-slate-border: #dcdcdc;
+  --profile-slate-ink: #565656;
   --profile-blue-bg: #eef2fb;
   --profile-blue-border: #cbd8f0;
   --profile-blue-ink: #2f5bb7;
@@ -110,14 +179,23 @@
   --profile-amber-ink: #8a6318;
 
   --switch-thumb: #ffffff;
-  --scrim: rgba(23, 22, 19, 0.4);
+  --scrim: rgba(18, 18, 18, 0.4);
 
-  --radius: 9px;
-  --radius-lg: 12px;
-  --shadow-xs: 0 1px 2px rgba(30, 29, 26, 0.05);
-  --shadow-sm: 0 2px 8px rgba(30, 29, 26, 0.06), 0 1px 2px rgba(30, 29, 26, 0.04);
-  --shadow-md: 0 8px 24px rgba(30, 29, 26, 0.10), 0 2px 6px rgba(30, 29, 26, 0.05);
-  --shadow-lg: 0 24px 60px rgba(23, 22, 19, 0.22), 0 4px 12px rgba(23, 22, 19, 0.08);
+  /* Four steps, and small elements take smaller ones so every corner reads as
+   * the same curve at the size it is drawn. --radius-sm is controls you press
+   * (buttons, row actions), --radius is controls you type into and the minor
+   * boxes inside a form, --radius-lg is the surface family -- tables, panels,
+   * cards, modals, toasts. Anything genuinely tiny (inline code, a 16px glyph)
+   * takes --radius-xs; a pill takes 999px and is not part of this scale. */
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --shadow-xs: 0 1px 2px rgba(24, 24, 24, 0.05);
+  --shadow-sm: 0 2px 8px rgba(24, 24, 24, 0.06), 0 1px 2px rgba(24, 24, 24, 0.04);
+  --shadow-md: 0 8px 24px rgba(24, 24, 24, 0.10), 0 2px 6px rgba(24, 24, 24, 0.05);
+  --shadow-lg: 0 24px 60px rgba(18, 18, 18, 0.22), 0 4px 12px rgba(18, 18, 18, 0.08);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
@@ -130,7 +208,14 @@
   /* A data: URI cannot resolve currentColor, so the select chevron is a token
    * with one stroke baked per theme. Geometry matches lucide's ChevronDown so
    * it sits consistently next to the lucide icons used everywhere else. */
-  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%236b6862' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23676767' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  /* The selection control's tick. One definition for both themes, unlike
+   * --chevron above: this one is used as a *mask*, so only the stroke's alpha
+   * is read and the colour comes from the pseudo-element's background. The path
+   * is lucide's Check verbatim, which is the tick drawn everywhere else in the
+   * app. See .selector:checked::after. */
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
 
   /* Bundled by Vite. Used as a mask rather than an image -- see .brand-mark. */
   --argus-mark: url("./assets/argus-mark.png");
@@ -142,35 +227,47 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Warm charcoal rather than pure black, to keep the brand's paper warmth in the
- * dark. Stamped onto <html> by src/theme.tsx (and by the pre-paint script in
- * index.html, so the window never flashes light before React boots). */
+/* Neutral charcoal rather than pure black: the ladder still needs four
+ * distinguishable steps above the window, and #000 leaves nowhere to put the
+ * sunken one. Stamped onto <html> by src/theme.tsx (and by the pre-paint script
+ * in index.html, so the window never flashes light before React boots).
+ *
+ * Achromatic, exactly like the light ramp above -- same rule, same reason. */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --paper: #171615;
-  --surface: #1c1b19;
-  --raised: #242220;
-  --hover: #211f1d;
-  --selected: #100f0e;
+  --paper: #161616;
+  --surface: #1b1b1b;
+  --raised: #222222;
+  /* Deliberately identical to --raised here. See the light block for why. */
+  --raised-soft: #222222;
+  --hover: #1f1f1f;
+  --selected: #0f0f0f;
 
-  --ink: #ece9e6;
-  --ink-soft: #a39d97;
-  --ink-faint: #8a847e;
+  --ink: #e9e9e9;
+  --ink-soft: #9e9e9e;
+  --ink-faint: #858585;
 
-  --border: #34312e;
-  --border-soft: #2a2825;
+  --border: #313131;
+  --border-soft: #282828;
 
-  --accent: #f2f0ed;
+  --accent: #f0f0f0;
   --accent-strong: #ffffff;
-  --accent-ink: #17161a;
+  --accent-ink: #171717;
 
-  --nav-active-bg: #100f0e;
+  --nav-active-bg: #0f0f0f;
+
+  /* Lifted a step, like every other hue here: the light cyan is too dark to read
+   * on charcoal. Same two values the landing site's .dark block uses. */
+  --plan-accent: #1fa6c2;
+  --plan-accent-strong: #3cbad6;
+  --plan-accent-ink: #0b1417;
 
   --success: #46c47c;
   --danger: #e2706a;
   --danger-strong: #f0908a;
   --danger-bg: #2a1a18;
+  --danger-ink: #171717;
 
   --status-active-bg: #16281d;
   --status-active-border: #3d8f5e;
@@ -184,6 +281,9 @@
   --status-review-bg: #221c33;
   --status-review-border: #6b57a8;
   --status-review-ink: #b9a6e8;
+  --status-info-bg: #172436;
+  --status-info-border: #3f6bad;
+  --status-info-ink: #8fb0e8;
 
   --method-get-bg: #1b2436;
   --method-get-border: #2c3d5c;
@@ -198,9 +298,9 @@
   --method-delete-border: #4a2f2d;
   --method-delete-ink: #e0908b;
 
-  --profile-slate-bg: #2b2825;
-  --profile-slate-border: #403b36;
-  --profile-slate-ink: #b8b1aa;
+  --profile-slate-bg: #292929;
+  --profile-slate-border: #3d3d3d;
+  --profile-slate-ink: #b3b3b3;
   --profile-blue-bg: #1b2436;
   --profile-blue-border: #2c3d5c;
   --profile-blue-ink: #8fb0e8;
@@ -217,7 +317,7 @@
   --profile-amber-border: #45381f;
   --profile-amber-ink: #d3a768;
 
-  --switch-thumb: #d8d3c8;
+  --switch-thumb: #d4d4d4;
   --scrim: rgba(0, 0, 0, 0.62);
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -225,7 +325,7 @@
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50), 0 2px 6px rgba(0, 0, 0, 0.32);
   --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.66), 0 4px 12px rgba(0, 0, 0, 0.44);
 
-  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23a39d97' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239e9e9e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 * {
@@ -276,7 +376,7 @@ button {
   align-items: center;
   background: var(--accent);
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--accent-ink);
   cursor: pointer;
   display: inline-flex;
@@ -298,14 +398,41 @@ button:not(:disabled):active {
   box-shadow: none;
 }
 
+/* --raised-soft, not --raised: a ghost button sits on the page, not in a card,
+ * and pure white against the page was the hardest edge in the chrome. */
 button.ghost {
-  background: var(--raised);
+  background: var(--raised-soft);
   border: 1px solid var(--border);
   color: var(--ink);
 }
 
+/* A destructive primary: the Delete in a confirm dialog. This used to set the
+ * colour alone, which left the base `button` fill underneath it -- and that
+ * fill is the accent, which is ink: near-black in light, near-white in dark. So
+ * every Delete rendered as a black button with dark red text on it, which is
+ * both unreadable and the wrong signal. It carries the danger fill instead. */
 button.danger {
+  background: var(--danger);
+  color: var(--danger-ink);
+}
+
+button.danger:not(:disabled):hover {
+  background: var(--danger-strong);
+}
+
+/* `class="danger ghost"` is the quiet variant -- the ghost surface with the
+ * danger word on it, for a toolbar where the destructive action sits beside
+ * three ordinary ones and must not be the loudest thing on the row. Declared
+ * after the filled form so the two win regardless of which order the class
+ * list is written in. */
+button.ghost.danger {
+  background: var(--raised-soft);
   color: var(--danger);
+}
+
+button.ghost.danger:not(:disabled):hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
 }
 
 .login-shell {
@@ -328,9 +455,28 @@ button.danger {
   width: min(420px, calc(100vw - 40px));
 }
 
-.login-panel svg {
-  color: var(--accent);
+/* The Argus mark at the head of the sign-in panel, drawn as a mask so it takes
+ * a colour rather than stamping black line art into the dark theme -- the same
+ * technique as .brand-mark and .plan-welcome-glyph.
+ *
+ * Filled with --plan-accent, which makes this the fourth surface allowed to use
+ * the token; see its comment at the top of this file. Deliberate, and for the
+ * same reason the other three have it: the sign-in screen is the seam between
+ * the site and the app -- the account was made on argus.bot, in cyan, and the
+ * first launcher screen it leads to should not look like a different company.
+ *
+ * The art is 874x1124, so the box carries that ratio rather than a square that
+ * would leave the mask floating in dead space. */
+.login-mark {
+  background-color: var(--plan-accent);
+  display: block;
+  height: 44px;
   justify-self: center;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 34px;
 }
 
 /* One canonical text input, the same way `select` below is canonical.
@@ -343,7 +489,18 @@ button.danger {
  * max-width, monospace paths).
  *
  * Deliberately typed rather than bare `input`: checkboxes and radios are drawn
- * by .switch / .checkbox-confirm and must not inherit a 36px pill. */
+ * by .switch / .checkbox-confirm and must not inherit a 36px pill.
+ *
+ * `:not([type])` is in the list because an attribute selector does not match a
+ * missing attribute, and `<input>` with no type IS a text input -- the HTML
+ * spec says so, and the browser agrees. So every bare `<input value=...>` in
+ * the app fell straight through all of this to the platform default: no token
+ * background, no radius, no 36px height, a hairline border that ignores the
+ * theme. There are about twenty of them across fourteen files (the whole step
+ * editor, TagInput, the three Move dialogs, Account and General settings), and
+ * they were the "input field looks wrong" in the automation editor. Fixing the
+ * rule fixes all of them, and the next one nobody remembers to type. */
+input:not([type]),
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -353,15 +510,19 @@ input[type="tel"],
 input[type="url"] {
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  /* Fully rounded, matching the selects and the chips. The horizontal padding
+     goes up with the radius: at 999px the curve eats the first character's
+     left bearing, and 12px left the text visibly crowding the edge. */
+  border-radius: 999px;
   color: var(--ink);
   min-height: var(--control-h);
-  padding: 0 12px;
+  padding: 0 16px;
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
 
-/* Focus is the border warming to the accent plus a soft ring, not the platform
- * outline -- the outline squares off the 8px corners it draws around. */
+/* Focus is the border darkening to the accent plus a soft ring, not the platform
+ * outline -- the outline squares off the corners it draws around. */
+input:not([type]):focus-visible,
 input[type="text"]:focus-visible,
 input[type="email"]:focus-visible,
 input[type="password"]:focus-visible,
@@ -376,22 +537,47 @@ textarea:focus-visible {
   outline: none;
 }
 
+/* The native number stepper, gone, everywhere.
+ *
+ * Chromium draws a two-arrow spinner inside every input[type=number], which is
+ * the only control in this app with a browser-drawn widget inside it -- so a
+ * run timeout, a retry count and a match index each carried a pair of grey
+ * arrows that belong to no part of the design system, sitting where the
+ * select's chevron sits and meaning something else entirely. The keyboard's
+ * up/down arrows still step the value; only the drawn control goes.
+ *
+ * `appearance: textfield` is the Firefox/spec half and the ::-webkit- rules are
+ * the Chromium half. Both are needed, and Electron only reads the second. */
+input[type='number'] {
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
 /* One canonical select. Every dropdown in the app inherits from here: the
  * native macOS arrow is replaced by the themed chevron token, and padding-right
  * reserves room for it so long folder/status names ellipsize instead of running
- * underneath the arrow. */
+ * underneath the arrow.
+ *
+ * Fully rounded, like the inputs and every chip in the app. Both paddings grew
+ * with the radius -- the left because the curve eats into the first character,
+ * the right because the chevron sat far enough out to clip against it. */
 select {
   appearance: none;
   background-color: var(--raised);
   background-image: var(--chevron);
-  background-position: right 12px center;
+  background-position: right 13px center;
   background-repeat: no-repeat;
   background-size: 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 999px;
   color: var(--ink);
   min-height: var(--control-h);
-  padding: 0 34px 0 10px;
+  padding: 0 37px 0 15px;
   text-overflow: ellipsis;
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
 }
@@ -399,7 +585,7 @@ select {
 textarea {
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--ink);
   padding: 12px 14px;
   transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
@@ -464,6 +650,23 @@ textarea {
   color: var(--status-review-ink);
 }
 
+.status-chip.status-info {
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  color: var(--status-info-ink);
+}
+
+/* <Badge> borrows .status-chip's pill for labels that are not profile
+   statuses. The base padding is optically weighted for the dot (9px left,
+   11px right); with no dot and no glyph that reads lopsided, so even it up. */
+.status-chip.is-plain {
+  padding: 5px 10px;
+}
+
+.status-chip > svg {
+  flex: none;
+}
+
 .status-picker {
   align-items: center;
   display: inline-flex;
@@ -515,6 +718,77 @@ tbody .status-picker-edit[aria-expanded='true'] {
   background: var(--selected);
 }
 
+/* ── The platform dropdown ──────────────────────────────────────────────────
+ * components/ui/PlatformSelect.tsx. Deliberately the same panel geometry as the
+ * status picker above -- two pickers in one row of the import table should not be
+ * two different widgets.
+ *
+ * The trigger is a logo the width of a glyph, not a control the width of
+ * "Windows 11": it replaced a native <select> that was the widest cell in the
+ * row and the only place in the app where a platform appeared without its mark. */
+.platform-select-trigger {
+  align-items: center;
+  background: none;
+  /* Buttons default to the filled accent treatment in this app, so a
+     background-only reset would leave the glyph the accent's ink. */
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  display: inline-flex;
+  height: var(--control-h-sm);
+  justify-content: center;
+  padding: 0 7px;
+}
+
+.platform-select-trigger:hover {
+  background: var(--hover);
+  border-color: var(--border-soft);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.platform-pop-list {
+  display: grid;
+  gap: 2px;
+}
+
+.platform-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+/* The tick is pushed to the far edge so the six names stay left-aligned to each
+   other rather than each being followed by its own mark. */
+.platform-pop-option > svg:last-child {
+  margin-left: auto;
+}
+
+.platform-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.platform-pop-option.active {
+  background: var(--selected);
+}
+
+.platform-pop-hint {
+  border-top: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  padding: 7px 8px 0;
+}
+
 /* A footer action inside the panel rather than a button sitting on it: the
    ghost fill and full border would make it a second card inside a 230px box. */
 .status-pop-new {
@@ -550,6 +824,15 @@ tbody .status-picker-edit[aria-expanded='true'] {
 .login-form {
   display: grid;
   gap: 14px;
+}
+
+/* Buttons are inline-flex and left-packed by default, which is right in a
+ * toolbar and wrong here: stretched to the panel's width by the grid, the label
+ * sat against the left edge while the Google button above it was centred, so
+ * the two ways in read as different kinds of control. Centring the icon/label
+ * pair lines them up. */
+.login-form button {
+  justify-content: center;
 }
 
 .login-links {
@@ -643,7 +926,6 @@ tbody .status-picker-edit[aria-expanded='true'] {
 
 .login-panel p,
 .loading-state p,
-.topbar p,
 .panel p {
   color: var(--ink-soft);
   margin: 0;
@@ -770,7 +1052,7 @@ nav button:hover svg {
 }
 
 /* The rule sits on the trailing edge, echoing the coloured line the landing
-/* Selection is carried by fill alone: a deeper beige than the rail, so the tab
+/* Selection is carried by fill alone: a deeper grey than the rail, so the tab
  * reads as pressed into the sidebar rather than pasted on top of it. */
 nav button.active {
   background: var(--nav-active-bg);
@@ -785,7 +1067,7 @@ nav button.active svg {
 
 .update-panel {
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: grid;
   gap: 10px;
   padding: 14px;
@@ -862,7 +1144,7 @@ nav button.active svg {
 
 .account-trigger {
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--ink);
   justify-content: stretch;
   min-height: var(--control-h);
@@ -916,6 +1198,48 @@ nav button.active svg {
   font-size: 10px;
   height: 22px;
   width: 22px;
+}
+
+/* The two things a profile can carry instead of its initials. Both keep the
+ * circle and both keep .avatar's box, so a table of forty rows has one column
+ * of plates whatever each one is filled with -- a photo row that was 2px taller
+ * than its neighbours would undo the whole point of the column. */
+
+/* A picture, cropped rather than letterboxed: these are account photos, and a
+ * face centred in the circle reads better than the whole frame shrunk into it
+ * with bars either side. */
+.avatar.avatar-photo {
+  background: var(--paper);
+  flex: none;
+  object-fit: cover;
+}
+
+/* A brand mark keeps its own colours (see assets/brands/README.md), so it sits
+ * on the neutral surface rather than on one of the six profile tints -- a
+ * full-colour logo on a coloured plate is two palettes arguing inside 32px. The
+ * hairline is what stops a white-ish mark from dissolving into a light card. */
+.avatar.avatar-brand {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  flex: none;
+  overflow: hidden;
+}
+
+/* The editor's Avatar row: the plate the table will draw, then the ways to
+ * change it. Wraps, because the Remove button is a fourth control that only
+ * exists once something is set and a narrow dialog should grow a line rather
+ * than squeeze all four. */
+.avatar-picker {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.avatar-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .account span,
@@ -993,7 +1317,7 @@ nav button.active svg {
 }
 
 /* Same rail vocabulary as the main sidebar -- transparent until hovered, a
- * deeper beige when selected, never the accent. A solid ink chip in a 208px
+ * deeper grey when selected, never the accent. A solid ink chip in a 208px
  * column would out-shout the section it is labelling. */
 .settings-rail button {
   background: transparent;
@@ -1107,6 +1431,28 @@ nav button.active svg {
   font-size: 13px;
   font-weight: 650;
   margin: 0 0 2px;
+}
+
+/* Only rendered when a row passes one, so a group with no icons keeps its old
+ * flush-left label. The glyph is the plan accent because the only group using
+ * icons today is the usage list, which is a plan surface. */
+.settings-row-label h4:has(.settings-row-icon) {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.settings-row-icon {
+  align-items: center;
+  color: var(--plan-accent);
+  display: inline-flex;
+}
+
+/* The description lines up under the label rather than under the glyph: the
+ * icon labels the row, and a sentence indented past it reads as belonging to
+ * the icon instead. */
+.settings-row-label h4:has(.settings-row-icon) + p {
+  padding-left: 24px;
 }
 
 .settings-row-label p,
@@ -1230,7 +1576,11 @@ img.settings-identity-avatar {
   width: 1px;
 }
 
-/* ── Plan ── */
+/* ── Plan ──
+ *
+ * A plan surface, so this block and .settings-included below are two of the
+ * three places allowed to draw with --plan-accent. See the token's comment at
+ * the top of this file. */
 .settings-plan {
   align-items: center;
   background: var(--raised);
@@ -1243,31 +1593,98 @@ img.settings-identity-avatar {
   padding: 16px 18px;
 }
 
+/* Washed rather than filled: this plate sits at the top of a panel of plain
+ * rows, and a solid accent block that size would be the loudest thing in
+ * Settings. */
+.settings-plan-mark {
+  align-items: center;
+  background: color-mix(in srgb, var(--plan-accent) 12%, transparent);
+  border-radius: var(--radius);
+  color: var(--plan-accent);
+  display: inline-flex;
+  flex: none;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.settings-plan-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-plan-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .settings-plan-name {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
-.settings-plan-status {
-  background: var(--status-active-bg);
-  border: 1px solid var(--status-active-border);
-  border-radius: 999px;
-  color: var(--status-active-ink);
-  font-size: 11px;
-  font-weight: 700;
-  margin-left: 8px;
-  padding: 2px 8px;
+/* The status word arrives lowercase from the database ("active", "past_due").
+ * Capitalised here rather than in the component so the Badge stays the app's
+ * one pill and does not grow a formatting opinion for this caller. */
+.settings-plan-title .status-chip {
   text-transform: capitalize;
-  vertical-align: 3px;
 }
 
-/* A cancelled subscription is still active until the period ends, so it is
- * warned about rather than shown as an error. */
-.settings-plan-status.ending {
+/* ── What the plan includes ── */
+.settings-included {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  padding: 12px 0;
+}
+
+.settings-included-tile {
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+}
+
+.settings-included-icon {
+  align-items: center;
+  color: var(--plan-accent);
+  display: inline-flex;
+  margin-bottom: 4px;
+}
+
+.settings-included-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.settings-included-tile strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+/* A workspace whose limit columns disagree with the plan it is on. Warning
+ * rather than danger: nothing is broken and nothing the user did caused it --
+ * the numbers are simply not the ones the tier sells, which is a billing
+ * correction, not a failure.
+ *
+ * Borrows the --status-warmup-* triple rather than tinting --danger. Those are
+ * introduced for the profile status pills, but they are the only warning colours
+ * in the file that carry their own light and dark values, and a note that reads
+ * as amber on paper and mud on charcoal is worse than reusing them. */
+.settings-note {
   background: var(--status-warmup-bg);
-  border-color: var(--status-warmup-border);
+  border: 1px solid var(--status-warmup-border);
+  border-radius: var(--radius);
   color: var(--status-warmup-ink);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  padding: 10px 12px;
 }
 
 .settings-plan p {
@@ -1294,6 +1711,45 @@ img.settings-identity-avatar {
   display: flex;
   gap: 5px;
   justify-content: flex-end;
+}
+
+/* The meter's own name, when the caller hands it one instead of drawing a
+ * heading above the control. The auto margin is the whole layout: the name sits
+ * hard left, the count stays hard right where every other meter puts it, and
+ * the track spans both underneath. Two rows, not three. */
+/* align-self overrides the row's baseline: the count is the tallest thing on the
+ * line, and baseline-aligning a flex box that contains an icon lines the icon up
+ * with the digits instead of the words next to it. */
+.settings-meter-label {
+  align-items: center;
+  align-self: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  margin-inline-end: auto;
+  min-width: 0;
+}
+
+/* One line instead of two, for the Team toolbar. The stacked form is right in
+ * Settings, where a meter owns a row and vertical space is free -- but in a
+ * toolbar it makes a two-line block sitting beside one-line controls, and the
+ * numbers ride above the track instead of beside the button they explain. */
+.settings-meter.is-compact {
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-meter.is-compact .settings-meter-numbers {
+  flex: none;
+  white-space: nowrap;
+}
+
+.settings-meter.is-compact .settings-meter-track {
+  min-width: 56px;
 }
 
 .settings-meter strong {
@@ -1495,11 +1951,17 @@ img.settings-identity-avatar {
   flex: 0 0 auto;
 }
 
+/* Spelled `overflow: auto` rather than `overflow-y: auto`, because a table can
+ * be wider than its column and needs the horizontal scrollbar. It always did:
+ * CSS computes an axis left at `visible` up to `auto` as soon as the other axis
+ * is not visible, so this pair was already scrolling both ways by accident.
+ * Saying it outright keeps .table-wrap's `overflow: hidden` from silently
+ * winning the x-axis and swallowing the overflowing columns. */
 .content > .table-wrap,
 .content > .card-grid {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: auto;
 }
 
 .topbar,
@@ -1510,16 +1972,47 @@ img.settings-identity-avatar {
   gap: 14px;
 }
 
+/* One height on every tab, whether or not the page has action buttons.
+ *
+ * This row has no height of its own -- align-items: center over a flex row
+ * means it is as tall as its tallest child. Five tabs put buttons in .actions
+ * (Profiles, Proxies, Cookies, Start page, Automations) and three do not
+ * (Extensions, Integrations, API; see renderTopActions in App.tsx), so the row
+ * was 36px on the first group and collapsed to the h1's own line box on the
+ * second. The title moved ~6px and the content under it ~12px as you switched
+ * tabs, which read as each page having its own header. Reserving --control-h
+ * -- the button height that was setting it anyway -- pins all eight together. */
 .topbar {
   justify-content: space-between;
+  min-height: var(--control-h);
 }
 
+/* The main data surface -- the profiles, cookies and proxies tables, and every
+ * panel drawn to match them. Takes the largest radius in the scale: these are
+ * the biggest boxes on screen, and a corner that reads as generous on a 400px
+ * table would read as a lozenge on a 36px button. */
 .table-wrap,
 .panel {
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
+}
+
+/* A table's rows are full-bleed: the last row's hover fill and a selected row's
+ * fill both run edge to edge, so at 14px they visibly square off the two bottom
+ * corners the border is rounding. A scroll container clips to the border box,
+ * which fixes that -- and .content > .table-wrap is already one (see above).
+ * This covers the tables that are not a direct child of .content.
+ *
+ * Scoped to .table-wrap and not .panel on purpose: a panel holds padded form
+ * controls, and clipping it would eat the 3px --focus-ring on anything sitting
+ * near its edge. A table has no focusable control against its border.
+ *
+ * Nothing that must escape the box is caught by this: row popovers are
+ * position: fixed (.popover-panel), so they are laid out against the viewport. */
+.table-wrap {
+  overflow: hidden;
 }
 
 .table-toolbar {
@@ -1536,12 +2029,282 @@ img.settings-identity-avatar {
   width: 100%;
 }
 
+/* Only the width. The fill, border, height and pill all come from the canonical
+ * `select` -- this block used to restate them, and in restating the radius as
+ * var(--radius) it squared off the only controls in a toolbar of rounded ones.
+ * The two selects still here (Cookies' In use / Unused, Proxies' Used by a
+ * profile) are the ones with no colour to show; the three that had one are now
+ * .filter-trigger below. */
 .table-toolbar select {
-  background-color: var(--raised);
+  min-width: 180px;
+}
+
+/* ── Filter dropdowns ───────────────────────────────────────────────────────
+ * components/ui/TableFilters.tsx -- the status filter, the tag filter and the
+ * selection bar's assign-to-folder.
+ *
+ * The trigger is drawn to match the canonical <select> exactly: same fill,
+ * border, height, pill and minimum width. That is the point. Two of the
+ * toolbar's dropdowns are still native selects, and a row that mixes two
+ * silhouettes reads as two kinds of control when they do the same kind of job.
+ * What a select could not do is show the value -- these hold the real status
+ * chip, the real tag chip or the folder's own glyph.
+ *
+ * --raised, not the --raised-soft the ghost buttons take: these are the search
+ * box's neighbours and belong to its surface, not to the buttons'. */
+.filter-trigger {
+  background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 999px;
+  color: var(--ink);
+  font-weight: 500;
+  gap: 8px;
+  justify-content: space-between;
   min-height: var(--control-h);
   min-width: 180px;
+  /* Less on the right than the left: the chevron is already inset by its own
+     box, and matching 15px pushed it visibly off-centre against the curve. */
+  padding: 0 13px 0 15px;
+}
+
+.filter-trigger:not(:disabled):hover {
+  border-color: var(--ink-faint);
+  /* Buttons in this app do not lift. See the note on `button:hover`. */
+  box-shadow: none;
+}
+
+/* Open is drawn the way a focused select is, so the control does not change
+   family the moment its panel appears. */
+.filter-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.filter-trigger-label {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The chevron. flex: none so a long folder name ellipsizes instead of squeezing
+   it, and quiet, because it is punctuation rather than content. */
+.filter-trigger > svg:last-child {
+  color: var(--ink-soft);
+  flex: none;
+}
+
+/* A chip inside the trigger has to be able to shrink. .tag-chip is flex: none
+   everywhere else -- in a table cell it must keep its full width -- but here it
+   is one of two children of a 180px control, and a long tag would otherwise
+   push the chevron out of the button rather than ellipsizing. */
+.filter-trigger .status-chip,
+.filter-trigger .tag-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The panel. Same rows as the status, platform and column pickers -- left
+   aligned, 34px, 7px radius, tick at the far edge -- for the same reason those
+   three agree with each other. */
+.filter-pop-list {
+  display: grid;
+  gap: 2px;
+}
+
+.filter-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 500;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.filter-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.filter-pop-option.active {
+  background: var(--selected);
+}
+
+.filter-pop-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The unlabelled tag rows' stand-in for a brand mark, on the same plate a
+   TagBadge uses so a catalogued tag and a user's own word line their names up
+   at the same offset. */
+.filter-pop-mark {
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+}
+
+/* How many rows carry this tag. The quiet counter the folder cards already use,
+   not a second piece of content on the row. */
+.filter-pop-count {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Pushed to the far edge so the names stay left-aligned to each other rather
+   than each being followed by its own mark -- the same rule .platform-pop-option
+   states for its own tick. */
+.filter-pop-tick {
+  flex: none;
+  margin-left: auto;
+}
+
+/* ── The column picker ──────────────────────────────────────────────────────
+ * components/ui/ColumnsButton.tsx. Deliberately the same rows as the status and
+ * platform pickers -- label left, tick at the far edge, 7px radius -- because a
+ * third shape of popover list in one app is a third widget to learn. What
+ * differs is that these are switches: the panel stays open while several are
+ * ticked, and toggling one does not dismiss it.
+ *
+ * The trigger sits at the far end of the toolbar, opposite the filters:
+ * everything to its left narrows which rows you see, this decides what a row
+ * shows, and those are not the same kind of control. */
+.table-toolbar .columns-trigger {
+  margin-left: auto;
+}
+
+/* How many columns are switched off, on the trigger itself. It is the fact
+   somebody wants when a column they expected is not there, and the only way to
+   tell a configured table from a default one without opening the panel. */
+.columns-trigger-count {
+  background: var(--selected);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+}
+
+/* Profiles offers eighteen columns; at 34px a row that is a panel taller than a
+   laptop window. The list scrolls and the reset stays put beneath it -- Popover
+   deliberately does not close on a scroll inside its own panel. */
+.columns-pop-scroll {
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  /* Room for the scrollbar, so it never sits on top of the ticks. */
+  padding-right: 2px;
+}
+
+.columns-pop-group {
+  display: grid;
+  gap: 2px;
+}
+
+.columns-pop-group + .columns-pop-group {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+/* Small, quiet and not clickable: these name the sections, they are not a
+   second level of choice. */
+.columns-pop-group-label {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0 0 2px;
+  padding: 0 8px;
+}
+
+.columns-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+  width: 100%;
+}
+
+/* Pushed to the far edge so the labels stay aligned to each other rather than
+   each being followed by its own mark -- the same rule .platform-pop-option
+   makes, for the same reason. */
+.columns-pop-option > svg:last-child {
+  margin-left: auto;
+}
+
+.columns-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.columns-pop-option.active {
+  background: var(--selected);
+}
+
+/* Name, which every table keeps. It stays in the list rather than being left
+   out: one greyed row answers "where did Name go?", where an absence raises the
+   question instead. */
+.columns-pop-option:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+  opacity: 1;
+}
+
+/* The divider is the footer's, not the button's: a control that carries its own
+   square top edge cannot also be a rounded control, which is what .status-pop-new
+   settles for and what this panel does not have to. */
+.columns-pop-footer {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+/* A real button, at --radius-sm -- the scale's step for "controls you press".
+   Quiet rather than bordered: a full ghost outline in a 248px panel reads as a
+   second card, so it takes the panel's own hover fill instead, like the option
+   rows above it. */
+.columns-pop-reset {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: center;
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  width: 100%;
+}
+
+.columns-pop-reset:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
 }
 
 /* The folder name in a table cell, with its icon. */
@@ -1581,6 +2344,44 @@ th {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* A sortable header is the same header, not a button dropped into it: it
+ * inherits the cell's colour, size, weight, tracking and case rather than
+ * re-declaring them, so a sortable column and a plain one read as one row.
+ * The global `button` rule sets min-height, padding and a background this
+ * needs none of -- hence the resets.
+ *
+ * Negative inline margin so the hit area covers the cell's own 14px padding
+ * without the label moving: the text has to stay on the same vertical line as
+ * the columns beside it. */
+.th-sort {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 5px;
+  letter-spacing: inherit;
+  margin: -6px -8px;
+  min-height: 0;
+  padding: 6px 8px;
+  text-transform: inherit;
+}
+
+.th-sort:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* The arrow is the one part that is not the label, so it stays quieter than
+ * it -- it marks which column is sorted, it does not compete to be read. */
+.th-sort svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
 }
 
 tbody tr {
@@ -1628,10 +2429,177 @@ td.checkbox-cell > input[type='checkbox'] {
   display: block;
 }
 
+/* ── Selectors ──────────────────────────────────────────────────────────────
+ * The round selection control shared by every table and card grid. See
+ * components/ui/Checkbox.tsx.
+ *
+ * These were unstyled native checkboxes: no accent-color anywhere in this file,
+ * so they were drawn by the platform and ignored the theme entirely -- a stock
+ * blue macOS tick in a table whose accent is ink, and a light-mode widget in a
+ * dark one. Round because the job is picking rows out of a set.
+ *
+ * Deliberately scoped to .selector rather than to input[type='checkbox']: the
+ * consent checkbox in the delete dialogs (.checkbox-confirm) has to stay square,
+ * because a round one reads as "pick one of these" rather than "I agree". */
+.selector {
+  appearance: none;
+  background: var(--raised);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  flex: none;
+  height: 18px;
+  margin: 0;
+  position: relative;
+  transition: background-color 0.12s var(--ease), border-color 0.12s var(--ease);
+  width: 18px;
+}
+
+.selector:hover {
+  border-color: var(--accent);
+}
+
+.selector:checked,
+.selector:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The tick is masked, not drawn.
+ *
+ * It used to be two borders on a box rotated 45deg, and it read as sitting low
+ * in the circle -- correctly, because the ink of such a box lives only on its
+ * bottom and right edges, so the centroid is down-right of the box's centre and
+ * the rotation turns that offset into pure downward drift. `top: 47%` was an
+ * attempt to claw it back and recovered about half a pixel of the ~1.3 it owed.
+ * Centring a shape whose ink is not where its box is cannot be done by nudging
+ * the box.
+ *
+ * A mask fixes the cause rather than the symptom: --tick's alpha carries the
+ * shape and `background` carries the colour, so the tick can still be
+ * --accent-ink in both themes -- which is what the border trick was reaching
+ * for, and what a background-image (whose stroke cannot take a custom property)
+ * could not have given it. The path is lucide's Check, so the tick in a
+ * checkbox and the tick in every chip and menu are now the same drawing. */
+.selector:checked::after {
+  background: var(--accent-ink);
+  content: '';
+  height: 11px;
+  left: 50%;
+  mask-image: var(--tick);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 11px;
+}
+
+/* Some but not all: a bar, not a tick. Only reachable when :checked is false,
+   so it cannot collide with the rule above. */
+.selector:indeterminate::after {
+  background: var(--accent-ink);
+  border-radius: 999px;
+  content: '';
+  height: 1.5px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+}
+
+.selector:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* A row that exists but must not be picked. It keeps its shape rather than
+   disappearing: the Run dialog's blocked profiles are the ones the user most
+   needs to see, because the point of the screen is telling them which. */
+.selector:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.selector:disabled:hover {
+  border-color: var(--border);
+}
+
 td.platform-cell {
   color: var(--ink-soft);
   width: 1%;
   white-space: nowrap;
+}
+
+/* The Profiles table's proxy columns -- two of them.
+ *
+ * The address and its check were briefly one cell, which put "which proxy is
+ * this" and "does it work" in one column sortable only by the first. They are
+ * two questions, and now two columns the user can keep or drop independently:
+ * some workspaces run everything direct, and some care only about the check.
+ * The import review table (ImportProfilesModal) has always split them this way.
+ *
+ * No margin between them any more -- the cell padding is the gap. */
+td.profile-proxy-cell,
+td.profile-proxy-status-cell {
+  white-space: nowrap;
+}
+
+.profile-proxy-host {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* On the row's centre rather than on the text baseline, which is where an
+   inline-flex chip would otherwise sit itself -- a couple of pixels low. */
+.profile-proxy-host,
+td.profile-proxy-status-cell > .proxy-check {
+  vertical-align: middle;
+}
+
+/* ── The optional Profiles columns ──────────────────────────────────────────
+ * The nine columns off by default (tables/profileColumns.tsx). All of them are
+ * one short fact per cell, and all of them are things somebody turned on to
+ * scan down rather than to read -- hence quiet, tabular, and nowrap.
+ *
+ * A missing value is an em dash, never an empty cell: a blank in a table this
+ * wide reads as a rendering fault rather than as "this one has none". */
+.cell-muted {
+  color: var(--ink-faint);
+}
+
+td.cell-soft {
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* Login email, start URL and cookie set can all be long enough to set the
+   table's width on their own. Capped and clipped, with the whole value in the
+   title -- the cell says which, and the tooltip says exactly which. */
+td.cell-wide {
+  max-width: 220px;
+}
+
+td.cell-wide .cell-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Eight characters is enough to tell two profiles apart by eye; the copy button
+   is there because the other twenty-eight are what the API wants. */
+td.profile-id-cell {
+  white-space: nowrap;
+}
+
+.profile-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  vertical-align: middle;
 }
 
 /* ── Proxies table cells ────────────────────────────────────────────────────
@@ -1646,14 +2614,101 @@ td.proxy-host-cell {
 td.proxy-check-cell {
   color: var(--ink-soft);
   font-size: 12px;
+  white-space: nowrap;
 }
 
-/* A dead proxy is the reason someone opened this tab. The whole message stays
-   in the cell rather than being clipped -- a check that failed with "407
-   Proxy Authentication Required" is useless truncated to "407 Proxy…". */
-td.proxy-check-cell.failed {
+/* ── The proxy check chip ───────────────────────────────────────────────────
+ * components/ui/ProxyCheckCell.tsx, shared by the Proxies table, the Profiles
+ * table's proxy column and the import review table.
+ *
+ * Same pill geometry as .status-chip so a row does not carry two different
+ * shapes of verdict, but a step quieter: a proxy's health is secondary to the
+ * profile's status, and two chips of equal weight in one row compete.
+ *
+ * The failure used to spill the whole curl error into the cell, which pushed
+ * rows to two lines and stopped the column being scannable; the message is in
+ * the title now, and this is why the chip never wraps. */
+.proxy-check {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 5px;
+  line-height: 1;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.proxy-check.unchecked {
+  background: var(--hover);
+  color: var(--ink-faint);
+}
+
+.proxy-check.checking {
+  background: var(--hover);
+  color: var(--ink-soft);
+}
+
+.proxy-check.ok {
+  background: var(--status-active-bg);
+  border-color: var(--status-active-border);
+  color: var(--status-active-ink);
+}
+
+/* A dead proxy is the reason someone opened this tab, so this is the one chip
+   here that carries a border strong enough to find without reading. */
+/* The chip is now a button: it opens the message rather than only hinting at it
+   in a title, so the cursor says "clickable" and not "hover me".
+   The two resets matter -- the global button rule would otherwise give this the
+   full control height and lift it on hover, and a 34px pill in a table row is
+   not the chip every other state renders. */
+.proxy-check.failed {
+  background: var(--danger-bg);
+  border-color: var(--status-ban-border);
   color: var(--danger);
+  cursor: pointer;
+  min-height: 0;
+}
+
+.proxy-check.failed:not(:disabled):hover {
+  border-color: var(--danger);
+  box-shadow: none;
+}
+
+/* The chip carries .proxy-check's own padding and radius, so the wrapper must
+   add no box of its own -- it exists only to stop the click. */
+.proxy-check-fail {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.proxy-fail-message {
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  /* A curl failure can run to a paragraph. The message scrolls rather than the
+     panel, so the copy button below it cannot be pushed out of reach. */
+  margin: 0 0 10px;
+  max-height: 180px;
+  /* Selectable, which is half the reason this stopped being a tooltip. curl
+     errors are long single tokens, so they have to be allowed to break. */
   overflow-wrap: anywhere;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.proxy-fail-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The flag inside the chip is the same bundled SVG the Name cell uses, sized down
+   so it sits on the chip's line rather than setting the chip's height. */
+.proxy-check .flag-svg {
+  height: 11px;
+  width: 16px;
 }
 
 /* ── "Assigned to" cells ────────────────────────────────────────────────────
@@ -1767,29 +2822,59 @@ tr.row-checked {
   min-height: 36px;
 }
 
-/* The row-actions cell, laid out as a flex row. `:not([colspan])` matters:
- * display: flex on a <td> stops it being a table cell at all, and a cell that
- * is not a table cell ignores colspan -- so the empty-folder message, which is
- * a single <td colSpan={9}>, was being drawn inside the width of the first
- * column instead of across the whole table. */
-td:last-child:not([colspan]) {
+/* The row-actions cell. The flex lives on an inner div, NOT on the td -- for
+ * exactly the reason td.name-cell documents above: `display: flex` on a <td>
+ * stops it being a table cell at all, so the padding, the hairline and
+ * `vertical-align: middle` apply to the flex box inside an anonymous cell
+ * rather than to the cell itself.
+ *
+ * That was survivable on Profiles and Proxies, where this cell always holds a
+ * full-height Launch button. It was not on Team, where a row holds zero, one or
+ * two buttons: the cell's height swung between 0 and 36px, and the buttons and
+ * the row's underline visibly floated against every other column.
+ *
+ * `width: 1%` + nowrap is the shrink-to-fit idiom td.checkbox-cell already
+ * uses. It collapses the column onto its content and pins it right, which is
+ * what puts one icon and two icons on the same right edge. */
+td.actions-cell {
+  text-align: right;
+  vertical-align: middle;
+  white-space: nowrap;
+  width: 1%;
+}
+
+/* Rendered even when there are no buttons, so every row in a table reserves the
+ * same height and the hairline is drawn in the same place. A row that offers no
+ * action is still a row. */
+.row-actions {
   align-items: center;
-  display: flex;
+  display: inline-flex;
   gap: 8px;
+  justify-content: flex-end;
+  min-height: var(--control-h);
 }
 
 /* The per-row Edit and Delete. .icon-button strips the fill and border a bare
  * <button> would have, which is right in a toolbar but not here: sitting next
  * to a filled Launch, two naked glyphs read as marks printed on the row rather
- * than as controls. These take the ghost surface back and match Launch's
- * height so the three form one group. */
+ * than as controls. These take a filled surface back and match Launch's
+ * height so the three form one group.
+ *
+ * --raised rather than the --raised-soft the ghost buttons now use: those sit on
+ * the page, this one sits inside a table row, and the two have different
+ * backgrounds to lift off. */
+/* --control-h-sm, not 36px. .icon-button is always applied alongside this class
+ * and both have specificity (0,1,0), so the later rule's `width: 32px` won on
+ * width while this one's `height: 36px` won on height -- every row action in
+ * the app rendered as a 32x36 rectangle rather than a square. Matching the
+ * smaller token squares the box and keeps the two rules agreeing. */
 .row-action {
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--ink-soft);
-  height: 36px;
-  width: 36px;
+  height: var(--control-h-sm);
+  width: var(--control-h-sm);
 }
 
 .row-action:not(:disabled):hover {
@@ -1841,11 +2926,13 @@ td:last-child:not([colspan]) {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
+/* The card view of a profile -- the same data as a table row, so it takes the
+   same surface radius the table does. */
 .data-card {
   align-items: center;
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
   color: var(--ink);
   display: flex;
@@ -1915,7 +3002,7 @@ td:last-child:not([colspan]) {
   background-color: var(--raised);
   background-position: right 9px center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   min-height: var(--control-h-sm);
   padding: 0 32px 0 10px;
 }
@@ -1973,10 +3060,15 @@ td:last-child:not([colspan]) {
 .proxy-badge {
   border-radius: 999px;
   display: inline-block;
+  flex: none;
   font-size: 11px;
   font-weight: 800;
   padding: 3px 9px;
   text-transform: uppercase;
+  /* The badge is the fixed part of the proxy cell and the host is the elastic
+     one -- see .import-proxy-host. Letting this wrap took the whole row to two
+     lines, which is what "Saved credentials" used to do. */
+  white-space: nowrap;
 }
 
 .proxy-badge.assigned {
@@ -1998,7 +3090,7 @@ td:last-child:not([colspan]) {
   align-items: center;
   background: var(--paper);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--ink);
   display: inline-flex;
   flex: 0 0 auto;
@@ -2040,10 +3132,17 @@ button:disabled {
 /* ── Empty states ───────────────────────────────────────────────────────────
  * Two sizes of the same block. The small one sits in a table cell under headers
  * that are still worth showing (a filter matched nothing, Trash is empty); the
- * `hero` one replaces the table, its headers and the toolbar entirely, for a
- * workspace that has no profiles at all. Both are centred on the column rather
- * than on the row, which is why the wrapper -- not the cell -- does the
- * centring: a <td> that is one of nine cannot centre itself across the table. */
+ * `hero` one is the same block given room, and is now only the Team tab's --
+ * its roster, its plan gate and its empty share list all sit under a toolbar
+ * that stays useful, so they are a block on the page rather than the page. Both
+ * are centred on the column rather than on the row, which is why the wrapper --
+ * not the cell -- does the centring: a <td> that is one of nine cannot centre
+ * itself across the table.
+ *
+ * A tab whose whole collection is empty uses .tab-empty instead, further down.
+ * Profiles, Proxies, Cookies and Automations all drop their toolbar, folder row
+ * and pager in that case, so there is no shell for the message to sit in and
+ * nothing above it to align to but the topbar. */
 .table-empty {
   align-items: center;
   display: flex;
@@ -2106,11 +3205,18 @@ button:disabled {
  * The folders, above the table, the way a file manager shows them. auto-fill
  * rather than a scroller: a workspace tends to have a handful of folders and
  * wrapping to a second line reads better than hiding half of them off the
- * right edge. */
+ * right edge.
+ *
+ * A compact row, not a card grid. These used to be 48px tall on a 180px minimum
+ * column with a 26px glyph plate and the --radius-lg surface curve, which made
+ * the navigation the tallest and loudest band on a page whose job is the table
+ * under it. Every number below came down one step together -- the height, the
+ * column, the plate, the curve and the count -- because shrinking only some of
+ * them leaves a card with the old proportions at a smaller size. */
 .folder-row {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
 }
 
 /* Both shapes the card takes: a plain <button> for All profiles / Trash / New
@@ -2124,12 +3230,13 @@ button:disabled {
   box-shadow: var(--shadow-xs);
   color: var(--ink);
   display: flex;
+  font-size: 13px;
   font-weight: 650;
-  gap: 10px;
+  gap: 8px;
   justify-content: flex-start;
-  min-height: 48px;
+  min-height: 40px;
   overflow: hidden;
-  padding: 0 12px;
+  padding: 0 10px;
   position: relative;
   text-align: left;
 }
@@ -2145,7 +3252,10 @@ button:disabled {
 }
 
 /* The clickable body of a folder card. Stretches so the whole card opens the
-   folder, not just the words. */
+   folder, not just the words.
+   The negative margin is the exact inverse of .folder-card's padding, which is
+   what lets the button cover the card's full width rather than the inset it
+   would otherwise sit in. Retune one and you must retune the other. */
 .folder-card-main {
   align-items: center;
   align-self: stretch;
@@ -2156,12 +3266,13 @@ button:disabled {
   color: inherit;
   display: flex;
   flex: 1;
+  font-size: inherit;
   font-weight: inherit;
-  gap: 10px;
-  margin: 0 -12px;
+  gap: 8px;
+  margin: 0 -10px;
   min-height: 0;
   min-width: 0;
-  padding: 0 12px;
+  padding: 0 10px;
 }
 
 .folder-card-main:not(:disabled):hover {
@@ -2176,13 +3287,13 @@ button:disabled {
 .folder-glyph {
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--ink-soft);
   display: inline-flex;
   flex: none;
-  height: 26px;
+  height: 22px;
   justify-content: center;
-  width: 26px;
+  width: 22px;
 }
 
 /* For the table cell and the move dialog, where the plate sits inside a line of
@@ -2205,8 +3316,8 @@ button:disabled {
 }
 
 .folder-glyph.flag .flag-svg {
-  height: 16px;
-  width: 24px;
+  height: 14px;
+  width: 20px;
 }
 
 .folder-glyph.small.flag .flag-svg {
@@ -2239,15 +3350,15 @@ button:disabled {
   border-radius: 999px;
   color: var(--ink-soft);
   flex: none;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  min-width: 22px;
-  padding: 2px 7px;
+  min-width: 20px;
+  padding: 1px 6px;
   text-align: center;
 }
 
 /* Edit and delete, swapped in for the count on hover rather than added beside
-   it: at 180px a card has room for a name or for two buttons, not both. */
+   it: at 160px a card has room for a name or for two buttons, not both. */
 .folder-card-actions {
   align-items: center;
   background: inherit;
@@ -2270,15 +3381,15 @@ button:disabled {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   box-shadow: none;
   color: var(--ink-soft);
   display: inline-flex;
-  height: 26px;
+  height: 22px;
   justify-content: center;
   min-height: 0;
   padding: 0;
-  width: 26px;
+  width: 22px;
 }
 
 .folder-card-actions button:not(:disabled):hover {
@@ -2354,10 +3465,8 @@ button:disabled {
   background: var(--hover);
 }
 
-.move-profiles-row input {
-  height: 18px;
-  width: 18px;
-}
+/* The 18px square this used to set is now .selector's own size, so the rows in
+   these dialogs and the rows in the tables cannot drift apart. */
 
 .move-profiles-name {
   font-weight: 650;
@@ -2386,11 +3495,145 @@ button:disabled {
   padding: 28px 0;
 }
 
-/* The hero state is the only content on the screen, so its container stops
- * being a table shell: no inner border to box the message in. */
-.table-wrap-empty {
-  display: grid;
-  place-items: center;
+/* ── Run automation dialog ──────────────────────────────────────────────── */
+
+/* Its own measure rather than .small-modal's 520px. These rows carry four
+   things where the move/assign dialogs carry two, and at 520 the check chip --
+   the one thing this screen exists to show -- was pushed out of the panel.
+   Named and sized here, the way .import-panel is, because that is the pattern
+   for a dialog that cannot use the shared width. */
+.profile-modal.run-automation-modal {
+  max-width: 640px;
+  width: min(640px, calc(100vw - 56px));
+}
+
+/* Fixed measures for the two right-hand columns rather than .move-profiles-row's
+   max-content pair. With both sized to their contents, every row's status chip
+   started at a different x -- "Ready", "Warmup" and "Ban" are three widths, and
+   so are "312 ms", "Checking…" and "Already running" -- so a list of six rows
+   zig-zagged down the right-hand side with nothing to read down. Fixed columns
+   give the eye two straight edges: one to scan the statuses, one to scan the
+   verdicts. All the slack still lands on the name, which is the only cell that
+   can ellipsis. */
+.run-profiles-row {
+  grid-template-columns: 18px minmax(0, 1fr) 6.25rem 8.5rem;
+}
+
+.run-profiles-row.is-blocked {
+  cursor: not-allowed;
+}
+
+/* Long custom statuses exist ("Needs review"); the column does not grow for
+   them, so the chip truncates instead of pushing the verdict off the row. */
+.run-profiles-row .status-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The name fades; the verdict does not. Greying the reason along with the row
+   is how a blocked row becomes a dead end -- the whole point of showing it is
+   that it says what to fix. */
+.run-profiles-row.is-blocked .move-profiles-name,
+.run-profiles-row.is-blocked .status-chip {
+  opacity: 0.5;
+}
+
+/* Avatar, name and host on one baseline, and the only cell that gives way.
+   min-width:0 is what lets it: without it a grid item refuses to shrink below
+   its content and the row grows past the panel instead of truncating. */
+.run-profiles-row .move-profiles-name {
+  align-items: baseline;
+  display: flex;
+  font-weight: 500;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-profiles-row .avatar {
+  align-self: center;
+}
+
+/* Each truncates on its own -- text-overflow does nothing on the flex parent.
+   The name has a floor and the host does not, which is what makes the host
+   yield first. Shrink factors alone were not enough: they distribute in
+   proportion to content width, so a 40-character hostname beside a short name
+   still clipped the name to "Old …" while the host kept 260px. A min-width on
+   the name is a hard stop -- a flex item will not shrink below it -- so the
+   host has to absorb the rest. Losing the tail of a host you can still
+   recognise beats losing the name that says which profile the row is. */
+.run-profiles-label {
+  flex-shrink: 1;
+  font-weight: 650;
+  min-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mono and muted, on .profile-proxy-host's face so a connection reads the same
+   here as it does in the Profiles table. Capped as well as shrinkable: a long
+   provider hostname would otherwise take half the row for a detail, and the
+   head of it is the part anyone recognises. */
+.run-profiles-host {
+  color: var(--ink-faint);
+  flex-shrink: 4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-profiles-proxy {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* "Direct", "Free proxy", "No proxy", "Already running" -- a word where the
+   table would have a chip, because there is no check behind any of them and a
+   chip would claim one. */
+.run-profiles-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.run-profiles-note.is-bad {
+  color: var(--danger);
+}
+
+/* Sits above the list rather than in the toolbar: it acts on what is shown, and
+   a select-all that lives away from the rows it ticks is a control people press
+   twice to find out what it did. */
+.run-profiles-all {
+  align-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  padding: 4px 8px;
+}
+
+/* The count that would otherwise only exist as a disabled checkbox nobody can
+   explain. Tone is --danger's surface, not --danger itself: this is a fact
+   about the list, not an error the user just caused. */
+.run-blocked-note {
+  align-items: center;
+  background: var(--status-ban-bg);
+  border: 1px solid var(--status-ban-border);
+  border-radius: 8px;
+  color: var(--status-ban-ink);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
 }
 
 /* A row holding one of these is not a data row -- no hairline under it, and the
@@ -2413,11 +3656,31 @@ tbody tr.empty-row-tr:hover {
   background: transparent;
 }
 
-.api-panel {
+/* The four card-and-prose tabs -- API, Integrations, Extensions, Automations --
+ * share this shell. Capped and centred, unlike the tables next door: every box
+ * on them is prose, a two-column form or a card grid, and all four were being
+ * stretched by the window rather than sized to their content. On a wide display
+ * the endpoint rows put a 60px path and a short label at opposite ends of a
+ * 2000px row with a lake of nothing between them, the "hand this to an agent"
+ * paragraph ran as one line, and the card grids fanned out to five and six
+ * columns. 1080px is about where the summary grid stops growing, the endpoint
+ * columns stay adjacent and the grids settle at three; below it nothing
+ * changes, so a laptop still gets the full width it had.
+ *
+ * Automations joined last and was the worst case: it is the only one of the
+ * four whose cards carry a description, so a six-column fan-out gave each one a
+ * 220px column with a three-line paragraph in it. */
+.api-panel,
+.automations-tab,
+.extensions-tab,
+.team-tab {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin-inline: auto;
+  max-width: 1080px;
   min-width: 0;
+  width: 100%;
 }
 
 .import-panel {
@@ -2636,9 +3899,13 @@ tbody tr.empty-row-tr:hover {
   width: 100%;
 }
 
+/* Two buttons sat flush against each other here, reading as one segmented
+ * control. Same 10px the grid around them uses. */
 .summary-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   grid-column: 1 / -1;
   justify-content: flex-end;
 }
@@ -2659,10 +3926,432 @@ tbody tr.empty-row-tr:hover {
   flex: 0 0 auto;
 }
 
-.api-groups {
+/* ── The reference ───────────────────────────────────────────────────────────
+ *
+ * Two levels of disclosure over one list. The flat version rendered every group
+ * permanently expanded -- about thirty rows on arrival, and the route table it
+ * reads from is set to grow considerably -- so the tab opened as a wall rather
+ * than an index. Groups collapse; a row inside an open group collapses over its
+ * fields, request body and curl. Nothing is open on a first visit.
+ *
+ * Buttons and aria-expanded rather than <details>, for the reason ApiTab.tsx
+ * gives at EntryRow: a controlled <details> and a search that force-opens its
+ * matches stop agreeing the moment the user clicks one, and the copy button
+ * would have had to nest inside the <summary> that toggles the row.
+ *
+ * `.api-groups` (plural) lived here and is gone with the flat list. `.api-group`
+ * is a different rule and still carries the three task blocks above this one. */
+/* ── The two ways in ─────────────────────────────────────────────────────────
+ *
+ * Side by side and equally weighted, because they are alternatives rather than
+ * steps: an agent user never touches the right-hand card and a script author
+ * never touches the left. Stacking them would have implied an order, and
+ * putting either first would have implied a default. */
+.api-ways {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.api-way {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+  padding: 14px;
+}
+
+.api-way header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.api-way header svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+/* The protocol first, what it is for after the dash. Someone scanning for "the
+ * MCP one" is scanning for those three letters and should not have to read a
+ * sentence to find them. */
+.api-way h2 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.api-way p {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.api-way-tools {
+  line-height: 1.9 !important;
+}
+
+.api-way-tools code {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.api-way-tools span {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.api-way-facts {
+  display: grid;
+  gap: 8px;
+}
+
+.api-way-facts > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.api-way-facts span {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.api-way-facts code {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  padding: 7px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pinned to the bottom so the two cards' buttons line up even though the
+ * columns above them are different lengths. */
+.api-way-actions {
+  display: flex;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* The legend for the reference's two columns. The protocol names are the whole
+ * point of it, so they take the ink and the rest stays quiet. */
+.api-reference-legend {
+  color: var(--ink-faint);
+  display: flex;
+  font-size: 11px;
+  gap: 16px;
+}
+
+.api-reference-legend em {
+  color: var(--ink-soft);
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+/* The sentence that answers "what am I about to make" before the form that
+ * makes it. Sits between the group's heading and its body, so it takes the
+ * body's padding and stops short of the heading's rule. */
+.api-group-lead {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 78ch;
+  padding: 12px 14px 0;
+}
+
+.api-group-lead + .api-group-lead {
+  padding-top: 8px;
+}
+
+.api-group-lead strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.api-reference {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.api-reference-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.api-reference-title {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.api-reference-title h2 {
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Two counts, not one. Endpoints and tools are different questions and the
+ * second is always the smaller -- see .api-entry-httponly. */
+.api-reference-title span {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.api-refgroup + .api-refgroup {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Every disclosure head in here is a full-bleed row, so it overrides the base
+ * button wholesale: that one is a filled accent control. */
+.api-refgroup-head,
+.api-entry-toggle {
+  background: transparent;
+  border-radius: 0;
+  color: var(--ink);
+  font-weight: 400;
+  justify-content: flex-start;
+  min-height: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.api-refgroup-head:not(:disabled):hover,
+.api-entry-toggle:not(:disabled):hover {
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.api-refgroup-head {
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.api-refgroup-head strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Pushes the badges to the far edge, so a column of groups has its counts
+ * aligned and can be read down rather than across. */
+.api-refgroup-count {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin-right: auto;
+}
+
+.api-refgroup-body {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* The caret is the one thing that moves in this tab. It turns rather than
+ * swapping glyph so the row does not reflow, and it is the same 0.12s the rest
+ * of the chrome uses. */
+.api-entry-caret {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  transition: transform 0.12s var(--ease);
+}
+
+.api-refgroup-head[aria-expanded='true'] .api-entry-caret,
+.api-entry-toggle[aria-expanded='true'] .api-entry-caret {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-entry-caret {
+    transition: none;
+  }
+}
+
+.api-entry + .api-entry {
+  border-top: 1px solid var(--border-soft);
+}
+
+.api-entry.is-open {
+  background: var(--paper);
+}
+
+/* The copy button is a sibling of the toggle, not a child, so the row is a
+ * 1fr + 32px pair rather than a button containing a button. */
+.api-entry-head {
+  align-items: center;
+  display: grid;
+  gap: 0 6px;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  padding-right: 8px;
+}
+
+/* Two rows: the identity of the thing, then what it does. The label used to
+ * share one line with the path and both ellipsized well before they needed to.
+ * Method and caret span both rows so they stay centred against the pair. */
+.api-entry-toggle {
+  align-items: center;
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: 14px 58px minmax(0, 1fr) auto;
+  padding: 9px 0 9px 14px;
+  row-gap: 2px;
+}
+
+.api-entry-toggle .api-entry-caret,
+.api-entry-toggle .method {
+  grid-row: 1 / span 2;
+}
+
+.api-entry-toggle .path {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+/* The MCP name, in the same monospace as the path because it is the same kind
+ * of thing -- an identifier you paste -- just addressed by a different caller. */
+.api-entry-tool {
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  grid-column: 4;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Said out loud rather than left blank. A row with an empty tool slot reads as
+ * one whose tool name failed to render; this is a real and deliberate fact
+ * about the route -- reachable by curl, and by no agent. */
+.api-entry-httponly {
+  color: var(--ink-faint);
+  font-size: 11px;
+  grid-column: 4;
+  grid-row: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.api-entry-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  grid-column: 3 / -1;
+  grid-row: 2;
+  line-height: 1.35;
+}
+
+/* MCP-only rows: neither GET nor POST, and colouring it as either would be a
+ * lie about how it is called. Takes the neutral chrome instead. */
+.method.tool {
+  background: var(--paper);
+  border-color: var(--border);
+  color: var(--ink-soft);
+}
+
+/* Indented to the method chip rather than to the path. Aligning it under the
+ * path would start the body 106px in and spend a sixth of the width on a
+ * gutter; this reads as belonging to the row above without the cost. */
+.api-entry-body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 14px 14px 38px;
+}
+
+.api-entry-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 78ch;
+}
+
+.api-entry-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+/* A definition list, because that is what it is: the field name is the term and
+ * the description defines it. The type and the required flag sit with the name
+ * rather than in columns of their own -- three of the nine routes that have
+ * fields have exactly one, and a table for one row is a table for no reason. */
+.api-entry-fields {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.api-entry-fields dt {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.api-entry-fields dt code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.api-entry-fields dd {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 2px 0 0;
+  max-width: 78ch;
+}
+
+.api-field-type {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+/* Required is a constraint, not a failure, so it takes the accent rather than
+ * --danger: a red flag beside half the fields on a create route reads as an
+ * error state the user is already in. */
+.api-field-required {
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.api-entry-curl {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.api-reference .table-empty {
+  margin: 14px;
+}
+
+/* The search borrows the Integrations tab's field whole. It is the same control
+ * doing the same job on the neighbouring tab, and a second one shaped slightly
+ * differently would be the drift, not the consistency. */
+.api-reference-bar .integration-search {
+  flex: 1 1 220px;
+  max-width: 320px;
 }
 
 .api-group {
@@ -2785,7 +4474,11 @@ tbody tr.empty-row-tr:hover {
   padding: 0 10px;
 }
 
+/* Revoke, on the API tab: a bordered button in a list, not a dialog's primary,
+ * so it keeps the raised surface and takes the danger in ink only. Spelled out
+ * rather than inherited, because `button.danger` above now fills. */
 .copy-button.danger {
+  background: var(--raised);
   color: var(--danger);
 }
 
@@ -2815,6 +4508,8 @@ tbody tr.empty-row-tr:hover {
 
 .key-form-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   grid-column: 1 / -1;
   justify-content: flex-end;
 }
@@ -2940,7 +4635,7 @@ tbody tr.empty-row-tr:hover {
 .toast {
   animation: toast-in 0.18s var(--ease);
   background: var(--ink);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   bottom: 20px;
   box-shadow: var(--shadow-md);
   color: var(--surface);
@@ -2959,10 +4654,14 @@ tbody tr.empty-row-tr:hover {
   }
 }
 
+/* 300px rather than 260px: a card's head is a mark, a name and up to two chips,
+ * and at 260 -- four columns inside the capped panel -- even "Not connected"
+ * alone was wrapping onto its own line on every card. Three wider columns fit
+ * the common case on one line and leave the wrap for the long states. */
 .integration-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
 
 /* The tab groups by what a tool is (coding agent, automation runtime, set up by
@@ -2984,26 +4683,63 @@ tbody tr.empty-row-tr:hover {
 }
 
 /* Status of the thing every integration depends on, stated once at the top
- * rather than repeated on ten cards. */
+ * rather than repeated on ten cards.
+ *
+ * A surface, not a bare row. It carries the same paper fill and radius as
+ * .api-note directly below it, so the two read as the tab's frame and the cards
+ * as its contents. Loose text on the page background put the API's state, its
+ * address, a count and a search field at the same level as the section
+ * headings, with nothing saying they belonged together. */
 .integration-bar {
   align-items: center;
+  background: var(--paper);
+  border-radius: 10px;
   display: flex;
   flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 10px 12px;
+}
+
+/* Left cluster: the chip and the address it refers to, kept adjacent so the
+ * address reads as that chip's object rather than a third item in a row. */
+.integration-bar-main {
+  align-items: center;
+  display: flex;
   gap: 10px;
+  min-width: 0;
 }
 
 .integration-bar code {
   color: var(--ink-faint);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Pushed to the right of the URL and left of the search: with ten cards across
- * three sections, "how much of this is live" is otherwise a counting exercise
- * the user has to do by eye every time they arrive. */
+/* Right cluster: the two ways of narrowing ten cards. `margin-left: auto` lives
+ * here rather than on the search field, so the count travels with it instead of
+ * being stranded mid-row. */
+.integration-bar-side {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+
+/* With ten cards across three sections, "how much of this is live" is otherwise
+ * a counting exercise the user has to do by eye every time they arrive. The
+ * number is the part worth reading, so it takes the ink and the words stay
+ * faint around it. */
 .integration-bar-count {
   color: var(--ink-faint);
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.integration-bar-count strong {
+  color: var(--ink);
 }
 
 /* ── "How these keys work" ──────────────────────────────────────────────────
@@ -3100,7 +4836,6 @@ tbody tr.empty-row-tr:hover {
   color: var(--ink-faint);
   display: flex;
   gap: 6px;
-  margin-left: auto;
   padding: 0 10px;
 }
 
@@ -3244,11 +4979,18 @@ tbody tr.empty-row-tr:hover {
   padding: 14px;
 }
 
+/* Wraps, because this row now carries up to two chips beside the name and a
+ * card is a third of a capped panel wide. Without it "Waiting for Gemini CLI"
+ * pushed the row past the card's edge instead of dropping under the name. The
+ * mark keeps its place at the head of the first line; everything after it flows.
+ * `row-gap` is tighter than the column gap so a wrapped chip sits with the name
+ * rather than looking like a second section. */
 .integration-card-head {
   align-items: center;
   color: var(--ink);
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
 }
 
 /* Height and width come from the inline size the component passes, so the mark
@@ -3261,11 +5003,12 @@ tbody tr.empty-row-tr:hover {
   width: 20px;
 }
 
-/* Single-colour marks only read on the background they were drawn for, and the
- * two we have were drawn for opposite ones: Codex's is #111 and vanishes on a
- * dark surface, Cursor's is #edecec and vanishes on a light one. So each names
- * the theme it has to be inverted in rather than sharing one "monochrome" flag.
- * Marks that carry their own colour name neither and are left alone. */
+/* Single-colour marks only read on the background they were drawn for, and ours
+ * were drawn for opposite ones: Codex's is #111 and vanishes on a dark surface,
+ * while Cursor's #edecec and the white-only Zed, Windsurf and MCP cuts vanish on
+ * a light one. So each names the theme it has to be inverted in rather than
+ * sharing one "monochrome" flag. Marks that carry their own colours name neither
+ * and are left alone. */
 :root[data-theme="dark"] .integration-logo.invert-on-dark {
   filter: invert(1);
 }
@@ -3317,11 +5060,18 @@ tbody tr.empty-row-tr:hover {
 }
 
 /* Two ways in from an empty tab (add one, or import a file) sit side by side;
- * the flex column above would otherwise stack them and read as a ranking. */
+ * the flex column above would otherwise stack them and read as a ranking.
+ *
+ * Wrapping and centred because the empty Automations tab puts up to four of
+ * these at once (create, load the example, mint a Demo profile, read the docs),
+ * which is past what 620px holds on one line. At two buttons neither property
+ * does anything. */
 .tab-empty-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+  justify-content: center;
 }
 
 /* A button that reads as a link: for the secondary way back to something the
@@ -3508,6 +5258,22 @@ tbody tr.empty-row-tr:hover {
   overflow-wrap: anywhere;
 }
 
+/* Pushed to the trailing edge so it does not sit against the end of a message
+   whose length changes with every failure. Inherits the panel's danger ink
+   rather than the link-button grey, or it would read as the quietest thing in a
+   red box. */
+.proxy-test-copy {
+  color: inherit;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.proxy-test-copy:not(:disabled):hover {
+  color: inherit;
+  opacity: 0.75;
+}
+
 /* The check runs in the background and the dialog stays usable while it does,
  * so this is a neutral progress line rather than a blocking state. */
 .proxy-test-result.pending {
@@ -3515,45 +5281,13 @@ tbody tr.empty-row-tr:hover {
   color: var(--ink-soft);
 }
 
-.status-pill {
-  align-items: center;
-  align-self: flex-start;
-  color: var(--success);
-  display: flex;
-  font-size: 12px;
-  font-weight: 700;
-  gap: 6px;
-}
-
-/* "Not connected" is a real state and worth saying out loud -- the card used to
- * show nothing at all, so a card that had simply never been connected looked
- * identical to one whose status had not loaded. */
-.status-pill.is-idle {
-  color: var(--ink-faint);
-}
-
-/* The third state, and the one that mattered most to add: a key exists but the
- * wiring behind it is broken. It used to be indistinguishable from Connected,
- * which is how a tool that failed to start the server on every launch still
- * showed a green dot. Amber, not red -- it is fixable in one click, not an
- * error the user caused. */
-.status-pill.is-warn {
-  color: var(--status-warmup-ink);
-}
-
-.status-pill.is-warn .status-dot {
-  background: currentcolor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentcolor 25%, transparent);
-}
-
-.status-dot {
-  background: var(--success);
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 28%, transparent);
-  display: inline-block;
-  height: 8px;
-  width: 8px;
-}
+/* `.status-pill` used to live here: bold coloured text with a glyph and --
+ * despite the name -- no background, border or radius. Both tabs that used it,
+ * Integrations and Extensions, now label their cards with the real pill
+ * (.status-chip, through <Badge>), so it and its `.is-idle`, `.is-warn` and
+ * `.status-dot` companions are gone. Bare coloured text was never distinct
+ * enough for the job: two of them side by side on a card head read as one
+ * sentence rather than as two separate facts. */
 
 .integration-card h2 {
   font-size: 15px;
@@ -3848,7 +5582,7 @@ tbody tr.empty-row-tr:hover {
   align-items: center;
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   display: flex;
   gap: 4px;
   min-height: 26px;
@@ -3897,26 +5631,9 @@ textarea {
  * around a grid of raised cards is a surface on a surface, and it turned the
  * page into one object that happens to contain extensions rather than into the
  * extensions themselves. */
-.extensions-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.extensions-head {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-/* Why a plain member cannot move the bundled switches. Sits above the grid as
- * a line of prose, not as an empty-state block -- nothing is missing. */
-.extensions-note {
-  color: var(--ink-soft);
-  margin: 0;
-  max-width: 62ch;
-}
+/* .extensions-tab's own box is up with .api-panel, which it now shares; the head
+ * row is .integration-bar and the admin note is .api-note, both borrowed whole
+ * from the Integrations tab so the two card tabs are laid out the same way. */
 
 .extensions-category {
   display: flex;
@@ -3935,10 +5652,12 @@ textarea {
   text-transform: uppercase;
 }
 
+/* Same track as .integration-grid, and for the same reason: a card head is a
+ * mark, a name and a chip, which does not fit in 260px. */
 .extension-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
 
 .extension-card {
@@ -3968,14 +5687,17 @@ textarea {
   opacity: 0.55;
 }
 
+/* Wraps, like .integration-card-head: the provenance chip sits with the name
+ * now, and a long name plus "Shared folder" does not fit a third of the capped
+ * panel on one line. */
 .extension-card-head {
   align-items: center;
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
 }
 
 .extension-card h3 {
-  flex: 1;
   font-size: 15px;
   font-weight: 650;
   margin: 0;
@@ -3983,6 +5705,13 @@ textarea {
    * fine; the card grows. Truncating would hide which of two similarly-named
    * extensions this is, which is the one thing the name is here for. */
   min-width: 0;
+}
+
+/* The remove button keeps the trailing edge. The h3 used to hold it there with
+ * flex: 1, which now would push the chip out there with it -- the chip belongs
+ * against the name. */
+.extension-card-head .extension-remove {
+  margin-left: auto;
 }
 
 .extension-card p {
@@ -4001,12 +5730,30 @@ textarea {
   font-size: 12px;
 }
 
+/* Controls only, now that the provenance chip has moved up to the head: one
+ * switch on an installed card, one Install button on a catalog card. Both sit
+ * on the trailing edge, where the Integrations cards keep theirs. */
 .extension-card-foot {
   align-items: center;
   display: flex;
   gap: 10px;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 2px;
+}
+
+/* What is happening right now on a card that has to fetch itself before it can
+ * be on -- a download's progress, or why one failed. Sits at the leading edge
+ * against the foot's flex-end so it reads as a status line for the card rather
+ * than as a label for the switch it would otherwise be pressed against. */
+.extension-card-status {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+}
+
+.extension-card-error {
+  color: var(--danger);
 }
 
 .extension-card-foot > button {
@@ -4131,9 +5878,65 @@ textarea {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   color: var(--ink-soft);
+  display: grid;
   font-size: 13px;
+  gap: 6px;
   max-width: 360px;
   padding: 12px 16px;
+}
+
+/* Glyph and message share a row; the copy button, when there is one, gets its
+   own below. Beside the text it would have aligned against the first of three
+   lines and left the banner ragged. */
+.status-toast-line {
+  align-items: flex-start;
+  display: flex;
+  gap: 9px;
+}
+
+/* The glyph is the tone, so it never shrinks and never wraps under the text. */
+.status-toast-mark {
+  display: flex;
+  flex: 0 0 auto;
+  padding-top: 1px;
+}
+
+.status-toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Coloured border and glyph, neutral surface. A fully tinted banner at this size
+   fights the app's monochrome chrome, and the corner is already the loudest
+   place on screen -- the ring is enough to be read across the window. */
+.status-toast.ok {
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+  color: var(--ink);
+}
+
+.status-toast.ok .status-toast-mark {
+  color: var(--success);
+}
+
+.status-toast.fail {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  color: var(--ink);
+}
+
+.status-toast.fail .status-toast-mark {
+  color: var(--danger);
+}
+
+.status-toast-copy {
+  color: var(--danger);
+  gap: 5px;
+  justify-self: end;
+  margin: 0 -6px -4px 0;
+}
+
+.status-toast-copy:not(:disabled):hover {
+  color: var(--danger);
+  opacity: 0.75;
 }
 
 .update-toast {
@@ -4423,7 +6226,7 @@ textarea {
 .profile-summary {
   background: var(--raised);
   border: 1px solid var(--border-soft);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
   display: grid;
   gap: 18px;
@@ -4597,7 +6400,12 @@ textarea {
 
 /* A field's control fills its column; everything else about how it looks comes
  * from the canonical input/select/textarea rules at the top of this file. */
-.field input,
+/* :not(.selector) matters. This rule was written when every control inside a
+ * field was a text input, and a checkbox is the one input for which "fill the
+ * row" is wrong: .selector is a fixed 18px circle, and .field input's (0,1,1)
+ * beats .selector's (0,1,0), so the first Field to contain a Checkbox rendered
+ * it as a full-width pill with the label shoved out of its box. */
+.field input:not(.selector),
 .field select,
 .field textarea {
   width: 100%;
@@ -4626,6 +6434,55 @@ textarea {
   font-weight: 500;
   margin: 0;
   text-transform: none;
+}
+
+/* A field's own value, restated in words, inside its label: "Give up after
+ * = 5 minutes". Quieter than the label and pushed to its far end, so it reads
+ * as the form answering rather than as a second thing being asked. */
+.field-echo {
+  color: var(--ink-faint);
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* A unit that belongs to the number rather than to the sentence under it. The
+ * span is the bordered box and the input inside it is bare, which is what keeps
+ * the focus ring around the pair instead of around the number alone. */
+.field-suffixed {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: flex;
+  min-height: var(--control-h);
+  padding-right: 15px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+.field-suffixed:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* The second selector is not redundant: `.field input:not(.selector)` above
+ * sets width: 100%, which on a flex child inside this box makes the number
+ * overrun the unit. Same specificity, and this rule is later, so it wins. */
+.field-suffixed > input,
+.field .field-suffixed > input {
+  background: none;
+  border: none;
+  box-shadow: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: auto;
+}
+
+.field-suffixed > span {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* ── Platform picker ────────────────────────────────────────────────────────
@@ -4737,7 +6594,7 @@ textarea {
   align-items: center;
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--ink-soft);
   display: flex;
   gap: 7px;
@@ -5018,9 +6875,24 @@ textarea {
  * aim at, and at 1600px an auto-fill grid spread eight bookmarks across the
  * whole window with the search box floating above nothing. 640px is about as
  * wide as a five-tile row wants to be, and it matches the cap the injected
- * browser home page now uses, so the two surfaces read as the same page. */
+ * browser home page now uses, so the two surfaces read as the same page.
+ *
+ * The 56px on top is .tab-empty's, deliberately the same number: this tab and
+ * an empty Proxies/Profiles/Cookies tab are both a centred column under the
+ * topbar with a mark at the head of it, and at different offsets the mark
+ * jumped up the window as you moved between them. Both are the second flex
+ * child of .content, so matching the padding is all it takes to land the Argus
+ * mark and the empty state's glyph on the same line.
+ *
+ * This was 0 for a while, on the grounds that a tab whose first row sits lower
+ * than every other tab's reads as misaligned. That still holds against a
+ * *populated* table -- whose toolbar starts at the top -- and is the trade being
+ * made here: the pairing with the empty states is the one worth having, because
+ * those are the screens a new workspace actually moves between. The 26px gap
+ * below still carries the separation the old 44px was standing in for. */
 .start-page {
   display: grid;
+  padding-top: 56px;
   /* .content is a flex column, so the auto margins are what centre this; they
    * beat the container's align-items: stretch. flex: 0 0 auto keeps a long
    * bookmark list from being squashed instead of scrolling .content. */
@@ -5028,8 +6900,45 @@ textarea {
   gap: 26px;
   margin: 0 auto;
   max-width: 640px;
-  padding-top: 44px;
   width: 100%;
+}
+
+/* The Argus mark over the search box, on this tab and on the generated browser
+ * home page (src/lib/homePage.ts emits the same thing in the same place). The
+ * two are deliberately one page in two places, so a brand that landed on only
+ * one of them would be the first thing to make them read as different screens.
+ *
+ * Centred, matching the generated page: the mark is the header of the search
+ * box below it rather than the first item of the left-aligned tile list, and it
+ * is the one element here that belongs to the app rather than to the content.
+ * Both surfaces centre it -- moving one alone is what makes the pair read as
+ * two different screens.
+ *
+ * The negative bottom margin works against .start-page's 26px gap: the mark
+ * belongs to the search box below it, and at the full gap it floated as a third
+ * item in the column rather than as that box's header. */
+.start-brand {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 -12px;
+}
+
+/* Masked, not an <img>. The source art is black line work on transparent, so
+ * as an image it would be an invisible smudge on the dark theme -- the same
+ * reason the sidebar's .brand-mark and .extension-mark.is-argus are masks.
+ * Taller than either of those because here it is the page's own header rather
+ * than a glyph in a row. */
+.start-brand-mark {
+  background-color: var(--ink);
+  display: block;
+  height: 44px;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  /* The art is 269x346, so a square box would letterbox it. This is its
+   * aspect ratio at the height above, which keeps the mask tight to the ink. */
+  width: 34px;
 }
 
 .start-search {
@@ -5117,6 +7026,48 @@ textarea {
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(5, 1fr);
+}
+
+/* The automations block. Its own grid rather than more tiles in the bookmark
+ * one, matching the generated browser page: a shortcut takes you somewhere and
+ * a workflow does something, and a row of each under one heading would say they
+ * were the same kind of thing. */
+.start-automations {
+  display: grid;
+  gap: 10px;
+}
+
+.start-section-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Sits under the label rather than at the foot of the section: it explains what
+ * pinning does, which is the decision being made in the row below it. */
+.start-section-note {
+  color: var(--ink-faint);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: -4px 0 0;
+}
+
+/* An automation tile is a preview, not a control -- the run happens in the
+ * browser, in a profile's session. So it takes the tile's shape and none of its
+ * pressability: no hover fill, no pointer. The X in the corner is the only
+ * thing on it you can click, and that one is a real button.
+ *
+ * Scoped through .start-tile to outrank .start-tile-open:hover, which is
+ * declared further down this file and would otherwise win on source order. */
+.start-tile .start-tile-static {
+  cursor: default;
+}
+
+.start-tile .start-tile-static:hover {
+  background: transparent;
 }
 
 /* Drops a column at a time rather than letting auto-fill decide, so the tiles
@@ -5862,10 +7813,16 @@ textarea {
   margin: 0;
 }
 
-/* Reserved at 16:10 so the real screenshots drop in without moving the text
- * under them. Dashed and labelled while it is empty, so it reads as "a picture
- * goes here" rather than as an image that failed to load. */
+/* The frame and its caption. The frame holds the aspect ratio at 16:10 whether
+ * it has a screenshot in it or not, so a walkthrough that is half illustrated --
+ * which is the state of these two -- does not resize as you page through it. */
 .intro-figure {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.intro-figure-frame {
   align-items: center;
   aspect-ratio: 16 / 10;
   background: var(--paper);
@@ -5873,16 +7830,57 @@ textarea {
   border-radius: var(--radius);
   color: var(--ink-faint);
   display: flex;
-  flex-direction: column;
-  gap: 8px;
   justify-content: center;
+  overflow: hidden;
   padding: 16px;
-  text-align: center;
 }
 
-.intro-figure span {
+/* Solid once there is something in it: dashed is the convention for a slot
+ * waiting to be filled, and leaving it around a real screenshot reads as one
+ * that failed to load. Tighter padding too -- the border is the picture's mount
+ * now, not a placeholder's outline. */
+.intro-figure-frame.has-shot {
+  border-style: solid;
+  padding: 8px;
+}
+
+/* `contain`, so a shot that is not 16:10 is letterboxed on the paper fill
+ * rather than cropped. Every shot in the app happens to opt into `is-full`
+ * below at the moment; this stays the default because it is the one that cannot
+ * silently eat the subject of a picture that arrives at some other ratio. */
+.intro-figure-frame img {
+  border-radius: 6px;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* The opt-in from IntroStep.fill: the picture is the card, edge to edge.
+ *
+ * No padding and no radius on the image -- the frame's own corners clip it, and
+ * a rounded rectangle inset by nothing inside another rounded rectangle draws a
+ * second, wrong-radius corner. `cover` rather than `contain` because filling is
+ * the whole point; it costs a centre crop to 16:10, which is why only whole-
+ * window shots may ask for this. Their outer band is desktop wallpaper. */
+.intro-figure-frame.is-full {
+  padding: 0;
+}
+
+.intro-figure-frame.is-full img {
+  border-radius: 0;
+  height: 100%;
+  max-height: none;
+  max-width: none;
+  object-fit: cover;
+  width: 100%;
+}
+
+.intro-figure figcaption {
+  color: var(--ink-faint);
   font-size: 12px;
-  max-width: 280px;
+  margin: 0 auto;
+  max-width: 320px;
+  text-align: center;
 }
 
 /* Left-aligned against the Back/Next pair, the same way a footer's delete
@@ -6016,341 +8014,1861 @@ td.cookie-value-cell input:focus {
   white-space: nowrap;
 }
 
-/* ── Automations ─────────────────────────────────────────────────────────────
- * The step list borrows the surface tokens the rest of the app uses rather
- * than inventing a palette: a step row is a .data-card at rest and gains its
- * own border only when expanded, so a list of twenty does not read as twenty
- * competing boxes. */
+/* ---------------------------------------------------------------------------
+   Profile CSV import: the review table and the destination step.
 
-.automations-tab {
-  padding: 24px;
+   The dialog this replaces was a paragraph and a row count, so it fit the
+   shared .import-panel width. A table with ten editable columns does not --
+   .import-review-panel is the one dialog in the app allowed to go wide, because
+   the alternative is horizontal scrolling over data the user is being asked to
+   check.
+   --------------------------------------------------------------------------- */
+
+/* Two classes, because .profile-modal.import-panel above pins the importer to
+   720px and would otherwise win on specificity. */
+.profile-modal.import-review-panel {
+  max-width: min(1240px, calc(100vw - 56px));
+  width: min(1240px, calc(100vw - 56px));
 }
 
-.automation-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-}
-
-.automation-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--raised);
-}
-
-.automation-card-head h2 {
-  margin: 0;
-  font-size: 16px;
-}
-
-.automation-card-head p {
-  margin: 6px 0 0;
+.import-lead {
   color: var(--ink-soft);
   font-size: 13px;
+  line-height: 1.55;
+  margin: 0 0 14px;
 }
 
-.automation-card-meta {
-  display: flex;
-  flex-wrap: wrap;
+/* The step rail, same shape as the intro dialog's. Ornamental, so it is hidden
+   from assistive tech -- the subtitle already says "Step 2 of 3" in words. */
+.import-dots {
+  display: inline-flex;
   gap: 6px;
-}
-
-.automation-card-run {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-.automation-card-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: auto;
-  align-items: center;
-}
-
-.automation-card-actions > button:first-child {
   margin-right: auto;
 }
 
-/* ── The step list ── */
+.import-dots i {
+  background: var(--border);
+  border-radius: 999px;
+  height: 6px;
+  transition: background 140ms var(--ease), width 140ms var(--ease);
+  width: 6px;
+}
 
-.automation-steps {
+.import-dots i.on {
+  background: var(--accent);
+  width: 18px;
+}
+
+.import-footer-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+/* ── The credential banner ──────────────────────────────────────────────────
+ * One login for every credential-less proxy in the file. See CredentialBanner in
+ * modals/ImportProfilesModal.tsx.
+ *
+ * A warning tone rather than a danger one: nothing is wrong with the file, and
+ * the import will still run -- the proxies just will not connect. It sits above
+ * the filter chips because it is about the whole file, and below the summary
+ * tiles because those are what the eye lands on first.
+ *
+ * The two inputs are sized rather than flexed: a username and a password are
+ * short, and letting them take the row's slack pushed the button off the end at
+ * dialog widths. */
+.import-credential-banner {
+  align-items: center;
+  background: var(--status-warmup-bg);
+  border: 1px solid var(--status-warmup-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+}
+
+.import-credential-copy {
   display: flex;
   flex-direction: column;
+  gap: 3px;
+  /* Takes the slack so the controls stay grouped at the end of the row. */
+  flex: 1 1 240px;
+}
+
+.import-credential-copy strong {
+  color: var(--status-warmup-ink);
+  font-size: 13px;
+}
+
+.import-credential-copy span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.import-credential-banner input {
+  flex: 0 1 150px;
+  min-width: 110px;
+}
+
+.import-review-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.filter-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  margin-right: auto;
 }
 
-/* One indent per nesting level, with a rule down the left so a loop body is
- * visibly inside its loop rather than merely after it. */
-.automation-steps.nested {
-  margin-left: 10px;
-  padding-left: 12px;
-  border-left: 2px solid var(--line);
+.filter-chips .chip {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  height: var(--control-h-sm);
+  padding: 0 12px;
 }
 
-.automation-steps-empty {
+.filter-chips .chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Every cell is an input, so the table's own row padding would double up with
+   the control's. The controls carry the height instead.
+
+   Two insets, and the gap between them was the alignment problem here. --cell-x
+   is the distance from the column edge to the cell's box; --value-inset is the
+   further distance to the first pixel of text *inside* a control, which is that
+   control's own border plus its own padding. A value in this table therefore
+   starts at the sum of the two, and a header that stops at --cell-x is not over
+   its column -- at ten columns wide that reads as a table where nothing sits
+   under its label.
+
+   Worse, the header cells were not even at --cell-x: `.import-review-table td`
+   below narrowed the data cells to 8px and the headers went on inheriting the
+   global 14px, so the labels were 6px right of their own cells and 7px left of
+   their own values at the same time. Everything below lines both up. */
+.import-review-table {
+  --cell-x: 8px;
+  --value-inset: 9px;
+
+  max-height: min(52vh, 560px);
+  overflow: auto;
+}
+
+.import-review-table table {
+  min-width: 1020px;
+}
+
+.import-review-table td {
+  padding: 4px var(--cell-x);
+  vertical-align: middle;
+}
+
+/* The cell's own control, and only that.
+   - `>` rather than a descendant, because the proxy popover renders inside the
+     cell it belongs to (it is position: fixed, not portalled), and its
+     connection-string and search fields are not table cells -- full-width and
+     32px tall is right for a column and wrong inside a panel.
+   - :not(checkbox), because the row's checkbox was being caught too and drawn
+     as a 32px box the full width of its cell, which does not read as a checkbox
+     at all. */
+.import-review-table td > input:not([type='checkbox']),
+.import-review-table td > select {
+  height: var(--control-h-sm);
+  min-width: 0;
+  width: 100%;
+}
+
+/* Tightened from the canonical 12px so a name still fits a cell this narrow,
+   and so --value-inset above stays true: 1px of border plus 8px of padding. */
+.import-review-table td > input:not([type='checkbox']) {
+  padding: 0 8px;
+}
+
+/* The chevron scales with the control: the canonical select carries a 16px mark
+   inset 12px, which in a 32px row leaves the value nowhere to go. */
+.import-review-table td > select {
+  background-position: right 8px center;
+  background-size: 14px;
+  padding: 0 26px 0 8px;
+}
+
+/* A sticky header over a `border-collapse: collapse` table does not carry its
+   own bottom border -- the collapsed edge belongs to the table, not the cell,
+   and scrolls away underneath it. The inset shadow is that hairline, drawn by
+   something that travels with the header. */
+.import-review-table thead th {
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--border);
+  padding: 8px var(--cell-x);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* A column whose value is drawn inside a control, so the label steps in to meet
+   it. The two columns that are plain text rather than a control take the same
+   step, below, so all eight agree. */
+.import-review-table thead th.th-value {
+  padding-left: calc(var(--cell-x) + var(--value-inset));
+}
+
+/* A row that cannot be written, and one the user chose to leave out. Different
+   things: the first is a problem, the second is a decision, so only the first
+   is tinted. */
+.import-review-table tr.row-blocked > td {
+  background: var(--status-ban-bg);
+}
+
+.import-review-table tr.row-skipped > td {
+  opacity: 0.5;
+}
+
+.import-state-cell {
+  width: 22px;
+}
+
+/* The details chevron closes the row, so its column is only as wide as the
+   control and the button sits at the end of it rather than floating in a column
+   that took whatever width was left over. */
+.import-toggle-cell {
+  text-align: right;
+  width: 48px;
+}
+
+/* .icon-button is 32px square with the row's own control height, so the chevron
+   sits on the same line as the inputs beside it instead of on the 36px the base
+   button rule would have given it. */
+.import-detail-toggle {
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  width: var(--control-h-sm);
+}
+
+.import-dot {
+  border-radius: 999px;
+  display: block;
+  height: 8px;
+  width: 8px;
+}
+
+.import-dot.ok {
+  background: var(--status-active-border);
+}
+
+.import-dot.warned {
+  background: var(--status-warmup-border);
+}
+
+.import-dot.blocked {
+  background: var(--status-ban-border);
+}
+
+.import-dot.skipped {
+  background: var(--border);
+}
+
+/* Inputs carrying a problem. `warned` is deliberately a border-only change:
+   the value is still going to be imported, just not as the file wrote it. */
+.import-review-table td input.invalid {
+  border-color: var(--status-ban-border);
+}
+
+.import-review-table td input.warned {
+  border-color: var(--status-warmup-border);
+}
+
+/* The two columns whose value is bare text rather than a control. They take the
+   control's inset by hand so they sit under their own header alongside the six
+   that get it from the control -- written as td.<class> to beat the padding on
+   `.import-review-table td` above, which is the same specificity. */
+.import-review-table td.import-folder-cell,
+.import-review-table td.import-check-cell {
+  padding-left: calc(var(--cell-x) + var(--value-inset));
+}
+
+.import-folder-cell {
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.import-check-cell {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* The four flat text states this column used to have (.import-unchecked,
+   .import-checking, .import-check-ok, .import-check-fail) are gone: the cell
+   renders the shared .proxy-check chip now, so a result looks the same here as
+   it does in the Proxies and Profiles tables. Only the em-dash for a row with
+   nothing to check is still local. */
+.import-check-cell > i {
+  color: var(--ink-faint);
+  font-style: normal;
+}
+
+/* The proxy cell is a button that looks like a value, because clicking the
+   value is how you change it -- a separate pencil in a ten-column table is a
+   target nobody finds. */
+.import-proxy-trigger {
+  align-items: center;
+  background: none;
+  /* Buttons in this app default to the filled accent treatment, so a
+     background-only reset leaves the label the accent's ink -- white on white. */
+  color: var(--ink);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  display: flex;
+  gap: 6px;
+  height: var(--control-h-sm);
+  justify-content: flex-start;
+  /* 8px against a 1px transparent border is the same 9px the inputs in this
+     table sit their text at, so the proxy reads on the column's line. */
+  padding: 0 8px;
+  width: 100%;
+}
+
+.import-proxy-trigger:hover {
+  background: var(--hover);
+  border-color: var(--border-soft);
+}
+
+.import-proxy-host {
+  font-size: 12px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-proxy-picker .field {
+  margin-bottom: 8px;
+}
+
+/* Type and Address on one line: they are two halves of one endpoint, and stacked
+   they pushed the credentials -- the fields this panel exists for -- below the
+   fold of a popover that is already competing with the row it is anchored to.
+   The fixed first column is sized to "SOCKS5" plus its chevron. */
+.import-proxy-endpoint {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 110px 1fr;
+}
+
+/* The hint under Address would otherwise stretch the Type cell's control to
+   match, leaving a select taller than the input beside it. */
+.import-proxy-endpoint .field {
+  align-self: start;
+  min-width: 0;
+}
+
+.import-proxy-modes {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.import-proxy-options {
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow: auto;
+  padding-top: 6px;
+}
+
+.import-proxy-option {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.import-proxy-option:hover {
+  background: var(--hover);
+}
+
+.import-proxy-empty {
+  color: var(--ink-faint);
+  font-size: 12px;
+  padding: 8px;
+}
+
+/* The duplicate notice is its own row rather than a cell, so the sentence
+   explaining what "already exists" means has somewhere to go.
+
+   The flex lives on an inner div, not on the td: `display: flex` on a table
+   cell takes it out of table layout, which silently kills the colspan and
+   collapses the whole notice into the width of column one. */
+.import-duplicate-row > td {
+  background: var(--status-warmup-bg);
+  padding: 6px var(--cell-x);
+}
+
+.import-duplicate-note {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+}
+
+/* A control sitting in a sentence rather than filling a column: it takes its
+   own width and the row's control height, and sits at the end of the note. */
+.import-review-table .import-duplicate-note select {
+  height: var(--control-h-sm);
+  margin-left: auto;
+  width: auto;
+}
+
+.import-detail-row > td {
+  background: var(--paper);
+  padding: 0 var(--cell-x);
+}
+
+/* align-items: start is the fix for the thing that made this panel look broken:
+   a .field is a grid of label / control / optional hint, and a grid item
+   stretches to its row by default. Half these fields carry a hint and half do
+   not, so the ones without were being stretched to the tall neighbour's height
+   and their control floated to the middle of the extra space -- Profile id and
+   User agent sat on one line, Start URL and Language on another. Hugging the
+   top puts every label on one line and every input on the next.
+
+   The left padding matches the review table's own value inset, so the detail
+   fields open directly under the columns they belong to. */
+.import-detail-grid {
+  align-items: start;
+  display: grid;
+  gap: 12px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  padding: 14px var(--value-inset);
+}
+
+/* The hint is the reason the rows were uneven; it also has to stay readable at
+   two lines without pushing the grid around, which align-items: start now
+   guarantees. */
+.import-detail-grid .field-hint {
+  line-height: 1.4;
+}
+
+.import-issue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  list-style: none;
   margin: 0;
+  padding: 0 var(--value-inset) 12px;
+}
+
+.import-issue-list li {
+  color: var(--status-warmup-ink);
+  font-size: 12px;
+}
+
+.import-issue-list li.blocking {
+  color: var(--status-ban-ink);
+}
+
+/* Destination step. Cards rather than radios because the choice is between
+   four different shapes of outcome, and each needs a line of explanation that
+   a radio label cannot carry. */
+.destination-cards {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  margin-bottom: 16px;
+}
+
+.destination-card {
+  align-items: flex-start;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: auto;
+  padding: 12px;
+  text-align: left;
+}
+
+.destination-card strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.destination-card span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.destination-card.on {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.destination-card:disabled {
+  opacity: 0.5;
+}
+
+.folder-mapping {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.folder-mapping-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.folder-mapping-source {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.folder-mapping-source i {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.folder-mapping-row input {
+  flex: 1;
+}
+
+/* The finished screen.
+ *
+ * Deliberately its own classes rather than the shared .import-summary /
+ * .summary-item grid: those are also the API tab's and the proxy-list
+ * importer's, and this is the one place that wants a hero, a glyph per stat and
+ * a dimmed zero. Restyling the shared pair would have carried all three into
+ * screens that never asked for them. */
+.import-done {
+  display: grid;
+  gap: 14px;
+}
+
+.import-done-hero {
+  align-items: center;
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.import-done-mark {
+  align-items: center;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  border-radius: 999px;
+  color: var(--success);
+  display: flex;
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.import-done-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.import-done-copy strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.import-done-copy i {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-style: normal;
+}
+
+/* A partial write is not a success and must not be dressed as one. */
+.import-done-hero.partial {
+  background: var(--status-warmup-bg);
+  border-color: color-mix(in srgb, var(--status-warmup-ink) 30%, transparent);
+}
+
+.import-done-hero.partial .import-done-mark {
+  background: color-mix(in srgb, var(--status-warmup-ink) 15%, transparent);
+  color: var(--status-warmup-ink);
+}
+
+.import-done-note {
+  color: var(--status-warmup-ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.import-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* Glyph in its own column spanning both rows, so the label and the number stack
+   beside it and every tile's number starts at the same x. */
+.import-stat {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-xs);
+  column-gap: 10px;
+  display: grid;
+  grid-template-areas: 'mark label' 'mark value';
+  grid-template-columns: auto 1fr;
+  min-width: 0;
+  padding: 11px 13px;
+  row-gap: 2px;
+}
+
+.import-stat-mark {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: flex;
+  grid-area: mark;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.import-stat-label {
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 900;
+  grid-area: label;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.import-stat-value {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 750;
+  grid-area: value;
+  line-height: 1.1;
+}
+
+/* Nothing happened for this one. Kept rather than hidden -- "0 skipped" is worth
+   confirming -- but it should not compete with the counts that did move. */
+.import-stat.zero {
+  opacity: 0.55;
+}
+
+.import-stat.zero .import-stat-value {
+  font-weight: 650;
+}
+
+.import-skipped {
+  background: var(--status-warmup-bg);
+  border-radius: var(--radius-xs);
+  display: grid;
+  font-size: 12.5px;
+  gap: 7px;
+  padding: 11px 13px;
+}
+
+.import-skipped-head {
+  align-items: center;
+  color: var(--status-warmup-ink);
+  display: flex;
+  font-size: 11px;
+  font-weight: 900;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+/* ── Team ─────────────────────────────────────────────────────────────────
+ *
+ * The roster shares the app's table rules; everything below is the parts a
+ * member row has that a profile row does not -- a two-line identity cell, an
+ * avatar that may be a photo, initials or an envelope, and the seat meter that
+ * sits in the toolbar rather than in a settings row.
+ *
+ * The tab's own box (width cap, column, 16px gap) is up with .api-panel, which
+ * it shares. Nothing here sets padding: .content owns the page's 24px, and
+ * adding more is the double-inset bug automations.css documents. */
+
+/* With no roster to sit above, the upsell belongs in the middle of the working
+   area. Not .tab-empty, which the other tabs' whole-tab empty states moved to:
+   this one is not the whole tab. The view chips and the seat meter are still
+   above it and still worth using, so there is a header here to be pinned under
+   and nothing for a fixed 56px to line up with. */
+.team-tab.is-empty {
+  align-content: center;
+  display: grid;
+  min-height: 60vh;
+}
+
+.team-member {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.team-member-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The name row also carries the "You" badge, so it is a flex line rather than
+   plain text -- and the badge must not stretch to the cell's height. */
+.team-member-text > strong {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.team-member-email {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-avatar {
+  border-radius: 999px;
+  flex: none;
+  height: 30px;
+  object-fit: cover;
+  width: 30px;
+}
+
+.team-avatar.is-initials,
+.team-avatar.is-invite {
+  align-items: center;
+  background: var(--hover);
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 11px;
+  font-weight: 750;
+  justify-content: center;
+}
+
+/* An invite is a person who is not here yet, and the mark says so: the same
+   circle, but a glyph and a dashed edge rather than a face or initials. */
+.team-avatar.is-invite {
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+.team-invite-row td {
+  /* Not a disabled row -- an admin acts on these. Just quieter than a member,
+     because a pending invite is a smaller fact than a colleague. */
+  color: var(--ink-soft);
+}
+
+.team-invited-by {
   color: var(--ink-soft);
   font-size: 13px;
 }
 
-.automation-step {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-}
-
-.automation-step.is-off {
-  opacity: 0.55;
-}
-
-.automation-step-row {
-  display: flex;
+/* Seats live in the toolbar, next to the button that spends them. The meter is
+   the same component the Plan & usage section uses, so the numbers a customer
+   sees in Settings and the ones they see here cannot drift. */
+.team-seats {
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-}
-
-.automation-step-handle {
-  cursor: grab;
-  color: var(--ink-soft);
-  display: inline-flex;
-}
-
-.automation-step-toggle {
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  color: var(--ink-soft);
-  display: inline-flex;
-}
-
-.automation-step-index {
-  min-width: 18px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-soft);
-  font-size: 12px;
-}
-
-.automation-step-kind {
-  font-weight: 600;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-/* The generated summary is the one thing that must survive a narrow window,
- * so it takes the slack and truncates rather than wrapping the row. */
-.automation-step-summary {
-  flex: 1;
+  display: flex;
+  gap: 10px;
   min-width: 0;
+}
+
+.team-seats .settings-meter {
+  min-width: 110px;
+}
+
+.team-seats-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* ── The invite dialog ── */
+
+.invite-link-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Monospace because it is a credential being read character by character, the
+   same treatment the proxy host cell and the automation JSON get. */
+.invite-link {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  min-width: 0;
+}
+
+
+/* ── Sharing to a teammate ───────────────────────────────────────
+ *
+ * Two surfaces: the share sheet (what am I handing over, and to whom) and the
+ * inbox (what has a colleague passed me, and will I take it). Both lean on the
+ * token families rather than any literal colour, so the dark theme stays a
+ * straight swap.
+ *
+ * Notably absent: any warning styling. An earlier cross-organization version of
+ * this feature needed one, because sending a cookie jar outside the company
+ * really did hand over live sessions. Between teammates there is nothing to
+ * warn about -- they can already open every one of these -- and a caution the
+ * reader knows is empty is worse than none. */
+
+/* ── The inbox ── */
+
+/* The bell sits in the topbar, so the count has to read at a glance without
+ * enlarging the button and shoving the row around. Absolute, and outside the
+ * button's own box. */
+.inbox-button {
+  position: relative;
+}
+
+.inbox-count {
+  align-items: center;
+  background: var(--danger);
+  border-radius: 999px;
+  color: var(--paper);
+  display: flex;
+  font-size: 10px;
+  font-weight: 750;
+  height: 15px;
+  justify-content: center;
+  min-width: 15px;
+  padding: 0 3px;
+  pointer-events: none;
+  position: absolute;
+  right: 1px;
+  top: 1px;
+}
+
+.inbox-pop {
+  display: flex;
+  flex-direction: column;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.inbox-empty {
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding: 14px 12px;
+  text-align: center;
+}
+
+.inbox-item {
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 12px;
+}
+
+.inbox-item:last-child {
+  border-bottom: 0;
+}
+
+.inbox-item-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inbox-item-head svg {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+.inbox-item-name {
+  font-size: 13px;
+  font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inbox-item-from {
   color: var(--ink-soft);
   font-size: 12px;
 }
 
-.automation-step-enabled {
-  display: inline-flex;
-}
-
-.automation-step-body {
-  padding: 4px 12px 14px 40px;
-  border-top: 1px solid var(--line);
-}
-
-.automation-step-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.automation-step-note {
-  margin: 0;
-  font-size: 12px;
+/* The sender's own words, so they are set apart from ours -- an unquoted note
+ * beside our copy reads as if the app wrote it. */
+.inbox-item-note {
+  border-left: 2px solid var(--border);
   color: var(--ink-soft);
-}
-
-.automation-step-advanced summary {
-  cursor: pointer;
   font-size: 12px;
-  color: var(--ink-soft);
+  line-height: 1.45;
+  padding-left: 8px;
 }
 
-.automation-step-advanced-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 8px;
-}
-
-.automation-nested {
-  margin-top: 6px;
-}
-
-.automation-nested-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-
-.automation-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* ── Add-step menu ── */
-
-.automation-add-menu {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px;
-  border: 1px dashed var(--line);
-  border-radius: 10px;
-}
-
-.automation-add-menu button {
-  border: 1px solid var(--line);
-  background: var(--surface);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.automation-add-menu .automation-add-cancel {
-  border-style: dashed;
-  color: var(--ink-soft);
-}
-
-/* ── Key/value and condition editors ── */
-
-.automation-kv {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.automation-kv-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 6px;
-}
-
-.automation-condition {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 6px;
-  align-items: center;
-}
-
-.automation-problems {
-  margin: 12px 0 0;
-  padding-left: 18px;
-  color: var(--danger, #b4402f);
-  font-size: 12px;
-}
-
-.automation-json textarea {
-  width: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* ── Run log ── */
-
-.run-log-layout {
-  display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 16px;
-  min-height: 360px;
-}
-
-.run-log-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-right: 1px solid var(--line);
-  padding-right: 12px;
-  overflow-y: auto;
-  max-height: 60vh;
-}
-
-.run-log-entry {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
-  text-align: left;
-  padding: 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: none;
-  cursor: pointer;
-}
-
-.run-log-entry.is-active {
-  border-color: var(--line);
-  background: var(--surface);
-}
-
-.run-log-entry-meta,
-.run-log-entry-time {
-  font-size: 11px;
-  color: var(--ink-soft);
-}
-
-.run-log-detail {
-  overflow-y: auto;
-  max-height: 60vh;
-}
-
-.run-log-lines {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  font-size: 12px;
-}
-
-/* Indentation is inline (padding-left from the entry's path depth), so the
- * log lines up with the editor's nesting without a class per level. */
-.run-log-line {
+.inbox-item-actions {
   display: flex;
   gap: 8px;
-  align-items: baseline;
-  padding: 3px 0;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.run-log-line-path {
-  font-variant-numeric: tabular-nums;
+.inbox-item-actions button {
+  font-size: 12px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
+/* ── Run notifications in the bell ──
+ * The second kind. A notification row is quieter than a handoff -- it reports
+ * a decision rather than demanding one -- so it carries no action buttons,
+ * only the title-as-link, a clear, and the unread dot. */
+
+.inbox-divider {
+  background: var(--border);
+  height: 1px;
+  margin: 2px 0;
+}
+
+/* Tone from the run's own status tokens, reported off the record -- the bell
+ * never recomputes a verdict, it only colours the one it was given. */
+.inbox-status.is-active {
+  color: var(--status-active-ink);
+}
+
+.inbox-status.is-warmup {
+  color: var(--status-warmup-ink);
+}
+
+.inbox-status.is-ban {
+  color: var(--danger);
+}
+
+.inbox-status.is-neutral {
+  color: var(--ink-faint);
+}
+
+/* The title doubles as the row's one action; styled as text with an underline
+ * on hover so the row does not read as a wall of buttons. */
+.inbox-item-open {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.inbox-item-open:hover {
+  text-decoration: underline;
+}
+
+.inbox-unread-dot {
+  background: var(--accent);
+  border-radius: 999px;
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+
+.inbox-item-clear {
+  color: var(--ink-faint);
+  height: 22px;
+  margin-left: auto;
+  min-height: 22px;
+  padding: 0;
+  width: 22px;
+}
+
+.inbox-item-clear:hover {
+  color: var(--danger);
+}
+
+.inbox-item.is-unread {
+  background: var(--surface);
+}
+
+.inbox-foot {
+  border-top: 1px solid var(--border-soft);
+  padding: 8px;
+}
+
+.inbox-foot button {
+  justify-content: center;
+  width: 100%;
+}
+
+/* ── The Shared view in the Team tab ── */
+
+.shared-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.shared-group-title {
+  align-items: center;
   color: var(--ink-soft);
-  min-width: 46px;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  letter-spacing: 0.4px;
+  margin-bottom: 10px;
+  text-transform: uppercase;
 }
 
-.run-log-line-text {
+/* The kind, as a word rather than only an icon. A list mixing profiles, proxies
+ * and cookie sets is unreadable if the only thing distinguishing them is a
+ * 14px glyph. */
+.shared-kind {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* The item picker inside the share sheet.
+ *
+ * The dialog carries its own list because Share used to be reachable only by
+ * ticking a table row first -- which made the feature invisible on every tab
+ * until you happened to select something, and absent entirely from the Team
+ * tab. A list here costs one scroll box and buys a cold entry point. */
+.share-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink-faint);
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+/* The input keeps the canonical text-input rules for type and colour but gives
+ * up its own box: the wrapper above draws the border, so two nested frames do
+ * not appear around one control. */
+.share-search input {
+  background: none;
+  border: 0;
+  box-shadow: none;
   flex: 1;
+  min-width: 0;
+  padding-left: 0;
+}
+
+.share-search input:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+.share-picker {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  /* Capped rather than unbounded: an org with 300 profiles would otherwise push
+     the address field and the Send button off the bottom of the dialog. */
+  max-height: 190px;
+  overflow: auto;
+}
+
+.share-pick {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.share-pick:last-child {
+  border-bottom: 0;
+}
+
+.share-pick:hover {
+  background: var(--hover);
+}
+
+.share-pick-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushed right and allowed to shrink away first: the name is what identifies
+   the row, the detail is only there to disambiguate two of the same name. */
+.share-pick-detail {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin-left: auto;
+  overflow: hidden;
+  padding-left: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-picker-empty {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 0;
+  padding: 14px 10px;
+  text-align: center;
+}
+
+/* The teammate picker. A list of real people rather than a text field: a
+ * hand-off only means something to somebody already in this workspace, so
+ * anything you could type would either be a person already on this list or a
+ * mistake. */
+.share-people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow: auto;
+}
+
+/* `color` is not optional here. The base `button` rule is a filled dark control
+ * -- background: var(--accent); color: var(--accent-ink) -- so overriding only
+ * the background leaves white text on a white surface, and the teammate's name
+ * disappears while their email (which sets its own --ink-soft) stays visible.
+ * Every other button variant in this file takes the colour back the same way. */
+.share-person {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.share-person:hover {
+  background: var(--hover);
+}
+
+/* The selected teammate takes the accent surface the primary button uses, which
+ * is ink rather than a hue -- so "chosen" reads the same way it does everywhere
+ * else in the app and still inverts cleanly in dark mode. */
+.share-person.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.share-person.active small {
+  color: var(--accent-ink);
+  opacity: 0.75;
+}
+
+.share-person-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 
-.run-log-line-ms {
-  color: var(--ink-soft);
+.share-person-text strong {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.run-log-shot {
+.share-person-text small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── The Assigned column ── */
+
+/* A face and a name, or a dash. Sized to sit in a table row without changing
+ * its height -- the roster's 30px avatar would. */
+.assignee {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.assignee-avatar {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  font-size: 9px;
+  font-weight: 750;
+  height: 20px;
+  justify-content: center;
+  overflow: hidden;
+  width: 20px;
+}
+
+.assignee-avatar img {
+  height: 100%;
+  object-fit: cover;
   width: 100%;
-  max-width: 420px;
-  margin-top: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+}
+
+.assignee-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Yours, marked. In a column of eight names the one that matters is your own,
+ * and scanning for it by reading is slower than seeing it. */
+.assignee.is-me .assignee-name {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* The sender's note, under the item name in the hand-off list. Quiet and
+ * indented, so a row without one does not look like it is missing something. */
+.shared-note {
+  color: var(--ink-soft);
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Plan surfaces ──────────────────────────────────────────────────────────
+ *
+ * The Plans tab, the plan welcome dialog and the plan half of Settings. These
+ * are the only three places allowed to draw with --plan-accent; see the token's
+ * comment at the top of this file for why the hue exists at all and why its
+ * scope is the price of it.
+ *
+ * Everything else here is the app's ordinary vocabulary: --raised cards on the
+ * --surface canvas, --radius-lg corners, --border hairlines, 999px pills. */
+
+.plans-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-inline: auto;
+  max-width: 1080px;
+  min-width: 0;
+  padding-bottom: 8px;
+  width: 100%;
+}
+
+.plans-head {
+  max-width: 620px;
+}
+
+.plans-head h2 {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+.plans-head p {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* What the workspace has already spent, not a fourth plan card. The argument
+ * for upgrading is "3 of 5", and a Free card next to three paid ones would
+ * instead invite a comparison the reader has already made. */
+.plans-current {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding: 14px 18px;
+}
+
+.plans-current-tag {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+/* A grid rather than a wrapping flex row, so the three tracks are the same
+ * length and start at the same x. Three meters of content-width lengths side by
+ * side invite a comparison between the bars themselves, which is meaningless --
+ * the denominators are different -- and equal columns take that reading away.
+ *
+ * Each meter is two rows, name-and-count over track: they carry their own names
+ * now (Meter's `label`) instead of getting a heading stacked on top, which is
+ * what made this strip three rows tall and put "Profiles" and "0 of 5" on
+ * separate lines. */
+.plans-current-meters {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 12px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  min-width: 0;
+}
+
+/* The meter is the shared control from components/ui/Meter.tsx, so it arrives
+ * drawn in --accent. On this surface it belongs to the plan, not to the chrome. */
+.plans-current .settings-meter-track span,
+.plan-welcome .settings-meter-track span {
+  background: var(--plan-accent);
+}
+
+.plans-current .settings-meter-track span.full,
+.plan-welcome .settings-meter-track span.full {
+  background: var(--danger);
+}
+
+/* Stretch, so the three cards end level and the three buttons land on one line.
+ * The cards have unequal feature lists, and with `align-items: start` each one
+ * stopped wherever its list ran out -- three ragged bottoms, and the button you
+ * are being asked to press sitting at a different height on every card. The
+ * card is already a column with the list at `flex: 1`, so the slack falls above
+ * the button and nothing else moves. */
+.plans-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Ribbon over card. The slot is what keeps the three card tops on one line: the
+ * ribbon strip is rendered for every plan and filled for the two that carry one
+ * ("Most popular" on Team, "Most valuable" on Enterprise), because dropping the
+ * element for Base would stand it taller than the plans being recommended --
+ * the opposite of what a recommendation should look like. */
+.plan-slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.plan-ribbon {
+  align-items: center;
+  border-radius: 999px 999px 0 0;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.06em;
+  min-height: 26px;
+  text-transform: uppercase;
+}
+
+.plan-ribbon.is-shown {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.plan-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 20px;
+}
+
+/* A recommended card carries the ribbon's colour down its own edge and squares
+ * the two top corners into it, so the pair reads as one object rather than a
+ * label resting on a box.
+ *
+ * The wash is the plan welcome dialog's hero: this is the tier that dialog will
+ * congratulate the buyer on, and the two screens are the same promise thirty
+ * seconds apart. It pours from the ribbon's edge downward and is gone by the
+ * price, so the name and the number sit in it and the feature list below stays
+ * on plain --raised where it is easiest to read.
+ *
+ * Held higher and lighter than the dialog's, though, and both numbers are the
+ * card's height rather than the dialog's: the hero's 150% radius is most of a
+ * short modal but all of a 400px card, which tinted the whole thing instead of
+ * its top. 62% ends the fade just past the price rule. Layered over --raised
+ * rather than replacing it -- a gradient to `transparent` alone would leave the
+ * bottom of the card showing the canvas through. */
+.plan-card.is-highlighted {
+  background:
+    radial-gradient(130% 62% at 50% 0%,
+      color-mix(in srgb, var(--plan-accent) 14%, transparent) 0%,
+      transparent 74%),
+    var(--raised);
+  border-color: var(--plan-accent);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  box-shadow: 0 10px 30px -14px color-mix(in srgb, var(--plan-accent) 55%, transparent);
+}
+
+.plan-card h3 {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.plan-tagline {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin: 0;
+}
+
+.plan-price {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 4px;
+  margin: 14px 0 0;
+  padding-bottom: 16px;
+}
+
+.plan-price strong {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.plan-price span {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.plan-features {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 9px;
+  list-style: none;
+  margin: 16px 0 20px;
+  padding: 0;
+}
+
+.plan-features li {
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.plan-features svg {
+  color: var(--plan-accent);
+  flex: none;
+  margin-top: 1px;
+}
+
+/* The first bullet is the entitlement the tier is actually bought for, so it is
+ * the one line that gets the ink and the weight. Anything below it is detail. */
+.plan-features li.is-lead {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* A heading for the list rather than a member of it: no tick, no indent. */
+.plan-features li.plan-carried {
+  color: var(--ink);
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+
+.plan-cta {
+  justify-content: center;
+  width: 100%;
+}
+
+/* Filled on the two recommended cards. Base uses .ghost, which is already the
+ * app's quiet primary -- three identical fills would leave nothing pointing
+ * anywhere. */
+.plan-cta:not(.ghost) {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.plan-cta:not(.ghost):not(:disabled):hover {
+  background: var(--plan-accent-strong);
+}
+
+.plan-cta:focus-visible {
+  outline-color: var(--plan-accent);
+}
+
+.plans-foot {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  justify-content: space-between;
+  padding-top: 16px;
+}
+
+.plans-foot p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 620px;
+}
+
+/* Three cards need ~880px to stay readable. Below that they stack rather than
+ * shrink: a 200px-wide price column is worse than a scroll. */
+@media (max-width: 940px) {
+  .plans-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── The welcome dialog ─────────────────────────────────────────────────────*/
+
+/* Replaces the shared header's row layout: this one is a centred block with the
+ * close button floated over it, not a title beside a control.
+ *
+ * The negative margin is what makes the wash reach the panel edges. .profile-modal
+ * pads itself by 18px on all four sides, so a plain child leaves a white gutter
+ * around the tint and it reads as a coloured box sitting inside the dialog
+ * rather than as the top of it. Cancelling that padding on this one element is
+ * the whole trick; the panel's own border-radius and overflow clip the two top
+ * corners, so the hero needs no radius of its own. Keep the two numbers equal to
+ * .profile-modal's padding if that ever changes. */
+.plan-welcome header {
+  display: block;
+  margin: -18px -18px 0;
+  position: relative;
+}
+
+/* Inset rather than flush now that it sits on the tint -- a glyph in the exact
+ * corner of a rounded panel looks clipped even when it is not. */
+.plan-welcome header > .icon-button {
+  margin-top: 0;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+}
+
+.plan-welcome-hero {
+  background:
+    radial-gradient(130% 150% at 50% 0%,
+      color-mix(in srgb, var(--plan-accent) 20%, transparent) 0%,
+      transparent 72%);
+  padding: 30px 26px 24px;
+  text-align: center;
+}
+
+/* The mark alone, no plate behind it. It is already a solid silhouette, so a
+ * filled circle around it was one container too many -- and it sits on the
+ * hero's tint, which is doing that job. */
+.plan-welcome-mark {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+/* The same alpha-masked PNG as the sidebar's .brand-mark, filled with the plan
+ * accent so it carries the tint rather than sitting on it. */
+.plan-welcome-glyph {
+  background-color: var(--plan-accent);
+  display: block;
+  height: 40px;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 40px;
+}
+
+.plan-welcome-hero h2 {
+  font-size: 22px;
+  letter-spacing: -0.015em;
+}
+
+.plan-welcome-hero p {
+  line-height: 1.5;
+  margin-inline: auto;
+  max-width: 380px;
+}
+
+.plan-welcome-grid {
+  display: grid;
+  margin: 0;
+}
+
+/* Plain rows on the panel, not tiles. Three boxed cards under a tinted hero was
+ * two container styles arguing: the hero is the object, and what follows it is
+ * a list. A hairline is all the separation a three-item list needs. */
+.plan-welcome-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 11px 2px;
+}
+
+.plan-welcome-row:last-child {
+  border-bottom: 0;
+}
+
+.plan-welcome-row dt {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  font-weight: 550;
+  gap: 9px;
+  min-width: 0;
+}
+
+.plan-welcome-icon {
+  align-items: center;
+  color: var(--plan-accent);
+  display: inline-flex;
+}
+
+.plan-welcome-row dd {
+  align-items: baseline;
+  display: flex;
+  gap: 7px;
+  margin: 0;
+}
+
+/* The number they had, struck through in the sense that it is over -- quiet,
+ * smaller, and the only thing on the row that is not the news. */
+.plan-welcome-from {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
+.plan-welcome-arrow {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+/* The new number, in the plan's colour. Sized to sit level with the label
+ * rather than tower over it -- without a card around each row there is no box
+ * for a 19px figure to fill, and the tint alone is enough to say which of the
+ * two numbers on the row is the one that matters. */
+.plan-welcome-row dd strong {
+  color: var(--plan-accent);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.plan-welcome-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── Workspace setup ──────────────────────────────────────────────────────
+ * "Who is this workspace for?" -- the first-run question.
+ *
+ * Sibling of the plan welcome above, deliberately quieter. That dialog is an
+ * announcement and earns its tinted hero; this one asks a question, and a
+ * celebration frame around a question reads as a sales screen. So: no hero, no
+ * accent fills, and the only weight in the whole thing is on the two cards --
+ * because choosing between them IS the screen, and everything after it is
+ * optional. */
+.setup-choices {
+  display: grid;
+  gap: 10px;
+  /* Two up where there is room, stacked below. Not a fixed 1fr 1fr: at the
+   * dialog's narrow width two columns put the supporting line on four lines
+   * each, which makes the shorter option look like the lesser one. */
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+/* A real target, not a radio with a label beside it. The whole card is the
+ * control -- 90px of it -- because this is a two-way fork on a first run and a
+ * 13px radio is a small thing to ask someone to find. */
+.setup-choice {
+  align-content: start;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  padding: 16px;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+/* Border rather than a fill or a shadow. The dialog already sits on --raised
+ * over a dimmed page, so a second elevation would be a third surface arguing
+ * with the two above it -- the same reasoning .plan-welcome-row records for
+ * dropping its tiles. */
+.setup-choice:hover:not(:disabled),
+.setup-choice:focus-visible {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.setup-choice:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.setup-choice > svg {
+  color: var(--ink-soft);
+  margin-bottom: 5px;
+}
+
+.setup-choice strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.setup-choice span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.setup-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.setup-logo-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+/* Square and contain, not cover: a logo is usually wider than it is tall and
+ * cropping one to fill a square is how you cut the name off a wordmark. */
+.setup-logo-preview {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  height: 44px;
+  object-fit: contain;
+  width: 44px;
+}
+
+.setup-logo-preview.is-empty {
+  border-style: dashed;
+}
+
+.setup-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+
+/* One button, so it sits at the end rather than being pushed apart from
+ * nothing by the shared footer's space-between. */
+.plan-welcome .modal-actions {
+  justify-content: flex-end;
+}
+
+.plan-welcome .modal-actions button {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.plan-welcome .modal-actions button:not(:disabled):hover {
+  background: var(--plan-accent-strong);
+}
+
+.plan-welcome .modal-actions button:focus-visible {
+  outline-color: var(--plan-accent);
+}
+
+/* Meters inside the plan section belong to the plan, not to the chrome. Scoped
+ * to this group rather than to .settings-meter, because the same control also
+ * draws the seat count in the Team tab's toolbar, which is chrome and stays
+ * ink. */
+.settings-plan-usage .settings-meter-track span {
+  background: var(--plan-accent);
+}
+
+.settings-plan-usage .settings-meter-track span.full {
+  background: var(--danger);
+}
+
+/* The one primary in the section -- "See plans" / "Upgrade plan". Manage
+ * billing sits beside it as a .ghost and is untouched. */
+.settings-plan-actions button:not(.ghost) {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.settings-plan-actions button:not(.ghost):not(:disabled):hover {
+  background: var(--plan-accent-strong);
+}
+
+.settings-plan-actions button:not(.ghost):focus-visible {
+  outline-color: var(--plan-accent);
 }

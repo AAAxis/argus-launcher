@@ -10,6 +10,7 @@
 import {useMemo, useState} from 'react';
 import {FolderInput, SearchX} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
+import {Checkbox} from '../ui/Checkbox';
 import {Modal} from '../ui/Modal';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {FlagIcon} from '../ui/icons';
@@ -108,10 +109,9 @@ export function MoveProxiesModal({folder, seedCountry, onClose}: {
           const from = state.proxy_folders.find((item) => item.id === proxy.folder_id);
           return (
             <label className="move-profiles-row move-proxies-row" key={proxy.id}>
-              <input
+              <Checkbox
                 checked={picked.includes(proxy.id)}
                 onChange={() => toggle(proxy.id)}
-                type="checkbox"
               />
               <span className="move-proxies-flag" title={proxyCountryLabel(proxy) || 'Country not checked'}>
                 <FlagIcon countryCode={proxy.country_code} />

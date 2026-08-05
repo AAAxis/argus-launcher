@@ -1,5 +1,6 @@
 import type {ArgusProfile} from '../types';
-import {optionalClient, raise, requireClient} from './client';
+import {AVATAR_MAX_BYTES, imageExtensionFor} from './account';
+import {optionalClient, raise, requireClient, STORAGE_BUCKET} from './client';
 import {profilePatchToRow, profileToRow, rowToProfile} from './mappers';
 import type {ProfileRow} from './rows';
 
@@ -7,7 +8,7 @@ const COLUMNS =
   'id,org_id,name,notes,folder_id,proxy_id,cookie_set_id,fingerprint,status,tags,start_urls,' +
   'command_line_switches,created_by,deleted_at,updated_at,created_at,color,proxy_mode,' +
   'cookie_mode,cookie_import_path,cookie_import_url,cookie_import_name,cookie_import_count,' +
-  'email,password,automation_id';
+  'email,password,automation_id,avatar,assigned_to';
 
 // Trashed profiles come back too -- the Trash view reads the same list and
 // filters on deleted_at, exactly as it did against the blob.
@@ -116,6 +117,57 @@ export async function purge(orgId: string, ids: string[]): Promise<void> {
       .eq('org_id', orgId)
       .in('id', ids);
   raise(error, 'profiles.purge');
+}
+
+// Uploads a picture for a profile's avatar and returns its public URL. The
+// caller stores that URL in ArgusProfile.avatar; nothing here writes the row,
+// because the editor holds an unsaved draft and a picture that landed in
+// Storage before Cancel was pressed should not have changed the profile.
+//
+// Scoped by org and profile so the object is findable from its path alone, and
+// timestamped rather than fixed for the reason account.uploadAvatar documents:
+// a stable path is served from cache by URL alone, so a replacement picture
+// would keep showing as the old one on every surface until the cache expired.
+// Superseded objects are left in place -- a few KB each, and deleting the old
+// one on upload would race a second worker still rendering it.
+export async function uploadAvatar(
+    orgId: string, profileId: string, file: File): Promise<string> {
+  const client = requireClient();
+  if (file.size > AVATAR_MAX_BYTES) {
+    throw new Error('That image is larger than 5 MB. Pick a smaller one.');
+  }
+  const objectPath =
+    `profile-avatars/${orgId}/${profileId}/${Date.now()}.${imageExtensionFor(file)}`;
+  const {error} = await client.storage
+      .from(STORAGE_BUCKET)
+      .upload(objectPath, file, {contentType: file.type || 'image/png', upsert: true});
+  if (error) {
+    throw new Error(`Could not upload the image: ${error.message}`);
+  }
+  return client.storage.from(STORAGE_BUCKET).getPublicUrl(objectPath).data.publicUrl;
+}
+
+// Empty Trash: everything with a deleted_at, whatever its age.
+//
+// Scoped by deleted_at rather than by an id list, which is what makes it safe to
+// offer without selecting anything first -- there is no way for the statement to
+// reach a profile that is not in Trash. It also picks up anything trashed on
+// another device while the dialog was open, where an id list gathered up front
+// would quietly miss it. Returns the ids removed so the caller can patch local
+// state and report a count.
+export async function purgeAll(orgId: string): Promise<string[]> {
+  const client = optionalClient();
+  if (!client) {
+    return [];
+  }
+  const {data, error} = await client
+      .from('profiles')
+      .delete()
+      .eq('org_id', orgId)
+      .not('deleted_at', 'is', null)
+      .select('id');
+  raise(error, 'profiles.purgeAll');
+  return ((data || []) as Array<{id: string}>).map((row) => row.id);
 }
 
 // The 30-day Trash expiry, as one statement instead of a filter-and-rewrite of

@@ -281,7 +281,13 @@ class Run {
     ]);
   }
 
-  finish(status, error) {
+  // finish() split in two so notify-on-finish can run between them: seal()
+  // decides the record's verdict, flush() writes it and tells the renderer.
+  // The send needs the sealed verdict (the message reports status, duration
+  // and the failing step) but must complete BEFORE flush(), because flush is
+  // what the renderer answers by writing the run to Supabase -- a send that
+  // fails after it would be logged into a record already gone.
+  seal(status, error) {
     this.record.status = status;
     this.record.error = error || null;
     this.record.finished_at = new Date().toISOString();
@@ -289,8 +295,14 @@ class Run {
       new Date(this.record.finished_at).getTime() - new Date(this.record.started_at).getTime();
     this.record.step_count = this.stepCount;
     this.record.vars = this.vars;
+  }
+
+  // `extra` rides on the finished event -- today that is the composed
+  // notification main.cjs built, which the renderer inserts into the
+  // `notifications` table (this process holds no Supabase credentials).
+  flush(extra) {
     this.persist();
-    this.onEvent({type: 'finished', runId: this.id, run: this.record});
+    this.onEvent({type: 'finished', runId: this.id, run: this.record, ...(extra || {})});
   }
 }
 
@@ -300,7 +312,8 @@ class Run {
 // This is not a style choice: AUTOMATION_REQUEST_TIMEOUT_MS is 20s and a real
 // run is minutes, so a route that awaited completion would 504 and look like a
 // hang in the runner rather than a timeout in the bridge.
-async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent}) {
+async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, onFinish,
+  onNotify}) {
   const problems = validateSteps(automation.steps || [], SCHEMA);
   if (problems.length > 0) {
     throw new Error(`This automation is not valid: ${problems.slice(0, 5).join('; ')}`);
@@ -325,12 +338,28 @@ async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent})
   onEvent({type: 'started', runId: run.id, run: run.record});
 
   // Deliberately not awaited.
-  void execute(run);
+  void execute(run, onFinish, onNotify);
   return run.id;
 }
 
-async function execute(run) {
+// onFinish is what makes `close_on_finish` real. It is a callback rather than a
+// reference to the launch table on purpose: this module owns the CDP socket for
+// the length of a run and nothing else, and teaching it to kill browser
+// processes would put the two halves of the process boundary in one file. main
+// decides what closing means; this decides when.
+//
+// onNotify is notify-on-finish, a callback for the same reason: main owns the
+// connector registry and the OS notification, this owns the one moment the
+// record is sealed but not yet flushed. It receives the sealed record and
+// returns the composed notification for the finished event (or null when the
+// automation's setting says this outcome does not notify).
+async function execute(run, onFinish, onNotify) {
   let session = null;
+  // Seeded with a failure rather than left null: every path out of the try
+  // below assigns it, and if some future edit finds one that does not, a run
+  // that ends as 'failed' is a bug you can see rather than one that leaves the
+  // record stuck on 'running' forever.
+  let outcome = {status: 'failed', error: 'The run ended without a result'};
   const budget = Math.min(
       Number(run.automation.timeout_ms) || DEFAULT_RUN_TIMEOUT_MS,
       DEFAULT_RUN_TIMEOUT_MS);
@@ -358,18 +387,52 @@ async function execute(run) {
       timeoutIn(budget, 'This run'),
     ]);
 
-    run.finish(run.degraded ? 'partial' : 'ok', null);
+    outcome = {status: run.degraded ? 'partial' : 'ok', error: null};
   } catch (error) {
     const message = error?.message || String(error);
-    if (run.cancelled || message === 'cancelled') {
-      run.finish('cancelled', null);
-    } else {
-      run.finish('failed', message);
-    }
+    outcome = run.cancelled || message === 'cancelled' ?
+      {status: 'cancelled', error: null} :
+      {status: 'failed', error: message};
   } finally {
     if (session) {
       session.close();
     }
+    // Closing the browser happens BEFORE the record is sealed. It used to sit
+    // at the end of each branch above, and a warning logged after the seal-
+    // and-flush would have reached the open window as an event and then never
+    // been written anywhere -- flush() is what persists the log and what the
+    // renderer answers by flushing the run to Supabase.
+    //
+    // Not on 'cancelled': the user is standing at the machine having just
+    // stopped the run, and taking their window away is the opposite of what
+    // stopping asked for.
+    if (onFinish && outcome.status !== 'cancelled') {
+      try {
+        onFinish();
+      } catch (error) {
+        run.log('warn', `Could not close the browser: ${error?.message || String(error)}`);
+      }
+    }
+    run.seal(outcome.status, outcome.error);
+    // Notify-on-finish sits between seal and flush on purpose: the message
+    // reports the sealed verdict, and a send that fails is logged into the
+    // record the user reads rather than into one already flushed. onNotify
+    // never throws for a dead connector -- it reports that as sendError so a
+    // broken webhook cannot also silence the bell -- but it is guarded anyway:
+    // a throw out of this finally would eat the run's own outcome.
+    let notification = null;
+    if (onNotify) {
+      try {
+        notification = await onNotify(run.record);
+      } catch (error) {
+        run.log('warn',
+            `Could not send the finish notification: ${error?.message || String(error)}`);
+      }
+    }
+    if (notification && notification.sendError) {
+      run.log('warn', `The finish message was not delivered: ${notification.sendError}`);
+    }
+    run.flush(notification ? {notification} : {});
     active.delete(run.id);
   }
 }

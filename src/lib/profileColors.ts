@@ -25,7 +25,25 @@ export const PROFILE_COLORS: {key: ProfileColorKey; label: string}[] = [
   {key: 'amber', label: 'Amber'},
 ];
 
+// The colour a stored value falls back to when it cannot be read. Deliberately
+// a constant and NOT randomProfileColor(): this is a read path, so a random
+// answer would give the same profile a different colour every time anything
+// asked, and the Dock tile would change under the user.
 export const DEFAULT_PROFILE_COLOR: ProfileColorKey = 'blue';
+
+// The colour a *new* profile starts with. Random rather than always blue
+// because this is what its launched window's Dock tile is drawn in
+// (electron/profile-icons.cjs), and a screen of profiles that all defaulted to
+// blue gave every one of them the same tile -- the one thing the per-profile
+// icon exists to prevent. Six colours means repeats once there are more than a
+// few profiles; the colour is a hint for telling windows apart, not an id, and
+// the picker is right there for anyone who wants to choose.
+//
+// Only ever called when a profile is created. See DEFAULT_PROFILE_COLOR above
+// for why read paths must not use this.
+export function randomProfileColor(): ProfileColorKey {
+  return PROFILE_COLORS[Math.floor(Math.random() * PROFILE_COLORS.length)].key;
+}
 
 // The palette this replaced, in its original order, so profiles saved before
 // this change adopt the muted tone instead of keeping a stale literal that only

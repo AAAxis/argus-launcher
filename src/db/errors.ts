@@ -57,6 +57,42 @@ export function describeDbError(error: unknown, fallback = 'Something went wrong
   if (raw.includes('not_authenticated')) {
     return 'Your session expired. Sign in again.';
   }
+
+  // ---- hand-offs (2026-08-06-handoffs.sql) ----
+  if (raw.includes('cannot_share_with_yourself')) {
+    return 'Pick a teammate — you can\'t share something with yourself.';
+  }
+  if (raw.includes('not_a_teammate')) {
+    return 'They\'re not in this workspace. Invite them from the Team tab first.';
+  }
+  if (raw.includes('handoff_not_yours')) {
+    return 'That one was shared with someone else, so only they can accept it.';
+  }
+  if (raw.includes('handoff_not_pending')) {
+    return 'That has already been answered.';
+  }
+  if (raw.includes('handoff_not_found')) {
+    return 'That share no longer exists.';
+  }
+  // Raised after the offer is closed, not instead of closing it -- so the row
+  // does not sit unanswerable in an inbox forever.
+  if (raw.includes('item_gone')) {
+    return 'That item was deleted before you accepted it.';
+  }
+  if (raw.includes('item_not_found')) {
+    return 'One of the items has been deleted. Reload and try again.';
+  }
+  // Only reachable against a database that has not had
+  // 2026-08-07-assign-directly.sql applied: the current set_assignee assigns to
+  // any teammate and never raises this. Kept because a launcher can meet an
+  // older database, and the advice still works -- sharing is the other road to
+  // the same assignment.
+  if (raw.includes('use_offer_handoff')) {
+    return 'Share it with them instead, so they can accept it.';
+  }
+  if (raw.includes('nothing_selected')) {
+    return 'Nothing was selected to share.';
+  }
   // 23505: duplicate key. The only client-reachable one is re-adding an
   // extension id, which addExtensionFromWebStoreLink already checks for.
   if (raw.includes('duplicate key value')) {

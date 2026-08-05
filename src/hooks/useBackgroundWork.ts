@@ -10,7 +10,7 @@ import type {WorkspaceValue} from '../workspace/WorkspaceProvider';
 // because "queued" and "already tried this session" are different questions --
 // collapsing them let a re-render queue the same proxy twice.
 export function useBackgroundProxyChecks(workspace: WorkspaceValue, enabled: boolean) {
-  const {data, proxies, setCheckingProxyId} = workspace;
+  const {data, proxies, beginProxyCheck, endProxyCheck} = workspace;
   const inFlight = useRef(new Set<string>());
   const attempted = useRef(new Set<string>());
   const proxyRows = data.state.proxies;
@@ -48,7 +48,7 @@ export function useBackgroundProxyChecks(workspace: WorkspaceValue, enabled: boo
         if (cancelled) {
           break;
         }
-        setCheckingProxyId(proxy.id);
+        beginProxyCheck(proxy.id);
         try {
           await proxies.recordCheck(await proxies.runCheck(proxy));
         } catch (error) {
@@ -59,7 +59,7 @@ export function useBackgroundProxyChecks(workspace: WorkspaceValue, enabled: boo
           });
         } finally {
           inFlight.current.delete(proxy.id);
-          setCheckingProxyId('');
+          endProxyCheck(proxy.id);
         }
       }
     })();

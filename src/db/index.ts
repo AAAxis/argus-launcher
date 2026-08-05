@@ -9,19 +9,26 @@
 //   2. every mutation touches exactly one row. There is no read-modify-write of
 //      an array anywhere, which is what makes two workers editing different
 //      profiles structurally unable to clobber each other.
-// One exception to rule 1: `account` is the signed-in user's own record, which
-// belongs to a person rather than to a tenant, so its functions take no orgId.
+// Two exceptions to rule 1. `account` is the signed-in user's own record, which
+// belongs to a person rather than to a tenant. And `shared.listInbox` is
+// addressed to an EMAIL rather than to an org -- an incoming share exists
+// before the recipient has chosen which of their workspaces to put it in, so
+// there is no org to filter on until they accept.
 export * as account from './account';
 export * as automations from './automations';
 export * as bookmarks from './bookmarks';
+export * as connectors from './connectors';
 export * as cookieSets from './cookieSets';
 export * as extensions from './extensions';
 export * as folders from './folders';
+export * as notifications from './notifications';
 export * as orgs from './orgs';
 export * as profiles from './profiles';
 export * as proxies from './proxies';
 export * as runs from './runs';
+export * as shared from './shared';
 export * as statuses from './statuses';
+export * as team from './team';
 
 export {CloudUnavailableError, STORAGE_BUCKET, supabase} from './client';
 export {describeDbError} from './errors';

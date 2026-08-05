@@ -28,7 +28,10 @@ export function formatDate(value: string | null | undefined) {
 // stays available in the row's title.
 const ACCOUNT_EMAIL_MAX = 24;
 
-export function shortenEmail(email: string) {
+// Not exported: accountLabel below is the way in, and the account row is the
+// only place an address is shortened. A caller reaching for this directly would
+// be one that skipped the display name.
+function shortenEmail(email: string) {
   if (email.length <= ACCOUNT_EMAIL_MAX) {
     return email;
   }
@@ -42,6 +45,26 @@ export function shortenEmail(email: string) {
     return `${email.slice(0, ACCOUNT_EMAIL_MAX - 1)}…`;
   }
   return `${email.slice(0, room)}…${domain}`;
+}
+
+// What the sidebar account row calls you.
+//
+// The display name when there is one: it is the name the account chose, and it
+// identifies the workspace you are signed into more directly than an elided
+// address does. An email-code account has none until it sets one in Settings,
+// so the address stays the fallback rather than the default. Either way the
+// full address is still in the row's title.
+//
+// Capped by the same rule as shortenEmail and for the same reason -- the row's
+// geometry is fixed, and a long name would push the gear off it just as a long
+// local part did. A name has no domain half worth keeping, so it truncates
+// plainly from the end.
+export function accountLabel(displayName: string, email: string) {
+  const name = displayName.trim();
+  if (!name) {
+    return shortenEmail(email);
+  }
+  return name.length <= ACCOUNT_EMAIL_MAX ? name : `${name.slice(0, ACCOUNT_EMAIL_MAX - 1)}…`;
 }
 
 export function escapeHtml(value: string) {

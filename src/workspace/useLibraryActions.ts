@@ -284,10 +284,10 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
     return true;
   }
 
-  // These toggles live on the organization, not on the individual user, so one
-  // worker cannot silently change what their colleagues' profiles launch with.
-  // The RLS UPDATE policy on organizations requires is_org_admin, which is why
-  // the switches are disabled for plain members rather than failing on click.
+  // These toggles live on the organization, not on the individual user: flipping
+  // one changes what every colleague's profiles launch with. Any member may do
+  // it -- organizations_update is is_org_member -- which is why the Extensions
+  // tab states the blast radius rather than disabling the switches.
   async function setBuiltInExtensionEnabled(
       key: keyof BuiltInExtensionToggles, enabled: boolean): Promise<boolean> {
     const next = {...state.built_in_extensions, [key]: enabled};

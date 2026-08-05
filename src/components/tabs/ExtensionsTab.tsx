@@ -20,26 +20,39 @@
 // and needs no words. The badge on each card already says where it came from,
 // and the grid ends in an Add tile, so the same information is there as an
 // invitation instead of an absence.
-import {useState} from 'react';
-import {BadgeCheck, Check, Download, Link2, Plus, Trash2} from 'lucide-react';
+import {useEffect, useState} from 'react';
+import {BadgeCheck, Check, Download, Link2, Plus, ShieldCheck, Trash2} from 'lucide-react';
+import {Badge} from '../ui/Badge';
 import {ExtensionMark} from '../ui/icons';
 import {
-  BUILT_IN_EXTENSIONS, CATALOG_CATEGORIES, EXTENSION_CATALOG, extensionLogo,
+  BUILT_IN_EXTENSIONS, CATALOG_CATEGORIES, EXTENSION_CATALOG, builtInExtensionEnabled,
+  extensionLogo,
 } from '../../data/extensionCatalog';
+import {native} from '../../native';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ReactNode} from 'react';
-import type {CatalogExtension} from '../../data/extensionCatalog';
-import type {BuiltInExtensionToggles, SharedExtension} from '../../types';
+import type {BuiltInExtension, CatalogExtension} from '../../data/extensionCatalog';
+import type {SharedExtension} from '../../types';
 
 type View = 'installed' | 'discover';
 
 export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
+  const {data} = useWorkspace();
   const [view, setView] = useState<View>('installed');
+  // Bundled plus shared, which is what "Installed" means on the chip above and
+  // in the grid below. Off ones are still installed, so this is not a count of
+  // what is running.
+  const installedCount =
+    BUILT_IN_EXTENSIONS.length + data.state.shared_extensions.length;
 
   return (
     <section className="extensions-tab">
-      <div className="extensions-head">
+      {/* The tab's frame, on the same paper surface the Integrations bar uses:
+          what you are looking at on the left, how many of them and how to get
+          another on the right. Loose on the page these three read as three
+          unrelated controls sitting above the cards. */}
+      <section className="integration-bar">
         {/* radiogroup, matching the proxy-mode chips in ProfileModal -- these
           * are one choice of two, and a `tablist` would owe the reader
           * aria-controls and real tabpanels that this does not have. */}
@@ -57,10 +70,15 @@ export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
             </button>
           ))}
         </div>
-        <button className="ghost" onClick={onAddExtension}>
-          <Link2 size={16} /> Add from link or folder
-        </button>
-      </div>
+        <div className="integration-bar-side">
+          <span className="integration-bar-count">
+            <strong>{installedCount}</strong> installed
+          </span>
+          <button className="ghost" onClick={onAddExtension}>
+            <Link2 size={16} /> Add from link or folder
+          </button>
+        </div>
+      </section>
 
       {view === 'installed' ?
         <InstalledView onBrowse={() => setView('discover')} /> :
@@ -75,36 +93,31 @@ export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
 
 function InstalledView({onBrowse}: {onBrowse: () => void}) {
   const org = useOrg();
-  const {data, library} = useWorkspace();
-  // Undefined/missing means enabled, for cloud state saved before either of
-  // these toggles existed.
-  const builtInEnabled = (key: keyof BuiltInExtensionToggles) =>
-    data.state.built_in_extensions?.[key] !== false;
+  const {data} = useWorkspace();
 
   return (
     <>
-      {!org.isAdmin && org.orgId && (
-        <p className="extensions-note">
-          The bundled extensions apply to everyone in {org.org?.name || 'this organization'},
-          so only an owner or admin can change them.
-        </p>
+      {/* Shaped like the Integrations tab's note, for the same reason: it is a
+          standing fact about the screen rather than a message about something
+          that just happened, and a bare grey paragraph above a grid of cards
+          reads as a caption for the first card. */}
+      {/* Shown to everyone, not only to the people who cannot act on it. It used
+          to be a permission warning for members; as of 2026-08-10 every member
+          may change these, which makes the org-wide blast radius the thing worth
+          saying -- and worth saying to the person about to click. */}
+      {org.orgId && (
+        <section className="api-note">
+          <ShieldCheck size={18} />
+          <span>
+            The bundled extensions apply to everyone in {org.org?.name || 'this organization'},
+            so turning one off turns it off for the whole team.
+          </span>
+        </section>
       )}
 
       <div className="extension-grid">
         {BUILT_IN_EXTENSIONS.map((entry) => (
-          <ExtensionCard
-            badge="Included"
-            enabled={builtInEnabled(entry.key)}
-            key={entry.key}
-            logo={extensionLogo(entry.slug)}
-            name={entry.name}
-            note={entry.note}
-            onToggle={(next) => void library.setBuiltInExtensionEnabled(entry.key, next)}
-            tagline={entry.tagline}
-            tint={entry.tint}
-            toggleDisabled={!org.isAdmin}
-            verified
-          />
+          <BuiltInExtensionCard entry={entry} key={entry.key} />
         ))}
 
         {data.state.shared_extensions.map((extension) => (
@@ -121,6 +134,86 @@ function InstalledView({onBrowse}: {onBrowse: () => void}) {
         </button>
       </div>
     </>
+  );
+}
+
+// A built-in card. Most are a plain switch, because their files are vendored in
+// extensions/ and are always there. One is not: Captcha Plugin's ~56 MB comes
+// from the Web Store on demand, so its first enable has to fetch before the
+// org's toggle can honestly say it is on.
+//
+// The org toggle is shared but the bytes are per machine, so "on" and
+// "downloaded" are genuinely different facts and the card reads both.
+function BuiltInExtensionCard({entry}: {entry: BuiltInExtension}) {
+  const {data, library} = useWorkspace();
+  const enabled = builtInExtensionEnabled(data.state.built_in_extensions, entry);
+  const [installed, setInstalled] = useState(!entry.downloadsOnEnable);
+  const [percent, setPercent] = useState<number | null>(null);
+  const [error, setError] = useState('');
+
+  // Whether this machine has the files, and progress for a download already
+  // running (this window's, or the catch-up pass started at sign-in).
+  useEffect(() => {
+    if (!entry.downloadsOnEnable) {
+      return undefined;
+    }
+    let live = true;
+    void native?.builtInExtensionStatus?.().then((status) => {
+      if (live) setInstalled(Boolean(status?.installed?.[entry.key]));
+    });
+    const stop = native?.onBuiltInDownloadProgress?.((progress) => {
+      if (!live || progress.key !== entry.key) return;
+      setPercent(progress.totalBytes ?
+        Math.floor((progress.receivedBytes / progress.totalBytes) * 100) : null);
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [entry.downloadsOnEnable, entry.key]);
+
+  const downloading = percent !== null && !installed;
+
+  async function toggle(next: boolean) {
+    setError('');
+    // Turning off never deletes the download: the files stay cached so turning
+    // it back on is instant, and a teammate toggling it off on their machine
+    // should not cost everyone else 56 MB again.
+    if (!next || installed || !entry.downloadsOnEnable) {
+      void library.setBuiltInExtensionEnabled(entry.key, next);
+      return;
+    }
+    setPercent(0);
+    const result = await native?.installBuiltInExtension?.(entry.key);
+    setPercent(null);
+    // The toggle is only written once the bytes are actually on disk. Writing
+    // it first would leave every profile in the org claiming an extension they
+    // then silently launch without.
+    if (result?.ok) {
+      setInstalled(true);
+      void library.setBuiltInExtensionEnabled(entry.key, true);
+      return;
+    }
+    setError(result?.error || 'Download failed. Check your connection and try again.');
+  }
+
+  return (
+    <ExtensionCard
+      badge="Included"
+      enabled={enabled}
+      logo={extensionLogo(entry.slug)}
+      name={entry.name}
+      note={entry.note}
+      onToggle={(next) => void toggle(next)}
+      status={
+        downloading ? `Downloading… ${percent}%` :
+          error ? <span className="extension-card-error">{error}</span> : null
+      }
+      tagline={entry.tagline}
+      tint={entry.tint}
+      toggleDisabled={downloading}
+      verified
+    />
   );
 }
 
@@ -200,13 +293,17 @@ function CatalogCard({entry, installed, onInstall}: {
       <div className="extension-card-head">
         <ExtensionMark logo={extensionLogo(entry.slug)} />
         <h3>{entry.name}</h3>
+        {/* Green, the same tone Connected takes on the Integrations tab: this
+            is the one chip in the catalog that means "already yours", and it
+            answers the Install button that would otherwise be here. */}
+        {installed && <Badge tone="active" icon={<Check size={12} />}>Installed</Badge>}
       </div>
       <p>{entry.tagline}</p>
-      <div className="extension-card-foot">
-        {installed ?
-          <span className="status-pill"><Check size={14} /> Installed</span> :
-          <button onClick={onInstall}><Download size={16} /> Install</button>}
-      </div>
+      {!installed && (
+        <div className="extension-card-foot">
+          <button onClick={onInstall}><Download size={16} /> Install</button>
+        </div>
+      )}
     </article>
   );
 }
@@ -215,7 +312,7 @@ function CatalogCard({entry, installed, onInstall}: {
 // The card both views share
 // ---------------------------------------------------------------------------
 
-function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagline, tint,
+function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, status, tagline, tint,
   toggleDisabled, verified}: {
   action?: ReactNode;
   badge: string;
@@ -224,6 +321,10 @@ function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagl
   name: string;
   note?: string;
   onToggle: (enabled: boolean) => void;
+  // Beside the switch: what is happening right now (a download's progress, why
+  // one failed), as opposed to `note`, which is a standing fact about the
+  // extension.
+  status?: ReactNode;
   tagline: string;
   tint?: boolean;
   toggleDisabled?: boolean;
@@ -234,20 +335,25 @@ function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagl
       <div className="extension-card-head">
         <ExtensionMark logo={logo} tint={tint} />
         <h3>{name}</h3>
+        {/* Where an extension came from, beside its name rather than in the
+          * card's foot -- it is part of the extension's identity, not of the
+          * controls. Bundled ones carry a verified mark in the blue "checked
+          * fact" tone: they ship with Argus and were not fetched from a store,
+          * which is the one thing about a browser extension worth vouching for.
+          * Everything else -- Web Store, Shared folder -- states its provenance
+          * in the neutral tone and makes no claim about it. */}
+        <Badge
+          tone={verified ? 'info' : 'neutral'}
+          icon={verified ? <BadgeCheck size={12} /> : undefined}
+        >
+          {badge}
+        </Badge>
         {action}
       </div>
       <p>{tagline}</p>
       {note && <p className="extension-card-note">{note}</p>}
       <div className="extension-card-foot">
-        {/* Bundled extensions carry a verified mark: they ship with Argus and
-          * were not fetched from a store, which is the one thing about a
-          * browser extension worth vouching for. Everything else -- Web Store,
-          * Shared folder -- states its provenance in the neutral tone and
-          * makes no claim about it. */}
-        <span className={verified ? 'status-pill' : 'status-pill is-idle'}>
-          {verified && <BadgeCheck size={14} />}
-          {badge}
-        </span>
+        {status && <span className="extension-card-status">{status}</span>}
         <label className="switch" aria-label={`${enabled ? 'Disable' : 'Enable'} ${name}`}>
           <input
             checked={enabled}

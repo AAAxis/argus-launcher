@@ -9,7 +9,7 @@ import {
   mediaDevicePresets,
   normalizeOsPreset,
 } from './lib/fingerprintPresets';
-import {DEFAULT_PROFILE_COLOR, normalizeProfileColor} from './lib/profileColors';
+import {DEFAULT_PROFILE_COLOR, normalizeProfileColor, randomProfileColor} from './lib/profileColors';
 import {newRowId} from './lib/random';
 import {normalizeTags} from './lib/tags';
 import {numberOrNull} from './lib/text';
@@ -29,7 +29,19 @@ export type ProfileDraft = {
   name: string;
   status: string;
   color: string;
+  // `brand:<slug>`, an https URL, or '' for the initials plate. See
+  // ArgusProfile.avatar; parsed in src/lib/profileAvatar.ts.
+  avatar: string;
   folder_id: string;
+  // The teammate on the hook for this profile, as an auth user id, or '' for
+  // unassigned.
+  //
+  // Unlike every other field here it does NOT travel through profileFromDraft
+  // into ArgusProfile: profileToRow deliberately omits assigned_to so an
+  // ordinary edit cannot carry a stale value back over an assignment made in
+  // another session. It rides in the draft only so the picker has somewhere to
+  // hold the choice until Save, which then applies it through set_assignee.
+  assigned_to: string;
   // Login credentials for whatever account this profile is signed into --
   // stored plaintext the same way proxy_search/proxy credentials already
   // are (see ArgusProfile.email/password in types.ts). Not used by Anty
@@ -124,14 +136,23 @@ export type StatusDraft = {
   name: string;
 };
 
-export function newProfileDraft(): ProfileDraft {
+// `selfId` seeds the assignee so the picker opens on "You", which is what the
+// profiles.assigned_to column default (auth.uid()) is about to do anyway --
+// showing "Unassigned" there would be the editor contradicting the row it is
+// about to write. Optional because csvImport calls this purely for the
+// fingerprint and colour defaults and has no user id to hand.
+export function newProfileDraft(selfId = ''): ProfileDraft {
   return {
     id: newRowId(),
     saved: false,
     name: `Profile ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`,
     status: 'Ready',
-    color: DEFAULT_PROFILE_COLOR,
+    // Random, not the default: this is a profile being created, and the colour
+    // decides which tile its browser window gets in the Dock.
+    color: randomProfileColor(),
+    avatar: '',
     folder_id: '',
+    assigned_to: selfId,
     email: '',
     password: '',
     proxy_id: '',
@@ -184,7 +205,9 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     // opens on the matching preset key instead of showing a seventh, custom
     // swatch that happens to be the same colour.
     color: normalizeProfileColor(profile.color),
+    avatar: profile.avatar || '',
     folder_id: profile.folder_id || '',
+    assigned_to: profile.assigned_to || '',
     email: profile.email || '',
     password: profile.password || '',
     proxy_id: profile.proxy_id || '',
@@ -278,6 +301,7 @@ export function profileFromDraft(draft: ProfileDraft, createdAt?: string): Argus
     name: draft.name.trim(),
     status: draft.status.trim() || 'Ready',
     color: draft.color || DEFAULT_PROFILE_COLOR,
+    avatar: draft.avatar.trim() || undefined,
     folder_id: draft.folder_id.trim() || null,
     email: draft.email.trim() || undefined,
     password: draft.password || undefined,

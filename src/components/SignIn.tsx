@@ -1,13 +1,19 @@
-import {Shield} from 'lucide-react';
+import {Mail} from 'lucide-react';
 import {GoogleMark} from './ui/icons';
-import {OTP_CODE_LENGTH} from '../lib/auth';
+import {OTP_CODE_LENGTH, SITE_URL} from '../lib/auth';
+import {native} from '../native';
 import type {SignIn as SignInState} from '../hooks/useSignIn';
 
 export function SignIn({state}: {state: SignInState}) {
   return (
     <main className="login-shell">
       <section className="login-panel">
-        <Shield size={34} />
+        {/* The product's own mark, not a generic padlock. This is the first
+            Argus screen anyone sees, and a lucide shield said "some security
+            app". Masked from the same PNG the sidebar's .brand-mark uses, so it
+            inverts with the theme instead of stamping a plate into the dark
+            panel -- see .login-mark in styles.css. */}
+        <span className="login-mark" aria-hidden="true" />
         {state.step === 'email' ? <EmailStep state={state} /> : <CodeStep state={state} />}
       </section>
     </main>
@@ -41,16 +47,42 @@ function EmailStep({state}: {state: SignInState}) {
           autoFocus
           required
         />
+        {/* Icon and label centred as a pair, to answer the Google button
+            directly above it: the two ways in are the same shape, the same
+            height and the same alignment, and differ only in their mark. */}
         <button type="submit" disabled={state.busy}>
+          <Mail size={16} strokeWidth={2} />
           {state.busy ? 'Sending…' : 'Email me a code'}
         </button>
       </form>
       {state.error && <span className="message error">{state.error}</span>}
+      {/* Below both ways in, which is the only position that covers each of
+          them: the Google button is outside the form. Mirrors the same line on
+          the website's AuthForm -- the two sign-in screens say the same thing in
+          the same words, and hooks/useSignIn.ts records the same acceptance. */}
       <div className="login-links">
-        <span className="hint">No password needed — entering your email creates your account.</span>
+        <span className="hint">
+          No password needed — entering your email creates your account. By continuing you agree
+          to our{' '}
+          <button type="button" className="link" onClick={() => openLegal('/terms')}>
+            Terms of Service
+          </button>{' '}
+          and{' '}
+          <button type="button" className="link" onClick={() => openLegal('/privacy')}>
+            Privacy Policy
+          </button>
+          .
+        </span>
       </div>
     </>
   );
+}
+
+// Legal pages open in the system browser rather than in the Electron window:
+// there is no chrome in here to get back from, and a signed-out user reading the
+// Terms should not lose the sign-in panel behind them.
+function openLegal(pathname: string) {
+  void native?.openExternal?.(`${SITE_URL}${pathname}`);
 }
 
 // Google and the divider are deliberately absent here: offering a second way in

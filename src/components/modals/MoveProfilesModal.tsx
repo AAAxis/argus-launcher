@@ -7,6 +7,7 @@
 import {useMemo, useState} from 'react';
 import {FolderInput, SearchX} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
+import {Checkbox} from '../ui/Checkbox';
 import {Modal} from '../ui/Modal';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {StatusChip} from '../ui/StatusChip';
@@ -102,10 +103,9 @@ export function MoveProfilesModal({folder, seedTag, onClose}: {
           const from = state.folders.find((item) => item.id === profile.folder_id);
           return (
             <label className="move-profiles-row" key={profile.id}>
-              <input
+              <Checkbox
                 checked={picked.includes(profile.id)}
                 onChange={() => toggle(profile.id)}
-                type="checkbox"
               />
               <span className="move-profiles-name">{profile.name}</span>
               <StatusChip status={profile.status || 'Ready'} />

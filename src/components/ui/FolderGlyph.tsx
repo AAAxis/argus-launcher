@@ -11,7 +11,9 @@ import {flagCodeFromIcon, folderIcon} from '../../data/folderIcons';
 import {profileColorStyle} from '../../lib/profileColors';
 import {FlagIcon} from './icons';
 
-export function FolderGlyph({icon, color, size = 17, small}: {
+// The default is the folder row's size, where the plate is 22px. Callers drawing
+// into the 20px `small` plate (the table cell, the move dialog) pass 13.
+export function FolderGlyph({icon, color, size = 15, small}: {
   icon?: string | null;
   // Undefined for folders saved before colours existed. They keep the plain
   // ink glyph rather than being assigned a colour nobody chose.

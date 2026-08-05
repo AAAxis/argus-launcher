@@ -1,10 +1,9 @@
 // Account: who is signed in, what they look like, and how to leave.
 //
 // Everything writable here belongs to the *user* (avatar, display name) except
-// the workspace name, which belongs to the org and is admin-only -- RLS on
-// organizations checks is_org_admin, so a member's rename would come back as
-// success-with-no-rows. db.orgs.rename is called through the caller's withDb
-// wrapper, which reports that properly.
+// the workspace name, which belongs to the org and is writable by any member --
+// RLS on organizations checks is_org_member. db.orgs.rename is called through
+// the caller's withDb wrapper, which reports a failure properly.
 import {useRef, useState} from 'react';
 import {Camera, LogOut, Trash2} from 'lucide-react';
 import * as account from '../../db/account';
@@ -212,16 +211,18 @@ export function AccountSection({onSignOut, onOpenSite, onMessage, onRenameOrg}: 
       </SettingsGroup>
 
       <SettingsGroup title="Workspace">
+        {/* Renaming is no longer owner-only: organizations_update is is_org_member
+            as of 2026-08-10, and the entitlement columns are held back by column
+            grants rather than by the role. So there is one description now
+            instead of a permission branch. */}
         <SettingsRow
           label="Name"
-          description={org.isAdmin ?
-            'Shared with everyone in this workspace.' :
-            'Only an owner or admin can rename the workspace.'}
+          description="Shared with everyone in this workspace."
         >
           {orgDraft === null ? (
             <>
               <SettingsValue>{org.org?.name || '—'}</SettingsValue>
-              {org.isAdmin && org.org && (
+              {org.org && (
                 <button className="ghost" onClick={() => setOrgDraft(org.org?.name || '')} type="button">
                   Rename
                 </button>

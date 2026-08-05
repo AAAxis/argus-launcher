@@ -1,23 +1,21 @@
-// Dialogs that add things to the shared library, or report what a bulk action
-// did: the cookie-set picker, the extension adder, and the CSV importer.
+// Dialogs that add things to the shared library: the cookie-set picker, the
+// extension adder, the proxy-list importer and the bookmark importer. The
+// profile CSV importer used to live here too and now has its own file
+// (ImportProfilesModal.tsx) -- it grew a review table and a destination step,
+// which is more screen than the rest of this file put together.
 import {useEffect, useState} from 'react';
 import {Download, Upload} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {Modal} from '../ui/Modal';
-import {
-  importColumns, profileImportExampleCsv, proxyImportExampleList,
-} from '../../data/importTemplate';
+import {proxyImportExampleList} from '../../data/importTemplate';
 import {parseBookmarkFile} from '../../lib/bookmarkImport';
-import {parseCsv} from '../../lib/csv';
 import {parseWebstoreExtensionId} from '../../lib/extensions';
 import {parseProxyList} from '../../lib/proxies';
-import {MAX_PROFILE_TAGS} from '../../lib/tags';
 import {native} from '../../native';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ParsedBookmark} from '../../lib/bookmarkImport';
 import type {ParsedProxyLine} from '../../lib/proxies';
-import type {ImportResult} from '../../workspace/useProfileActions';
 import type {ArgusCookie} from '../../types';
 
 export function CookiePickerModal({search, onSearch, selectedId, onSelect, onClose}: {
@@ -182,109 +180,16 @@ export function ExtensionAddModal({onClose}: {onClose: () => void}) {
   );
 }
 
-export function ImportModal({onClose}: {onClose: () => void}) {
-  const {toast, profiles} = useWorkspace();
-  const [file, setFile] = useState<{path: string; rows: Record<string, string>[]} | null>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
-  const {run, isPending} = useAsyncAction();
-
-  // Opening this dialog is always the Import button, and the first thing that
-  // button used to do was raise the OS file picker -- so it still does. Cancel
-  // the picker and the dialog stays put with its own Choose CSV button.
-  useEffect(() => {
-    void pickCsv();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function pickCsv() {
-    if (!native?.selectImportCsv) {
-      toast.setMessage('Native CSV picker is not available. Restart Argus Launcher and try again.');
-      return;
-    }
-    const picked = await native.selectImportCsv();
-    if (!picked) {
-      return;
-    }
-    setResult(null);
-    setFile({path: picked.path, rows: parseCsv(picked.content)});
-  }
-
-  async function runImport() {
-    if (!file?.rows.length) {
-      return;
-    }
-    const imported = await profiles.importFromCsv(file.rows);
-    if (!imported) {
-      return;
-    }
-    setResult(imported);
-    setFile(null);
-    toast.setMessage(`Imported ${imported.created} new, updated ${imported.updated} profiles`);
-  }
-
-  return (
-    <Modal
-      className="import-panel"
-      onClose={onClose}
-      title="Mass import profiles"
-      subtitle={
-        <>
-          Import profiles in bulk from a Dolphin-style inventory CSV. Re-importing the same file
-          updates the profiles it already created (matched by <code>profile_id</code>) rather than
-          duplicating them.
-        </>
-      }
-    >
-      <div className="import-actions">
-        <button className="ghost" onClick={() => void pickCsv()}>
-          <Upload size={18} /> Choose CSV file
-        </button>
-        <button
-          className="ghost"
-          onClick={() => void saveExample('argus-profiles-example.csv',
-              profileImportExampleCsv(), 'text/csv', toast.setMessage)}
-        >
-          <Download size={18} /> Download example
-        </button>
-        {file && (
-          <span className="import-file-label">
-            {file.path.split('/').pop()} — {file.rows.length} row{file.rows.length === 1 ? '' : 's'}
-          </span>
-        )}
-      </div>
-      <dl className="import-columns">
-        {importColumns.map((column) => (
-          <div key={column.name}>
-            <dt>
-              <code>{column.name}</code>
-              {column.required && <em>required</em>}
-            </dt>
-            <dd>{column.note}</dd>
-          </div>
-        ))}
-      </dl>
-      {file && (
-        <BusyButton
-          busy={isPending('run-import')}
-          busyLabel="Importing…"
-          onClick={() => void run('run-import', runImport)}
-        >
-          Import {file.rows.length} profile{file.rows.length === 1 ? '' : 's'}
-        </BusyButton>
-      )}
-      {result && <ImportSummary result={result} />}
-    </Modal>
-  );
-}
-
 // The file the "Download example" buttons write is not a starting point the
 // user then has to correct: each one round-trips through its own importer
 // unchanged, which is the only way to make "here is the format" verifiable
 // rather than a claim.
 //
-// Shared by both importers because the saving is the same either way: the
-// native picker when the app is packaged, and an anchor when this is running
-// in a browser tab during development.
+// Shared by the importers in this file because the saving is the same either
+// way: the native picker when the app is packaged, and an anchor when this is
+// running in a browser tab during development. The profile importer has its own
+// copy rather than importing this one, so this file is free to be about the
+// library dialogs alone.
 async function saveExample(
     fileName: string, content: string, mime: string, say: (message: string) => void) {
   const kind = fileName.endsWith('.csv') ? 'CSV' : 'list';
@@ -304,11 +209,11 @@ async function saveExample(
   say(`Downloaded example ${kind}`);
 }
 
-// Bulk-adds proxies from a vendor list file. Deliberately separate from
-// ImportModal above: that one imports profiles from a structured CSV with
-// named columns, this one takes a bare list of connection strings, which needs
-// a different preview (per-line status) and a different failure mode (a bad
-// line, not a bad column).
+// Bulk-adds proxies from a vendor list file. Deliberately separate from the
+// profile importer (components/modals/ImportProfilesModal.tsx): that one reads
+// a structured CSV with named columns, this one takes a bare list of connection
+// strings, which needs a different preview (per-line status) and has a
+// different failure mode (a bad line, not a bad column).
 export function ProxyImportModal({onClose}: {onClose: () => void}) {
   const {data, toast, proxies} = useWorkspace();
   const [file, setFile] = useState<{path: string; lines: ParsedProxyLine[]} | null>(null);
@@ -545,37 +450,3 @@ export function BookmarkImportModal({onClose}: {onClose: () => void}) {
   );
 }
 
-function ImportSummary({result}: {result: ImportResult}) {
-  const counts: Array<[string, number]> = [
-    ['Profiles created', result.created],
-    ['Profiles updated', result.updated],
-    ['Proxies created', result.proxiesCreated],
-    ['Proxies reused', result.proxiesReused],
-    ['Folders created', result.foldersCreated],
-  ];
-  // Only when it happened. A permanent "Tags trimmed 0" row would read as a
-  // warning the importer is always half-raising.
-  if (result.tagsTrimmed) {
-    counts.push([`Rows trimmed to ${MAX_PROFILE_TAGS} tags`, result.tagsTrimmed]);
-  }
-  return (
-    <div className="import-summary">
-      {counts.map(([label, value]) => (
-        <div className="summary-item" key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
-        </div>
-      ))}
-      {result.skipped.length > 0 && (
-        <div className="summary-item wide">
-          <span>Skipped ({result.skipped.length})</span>
-          <div className="summary-lines">
-            {result.skipped.map((item, index) => (
-              <i key={index}>{item.name}: {item.reason}</i>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}

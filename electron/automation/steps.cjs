@@ -9,6 +9,8 @@
 const https = require('node:https');
 const http = require('node:http');
 const {LOAD_TIMEOUT_MS} = require('../cdp-core.cjs');
+const ai = require('./ai.cjs');
+const connectors = require('./connectors.cjs');
 
 const POLL_INTERVAL_MS = 100;
 
@@ -65,6 +67,45 @@ async function focusSelector(cdp, selector, clear) {
   if (!ok) {
     throw new Error(`No element matches ${selector}`);
   }
+}
+
+// How much of a page an AI step may send.
+//
+// A cap, not a nicety. Pages run to hundreds of kilobytes of boilerplate, every
+// character of it is billed, and past a model's context window the request is
+// rejected outright rather than truncated for us. 12k characters is roughly
+// 3k tokens -- enough for the readable content of an ordinary page, and small
+// enough that a runaway single-page app cannot turn one step into a large bill.
+const AI_CONTEXT_LIMIT = 12000;
+
+// What an AI step shows the model, per its `context` field.
+//
+// innerText and not innerHTML: the question is almost always about what the
+// page says, markup triples the token count, and a model reading tag soup
+// answers worse than one reading prose.
+async function pageContext(cdp, step) {
+  if (step.context === 'selector') {
+    if (!step.selector) {
+      throw new Error('This step is set to read a selector but names none');
+    }
+    const text = await evaluateValue(cdp, `(() => {
+      const el = document.querySelector(${JSON.stringify(String(step.selector))});
+      return el ? (el.innerText || el.textContent || '') : null;
+    })()`);
+    // Null means no match, which is a different thing from an element that is
+    // empty -- and asking a model about nothing produces a confident answer
+    // about nothing. Same "no phantom data" rule extract follows.
+    if (text === null) {
+      throw new Error(`No element matches ${step.selector}`);
+    }
+    return String(text).slice(0, AI_CONTEXT_LIMIT);
+  }
+  if (step.context === 'pageText') {
+    const text = await evaluateValue(
+        cdp, '(document.body && document.body.innerText) || ""');
+    return String(text || '').slice(0, AI_CONTEXT_LIMIT);
+  }
+  return '';
 }
 
 // Polls `expression` until it returns true. Used by waitFor, which cannot lean
@@ -289,6 +330,88 @@ const EXECUTORS = {
       request.end();
     });
     return step.into ? {vars: {[step.into]: value}} : undefined;
+  },
+
+  async aiPrompt({cdp, step, log}) {
+    const provider = connectors.resolve(step.provider, 'ai');
+    const context = await pageContext(cdp, step);
+    const answer = await ai.complete({
+      provider,
+      system: step.format === 'json' ?
+        'Answer with a single JSON object and nothing else. No prose, no code fences.' :
+        'Answer plainly and briefly. No preamble.',
+      user: context ? `${step.prompt}\n\n---\n${context}` : step.prompt,
+      maxTokens: step.maxTokens,
+      json: step.format === 'json',
+    });
+    // The model's answer is logged; the prompt and the key are not. The answer
+    // is what a person debugging this run needs to see, and it is the only one
+    // of the three that is not either large or secret.
+    log('info', `${provider.name} answered ${answer.length} characters`);
+    if (step.format !== 'json') {
+      return {vars: {[step.into]: answer}};
+    }
+    // Fences happen even when the prompt forbids them and response_format is
+    // set, because not every OpenAI-compatible server implements that flag.
+    const cleaned = answer.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    try {
+      return {vars: {[step.into]: JSON.parse(cleaned)}};
+    } catch {
+      // The raw text is NOT stored as a fallback. A step that asked for JSON and
+      // silently stored a paragraph turns into a failure three steps later, in
+      // whichever step first read a field off it.
+      throw new Error(
+          `${provider.name} was asked for JSON and did not answer with any: ` +
+          `${cleaned.slice(0, 120)}`);
+    }
+  },
+
+  async aiCheck({cdp, step, log}) {
+    const provider = connectors.resolve(step.provider, 'ai');
+    const context = await pageContext(cdp, step);
+    const answer = await ai.complete({
+      provider,
+      // Both halves matter. Without the first the model explains itself; without
+      // the second a cautious model answers "I cannot determine that", which is
+      // not a branch either arm of an If can take.
+      system: 'Answer with exactly one word: yes or no. Never anything else. ' +
+        'If you are unsure, answer no.',
+      user: context ? `${step.question}\n\n---\n${context}` : step.question,
+      maxTokens: 8,
+    });
+    // Punctuation and casing are stripped; anything beyond that is not
+    // interpreted. "Yes." is a yes, "probably yes" is not -- guessing at a
+    // hedge is how a branch silently starts taking the wrong arm.
+    const word = answer.toLowerCase().replace(/[^a-z]/g, '');
+    if (word !== 'yes' && word !== 'no') {
+      throw new Error(
+          `${provider.name} was asked for yes or no and answered "${answer.slice(0, 60)}"`);
+    }
+    log('info', `${provider.name}: ${word}`);
+    if (word === 'no' && step.onFalse === 'fail') {
+      // The assertion the catalogue never had. Thrown rather than returned, so
+      // the step's own onError decides whether the run stops or goes partial --
+      // this executor should not be the thing that makes that call.
+      //
+      // `into` is not written on this path: the runner merges vars only from a
+      // step that returned. The log line above is where the answer survives,
+      // which is the right place for it when the point was that it was "no".
+      throw new Error(`AI check failed: ${step.question}`);
+    }
+    return step.into ? {vars: {[step.into]: word}} : undefined;
+  },
+
+  async notify({step, log}) {
+    // No CDP, like httpRequest, and sent from the launcher for the same
+    // reason: a send from the page would traverse the profile's proxy and
+    // carry its cookies. `message` arrives already interpolated -- that is how
+    // an AI step's answer travels: "Done: {{vars.summary}}".
+    const connector = connectors.resolve(step.connector, 'message');
+    await connectors.send({connector, message: step.message, subject: step.subject});
+    // The length, not the body. The body may hold interpolated page data and
+    // the log is flushed to the cloud with the run record -- same rule as the
+    // aiPrompt prompt above.
+    log('info', `Sent ${String(step.message || '').length} characters via ${connector.name}`);
   },
 };
 

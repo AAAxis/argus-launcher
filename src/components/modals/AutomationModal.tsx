@@ -6,11 +6,15 @@
 // inline WITHOUT clobbering the step list -- you keep editing the text until it
 // is right, rather than losing it the moment you mistype a brace.
 import {useState} from 'react';
+import {Pencil, Play, Trash2} from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {Field} from '../ui/Field';
 import {BusyButton} from '../ui/BusyButton';
+import {TagInput} from '../ui/TagInput';
 import {StepList} from '../automations/StepList';
 import {STEP_SCHEMA} from '../../automations/schema';
+import {MAX_PROFILE_TAGS} from '../../lib/tags';
+import type {TagUsage} from '../../lib/tags';
 import type {ArgusAutomation} from '../../types';
 import type {AutomationStep} from '../../automations/types';
 
@@ -60,12 +64,168 @@ function validate(steps: unknown, path = 'steps', depth = 0): string[] {
   return problems;
 }
 
-export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
+// The automation's name, as the dialog's heading.
+//
+// It was a labelled input in the sidebar, below the Steps/JSON toggle and above
+// four settings -- so the one thing that identifies what you are editing sat
+// fifth in a column of equals, while the header said "New automation" no matter
+// what you had typed. Same call as StatusChip: the name is the value, the
+// pencil is the way to change it.
+function TitleField({value, onChange}: {
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  // Held locally while editing so Escape has something to revert to, and so an
+  // empty box mid-retype does not disable Save on every keystroke.
+  const [text, setText] = useState(value);
+
+  if (!editing) {
+    return (
+      <span className="automation-title">
+        <span className="automation-title-text">{value.trim() || 'Untitled automation'}</span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Rename this automation"
+          title="Rename"
+          onClick={() => {
+            setText(value);
+            setEditing(true);
+          }}
+        ><Pencil size={14} /></button>
+      </span>
+    );
+  }
+
+  function commit() {
+    setEditing(false);
+    const next = text.trim();
+    // An empty name blocks Save, and silently keeping the old one would hide
+    // that the rename did not take. Empty is allowed through and the footer
+    // says why.
+    onChange(next);
+  }
+
+  return (
+    <span className="automation-title">
+      <input
+        type="text"
+        className="automation-title-input"
+        autoFocus
+        value={text}
+        placeholder="Name this automation"
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commit();
+          }
+          if (event.key === 'Escape') {
+            // Stops the dialog closing as well -- Modal listens for Escape.
+            event.stopPropagation();
+            setText(value);
+            setEditing(false);
+          }
+        }}
+      />
+    </span>
+  );
+}
+
+// The run budget, in seconds.
+//
+// It was "Run timeout (ms)" over a raw 300000, which asks the reader to divide
+// by a thousand and then by sixty before they can answer "how long is that",
+// and to know that a *step* timeout lives somewhere else entirely. Storage is
+// untouched -- automations.timeout_ms is still milliseconds, and the local API
+// still caps at 600000. This converts at the edge.
+//
+// The text is held locally so the box can be empty mid-retype. Bound straight
+// to the draft it could not be: clearing it would write 0, and a run budget of
+// zero milliseconds is not a state worth being able to type.
+const DEFAULT_TIMEOUT_MS = 300000;
+const MIN_TIMEOUT_SEC = 1;
+const MAX_TIMEOUT_SEC = 600;
+
+function describeSeconds(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  const minutePart = `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  return rest === 0 ? minutePart : `${minutePart} ${rest} sec`;
+}
+
+function TimeoutField({value, onChange}: {
+  value: number;
+  onChange: (timeoutMs: number) => void;
+}) {
+  const [text, setText] = useState(() => String(Math.round(value / 1000)));
+  const seconds = Math.round(value / 1000);
+
+  return (
+    <Field
+      label={
+        <>
+          Give up after
+          <span className="field-echo">= {describeSeconds(seconds)}</span>
+        </>
+      }
+      hint="The whole run, not one step. The most Argus allows is 10 minutes."
+    >
+      <span className="field-suffixed">
+        <input
+          type="number"
+          min={MIN_TIMEOUT_SEC}
+          max={MAX_TIMEOUT_SEC}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            const next = Number(event.target.value);
+            // An empty or nonsense box leaves the saved value alone; the echo
+            // above keeps showing what would be saved.
+            if (event.target.value !== '' && Number.isFinite(next) && next > 0) {
+              onChange(Math.min(MAX_TIMEOUT_SEC, next) * 1000);
+            }
+          }}
+          // Clamping on blur rather than on every keystroke: clamping as you
+          // type turns "600" into "6" the moment the 6 lands under a max of 60.
+          onBlur={() => {
+            const clamped = Math.min(
+                MAX_TIMEOUT_SEC,
+                Math.max(MIN_TIMEOUT_SEC, Math.round(Number(text) || seconds)));
+            setText(String(clamped));
+            onChange(clamped * 1000);
+          }}
+        />
+        <span aria-hidden="true">sec</span>
+      </span>
+    </Field>
+  );
+}
+
+export function AutomationModal({
+  automation, exists, tagOptions = [], checkProfile, connectors = [], onClose, onSave, onRun,
+  onDelete,
+}: {
   automation: ArgusAutomation;
   exists: boolean;
+  // Every tag in use across the workspace, for the suggestion row.
+  tagOptions?: TagUsage[];
+  // The profile a step's Check button tests its selector against.
+  checkProfile?: {id: string; name: string} | null;
+  // The workspace's connectors, for a step's connector dropdown. Names
+  // only -- the key never comes near the editor.
+  connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
   onClose: () => void;
   onSave: (next: ArgusAutomation) => Promise<string | null>;
   onRun?: (next: ArgusAutomation) => void;
+  // Raises the confirm dialog. It does not delete anything itself, and it is
+  // deliberately not given the draft: you delete the saved workflow, not
+  // whatever unsaved edits happen to be on screen.
+  onDelete?: () => void;
 }) {
   const [draft, setDraft] = useState<ArgusAutomation>(automation);
   const [view, setView] = useState<'steps' | 'json'>('steps');
@@ -110,11 +270,25 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
     <Modal
       onClose={onClose}
       className="automation-modal"
-      title={exists ? draft.name || 'Automation' : 'New automation'}
+      title={
+        <TitleField
+          value={draft.name}
+          onChange={(name) => setDraft({...draft, name})}
+        />
+      }
       subtitle={`${draft.steps.length} step${draft.steps.length === 1 ? '' : 's'}`}
       footer={
         <>
           {saveError && <p className="settings-error">{saveError}</p>}
+          {/* .modal-actions gives .danger `margin-right: auto`, so this sits at
+              the far left of the row and Cancel/Save stay together at the
+              right. Only for an automation that exists: there is nothing to
+              delete about a draft, and Cancel already discards one. */}
+          {onDelete && exists && (
+            <button type="button" className="ghost danger" onClick={onDelete}>
+              <Trash2 size={16} /> Delete
+            </button>
+          )}
           <button type="button" className="ghost" onClick={onClose}>Cancel</button>
           <BusyButton
             busy={saving}
@@ -127,19 +301,24 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
     >
       <div className="profile-editor-layout">
         <div className="profile-editor-main">
+          {/* choice-chip, and `active` not `is-active`. Both were wrong, and
+              they cancelled out into something that looked intentional: with
+              neither class applied the two buttons fell back to the base rule
+              and rendered as identical accent pills, so the view you were in
+              was the one you could not see. */}
           <div className="choice-chips" role="radiogroup" aria-label="Editor view">
             <button
               type="button"
               role="radio"
               aria-checked={view === 'steps'}
-              className={view === 'steps' ? 'is-active' : ''}
+              className={`choice-chip${view === 'steps' ? ' active' : ''}`}
               onClick={() => setView('steps')}
             >Steps</button>
             <button
               type="button"
               role="radio"
               aria-checked={view === 'json'}
-              className={view === 'json' ? 'is-active' : ''}
+              className={`choice-chip${view === 'json' ? ' active' : ''}`}
               onClick={() => {
                 setJson(JSON.stringify(draft.steps, null, 2));
                 setJsonError('');
@@ -151,6 +330,8 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
           {view === 'steps' ? (
             <StepList
               steps={draft.steps}
+              checkProfile={checkProfile}
+              connectors={connectors}
               onChange={(steps) => setDraft({...draft, steps})}
             />
           ) : (
@@ -176,59 +357,141 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
         </div>
 
         <aside className="profile-editor-side">
-          <Field label="Name">
-            <input
-              value={draft.name}
-              onChange={(event) => setDraft({...draft, name: event.target.value})}
-            />
-          </Field>
-          <Field label="Description">
-            <textarea
-              rows={2}
-              value={draft.description || ''}
-              onChange={(event) => setDraft({...draft, description: event.target.value})}
-            />
-          </Field>
-          <div className="automation-field">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={Boolean(draft.pinned)}
-                onChange={(event) => setDraft({...draft, pinned: event.target.checked})}
-              />
-              <span>Show on every profile's start page</span>
-            </label>
-            <p className="field-hint">
-              Adds a tile next to the bookmarks, so it can be run from inside the browser.
-            </p>
-          </div>
-          <div className="automation-field">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={Boolean(draft.close_on_finish)}
-                onChange={(event) => setDraft({...draft, close_on_finish: event.target.checked})}
-              />
-              <span>Close the browser when it finishes</span>
-            </label>
-          </div>
-          <Field label="Run timeout (ms)" hint="The whole run. Capped at 10 minutes.">
-            <input
-              type="number"
-              min={1000}
-              max={600000}
-              value={draft.timeout_ms ?? 300000}
-              onChange={(event) => setDraft({...draft, timeout_ms: Number(event.target.value)})}
-            />
-          </Field>
+          {/* First, and primary. It was a ghost button at the bottom of the
+              column, below five settings -- so the one action you came here to
+              take was the quietest thing on the panel and the last thing you
+              reached. Everything under it is configuration. */}
           {onRun && exists && (
             <button
               type="button"
-              className="ghost"
+              className="primary automation-run-now"
               onClick={() => onRun(draft)}
               disabled={problems.length > 0}
-            >Run now</button>
+              title={problems.length > 0 ?
+                'Fix the problems listed under the steps first.' :
+                'Pick profiles and run'}
+            ><Play size={16} /> Run now</button>
           )}
+
+          {/* Name has moved to the dialog's heading -- this column is settings
+              now, not identity. They sit on their own surface so the column
+              reads as one group of settings rather than as five loose controls
+              stacked against the dialog's background. */}
+          <div className="automation-settings-card">
+            <Field label="Description">
+              <textarea
+                rows={2}
+                value={draft.description || ''}
+                onChange={(event) => setDraft({...draft, description: event.target.value})}
+              />
+            </Field>
+            <Field
+              label="Tags"
+              hint={`At most ${MAX_PROFILE_TAGS}. Shared catalogue with profiles.`}
+              // group, not a label: TagInput is a row of buttons, and a <label>
+              // wrapping them fires its implicit activation on the first one.
+              group
+            >
+              <TagInput
+                options={tagOptions}
+                placeholder="signup, client-a"
+                value={draft.tags || []}
+                onChange={(tags) => setDraft({...draft, tags})}
+              />
+            </Field>
+            <div className="automation-field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.pinned)}
+                  onChange={(event) => setDraft({...draft, pinned: event.target.checked})}
+                />
+                <span>Show on every profile's start page</span>
+              </label>
+              <p className="field-hint">
+                Adds a tile next to the bookmarks, so it can be run from inside the browser.
+              </p>
+            </div>
+            <div className="automation-field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.close_on_finish)}
+                  onChange={(event) => setDraft({...draft, close_on_finish: event.target.checked})}
+                />
+                <span>Close the browser when it finishes</span>
+              </label>
+              {/* The hint this checkbox never had, and it states the rule
+                  exactly: the runner closes what the run opened and nothing
+                  else, so a window you were already working in survives a run
+                  against it. */}
+              <p className="field-hint">
+                Only a browser this run opened. A window you already had open is left alone.
+              </p>
+            </div>
+            <Field
+              label="When it finishes"
+              hint={draft.notify_on === 'failure' ?
+                'Includes runs where a failed step was set to continue. ' +
+                  'Cancelling a run never notifies.' :
+                draft.notify_on === 'always' ?
+                  'Cancelling a run never notifies — you just did it yourself.' :
+                  undefined}
+            >
+              <select
+                value={draft.notify_on || ''}
+                onChange={(event) => {
+                  const notify_on = (event.target.value || null) as
+                    'always' | 'failure' | null;
+                  // Turning it off clears the target too: a connector id
+                  // behind a null notify_on is dead state a later edit would
+                  // resurrect by surprise.
+                  setDraft(notify_on ?
+                    {...draft, notify_on} :
+                    {...draft, notify_on: null, notify_connector_id: null});
+                }}
+              >
+                <option value="">Don&apos;t notify</option>
+                <option value="always">Notify when it finishes</option>
+                <option value="failure">Notify on failure</option>
+              </select>
+            </Field>
+            {draft.notify_on && (
+              <Field
+                label="Send to"
+                hint="Argus always rings the bell and raises a desktop notification;
+                  a connector additionally sends the outcome out of Argus."
+              >
+                <select
+                  value={draft.notify_connector_id || ''}
+                  onChange={(event) => setDraft({
+                    ...draft,
+                    notify_connector_id: event.target.value || null,
+                  })}
+                >
+                  <option value="">Argus (bell + desktop)</option>
+                  {connectors
+                      .filter((connector) => connector.category === 'message')
+                      .map((connector) => (
+                        <option key={connector.id} value={connector.id}>
+                          {connector.name}
+                        </option>
+                      ))}
+                  {/* A connector that has been deleted. Listed so the setting
+                      keeps showing what it names instead of silently snapping
+                      to Argus-only -- the run will say the connector is gone. */}
+                  {Boolean(draft.notify_connector_id) &&
+                    !connectors.some((c) => c.id === draft.notify_connector_id) && (
+                    <option value={String(draft.notify_connector_id)}>Missing connector</option>
+                  )}
+                </select>
+              </Field>
+            )}
+            <TimeoutField
+              value={draft.timeout_ms ?? DEFAULT_TIMEOUT_MS}
+              onChange={(timeout_ms) => setDraft({...draft, timeout_ms})}
+            />
+          </div>
         </aside>
       </div>
     </Modal>

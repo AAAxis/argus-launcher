@@ -63,6 +63,20 @@ export type ArgusProfile = {
   name: string;
   status?: string;
   color?: string;
+  // What the profiles table draws in the Name column instead of the initials
+  // plate. One text column carrying a tagged union, the same shape folders.icon
+  // uses for `flag:US` alongside its FOLDER_ICONS keys:
+  //
+  //   'brand:<slug>'  one of the TAG_PRESETS slugs (src/data/tagPresets.ts),
+  //                   drawn as that brand's own mark
+  //   'https://…'     a picture, uploaded to the `global` bucket or pasted
+  //   undefined       the initials plate, which is what every profile had
+  //                   before this field existed
+  //
+  // Anything else downgrades to the initials plate client-side, so removing a
+  // brand from the catalog costs a profile its logo rather than breaking it.
+  // Parsed in exactly one place: src/lib/profileAvatar.ts.
+  avatar?: string;
   tags?: string[];
   // Login credentials for whatever account this profile is logged into.
   // Stored in plaintext the same way ArgusProxy.password already is -- no
@@ -117,6 +131,22 @@ export type ArgusProfile = {
     rotate_on_launch?: boolean;
   };
   created_at?: string;
+  // Who made this profile, as an auth user id. Resolved to a name through
+  // CloudState.members, which is why the Profiles table only shows the column
+  // once there is more than one member to tell apart.
+  //
+  // Null on every row created before 2026-08-05-teams.sql set the column's
+  // default to auth.uid(): the column existed and was selected all along, but
+  // nothing ever wrote it. Those rows render "—" rather than being backfilled
+  // to the owner, because guessing an author is worse than admitting to none.
+  created_by?: string | null;
+  // Who is on the hook for this row, as an auth user id. Distinct from
+  // created_by, which never changes: authorship is history, an assignment is a
+  // current fact and moves when work is handed over. Null means unclaimed.
+  //
+  // NOT a permission. Everyone in the org sees every profile either way -- see
+  // the note on Handoff.
+  assigned_to?: string | null;
   // Soft-delete timestamp (ISO 8601). Set when a profile is moved to Trash;
   // the profile is hidden from the normal profiles list but kept for 30 days
   // (auto-purged on the next app launch after that) so an accidental delete
@@ -164,6 +194,8 @@ export type ArgusProxy = {
   ping_ms?: number;
   checked_at?: string;
   check_error?: string;
+  // Who is on the hook for this proxy. See ArgusProfile.assigned_to.
+  assigned_to?: string | null;
 };
 
 // A shared, reusable cookie-set in the Cookies tab library. A set is attached
@@ -198,6 +230,10 @@ export type ArgusCookie = {
   tags?: string[];
   created_at?: string;
   updated_at?: string;
+  // Who is on the hook for this set. See ArgusProfile.assigned_to. Distinct
+  // from "assigned to profiles", which is what cookie_set_id does -- that says
+  // which profiles USE it, this says which person looks after it.
+  assigned_to?: string | null;
   // Soft-delete timestamp, the same 30-day contract as ArgusProfile.deleted_at.
   // Trashing a set also unassigns every profile using it, because a trashed set
   // that could still seed a launch would be a lie.
@@ -242,15 +278,22 @@ export type SharedBookmark = {
   position?: number;
 };
 
-// Per-extension on/off switches for the bundled (non-removable) "stock"
+// Per-extension on/off switches for the built-in (non-removable) "stock"
 // extensions -- these ship with every install (cookie-manager, SMS-Activate)
 // or are conditionally bundled per profile (foxywall_free_proxy, gated on a
-// profile's proxy_mode === 'free_proxy'). Undefined/missing means enabled,
-// for backward compatibility with cloud state saved before this existed.
+// profile's proxy_mode === 'free_proxy').
+//
+// What a missing key means is NOT uniform, and is defined once per extension in
+// electron/built-in-extensions.cjs rather than inferred here. The first three
+// default to enabled, so cloud state saved before their toggles existed does
+// not silently lose them. captcha_plugin defaults to disabled: its files are
+// not vendored in extensions/ but downloaded on enable (~56 MB), so an org that
+// has never heard of it must not read as having opted into that.
 export type BuiltInExtensionToggles = {
   cookie_manager?: boolean;
   sms_activate?: boolean;
   foxywall_free_proxy?: boolean;
+  captcha_plugin?: boolean;
 };
 
 // A workflow: an ordered list of steps driven against one profile's browser
@@ -267,18 +310,93 @@ export type ArgusAutomation = {
   steps: AutomationStep[];
   // Seed values every run starts with, before any setVar or extract.
   variables?: AutomationVars;
+  // Free text, at most 5, normalized through normalizeTags on every write --
+  // the same contract profiles.tags has, and the same catalog behind the
+  // suggestions, so "facebook" means the same thing on both.
+  tags?: string[];
   // Shows as a tile on every profile's generated start page. Org-wide: the
   // per-profile slot is ArgusProfile.automation_id, and pins are the
   // many-to-many case that would otherwise need a join table.
   pinned?: boolean;
   // Whole-run ceiling. The runner also caps every individual step.
   timeout_ms?: number;
-  // Whether to close the browser when the run ends. Defaults false for runs a
-  // human is watching (on-launch, start-page) and true for MCP and API runs,
-  // where nobody is looking at the window.
+  // Close the browser when the run ends -- but only a browser this run opened.
+  // A run that attached to a window that was already there leaves it alone, and
+  // that covers the on-launch and start-page triggers by construction: the user
+  // opened those. Cancelling never closes anything either. The main process
+  // holds the whole rule; see the onFinish wiring in main.cjs.
+  //
+  // (This comment used to describe a default that varied by trigger. It never
+  // did: nothing read this field at all until the runner learned to.)
   close_on_finish?: boolean;
+  // "Tell me when this finishes." null/undefined means it does not notify;
+  // 'failure' also covers a partial run, whose continue-past step failure is
+  // still a failure the user asked to hear about. Cancelling never notifies --
+  // the user just did it themselves.
+  notify_on?: 'always' | 'failure' | null;
+  // Where the finish message additionally goes: a message connector's id, or
+  // null for delivery to Argus alone (the topbar bell and a desktop
+  // notification, which fire whenever notify_on says to regardless of this
+  // field). Deliberately no FK behind it -- a deleted connector fails the send
+  // with a sentence naming it rather than silently notifying nobody.
+  notify_connector_id?: string | null;
   created_at?: string;
   updated_at?: string;
+  // Who is on the hook for this automation. See ArgusProfile.assigned_to.
+  assigned_to?: string | null;
+};
+
+// An outside service automations can call, shared by the whole workspace: an
+// AI endpoint an aiPrompt/aiCheck step asks, or a messaging target a notify
+// step sends through. `category` is which of those it is; `kind` is which
+// service; `config` is everything service-specific, shaped by the preset
+// catalogue in src/data/connectors.ts.
+//
+// Workspace-wide rather than per-machine so a shared automation runs for
+// everyone who opens it, which is also why `config` -- credentials included --
+// is readable by every member. See the migration for the full reasoning,
+// including why plaintext columns are the consistent choice in an app whose
+// proxy and profile passwords are already stored the same way.
+export type ArgusConnector = {
+  id: string;
+  // What the workspace calls it. This is what a step's dropdown lists, so
+  // renaming one changes how every workflow using it reads.
+  name: string;
+  // What the connector is for, which is what a step filters on. The default is
+  // per category too: an AI step and a notify step each want their own.
+  category: 'ai' | 'message';
+  // A preset id from src/data/connectors.ts. Unknown values are shown as
+  // unrecognised rather than treated as an error -- the catalogue can move
+  // ahead of a row written by an older build.
+  kind: string;
+  // The service-specific fields, as strings under the keys the preset
+  // declares. Which of them are secret is the preset's call too.
+  config: Record<string, string>;
+  // Used by a step that names no connector. At most one per (org, category),
+  // enforced by a partial unique index rather than by the client.
+  is_default?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+// One "a run finished" record, org-wide -- the bell's second kind next to
+// teammate handoffs, and what the OS notification mirrored. Composed by the
+// main process off the run record and written by the renderer (the only side
+// with Supabase); `status` is reported from that record, never recomputed.
+export type ArgusNotification = {
+  id: string;
+  // What produced this. 'automation_run' today; a column rather than an
+  // assumption so a third bell kind is a row here, not another table.
+  kind: string;
+  title: string;
+  body: string;
+  status?: string | null;
+  // What to open when the row is clicked. Null when there is nothing to open.
+  automation_id?: string | null;
+  run_id?: string | null;
+  // Who set the run going -- what the bell renders, not an access rule.
+  created_by?: string | null;
+  created_at: string;
 };
 
 // One execution. Written when the run starts, not when it finishes, so a crash
@@ -325,16 +443,131 @@ export type ArgusOrg = {
   // and the database disagree about plan keys (landing/LANDING.md:96-128), and
   // an integer means the launcher never has to know which spelling is live.
   automation_limit?: number | null;
+  // Who the workspace belongs to, answered once at onboarding and editable in
+  // Settings. Descriptive only -- nothing above this line is derived from it.
+  //
+  // `legal_name` is deliberately not `name`. `name` is what this workspace is
+  // called and an owner may rename it to "Client accounts" whenever they like;
+  // `legal_name` is the business behind it and stays put. Collapsing them would
+  // make "which company is this" unanswerable the first time somebody tidies up
+  // their workspace names.
+  org_type?: OrgType | null;
+  legal_name?: string | null;
+  // ISO 3166-1 alpha-2, uppercase, constrained in the database.
+  country?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  // The gate the setup prompt reads. A timestamp rather than a boolean so
+  // "never asked" and "asked, answered the first question, skipped the rest"
+  // stay distinguishable -- a solo workspace legitimately has null in every
+  // other column here.
+  onboarded_at?: string | null;
 };
 
-export type OrgRole = 'owner' | 'admin' | 'member';
+// Solo or business. The only question onboarding asks that everyone answers.
+export type OrgType = 'solo' | 'business';
 
-// One row of org_members joined to its organization. `role` decides whether the
-// org-wide settings (name, built-in extension toggles) are writable: the RLS
-// UPDATE policy on organizations requires is_org_admin.
+// Two roles, not three. The owner is the account holder -- whoever ran
+// bootstrap_org -- and is the only person who can invite, remove, or mint an API
+// token. Everyone else is a member with full access to the work: every profile,
+// proxy, cookie set and automation, plus the workspace's own name and branding.
+//
+// 'admin' was removed in 2026-08-10-owner-member-roles.sql. Nothing writes it and
+// the check constraint on org_members now refuses it.
+export type OrgRole = 'owner' | 'member';
+
+// One row of org_members joined to its organization. `role` no longer decides
+// whether the org-wide settings are writable -- the UPDATE policy on
+// organizations is is_org_member, and the entitlement columns are held back by
+// column grants rather than by any role. It decides who manages people.
 export type OrgMembership = {
   org: ArgusOrg;
   role: OrgRole;
+};
+
+// One person on the team, as the roster needs them.
+//
+// This is NOT a row of org_members: that table holds ids and nothing else, and
+// Supabase does not expose auth.users to clients, so a member list built by a
+// join from here would render a column of uuids. The identity fields come from
+// the org_members_with_identity function, which reads auth.users on the
+// server for orgs the caller already belongs to.
+//
+// `display_name` and `avatar_url` are empty strings rather than null when the
+// person has set neither -- the callers fall back to the address and to an
+// initials plate, and one shape means no call site has to handle both.
+export type OrgMember = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  avatar_url: string;
+  role: OrgRole;
+  // When they joined this org, not when the account was created.
+  created_at: string;
+  // Who invited them. Null for the founding owner, who invited nobody.
+  invited_by: string | null;
+};
+
+export type OrgInviteStatus = 'pending' | 'accepted' | 'revoked';
+
+// An offer of a seat that has not been taken yet.
+//
+// Only the owner can read these -- every policy on org_invites is is_org_owner,
+// including select -- so this is Team-tab-local state rather than part of
+// CloudState. A member reading the table gets an empty list, not an error, which
+// is exactly the kind of silent nothing that does not belong in the shared
+// workspace cache.
+//
+// `role` is a constant rather than an OrgRole: an invite can only ever offer
+// membership. The column keeps its check constraint (`role = 'member'`) and
+// create_org_invite refuses anything else, so this is the type saying what the
+// database already enforces.
+export type OrgInvite = {
+  id: string;
+  email: string;
+  role: 'member';
+  status: OrgInviteStatus;
+  // The credential. Minted server-side by create_org_invite and shown once, in
+  // the link the owner copies -- there is no email delivery.
+  token: string;
+  expires_at: string;
+  created_at: string;
+  invited_by: string | null;
+};
+
+// What one teammate can hand to another. Deliberately not every table: a folder
+// is a filing decision that belongs to the workspace rather than to a person,
+// and extensions/bookmarks are org-wide settings nobody owns individually.
+export type HandoffKind = 'profile' | 'proxy' | 'cookie_set' | 'automation';
+
+export type HandoffStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
+// An offer to take something over.
+//
+// Read the word "share" carefully here, because it does NOT mean access.
+// Profiles, proxies, cookie sets and automations are scoped by org_id and by
+// nothing else, so every member of the workspace can already see all of them --
+// there is no permission left to grant. What a hand-off moves is
+// responsibility: accepting sets the item's `assigned_to` to you.
+//
+// So the approve step is not a gate on data. It is consent: work does not
+// silently land on your plate because a colleague decided it should.
+export type Handoff = {
+  id: string;
+  kind: HandoffKind;
+  status: HandoffStatus;
+  item_id: string;
+  // The name the item had when it was offered, denormalised server-side. The
+  // four tables share no shape to join to, so rendering an inbox from live rows
+  // would mean a union per notification for one string.
+  item_name: string;
+  // Both are auth user ids. Names are resolved from CloudState.members, which
+  // the launcher already holds -- unlike the cross-org design this replaced,
+  // both parties are in one org, so no server-side identity join is needed.
+  from_user: string | null;
+  to_user: string;
+  note: string;
+  created_at: string;
 };
 
 export type CloudState = {
@@ -360,5 +593,22 @@ export type CloudState = {
   // only the history view wants them, so they are read on demand -- the same
   // reason cookie_sets.list() leaves the `cookies` column out.
   automations: ArgusAutomation[];
+  // The workspace's connectors -- AI endpoints and messaging targets. Loaded
+  // with everything else rather than on demand because the automation editor
+  // needs the names to render a step's connector dropdown, and the main
+  // process needs the whole list -- credentials included -- before any run can
+  // make a call.
+  connectors: ArgusConnector[];
+  // Run-finished notifications, newest first, each carrying whether THIS user
+  // has read it (joined from notification_reads at load). The bell renders
+  // these next to handoffs.
+  notifications: (ArgusNotification & {read: boolean})[];
+  // Everyone in this org. Here rather than local to the Team tab because the
+  // Profiles table needs it too -- it is what turns profiles.created_by from a
+  // uuid into a name -- and reading it twice for two surfaces would be two
+  // round trips for one small list.
+  //
+  // Pending invites are deliberately NOT here; see OrgInvite.
+  members: OrgMember[];
   built_in_extensions?: BuiltInExtensionToggles;
 };

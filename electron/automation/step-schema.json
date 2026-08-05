@@ -20,7 +20,7 @@
       {"key": "for", "kind": "select", "label": "Condition", "required": true, "default": "selector",
        "options": ["selector", "selectorGone", "url", "text"]},
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
-       "showWhen": {"for": ["selector", "selectorGone"]}},
+       "showWhen": {"for": ["selector", "selectorGone"]}, "check": "selector"},
       {"key": "url", "kind": "text", "label": "URL contains", "interpolate": true,
        "showWhen": {"for": "url"}},
       {"key": "text", "kind": "text", "label": "Page contains text", "interpolate": true,
@@ -34,7 +34,7 @@
     "cdp": ["Runtime", "Input"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
-       "interpolate": true},
+       "interpolate": true, "check": "selector"},
       {"key": "nth", "kind": "number", "label": "Match index", "min": 0,
        "hint": "Zero-based. Leave empty for the first match."}
     ]
@@ -46,7 +46,7 @@
     "cdp": ["Runtime", "Input"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
-       "interpolate": true},
+       "interpolate": true, "check": "selector"},
       {"key": "text", "kind": "text", "label": "Text", "required": true, "interpolate": true,
        "hint": "Supports {{profile.email}} and {{profile.password}}."},
       {"key": "clear", "kind": "boolean", "label": "Clear the field first", "default": true},
@@ -64,7 +64,7 @@
       {"key": "to", "kind": "select", "label": "Scroll to", "required": true, "default": "bottom",
        "options": ["bottom", "top", "selector"]},
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
-       "showWhen": {"to": "selector"}}
+       "showWhen": {"to": "selector"}, "check": "selector"}
     ]
   },
   "extract": {
@@ -74,7 +74,7 @@
     "cdp": ["Runtime"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
-       "interpolate": true},
+       "interpolate": true, "check": "selector"},
       {"key": "what", "kind": "select", "label": "Read", "default": "text",
        "options": ["text", "html", "attr", "value"]},
       {"key": "attr", "kind": "text", "label": "Attribute", "interpolate": true,
@@ -107,7 +107,7 @@
     "cdp": ["Page", "DOM"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
-       "hint": "Leave empty to capture the viewport."},
+       "hint": "Leave empty to capture the viewport.", "check": "selector"},
       {"key": "fullPage", "kind": "boolean", "label": "Full page"}
     ]
   },
@@ -152,6 +152,72 @@
     ],
     "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
   },
+  "aiPrompt": {
+    "label": "Ask AI",
+    "icon": "sparkles",
+    "summary": "Ask AI into {into}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "provider", "kind": "connector", "category": "ai", "label": "Provider",
+       "hint": "Leave as the workspace default unless this step needs a specific model."},
+      {"key": "prompt", "kind": "textarea", "label": "Prompt", "required": true,
+       "interpolate": true,
+       "placeholder": "Summarise this page in one sentence.",
+       "hint": "Supports {{vars.x}} and {{profile.email}}."},
+      {"key": "context", "kind": "select", "label": "Show the model", "default": "none",
+       "options": ["none", "pageText", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"context": "selector"}, "check": "selector"},
+      {"key": "format", "kind": "select", "label": "Answer as", "default": "text",
+       "options": ["text", "json"]},
+      {"key": "maxTokens", "kind": "number", "label": "Answer length cap (tokens)", "min": 1,
+       "max": 4096, "default": 512},
+      {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "hint": "Readable afterwards as {{vars.<name>}}."}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies. Page text is truncated before it is sent."
+  },
+  "aiCheck": {
+    "label": "AI check",
+    "icon": "scan-eye",
+    "summary": "AI check: {question}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "provider", "kind": "connector", "category": "ai", "label": "Provider"},
+      {"key": "question", "kind": "textarea", "label": "Yes/no question", "required": true,
+       "interpolate": true,
+       "placeholder": "Is this a captcha or bot-check page?"},
+      {"key": "context", "kind": "select", "label": "Show the model", "default": "pageText",
+       "options": ["none", "pageText", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"context": "selector"}, "check": "selector"},
+      {"key": "into", "kind": "text", "label": "Store the answer in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "hint": "Stores \"yes\" or \"no\". Branch on it with an If step: {{vars.<name>}} equals yes."},
+      {"key": "onFalse", "kind": "select", "label": "If the answer is no", "default": "continue",
+       "options": ["continue", "fail"],
+       "hint": "\"fail\" makes this an assertion: the step fails and On failure decides the rest."}
+    ],
+    "note": "The model is asked for one word and nothing else. Anything it says that is not yes or no fails the step rather than being guessed at."
+  },
+  "notify": {
+    "label": "Send message",
+    "icon": "send",
+    "summary": "Send message",
+    "cdp": [],
+    "fields": [
+      {"key": "connector", "kind": "connector", "category": "message", "label": "Send via",
+       "hint": "Leave as the workspace default message connector."},
+      {"key": "message", "kind": "textarea", "label": "Message", "required": true,
+       "interpolate": true,
+       "placeholder": "Done: {{vars.summary}}",
+       "hint": "Supports {{vars.x}} and {{profile.name}} -- this is how an AI step's answer gets sent."},
+      {"key": "subject", "kind": "text", "label": "Subject", "interpolate": true,
+       "hint": "Used by email connectors; chat connectors ignore it."}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
+  },
   "if": {
     "label": "If",
     "icon": "git-branch",
@@ -159,8 +225,8 @@
     "cdp": ["Runtime"],
     "fields": [
       {"key": "condition", "kind": "condition", "label": "Condition", "required": true},
-      {"key": "then", "kind": "steps", "label": "Then"},
-      {"key": "else", "kind": "steps", "label": "Otherwise"}
+      {"key": "then", "kind": "steps", "label": "Yes"},
+      {"key": "else", "kind": "steps", "label": "No"}
     ]
   },
   "loop": {
@@ -178,7 +244,7 @@
        "hint": "A whole-field template resolving to an array. Each item is {{loop.item}}."},
       {"key": "maxIterations", "kind": "number", "label": "Safety cap", "min": 1, "max": 1000,
        "default": 100},
-      {"key": "body", "kind": "steps", "label": "Steps"}
+      {"key": "body", "kind": "steps", "label": "Each time"}
     ]
   }
 }

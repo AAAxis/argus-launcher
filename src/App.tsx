@@ -2,8 +2,9 @@
 // gate in front of both. Everything with real logic behind it lives in
 // workspace/ (data and mutations), hooks/ (effects) or components/.
 import {useEffect, useState} from 'react';
-import type {ArgusAutomation} from './types';
-import {BookOpen, Plus, Upload, UserPlus} from 'lucide-react';
+import type {ArgusAutomation, ArgusConnector} from './types';
+import {BookOpen, CircleAlert, CircleCheck, Plus, Upload, UserPlus} from 'lucide-react';
+import {CopyButton} from './components/ui/CopyButton';
 import {SignIn} from './components/SignIn';
 import {Sidebar, Topbar, UpdateToast} from './components/Shell';
 import {ApiTab} from './components/tabs/ApiTab';
@@ -14,18 +15,31 @@ import {StartPageTab} from './components/tabs/StartPageTab';
 import {AutomationsTab} from './components/tabs/AutomationsTab';
 import {ExtensionsTab} from './components/tabs/ExtensionsTab';
 import {IntegrationsTab} from './components/tabs/IntegrationsTab';
+import {PlansTab} from './components/tabs/PlansTab';
+import {TeamTab} from './components/tabs/TeamTab';
+import type {TeamView} from './components/tabs/TeamTab';
 import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
 import {AutomationModal} from './components/modals/AutomationModal';
+import {ConnectorModal} from './components/modals/ConnectorModal';
+import {RunAutomationModal} from './components/modals/RunAutomationModal';
 import {RunLogModal} from './components/modals/RunLogModal';
 import {CookieSetModal} from './components/modals/CookieSetModal';
-import {ProfileDeleteModal, ProxyDeleteModal, ErrorModal} from './components/modals/ConfirmModals';
+import {
+  AutomationDeleteModal, ProfileDeleteModal, ProxyDeleteModal, ErrorModal,
+} from './components/modals/ConfirmModals';
+import type {AutomationDeleteRequest} from './components/modals/ConfirmModals';
 import {BookmarkModal, FolderModal, ProxyModal, StatusModal} from './components/modals/EditorModals';
 import {IntegrationModal} from './components/modals/IntegrationModal';
 import {
-  BookmarkImportModal, CookiePickerModal, ExtensionAddModal, ImportModal, ProxyImportModal,
+  BookmarkImportModal, CookiePickerModal, ExtensionAddModal, ProxyImportModal,
 } from './components/modals/LibraryModals';
+import {ImportProfilesModal} from './components/modals/ImportProfilesModal';
 import {IntroModal} from './components/modals/IntroModal';
+import {PlanWelcomeModal} from './components/modals/PlanWelcomeModal';
+import {WorkspaceSetupModal} from './components/modals/WorkspaceSetupModal';
 import {ProfileModal} from './components/modals/ProfileModal';
+import {ShareModal} from './components/modals/ShareModal';
+import type {ShareRequest} from './components/modals/ShareModal';
 import {
   ChangelogModal, OAuthApprovalModal, RevealedKeyModal, UpdateControl,
 } from './components/modals/SettingsModal';
@@ -36,9 +50,14 @@ import {COOKIE_INTRO_STEPS} from './data/cookieIntro';
 import {PROFILE_INTRO_STEPS} from './data/profileIntro';
 import {DEFAULT_FOLDER_ICON} from './data/folderIcons';
 import {DEFAULT_PROFILE_COLOR, normalizeProfileColor} from './lib/profileColors';
+import {newProfileDraft, profileFromDraft} from './drafts';
 import {findIntegration} from './data/integrations';
+import {SITE_LINKS} from './data/links';
+import {runTarget} from './automations/target';
 import {SITE_URL} from './lib/auth';
 import {hasSeenProfileIntro, markProfileIntroSeen} from './lib/introSeen';
+import {acknowledgePlan, lastAcknowledgedPlan} from './lib/planWelcome';
+import {isPlanKey, PLANS, showsPlanPicker} from './plans';
 import {TRASH_FOLDER_ID} from './lib/trash';
 import {useApiKeys, useIntegrations} from './hooks/useApiKeys';
 import {useAutomationBridge} from './hooks/useAutomationBridge';
@@ -91,8 +110,36 @@ export function App() {
   // dialog has to carry which one this is rather than infer it.
   const [automationDraft, setAutomationDraft] =
     useState<{automation: ArgusAutomation; exists: boolean} | null>(null);
+  // The connector being added or edited, on the automationDraft pattern and
+  // for the same reason: create and replace are separate writes. A new one
+  // starts with kind '' -- the modal's picker fills it in.
+  const [connectorDraft, setConnectorDraft] =
+    useState<{connector: ArgusConnector; exists: boolean} | null>(null);
   const [historyFor, setHistoryFor] = useState<ArgusAutomation | null>(null);
+  // The automation whose delete confirmation is open. Beside automationDraft
+  // rather than in useEditors because only the editor raises it -- the card in
+  // the grid has no Delete any more.
+  const [automationDeleteRequest, setAutomationDeleteRequest] =
+    useState<AutomationDeleteRequest | null>(null);
+  // The automation whose profile picker is open. Held here rather than in the
+  // Automations tab because the editor's own Run button raises the same dialog,
+  // and that dialog must not be a second copy living inside the editor.
+  const [runningAutomation, setRunningAutomation] = useState<ArgusAutomation | null>(null);
   const [revealedKey, setRevealedKey] = useState<{name: string; token: string} | null>(null);
+  // What is about to be shared out of the workspace. Held here rather than in
+  // each tab because four tabs raise it and the dialog is one -- the same reason
+  // the delete confirmations live in useEditors.
+  const [sharing, setSharing] = useState<ShareRequest | null>(null);
+  // Which half of the Team tab is showing. Held here, not in the tab, because
+  // the inbox bell's "View all" has to land on the Shared view specifically --
+  // the same reason the folder ids for three other tabs live up here.
+  const [teamView, setTeamView] = useState<TeamView>('members');
+  // The plan this machine last welcomed the active workspace onto, mirrored out
+  // of localStorage so both the welcome and the walkthrough can read it without
+  // touching storage on every render. `undefined` is "not read yet" and is
+  // distinct from `null`, which is "never welcomed" -- collapsing the two would
+  // open the dialog for one commit on every launch.
+  const [acknowledgedPlan, setAcknowledgedPlan] = useState<string | null | undefined>(undefined);
 
   useAutomationBridge(workspace);
   useFaviconWarmer(workspace);
@@ -115,6 +162,80 @@ export function App() {
 
   const startup = describeStartup(org.ready, resourceState, apiState);
 
+  const orgId = org.orgId;
+  const currentPlan = org.org?.plan;
+
+  useEffect(() => {
+    setAcknowledgedPlan(orgId ? lastAcknowledgedPlan(orgId) : null);
+  }, [orgId]);
+
+  // "Who is this workspace for?", asked once per workspace.
+  //
+  // The gate is a column, not localStorage -- unlike the walkthrough and the
+  // plan welcome, which are properties of this machine. The answer belongs to
+  // the organization, so somebody who signs in on a second computer, or who
+  // already answered on the website, must not be asked again. `onboarded_at`
+  // being set is that test, and it is set even when they decline.
+  //
+  // `org.ready` matters as much as it does for the plan welcome: `org.org` is
+  // undefined during the first fetch, and reading undefined as "not onboarded"
+  // would put this dialog in front of every returning user on every launch.
+  //
+  // First in the queue of the three one-shot dialogs, and declared above them
+  // because both of the others read it. It is the only one that asks a question
+  // rather than explaining something, it is the shortest, and the other two both
+  // have another way in (the empty state and Settings > General for the
+  // walkthrough; nothing is lost by the plan welcome waiting one launch). At
+  // most one of the three is ever open.
+  //
+  // setupDone is local state rather than a re-read of the org: the row is
+  // written before onDone fires, but org.org does not refresh until the next
+  // resolve, and without this the dialog would reopen on the render in between.
+  const [setupDone, setSetupDone] = useState(false);
+  const setupDue = Boolean(org.email) && !startup.blocked && org.ready && orgId &&
+    !org.org?.onboarded_at && !setupDone;
+
+  // Whether this workspace has changed onto a paid plan since this machine last
+  // said so. Gated on org.ready as well as the startup screen, because `plan` is
+  // undefined during the first fetch and reading that as a change would
+  // congratulate the user on every launch -- the same "not loaded is not a
+  // value" rule src/team/limit.ts and src/automations/limit.ts are built around.
+  const welcomeReady = Boolean(org.email) && !startup.blocked && org.ready &&
+    acknowledgedPlan !== undefined;
+  const planChanged = Boolean(welcomeReady && orgId && currentPlan &&
+    currentPlan !== acknowledgedPlan);
+  // Two plans change without raising anything: Free, which is not an occasion,
+  // and one this build has never heard of, which means the mirror in
+  // src/plans.ts is stale -- and a celebration that cannot name what it is
+  // celebrating should not open at all. Both are still recorded below, so
+  // neither re-asks on every launch.
+  //
+  // `&& !setupDue` keeps the three one-shot dialogs from stacking. Setup goes
+  // first (see its own note below); the welcome is not lost, it opens on the
+  // next launch because acknowledgePlan only runs when this one is dismissed.
+  const planWelcomeDue = planChanged && isPlanKey(currentPlan) &&
+    !showsPlanPicker(currentPlan) && !setupDue;
+
+  // The silent half. Recording Free is not bookkeeping: it is what gives a later
+  // upgrade a number to count up from, so it has to land on the plan the user is
+  // on now rather than on the one they eventually buy.
+  useEffect(() => {
+    if (planChanged && orgId && currentPlan &&
+        (showsPlanPicker(currentPlan) || !isPlanKey(currentPlan))) {
+      acknowledgePlan(orgId, currentPlan);
+      setAcknowledgedPlan(currentPlan);
+    }
+  }, [planChanged, orgId, currentPlan]);
+
+  // Acknowledged on dismiss rather than on open, so a crash between the two
+  // shows the welcome again instead of eating it.
+  const dismissPlanWelcome = () => {
+    if (orgId && currentPlan) {
+      acknowledgePlan(orgId, currentPlan);
+      setAcknowledgedPlan(currentPlan);
+    }
+  };
+
   // The walkthrough opens itself once, for someone who has nothing to look at
   // yet. Three things all have to be true, and each of them has bitten:
   //   - signed in, and past the startup gate, or it would open behind a screen
@@ -125,14 +246,36 @@ export function App() {
   //   - not seen on this machine before.
   // It sits below describeStartup because it reads it, and above the early
   // returns because a hook cannot be called conditionally.
+  //
+  // A fourth now: no plan welcome due, so the two never stack. They collide in
+  // exactly one real case and it is a likely one -- somebody invited into a paid
+  // workspace, where every profile belongs to a colleague and their own list is
+  // empty. The walkthrough is the one that waits, because it is the one with two
+  // other ways in (the empty state, and Settings > General).
+  // `!setupDue` as well as `!planWelcomeDue`, and it matters more here: a brand
+  // new account has both an empty workspace AND an unanswered setup question, so
+  // without this the two would collide on literally every first run rather than
+  // in an edge case. The walkthrough marks itself seen the moment it opens, so
+  // stacking would not just look wrong -- it would spend the one showing it gets.
   const introReady = Boolean(org.email) && !startup.blocked && !data.loading &&
-    data.state.profiles.length === 0;
+    data.state.profiles.length === 0 && !planWelcomeDue && !setupDue;
   useEffect(() => {
     if (introReady && !hasSeenProfileIntro()) {
       markProfileIntroSeen();
       setIntroOpen(true);
     }
   }, [introReady]);
+
+  // The Plans tab sells the first paid plan, so it goes away when one is bought
+  // -- which can happen while the user is standing on it, on the focus refresh
+  // that follows a purchase. Without this the sidebar entry vanishes and the
+  // content area keeps rendering a tab nothing can navigate back to.
+  const planPickerVisible = org.ready && showsPlanPicker(currentPlan);
+  useEffect(() => {
+    if (!planPickerVisible) {
+      setActiveTab((tab) => (tab === 'plans' ? 'profiles' : tab));
+    }
+  }, [planPickerVisible]);
 
   if (startup.blocked) {
     return (
@@ -158,7 +301,27 @@ export function App() {
       <Sidebar activeTab={activeTab} onTab={setActiveTab} onSettings={() => setSettingsOpen(true)} />
 
       <section className="content">
-        <Topbar activeTab={activeTab} actions={renderTopActions()} />
+        <Topbar
+          activeTab={activeTab}
+          actions={renderTopActions()}
+          onViewShares={() => {
+            setTeamView('shared');
+            setActiveTab('team');
+          }}
+          // A bell notification opens the run history it reports on. The
+          // automation may have been deleted since -- then the Automations tab
+          // is the closest true answer, and its runs are still readable there
+          // through their denormalised names.
+          onOpenAutomationHistory={(automationId) => {
+            const automation = data.state.automations.find(
+                (item) => item.id === automationId);
+            if (automation) {
+              setHistoryFor(automation);
+            } else {
+              setActiveTab('automations');
+            }
+          }}
+        />
         {data.loading ? (
           <LoadingState
             label="Loading cloud data"
@@ -168,7 +331,31 @@ export function App() {
       </section>
 
       <div className="toast-stack">
-        {toast.message && <div className="status-toast" role="status">{toast.message}</div>}
+        {toast.message && (
+          // role=alert for a failure: a status line is polite and a screen
+          // reader may sit on it until the user next idles, which is the wrong
+          // trade for the one tone that reports something went wrong.
+          <div
+            className={`status-toast ${toast.tone}`}
+            role={toast.tone === 'fail' ? 'alert' : 'status'}
+          >
+            <span className="status-toast-line">
+              {toast.tone !== 'info' && (
+                <span className="status-toast-mark" aria-hidden="true">
+                  {toast.tone === 'fail' ? <CircleAlert size={16} /> : <CircleCheck size={16} />}
+                </span>
+              )}
+              <span className="status-toast-text">{toast.message}</span>
+            </span>
+            {toast.detail && (
+              <CopyButton
+                className="link-button status-toast-copy"
+                label="Copy"
+                value={toast.detail}
+              />
+            )}
+          </div>
+        )}
         <UpdateToast
           state={updater.updateState}
           dismissedVersion={updater.dismissedVersion}
@@ -185,6 +372,10 @@ export function App() {
             setSettingsOpen(false);
             setIntroOpen(true);
           }}
+          onOpenPlans={() => {
+            setSettingsOpen(false);
+            setActiveTab('plans');
+          }}
           onOpenSite={openAccountPage}
           onSignOut={() => void signOut()}
           resourceState={resourceState}
@@ -192,6 +383,40 @@ export function App() {
         />
       )}
       {changelogOpen && <ChangelogModal updater={updater} onClose={() => setChangelogOpen(false)} />}
+      {setupDue && orgId && (
+        <WorkspaceSetupModal
+          orgId={orgId}
+          orgName={org.org?.name || ''}
+          onDone={() => {
+            setSetupDone(true);
+            // Pull the row back so Settings and the Team tab show the business
+            // name straight away rather than after the next focus refresh.
+            void org.reload();
+          }}
+        />
+      )}
+      {planWelcomeDue && isPlanKey(currentPlan) && (
+        <PlanWelcomeModal
+          plan={PLANS[currentPlan]}
+          // The row, not the mirror. PLANS still supplies the label and the
+          // "before" column, but what the workspace is being welcomed onto has
+          // to be what it actually got -- see the header of PlanWelcomeModal.
+          //
+          // `?? null` on seat_limit: ArgusOrg types it as a plain number, but a
+          // row read back from a database where it is null means unlimited, and
+          // the modal renders that word.
+          limits={{
+            profiles: org.org?.profile_limit ?? null,
+            seats: org.org?.seat_limit ?? null,
+            automations: org.org?.automation_limit ?? null,
+          }}
+          previous={acknowledgedPlan && isPlanKey(acknowledgedPlan) ?
+            PLANS[acknowledgedPlan] :
+            undefined}
+          orgName={org.org?.name || 'This workspace'}
+          onClose={dismissPlanWelcome}
+        />
+      )}
       {introOpen && (
         <IntroModal
           steps={PROFILE_INTRO_STEPS}
@@ -217,7 +442,7 @@ export function App() {
       {editors.extensionAddOpen && (
         <ExtensionAddModal onClose={() => editors.setExtensionAddOpen(false)} />
       )}
-      {editors.importOpen && <ImportModal onClose={() => editors.setImportOpen(false)} />}
+      {editors.importOpen && <ImportProfilesModal onClose={() => editors.setImportOpen(false)} />}
       {editors.proxyImportOpen && (
         <ProxyImportModal onClose={() => editors.setProxyImportOpen(false)} />
       )}
@@ -318,16 +543,81 @@ export function App() {
           }}
         />
       )}
+      {connectorDraft && (
+        <ConnectorModal
+          connector={connectorDraft.connector}
+          exists={connectorDraft.exists}
+          onClose={() => setConnectorDraft(null)}
+        />
+      )}
       {automationDraft && (
         <AutomationModal
           automation={automationDraft.automation}
           exists={automationDraft.exists}
+          tagOptions={workspace.tagOptions}
+          // The profile a step's Check button tests its selector against: the
+          // one this automation last ran on, so the page you check against is
+          // the page the run actually used.
+          checkProfile={runTarget(
+              data.state,
+              automationDraft.automation,
+              workspace.selectedProfileId,
+              workspace.automations.lastRunProfileId(automationDraft.automation.id),
+          )}
+          // Names and ids only. The config stays out of the editor entirely --
+          // a step stores a connector id, and the main process is the only
+          // thing that ever turns one into a credential.
+          connectors={data.state.connectors.map((connector) => ({
+            id: connector.id,
+            name: connector.name,
+            category: connector.category,
+            is_default: connector.is_default,
+          }))}
           onClose={() => setAutomationDraft(null)}
+          onRun={setRunningAutomation}
           onSave={(next) => workspace.automations.save(next, automationDraft.exists)}
+          // Counted from the saved automation's id, not from the draft: the
+          // draft may have unsaved edits, but what is attached to a profile is
+          // whatever was last written.
+          onDelete={() => setAutomationDeleteRequest({
+            id: automationDraft.automation.id,
+            label: automationDraft.automation.name || 'this automation',
+            attachedProfiles: data.state.profiles.filter((profile) =>
+              !profile.deleted_at &&
+              profile.automation_id === automationDraft.automation.id).length,
+          })}
+        />
+      )}
+      {automationDeleteRequest && (
+        <AutomationDeleteModal
+          request={automationDeleteRequest}
+          onClose={() => setAutomationDeleteRequest(null)}
+          onDeleted={() => {
+            setAutomationDeleteRequest(null);
+            // The editor it was raised from is showing something that no longer
+            // exists, so it goes too.
+            setAutomationDraft(null);
+          }}
         />
       )}
       {historyFor && (
         <RunLogModal automation={historyFor} onClose={() => setHistoryFor(null)} />
+      )}
+      {runningAutomation && (
+        <RunAutomationModal
+          automation={runningAutomation}
+          // The editor's own Run button raises this over the still-open editor.
+          nested={Boolean(automationDraft)}
+          // Closes this and opens the proxy editor rather than stacking one
+          // dialog on the other: the proxy editor is reachable from three other
+          // places and none of them nest it. Re-opening Run afterwards costs a
+          // click and shows the freshly-checked result.
+          onFixProxy={(proxy) => {
+            setRunningAutomation(null);
+            editors.editProxy(proxy);
+          }}
+          onClose={() => setRunningAutomation(null)}
+        />
       )}
       {editors.cookieSetOpen && (
         <CookieSetModal
@@ -371,6 +661,25 @@ export function App() {
           }}
         />
       )}
+      {sharing && org.orgId && (
+        <ShareModal
+          request={sharing}
+          onClose={() => setSharing(null)}
+          onShare={async (kind, ids, toUserId, note) => {
+            const result = await workspace.shared.offer(
+                org.orgId as string, kind, ids, toUserId, note);
+            if ('count' in result) {
+              // Names the person, because the whole point is that it is now
+              // waiting on somebody -- "Shared" alone would not say that an
+              // answer is still outstanding.
+              const to = data.state.members.find((member) => member.user_id === toUserId);
+              const name = to?.display_name || to?.email || 'them';
+              toast.setMessage(`Shared with ${name}. They'll be asked to accept.`);
+            }
+            return result;
+          }}
+        />
+      )}
       {toast.errorDialog && (
         <ErrorModal dialog={toast.errorDialog} onClose={() => toast.setErrorDialog(null)} />
       )}
@@ -403,6 +712,7 @@ export function App() {
             fillCountry={folderFillCountry}
             onFillCountryDone={() => setFolderFillCountry('')}
             onRequestDelete={editors.requestDeleteProxies}
+            onShare={setSharing}
           />
         );
       case 'cookies':
@@ -427,6 +737,7 @@ export function App() {
               icon: folder.icon || DEFAULT_FOLDER_ICON,
               color: normalizeProfileColor(folder.color),
             })}
+            onShare={setSharing}
           />
         );
       case 'startPage':
@@ -440,8 +751,18 @@ export function App() {
         return (
           <AutomationsTab
             onNew={() => setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}
+            onLoadExample={() => void loadExampleAutomation()}
+            onCreateDemoProfile={() => void createDemoProfile()}
             onEdit={(automation) => setAutomationDraft({automation, exists: true})}
+            onRun={setRunningAutomation}
             onHistory={setHistoryFor}
+            onShare={setSharing}
+            onOpenSite={openAccountPage}
+            onNewConnector={() => setConnectorDraft({
+              connector: workspace.connectors.blank(''),
+              exists: false,
+            })}
+            onEditConnector={(connector) => setConnectorDraft({connector, exists: true})}
           />
         );
       case 'extensions':
@@ -454,13 +775,38 @@ export function App() {
             onOpen={integrations.open}
           />
         );
+      // No renderTopActions() case, like Automations and Extensions: the Invite
+      // button belongs in this tab's own bar, beside the seat count it changes.
+      case 'team':
+        return (
+          <TeamTab
+            view={teamView}
+            onView={setTeamView}
+            onShare={setSharing}
+            onOpenSite={openAccountPage}
+          />
+        );
       case 'api':
         return (
           <ApiTab
             apiKeys={apiKeys}
             signedInEmail={org.email}
-            onOpenDocs={() => openAccountPage('/docs/api')}
+            onOpenDocs={() => openAccountPage(SITE_LINKS.docs)}
+            onOpenIntegrations={() => setActiveTab('integrations')}
             onKeyCreated={setRevealedKey}
+          />
+        );
+      // Counted the way settings/SettingsDialog.tsx counts them, and for the
+      // same reasons: Trash does not count against the profile limit until a
+      // profile is restored, and automations are hard-deleted so every row in
+      // state is a live one.
+      case 'plans':
+        return (
+          <PlansTab
+            profileCount={data.state.profiles.filter((profile) => !profile.deleted_at).length}
+            automationCount={data.state.automations.length}
+            memberCount={data.state.members.length}
+            onOpenSite={openAccountPage}
           />
         );
       case 'profiles':
@@ -487,6 +833,7 @@ export function App() {
             fillTag={folderFillTag}
             onFillTagDone={() => setFolderFillTag('')}
             onRequestDelete={editors.requestDeleteProfiles}
+            onShare={setSharing}
             onShowIntro={() => setIntroOpen(true)}
           />
         );
@@ -504,13 +851,10 @@ export function App() {
             <button onClick={editors.newProfile}><UserPlus size={18} /> Add profile</button>
           </>
         );
-      case 'automations':
-        return (
-          <button onClick={() =>
-            setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}>
-            <Plus size={18} /> New automation
-          </button>
-        );
+      // 'automations' has no case, on the same terms as 'extensions': both put
+      // their create action in the tab's own .integration-bar, where it sits
+      // beside the count it changes. A second copy in the Topbar would be two
+      // buttons to keep in step over one plan-cap check.
       case 'proxies':
         return (
           <>
@@ -546,6 +890,44 @@ export function App() {
         );
       default:
         return null;
+    }
+  }
+
+  // Inserts the pre-written example, then opens it for editing.
+  //
+  // The row is written before the editor opens (exists: false -> an INSERT,
+  // never an upsert -- see the trg_automation_limit note in db/automations.ts),
+  // so what the user is looking at is a real automation from the first frame
+  // rather than a draft that only becomes real if they press Save. save()
+  // hands the failure back instead of toasting it, so this has to surface it --
+  // and it is the path that reports automation_limit_reached when an org's cap
+  // has not been raised, which is a message worth showing verbatim.
+  async function loadExampleAutomation() {
+    const automation = workspace.automations.exampleAutomation();
+    const error = await workspace.automations.save(automation, false);
+    if (error) {
+      toast.setMessage(error);
+      return;
+    }
+    setAutomationDraft({automation, exists: true});
+  }
+
+  // A Direct-mode profile for the example to run against.
+  //
+  // Built through newProfileDraft/profileFromDraft rather than assembled here,
+  // so the fingerprint, colour and tag defaults come from the same place every
+  // other new profile gets them from -- a hand-rolled row would drift the first
+  // time those defaults change. Direct mode needs no proxy credentials, which
+  // is the only reason this can be a one-click offer at all; profiles.save
+  // selects the new profile, which is what runTarget then resolves against.
+  async function createDemoProfile() {
+    const profile = profileFromDraft({
+      ...newProfileDraft(),
+      name: 'Demo',
+      proxy_mode: 'direct',
+    });
+    if (await workspace.profiles.save(profile)) {
+      toast.setMessage('Created the Demo profile — it browses direct, with no proxy.');
     }
   }
 

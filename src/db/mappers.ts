@@ -7,16 +7,25 @@
 // `cookie_set_id` there, and two scalar fields are arrays in the database.
 // Renaming the app types would touch every tab and dialog in main.tsx, so the
 // translation lives here instead and the UI keeps reading what it always read.
+import {normalizeTags} from '../lib/tags';
 import type {
   ArgusAutomation,
+  ArgusConnector,
   ArgusCookie,
   ArgusFolder,
   ArgusOrg,
   ArgusProfile,
   ArgusProxy,
   AutomationRun,
+  ArgusNotification,
   BuiltInExtensionToggles,
+  OrgInvite,
+  OrgMember,
+  OrgRole,
   ProxyMode,
+  Handoff,
+  HandoffKind,
+  HandoffStatus,
   SharedBookmark,
   SharedExtension,
 } from '../types';
@@ -30,12 +39,17 @@ import type {
 import type {
   AutomationRow,
   AutomationRunRow,
+  ConnectorRow,
   CookieSetRow,
   CustomStatusRow,
   FolderRow,
+  NotificationRow,
   OrganizationRow,
+  OrgInviteRow,
+  OrgMemberIdentityRow,
   ProfileRow,
   ProxyRow,
+  HandoffRow,
   SharedBookmarkRow,
   SharedExtensionRow,
 } from './rows';
@@ -83,6 +97,20 @@ export function rowToOrg(row: OrganizationRow): ArgusOrg {
     // database that has not had the migration applied would otherwise hand
     // every org an unlimited automation allowance.
     automation_limit: row.automation_limit ?? 0,
+    // Passed through as-is, unlike the limit above. Null here means "not
+    // answered", which is a real state the setup prompt keys on -- collapsing it
+    // to a default would make an un-onboarded workspace look onboarded.
+    //
+    // org_type is narrowed rather than cast: the column has a CHECK constraint,
+    // but this build could be talking to a database where it does not yet, and
+    // an unrecognised value should read as unanswered rather than render as
+    // itself in a sentence that says "You work as a ___".
+    org_type: row.org_type === 'solo' || row.org_type === 'business' ? row.org_type : null,
+    legal_name: row.legal_name,
+    country: row.country,
+    website: row.website,
+    logo_url: row.logo_url,
+    onboarded_at: row.onboarded_at,
   };
 }
 
@@ -97,6 +125,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     name: row.name,
     status: undef(row.status),
     color: undef(row.color),
+    avatar: undef(row.avatar),
     tags: undef(row.tags),
     email: undef(row.email),
     password: undef(row.password),
@@ -114,6 +143,8 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     command_line_switches: switchesToText(row.command_line_switches),
     fingerprint,
     created_at: undef(row.created_at),
+    created_by: row.created_by,
+    assigned_to: row.assigned_to,
     deleted_at: row.deleted_at,
   };
 }
@@ -124,6 +155,17 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
 // softDelete/restore/purge alone, so an ordinary edit -- from a session that
 // has not noticed someone else trashed this profile -- cannot bring it back.
 // That is verification check 3 of prompt 05 in one omitted line.
+//
+// `created_by` is omitted for a related reason, and it matters twice. On insert
+// the column's DEFAULT auth.uid() fills it, which is the only version of it
+// that cannot be forged. On update -- `replace` sends every key of this object
+// -- omitting it is what stops a colleague's edit from rewriting authorship to
+// themselves.
+//
+// `assigned_to` is omitted on exactly the same grounds. It is owned by
+// accept_handoff and set_assignee, so an ordinary edit -- by anyone, from a
+// session that may not have seen the hand-off at all -- must not carry a stale
+// value back over it and silently unassign the row.
 //
 // `updated_at` is set here because no trigger maintains it: 0001/0005 give the
 // column a default but nothing refreshes it on update.
@@ -145,6 +187,7 @@ export function profileToRow(orgId: string, profile: ArgusProfile): Insert<Profi
     start_urls: startUrl ? [startUrl] : [],
     command_line_switches: switchesToArray(profile.command_line_switches),
     color: profile.color ?? null,
+    avatar: profile.avatar ?? null,
     proxy_mode: profile.proxy_mode ?? null,
     cookie_mode: profile.cookie_mode ?? null,
     cookie_import_path: profile.cookie_import_path ?? null,
@@ -169,6 +212,9 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
   }
   if ('color' in patch) {
     row.color = patch.color ?? null;
+  }
+  if ('avatar' in patch) {
+    row.avatar = patch.avatar ?? null;
   }
   if ('tags' in patch) {
     row.tags = patch.tags ?? [];
@@ -243,6 +289,7 @@ export function rowToProxy(row: ProxyRow): ArgusProxy {
     ping_ms: undef(row.last_latency_ms),
     checked_at: undef(row.last_checked_at),
     check_error: undef(row.last_error),
+    assigned_to: row.assigned_to,
   };
 }
 
@@ -295,6 +342,7 @@ export function rowToCookie(row: CookieSetRow): ArgusCookie {
     tags: row.tags ?? [],
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
+    assigned_to: row.assigned_to,
     deleted_at: row.deleted_at,
   };
 }
@@ -410,6 +458,47 @@ export function rowToStatus(row: CustomStatusRow): string {
 // only coerces null to undefined and fills defaults for a row written before a
 // column existed.
 
+// config is guarded back to an object even though the table has a CHECK
+// constraint saying it is one: a row read through a future view or a cast
+// that loses the guarantee must deserialise into "no fields set", not crash
+// whatever reads a field off null.
+export function rowToConnector(row: ConnectorRow): ArgusConnector {
+  const config = row.config && typeof row.config === 'object' && !Array.isArray(row.config) ?
+    row.config : {};
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category === 'message' ? 'message' : 'ai',
+    kind: row.kind,
+    config: Object.fromEntries(Object.entries(config)
+        .filter(([, value]) => value !== null && value !== undefined)
+        .map(([key, value]) => [key, String(value)])),
+    is_default: row.is_default ?? false,
+    created_at: undef(row.created_at),
+    updated_at: undef(row.updated_at),
+  };
+}
+
+// Blank config values are dropped rather than written through. An empty
+// base_url means "use the preset's endpoint", and '' is not that -- it would
+// resolve to a request against the empty URL. Same for a blank api_key.
+export function connectorToRow(
+    orgId: string, connector: ArgusConnector): Insert<ConnectorRow> {
+  return {
+    id: connector.id,
+    org_id: orgId,
+    name: connector.name.trim(),
+    category: connector.category,
+    kind: connector.kind,
+    config: Object.fromEntries(Object.entries(connector.config || {})
+        .map(([key, value]) => [key, value.trim()])
+        .filter(([, value]) => value !== '')),
+    is_default: connector.is_default ?? false,
+    created_at: connector.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export function rowToAutomation(row: AutomationRow): ArgusAutomation {
   return {
     id: row.id,
@@ -417,11 +506,18 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
     description: row.description,
     steps: (row.steps || []) as AutomationStep[],
     variables: (row.variables || {}) as AutomationVars,
+    tags: row.tags || [],
     pinned: row.pinned ?? false,
     timeout_ms: row.timeout_ms ?? undefined,
     close_on_finish: row.close_on_finish ?? false,
+    // Null-preserving on purpose: a row written before these columns existed
+    // must map to "does not notify", not to a default that starts sending.
+    notify_connector_id: row.notify_connector_id ?? null,
+    notify_on: row.notify_on === 'always' || row.notify_on === 'failure' ?
+      row.notify_on : null,
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
+    assigned_to: row.assigned_to,
   };
 }
 
@@ -437,9 +533,14 @@ export function automationToRow(
     description: automation.description ?? null,
     steps: automation.steps as unknown[],
     variables: (automation.variables || {}) as Record<string, unknown>,
+    // normalizeTags is the only enforcement point for the 5-tag cap and it is
+    // applied at the edges, exactly as it is for profiles -- see AGENTS.md.
+    tags: normalizeTags(automation.tags || []),
     pinned: automation.pinned ?? false,
     timeout_ms: automation.timeout_ms ?? 300000,
     close_on_finish: automation.close_on_finish ?? false,
+    notify_connector_id: automation.notify_connector_id ?? null,
+    notify_on: automation.notify_on ?? null,
     created_at: automation.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -460,6 +561,9 @@ export function automationPatchToRow(
   if ('variables' in patch) {
     row.variables = (patch.variables || {}) as Record<string, unknown>;
   }
+  if ('tags' in patch) {
+    row.tags = normalizeTags(patch.tags || []);
+  }
   if ('pinned' in patch) {
     row.pinned = patch.pinned ?? false;
   }
@@ -468,6 +572,12 @@ export function automationPatchToRow(
   }
   if ('close_on_finish' in patch) {
     row.close_on_finish = patch.close_on_finish ?? false;
+  }
+  if ('notify_connector_id' in patch) {
+    row.notify_connector_id = patch.notify_connector_id ?? null;
+  }
+  if ('notify_on' in patch) {
+    row.notify_on = patch.notify_on ?? null;
   }
   return row;
 }
@@ -512,6 +622,114 @@ export function runToRow(orgId: string, run: AutomationRun): Insert<AutomationRu
     error: run.error ?? null,
     vars: (run.vars || {}) as Record<string, unknown>,
     log: (run.log || []) as unknown[],
+  };
+}
+
+// ---- notifications ------------------------------------------------------
+
+export function rowToNotification(row: NotificationRow): ArgusNotification {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    body: row.body,
+    // Reported off the run record when the row was written, never recomputed
+    // here -- the run record decided the verdict.
+    status: row.status,
+    automation_id: row.automation_id,
+    run_id: row.run_id,
+    created_by: row.created_by,
+    created_at: row.created_at,
+  };
+}
+
+export function notificationToRow(
+    orgId: string, notification: ArgusNotification): Insert<NotificationRow> {
+  return {
+    id: notification.id,
+    org_id: orgId,
+    kind: notification.kind,
+    title: notification.title,
+    body: notification.body,
+    status: notification.status ?? null,
+    automation_id: notification.automation_id ?? null,
+    run_id: notification.run_id ?? null,
+    created_at: notification.created_at || new Date().toISOString(),
+  };
+}
+
+// ---- team ---------------------------------------------------------------
+
+// Anything that is not 'owner' reads as 'member', the less privileged of the two.
+//
+// The column has a CHECK constraint so this should be unreachable, but the
+// direction of the fallback is the point: if a future role is added and an old
+// build reads it, showing that person as a member under-states what they can do
+// rather than handing the UI's owner controls to someone this build cannot
+// reason about. RLS decides either way; this only decides what is drawn.
+//
+// This is also what carries a database still holding 'admin' -- one that has not
+// had 2026-08-10-owner-member-roles.sql run against it -- into the two-role UI
+// without a crash: those people render, and act, as members.
+function orgRole(value: string): OrgRole {
+  return value === 'owner' ? 'owner' : 'member';
+}
+
+export function rowToMember(row: OrgMemberIdentityRow): OrgMember {
+  return {
+    user_id: row.user_id,
+    email: row.email || '',
+    display_name: row.display_name || '',
+    avatar_url: row.avatar_url || '',
+    role: orgRole(row.role),
+    created_at: row.created_at,
+    invited_by: row.invited_by,
+  };
+}
+
+export function rowToInvite(row: OrgInviteRow): OrgInvite {
+  return {
+    id: row.id,
+    email: row.email,
+    // Always 'member'. The column's check constraint permits nothing else and
+    // create_org_invite refuses anything else, so reading the row's own value
+    // would only be a way to render a role that cannot be granted.
+    role: 'member',
+    status: row.status === 'accepted' || row.status === 'revoked' ? row.status : 'pending',
+    token: row.token,
+    expires_at: row.expires_at,
+    created_at: row.created_at,
+    invited_by: row.invited_by,
+  };
+}
+
+// ---- handoffs ------------------------------------------------------------
+
+// Both open text columns are narrowed here, so an unknown value from a newer
+// server renders as the safe default rather than as a blank chip or an
+// undefined branch. Same reasoning as orgRole above: the table's CHECK decides
+// what is legal, this only decides what is drawn.
+function handoffKind(value: string): HandoffKind {
+  return value === 'proxy' || value === 'cookie_set' || value === 'automation' ?
+    value : 'profile';
+}
+
+function handoffStatus(value: string): HandoffStatus {
+  return value === 'accepted' || value === 'declined' || value === 'cancelled' ?
+    value : 'pending';
+}
+
+export function rowToHandoff(row: HandoffRow): Handoff {
+  return {
+    id: row.id,
+    kind: handoffKind(row.kind),
+    status: handoffStatus(row.status),
+    item_id: row.item_id,
+    item_name: row.item_name || 'Untitled',
+    from_user: row.from_user,
+    to_user: row.to_user,
+    note: row.note || '',
+    created_at: row.created_at,
   };
 }
 

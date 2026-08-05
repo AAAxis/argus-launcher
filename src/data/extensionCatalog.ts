@@ -1,6 +1,5 @@
-// Everything the Extensions tab draws: the three bundled extensions every
-// install ships with, and the curated Web Store catalog the Discover view
-// browses.
+// Everything the Extensions tab draws: the built-in extensions every install
+// ships with, and the curated Web Store catalog the Discover view browses.
 //
 // Named extensionCatalog and not extensions because src/lib/extensions.ts
 // already exists (it parses Web Store ids out of a pasted link).
@@ -36,6 +35,12 @@ export function extensionLogo(slug?: string): string | undefined {
 
 export type BuiltInExtension = {
   key: keyof BuiltInExtensionToggles;
+  // What a missing value in BuiltInExtensionToggles means for this extension.
+  // Not uniform: the original three default on so cloud state written before
+  // their toggles existed does not silently lose them, while a download-on-
+  // enable one defaults off. Mirrors `defaultEnabled` in
+  // electron/built-in-extensions.cjs; the test asserts they agree.
+  defaultEnabled: boolean;
   name: string;
   // One line for the card. The long-form caveats that used to live in
   // `description` moved to `note`, which only the cards that need it render --
@@ -48,14 +53,25 @@ export type BuiltInExtension = {
   // rather than as an <img>. The Argus mark is black-on-transparent, so as an
   // image it would vanish against the dark theme's raised surface.
   tint?: boolean;
+  // True for a built-in whose files are not vendored in extensions/ but pulled
+  // from the Web Store the first time someone switches it on. The card offers
+  // an explicit Enable with a progress bar instead of an instant toggle, and
+  // the org's switch is only written once the bytes are actually on disk.
+  downloadsOnEnable?: boolean;
 };
 
-// The bundled (non-removable) extensions every install ships with. Their
+// The built-in (non-removable) extensions every install ships with. Their
 // toggles live on the organization, not on the individual user, so one worker
 // cannot silently change what their colleagues' profiles launch with.
+//
+// This list is the UI half of a pair: electron/built-in-extensions.cjs holds
+// the runtime half (where each one's files come from and where its copy goes),
+// and `key` is the contract between them, since main.cjs is CommonJS and cannot
+// import this file. built-in-extensions.test.ts asserts the two agree.
 export const BUILT_IN_EXTENSIONS: BuiltInExtension[] = [
   {
     key: 'cookie_manager',
+    defaultEnabled: true,
     name: 'Argus Cookie Manager',
     tagline: 'Export the session a profile is signed into, or import a cookie file straight into it.',
     note: 'Also seeds a profile with the cookie set assigned to it, once, on its first launch.',
@@ -66,19 +82,47 @@ export const BUILT_IN_EXTENSIONS: BuiltInExtension[] = [
   },
   {
     key: 'sms_activate',
+    defaultEnabled: true,
     name: 'SMS Activate',
     tagline: 'Buy a phone number for a verification code, so a profile never signs up with yours.',
-    note: 'Numbers are single-use: one number, one verification. Buy another for the next account.',
+    // The API key is called out because the extension ships without one and
+    // opens on a setup screen until you paste yours -- a card that only promised
+    // phone numbers left people looking for a button that was never there.
+    note: 'Needs your own API key from onlinesim.io. Numbers are single-use: one number, one ' +
+      'verification. Buy another for the next account.',
     slug: 'sms-activate',
   },
   {
     key: 'foxywall_free_proxy',
+    defaultEnabled: true,
     name: 'FoxyWall Proxy',
     tagline: 'The free-proxy backend, bundled into every profile.',
     note: 'Only auto-connects for profiles set to Free Proxy mode. This switch stops it being bundled at all.',
     slug: 'foxywall',
   },
+  {
+    key: 'captcha_plugin',
+    defaultEnabled: false,
+    name: 'Captcha Plugin',
+    tagline: 'Solves reCAPTCHA in the browser itself, on CPU. No account, no per-solve fee.',
+    note: 'Off until you enable it: the model is a ~56 MB download, fetched once per machine ' +
+      'and shared by every profile.',
+    slug: 'captchaplugin',
+    downloadsOnEnable: true,
+  },
 ];
+
+// Whether an entry counts as on, given the org's saved toggles. Falls back to
+// the entry's own default rather than a blanket `!== false`, which is what lets
+// Captcha Plugin ship off while the other three ship on. The runtime half
+// applies the same rule in builtInEnabled().
+export function builtInExtensionEnabled(
+    toggles: BuiltInExtensionToggles | undefined,
+    entry: BuiltInExtension,
+): boolean {
+  const value = toggles?.[entry.key];
+  return value === undefined || value === null ? entry.defaultEnabled : Boolean(value);
+}
 
 // ---------------------------------------------------------------------------
 // The Discover catalog.

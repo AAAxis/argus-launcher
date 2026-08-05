@@ -5,7 +5,7 @@ import type {ProxyRow} from './rows';
 
 const COLUMNS =
   'id,org_id,name,type,host,port,username,password,folder_id,last_checked_at,last_ip,' +
-  'last_country,last_latency_ms,created_at,last_country_code,last_error';
+  'last_country,last_latency_ms,created_at,last_country_code,last_error,assigned_to';
 
 export async function list(orgId: string): Promise<ArgusProxy[]> {
   const client = optionalClient();

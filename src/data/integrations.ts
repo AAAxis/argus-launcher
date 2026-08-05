@@ -2,7 +2,12 @@ import {Bot, Code, Hexagon, PanelsTopLeft, Plug, SquareTerminal, Waypoints, Wind
 import claudeCodeLogo from '../assets/claude-code.svg';
 import codexLogo from '../assets/codex.svg';
 import cursorLogo from '../assets/cursor.svg';
+import geminiCliLogo from '../assets/gemini-cli.svg';
+import mcpLogo from '../assets/mcp.svg';
 import openclawLogo from '../assets/openclaw.svg';
+import vscodeLogo from '../assets/vscode.svg';
+import windsurfLogo from '../assets/windsurf.svg';
+import zedLogo from '../assets/zed.svg';
 
 export type IntegrationId =
   | 'claude-code'
@@ -30,9 +35,11 @@ export type Integration = {
   logo?: string;
   // Which theme the mark has to be inverted in. A single-colour mark only reads
   // on the background it was drawn for: Codex's is near-black (#111) so it
-  // disappears on a dark surface, Cursor's is near-white (#edecec) so it
-  // disappears on a light one. They therefore invert in opposite themes, which
-  // one boolean could not express.
+  // disappears on a dark surface, while Cursor's (#edecec) and the white-only
+  // cuts of Zed, Windsurf and the MCP mark disappear on a light one. They
+  // therefore invert in opposite themes, which one boolean could not express.
+  // Marks that carry their own colours -- Claude Code, Gemini CLI, VS Code,
+  // OpenClaw -- name neither and are left alone.
   invertOn?: 'dark' | 'light';
   // What the connect flow writes, in the user's words. Shown before anything is
   // touched, so "one click and it edited a file in my home directory" is never
@@ -98,6 +105,7 @@ export const INTEGRATIONS: Integration[] = [
     description: "Google's coding agent CLI. Same tools, in its own settings file.",
     category: 'agent',
     icon: Code,
+    logo: geminiCliLogo,
     configLabel: '~/.gemini/settings.json',
     restartLabel: 'Restart Gemini CLI',
     confirmLabel: 'Then run /mcp — argus should be in the list.',
@@ -108,6 +116,8 @@ export const INTEGRATIONS: Integration[] = [
     description: 'The Codeium editor. Registered for Cascade to use.',
     category: 'agent',
     icon: Wind,
+    logo: windsurfLogo,
+    invertOn: 'light',
     configLabel: '~/.codeium/windsurf/mcp_config.json',
     restartLabel: 'Reload Windsurf',
     confirmLabel: 'Then open Cascade’s plugin panel: argus should be listed there.',
@@ -118,6 +128,7 @@ export const INTEGRATIONS: Integration[] = [
     description: 'Agent mode in Visual Studio Code, through its user MCP config.',
     category: 'agent',
     icon: PanelsTopLeft,
+    logo: vscodeLogo,
     configLabel: 'Code/User/mcp.json',
     restartLabel: 'Reload VS Code',
     confirmLabel: 'Then switch Chat to Agent mode and open the tools picker — the argus tools should be listed.',
@@ -128,6 +139,8 @@ export const INTEGRATIONS: Integration[] = [
     description: "Zed's agent panel, through its context server settings.",
     category: 'agent',
     icon: Code,
+    logo: zedLogo,
+    invertOn: 'light',
     configLabel: '~/.config/zed/settings.json',
     restartLabel: 'Restart Zed',
     confirmLabel: 'Then check the agent panel’s settings: argus should appear under context servers.',
@@ -160,6 +173,10 @@ export const INTEGRATIONS: Integration[] = [
     description: 'Anything that speaks MCP. Copy the server block into its config yourself.',
     category: 'manual',
     icon: Plug,
+    // The protocol's own mark rather than a vendor's -- this card is the one
+    // that stands for every client we have not named.
+    logo: mcpLogo,
+    invertOn: 'light',
     configLabel: 'whatever your client reads',
     restartLabel: 'Restart your client',
     confirmLabel: 'Your client should list argus among its MCP servers once it is back up.',

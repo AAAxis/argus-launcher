@@ -1,9 +1,17 @@
-// Hand-written row shapes for the tables prompt 03 created. There is no
-// generated database.types.ts and the Supabase CLI is not installed on this
-// machine, so these are maintained by hand against
-// supabase/migrations/0001_multitenant_core.sql as amended by 0005. Keep them
-// in that order -- a column that exists here but not in the database fails at
-// runtime, not at typecheck.
+// Hand-written row shapes for the tables prompt 03 created. They stay
+// hand-written because they carry refinements the generator cannot infer --
+// BuiltInExtensionToggles rather than Json, and the comments explaining why a
+// given column is nullable.
+//
+// They are no longer unchecked, though. `database.types.ts` is generated from
+// the live schema, and `rows.schema-check.ts` asserts at typecheck time that
+// every column named here still exists. Regenerate after any schema change:
+//
+//   supabase gen types typescript --linked --schema public > src/db/database.types.ts
+//
+// Modelling fewer columns than the table has is safe. Naming one that is not
+// there is not: PostgREST rejects the whole select, and the user sees an empty
+// table rather than an error.
 import type {BuiltInExtensionToggles} from '../types';
 
 export type OrganizationRow = {
@@ -21,6 +29,20 @@ export type OrganizationRow = {
   // migration lands must map to something defined, and the client treats
   // null-or-missing as "no automations" rather than as unlimited.
   automation_limit: number | null;
+  // Who the workspace belongs to (2026-08-08-org-profile.sql). All nullable:
+  // every org that predates onboarding has nulls here and there is deliberately
+  // no backfill, because inventing a country or a company for an existing
+  // customer would be phantom data.
+  //
+  // Descriptive only. Nothing gates on these -- unlike the four columns above,
+  // which the triggers enforce -- and they are writable by any member, because
+  // the entitlement boundary is the column grant rather than the role.
+  org_type: string | null;
+  legal_name: string | null;
+  country: string | null;
+  website: string | null;
+  logo_url: string | null;
+  onboarded_at: string | null;
 };
 
 export type OrgMemberRow = {
@@ -28,6 +50,61 @@ export type OrgMemberRow = {
   user_id: string;
   role: string;
   created_at: string;
+  // Who added them. Has existed since 0001 and was never written until
+  // accept_org_invite started carrying it across from the invite.
+  invited_by: string | null;
+};
+
+// What org_members_with_identity() returns -- NOT a table row.
+//
+// org_members holds ids and nothing else, and auth.users is not exposed to
+// clients, so the roster comes from a SECURITY DEFINER function that joins the
+// two server-side for orgs the caller belongs to. Added 2026-08-05-teams.sql.
+export type OrgMemberIdentityRow = {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  role: string;
+  created_at: string;
+  invited_by: string | null;
+};
+
+// Added 2026-08-05-teams.sql. The table existed before that but was unused and
+// empty; the migration drops and recreates it, so this shape is the only one
+// that has ever been read.
+export type OrgInviteRow = {
+  id: string;
+  org_id: string;
+  email: string;
+  role: string;
+  token: string;
+  status: string;
+  invited_by: string | null;
+  accepted_by: string | null;
+  expires_at: string;
+  created_at: string;
+  accepted_at: string | null;
+};
+
+// An offer to take an item over. Read straight from the table with no RPC and
+// no join: handoffs_select is is_org_member, and both parties are members of
+// the same org, so the launcher resolves their names from CloudState.members
+// rather than asking the server to join auth.users.
+//
+// Added 2026-08-06-handoffs.sql.
+export type HandoffRow = {
+  id: string;
+  org_id: string;
+  kind: string;
+  item_id: string;
+  item_name: string | null;
+  from_user: string | null;
+  to_user: string;
+  note: string | null;
+  status: string;
+  created_at: string;
+  resolved_at: string | null;
 };
 
 // id is text, not uuid: a profile id is also its on-disk directory name under
@@ -64,6 +141,12 @@ export type ProfileRow = {
   password: string | null;
   // The automation to run when this profile launches. Added 2026-08-05.
   automation_id: string | null;
+  // The profile's picture: `brand:<slug>`, an https URL, or null for the
+  // initials plate. Added 2026-08-05. See ArgusProfile.avatar in src/types.ts.
+  avatar: string | null;
+  // Who is on the hook for it. Added 2026-08-06-handoffs.sql. Nullable on every
+  // table that has it -- unclaimed is the default and the common case.
+  assigned_to: string | null;
 };
 
 export type ProxyRow = {
@@ -83,6 +166,7 @@ export type ProxyRow = {
   created_at: string;
   last_country_code: string | null;
   last_error: string | null;
+  assigned_to: string | null;
 };
 
 export type FolderRow = {
@@ -123,6 +207,7 @@ export type CookieSetRow = {
   // to an empty tag list rather than to undefined behaviour.
   tags: string[] | null;
   deleted_at: string | null;
+  assigned_to: string | null;
 };
 
 // Primary key is (org_id, id), not (id): addExtensionFromWebStoreLink uses the
@@ -172,12 +257,62 @@ export type AutomationRow = {
   description: string | null;
   steps: unknown[];
   variables: Record<string, unknown> | null;
+  tags: string[] | null;
   pinned: boolean | null;
   timeout_ms: number | null;
   close_on_finish: boolean | null;
+  // "Tell me when this finishes." notify_on is 'always' | 'failure' | null,
+  // null meaning the automation does not notify. notify_connector_id names a
+  // message connector, or null for delivery to Argus alone (the bell and a
+  // desktop notification); deliberately no FK -- see the migration.
+  notify_connector_id: string | null;
+  notify_on: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  assigned_to: string | null;
+};
+
+// An outside service automations talk to: an AI endpoint or a messaging
+// target, told apart by `category`. Org-scoped, owner-writable, member-
+// readable -- `config` (credentials included) selected in full, which is what
+// lets a teammate run a shared workflow. See
+// supabase/migrations/20260805201923_connectors.sql.
+export type ConnectorRow = {
+  id: string;
+  org_id: string;
+  name: string;
+  category: string;
+  kind: string;
+  config: Record<string, unknown> | null;
+  is_default: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// One "a run finished" row for the whole org -- the bell's second kind, next
+// to handoffs. `status` is copied off the run record, never recomputed.
+export type NotificationRow = {
+  id: string;
+  org_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  status: string | null;
+  automation_id: string | null;
+  run_id: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+// Per-user read state for the table above, insert-only -- a row per
+// (notification, person) rather than an array column, so marking one read is
+// an insert that cannot lose a concurrent one.
+export type NotificationReadRow = {
+  notification_id: string;
+  user_id: string;
+  read_at: string;
 };
 
 // One execution. Inserted when the run starts and updated when it ends, so an

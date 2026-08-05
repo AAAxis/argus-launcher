@@ -5,6 +5,7 @@
 import {useMemo, useState} from 'react';
 import {FolderInput, SearchX} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
+import {Checkbox} from '../ui/Checkbox';
 import {Modal} from '../ui/Modal';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {TagCell} from '../ui/TagChip';
@@ -88,10 +89,9 @@ export function MoveCookieSetsModal({folder, onClose}: {
           const from = state.cookie_folders.find((item) => item.id === cookie.folder_id);
           return (
             <label className="move-profiles-row" key={cookie.id}>
-              <input
+              <Checkbox
                 checked={picked.includes(cookie.id)}
                 onChange={() => toggle(cookie.id)}
-                type="checkbox"
               />
               <span className="move-profiles-name">{cookie.name}</span>
               <TagCell tags={cookie.tags} />

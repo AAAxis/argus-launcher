@@ -11,7 +11,7 @@ import type {CookieSetRow} from './rows';
 // them on every load, which useCloudData repeats on each window focus. This
 // list is metadata; loadPayload fetches a body, one set at a time.
 const COLUMNS =
-  'id,org_id,name,updated_at,created_at,source_url,count,folder_id,tags,deleted_at';
+  'id,org_id,name,updated_at,created_at,source_url,count,folder_id,tags,deleted_at,assigned_to';
 
 // Trashed sets come back too, exactly as profiles.list returns soft-deleted
 // profiles: Trash is a view the tab filters into, not a second read.
@@ -160,6 +160,25 @@ export async function purge(orgId: string, ids: string[]): Promise<void> {
       .eq('org_id', orgId)
       .in('id', ids);
   raise(error, 'cookieSets.purge');
+}
+
+// Empty Trash. Mirrors profiles.purgeAll exactly, including why it is scoped by
+// deleted_at rather than by an id list: that is what makes it safe to offer with
+// nothing selected, and it also catches anything trashed elsewhere while the
+// dialog was open.
+export async function purgeAll(orgId: string): Promise<string[]> {
+  const client = optionalClient();
+  if (!client) {
+    return [];
+  }
+  const {data, error} = await client
+      .from('cookie_sets')
+      .delete()
+      .eq('org_id', orgId)
+      .not('deleted_at', 'is', null)
+      .select('id');
+  raise(error, 'cookieSets.purgeAll');
+  return ((data || []) as Array<{id: string}>).map((row) => row.id);
 }
 
 // The 30-day Trash expiry, as one statement. Returns the ids it removed so the
