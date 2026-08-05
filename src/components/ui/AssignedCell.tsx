@@ -18,8 +18,7 @@
 //
 // Lives here rather than in a tab because both tables ask exactly the same
 // question and a second copy would drift.
-import {initials} from '../../lib/text';
-import {profileColorStyle} from '../../lib/profileColors';
+import {ProfileAvatar} from './ProfileAvatar';
 import type {ArgusProfile} from '../../types';
 
 // Four avatars is about what fits before the column starts competing with the
@@ -39,9 +38,7 @@ export function AssignedCell({holders, emptyLabel = 'Not assigned'}: {
     <span className="assigned-cell" title={holders.map((profile) => profile.name).join(', ')}>
       {shown.map((profile) => (
         <span className="assigned-holder" key={profile.id}>
-          <span className="avatar avatar-sm" style={profileColorStyle(profile.color)}>
-            {initials(profile.name)}
-          </span>
+          <ProfileAvatar profile={profile} small />
           <span className="assigned-holder-name">{profile.name}</span>
         </span>
       ))}

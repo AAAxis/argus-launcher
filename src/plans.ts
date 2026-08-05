@@ -14,13 +14,21 @@ export type PlanInfo = {
   key: PlanKey;
   label: string;
   priceMonthly: number;
+  // Marketing copy only, for "upgrade to get N seats" wording. The number that
+  // decides anything is organizations.seat_limit, set by
+  // apply_plan_entitlements and enforced by trg_seat_limit -- src/team/limit.ts
+  // reads that and never this, precisely so a stale mirror cannot gate a
+  // feature.
+  seats: number;
 };
 
 export const PLANS: Record<PlanKey, PlanInfo> = {
-  free: {key: 'free', label: 'Free', priceMonthly: 0},
-  base: {key: 'base', label: 'Base', priceMonthly: 89},
-  pro: {key: 'pro', label: 'Team', priceMonthly: 159},
-  team: {key: 'team', label: 'Enterprise', priceMonthly: 299},
+  free: {key: 'free', label: 'Free', priceMonthly: 0, seats: 1},
+  // One seat, deliberately: teams are what the next tier up buys, so a Base
+  // workspace gets the Team tab's upsell rather than a roster of one.
+  base: {key: 'base', label: 'Base', priceMonthly: 89, seats: 1},
+  pro: {key: 'pro', label: 'Team', priceMonthly: 159, seats: 10},
+  team: {key: 'team', label: 'Enterprise', priceMonthly: 299, seats: 25},
 };
 
 export function isPlanKey(value: unknown): value is PlanKey {

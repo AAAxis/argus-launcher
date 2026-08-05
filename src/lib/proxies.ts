@@ -38,26 +38,27 @@ export function proxyOptionLabel(proxy: ArgusProxy) {
   return `${name} · ${type} · ${proxy.host}:${port}`;
 }
 
-// Parses the "<type>://<host>:<port>:<username>:<password>" connection string
-// the browser/inventory tooling embeds in proxy_name (see argus-browser's CSV
-// fix-up), e.g. "socks5://45.192.39.37:63947:Evd8sDYf:pr1Ywfsh".
-export function parseProxyConnectionString(raw: string): {
-  type: 'http' | 'socks5';
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-} | null {
-  const match = /^(http|socks5):\/\/([^:]+):(\d+):([^:]*):(.*)$/.exec(raw.trim());
-  if (!match) {
-    return null;
-  }
-  const [, type, host, port, username, password] = match;
-  return {type: type as 'http' | 'socks5', host, port: Number(port), username, password};
-}
+// There used to be a second, stricter parser here -- parseProxyConnectionString,
+// an anchored /^(http|socks5):\/\/([^:]+):(\d+):([^:]*):(.*)$/ used by the
+// profile CSV importer alone. It required all five groups, so a perfectly good
+// "socks5://204.252.87.159:47403" was rejected for having no trailing
+// ":user:pass", which is exactly what this app's own profile export wrote. Two
+// parsers meant the proxy-list importer could advertise "203.0.113.20:8080" in
+// its example while the profile importer refused the same string. There is now
+// one: parseProxyLink, below.
 
 export function proxyDedupeKey(type: string, host: string, port: number, username: string) {
   return [type, host, port, username].join('|').toLowerCase();
+}
+
+// Every key an existing proxy should be found under. Normally one -- but a
+// proxy saved before `type` was a field has no type, and keying it as 'http'
+// (the old fallback) meant a CSV row saying socks5://same-host:same-port never
+// matched it and imported a duplicate instead. An untyped record answers to
+// both, and the import fills the type in rather than creating a second row.
+export function proxyDedupeKeys(proxy: Pick<ArgusProxy, 'type' | 'host' | 'port' | 'username'>) {
+  const types = proxy.type ? [proxy.type] : ['http', 'socks5'];
+  return types.map((type) => proxyDedupeKey(type, proxy.host, proxy.port, proxy.username || ''));
 }
 
 // Accepts either a real URL (http://user:pass@host:port, socks5://...) or the
@@ -75,7 +76,12 @@ export function parseProxyLink(value: string): Omit<ArgusProxy, 'id' | 'name'> |
     const type = protocol.startsWith('http') ? 'http' : 'socks5';
     const port = Number(url.port);
     if (!url.hostname || !Number.isInteger(port) || port < 1 || port > 65535) {
-      return null;
+      // Not a usable URL, but that does not make it unusable -- and it used to
+      // end here. "socks5://host:port:user:p@ss" parses *successfully* as a
+      // URL, because the @ makes everything before it userinfo and leaves "ss"
+      // as the hostname; the port then comes out empty and the whole line was
+      // rejected. Any @ in a password did this, which is most of them.
+      return fromShorthand(trimmed);
     }
     return {
       type,
@@ -87,43 +93,48 @@ export function parseProxyLink(value: string): Omit<ArgusProxy, 'id' | 'name'> |
   } catch {
     // "socks5://host:port:user:pass" lands here rather than in the URL branch
     // above -- ":1080:user:pass" is not a valid URL port, so the parse throws.
-    // Flattening "://" to ":" makes it the same shape as the bare shorthand;
-    // without this the leading "//" stayed glued to the host and every such
-    // line imported a hostname curl could not resolve.
-    const flat = trimmed.replace(/^([a-z][a-z0-9+.-]*):\/\//i, '$1:');
-    // Empty segments are kept (no filter(Boolean)): dropping them silently
-    // shifted a password into the username slot for "host:port::pass".
-    const parts = flat.split(':').map((part) => part.trim());
-    const first = parts[0]?.toLowerCase();
-    const hasTypePrefix = first === 'http' || first === 'https' ||
-      first === 'socks' || first === 'socks5';
-    const type = hasTypePrefix && first?.startsWith('http') ? 'http' : 'socks5';
-    const rest = hasTypePrefix ? parts.slice(1) : parts;
-    // host:port:user:pass, the order every vendor list uses.
-    if (rest[0] && isPort(rest[1])) {
-      return {
-        type,
-        host: rest[0],
-        port: Number(rest[1]),
-        username: rest[2] || undefined,
-        password: rest[3] || undefined,
-      };
-    }
-    // user:pass:host:port -- the other order in circulation, and the reason
-    // this does not simply read slots 0 and 1. Only accepted when the third
-    // segment actually looks like a host and the fourth like a port, so a
-    // password that happens to be numeric cannot turn a line inside out.
-    if (rest.length === 4 && looksLikeProxyHost(rest[2]) && isPort(rest[3])) {
-      return {
-        type,
-        host: rest[2],
-        port: Number(rest[3]),
-        username: rest[0] || undefined,
-        password: rest[1] || undefined,
-      };
-    }
-    return null;
+    return fromShorthand(trimmed);
   }
+}
+
+// The colon-delimited vendor shorthand, with or without a scheme in front.
+function fromShorthand(trimmed: string): Omit<ArgusProxy, 'id' | 'name'> | null {
+  // Flattening "://" to ":" makes a scheme-prefixed line the same shape as
+  // the bare shorthand; without this the leading "//" stayed glued to the
+  // host and every such line imported a hostname curl could not resolve.
+  const flat = trimmed.replace(/^([a-z][a-z0-9+.-]*):\/\//i, '$1:');
+  // Empty segments are kept (no filter(Boolean)): dropping them silently
+  // shifted a password into the username slot for "host:port::pass".
+  const parts = flat.split(':').map((part) => part.trim());
+  const first = parts[0]?.toLowerCase();
+  const hasTypePrefix = first === 'http' || first === 'https' ||
+    first === 'socks' || first === 'socks5';
+  const type = hasTypePrefix && first?.startsWith('http') ? 'http' : 'socks5';
+  const rest = hasTypePrefix ? parts.slice(1) : parts;
+  // host:port:user:pass, the order every vendor list uses.
+  if (rest[0] && isPort(rest[1])) {
+    return {
+      type,
+      host: rest[0],
+      port: Number(rest[1]),
+      username: rest[2] || undefined,
+      password: rest[3] || undefined,
+    };
+  }
+  // user:pass:host:port -- the other order in circulation, and the reason
+  // this does not simply read slots 0 and 1. Only accepted when the third
+  // segment actually looks like a host and the fourth like a port, so a
+  // password that happens to be numeric cannot turn a line inside out.
+  if (rest.length === 4 && looksLikeProxyHost(rest[2]) && isPort(rest[3])) {
+    return {
+      type,
+      host: rest[2],
+      port: Number(rest[3]),
+      username: rest[0] || undefined,
+      password: rest[1] || undefined,
+    };
+  }
+  return null;
 }
 
 function isPort(value: string | undefined) {
@@ -184,8 +195,7 @@ export function defaultProxyName(host: string, port: number) {
 // "host:port:user:pass" that vendors hand out, the "socks5://..." URL form,
 // and a "type:host:port:user:pass" prefix.
 export function parseProxyList(content: string, existing: ArgusProxy[]): ParsedProxyLine[] {
-  const seen = new Set(existing.map((proxy) =>
-    proxyDedupeKey(proxy.type || 'http', proxy.host, proxy.port, proxy.username || '')));
+  const seen = new Set(existing.flatMap(proxyDedupeKeys));
   const results: ParsedProxyLine[] = [];
   content.split(/\r?\n/).forEach((rawLine, index) => {
     const raw = rawLine.trim();

@@ -15,7 +15,9 @@ import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
 
 const require = createRequire(import.meta.url);
-const {createRunTokens, handleRunFromPage} = require('../electron/automation/run-token.cjs');
+const {
+  createRunTokens, handleRecheckFromPage, handleRunFromPage,
+} = require('../electron/automation/run-token.cjs');
 
 const PORT = 38998;
 const results = [];
@@ -34,25 +36,45 @@ let clockOffset = 0;
 const tokens = createRunTokens({now: () => Date.now() + clockOffset});
 
 let started = 0;
-const server = createServer((req, res) => handleRunFromPage({
-  req,
-  res,
-  tokens,
-  sendJson,
-  startRun: async () => {
-    started += 1;
-    return `run_${started}`;
-  },
-}));
+// Both page routes on one server, told apart by path exactly as main.cjs does.
+const rechecked = [];
+const server = createServer((req, res) => {
+  if (req.url === '/recheck') {
+    handleRecheckFromPage({
+      req,
+      res,
+      tokens,
+      sendJson,
+      recheck: async (entry) => {
+        rechecked.push(entry.profileId);
+        return {proxyOk: true, title: 'Anti-detect proxy active', detail: '1.2.3.4:80 · US · 90ms'};
+      },
+    });
+    return;
+  }
+  handleRunFromPage({
+    req,
+    res,
+    tokens,
+    sendJson,
+    startRun: async () => {
+      started += 1;
+      return `run_${started}`;
+    },
+  });
+});
 
-async function post(body, headers = {'Content-Type': 'application/json'}) {
-  const response = await fetch(`http://127.0.0.1:${PORT}/`, {
+async function post(body, headers = {'Content-Type': 'application/json'}, path = '/') {
+  const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
   return {status: response.status, text: await response.text()};
 }
+
+const postRecheck = (body, headers) =>
+  post(body, headers || {'Content-Type': 'application/json'}, '/recheck');
 
 await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve));
 
@@ -81,12 +103,57 @@ check('a body carrying its own steps cannot inject them',
 check('non-JSON content type refused (blocks a cross-origin form POST)',
     formPost.status === 403);
 
+// ── The re-check route ───────────────────────────────────────────────────────
+// Same credential, second power: re-check the profile's assigned proxy. It has
+// to hold the same properties as the run route, and one more of its own -- the
+// profile is taken off the token's entry, so a caller cannot aim it.
+//
+// Its own token, on its own profile, so these requests do not eat the run
+// token's 10-per-minute budget and change what the checks above measure.
+const pageToken = tokens.mint({
+  profileId: 'p9',
+  profileName: 'Page',
+  // Null, as on a launch with nothing pinned and nothing attached: no debugging
+  // port was reserved, and the token exists purely so the page can re-check.
+  cdpPort: null,
+  automations: [],
+});
+
+const recheckOk = await postRecheck({runToken: pageToken});
+check('a valid token re-checks its own proxy',
+    recheckOk.status === 200 && rechecked.length === 1, recheckOk.text);
+check('the profile comes off the token, not the request',
+    rechecked[0] === 'p9',
+    'the body carries nothing but the token, so there is no id to aim');
+
+// A token minted with no automations can re-check and nothing else -- this is
+// what every ordinary launch now carries.
+const runWithPageToken = await post({runToken: pageToken, automationId: 'a1'});
+check('a re-check-only token cannot run anything',
+    runWithPageToken.status === 403 && started === 2, runWithPageToken.text);
+check('and it refuses byte-identically to an unknown token',
+    runWithPageToken.text === unknown.text);
+
+const recheckUnknown = await postRecheck({runToken: 'f'.repeat(64)});
+const recheckForm = await postRecheck({runToken: pageToken},
+    {'Content-Type': 'application/x-www-form-urlencoded'});
+check('unknown token refused on the re-check route', recheckUnknown.status === 403);
+check('re-check refusals are byte-identical to the run route\'s (not an oracle)',
+    recheckUnknown.status === unknown.status && recheckUnknown.text === unknown.text,
+    recheckUnknown.text);
+check('non-JSON content type refused on the re-check route too',
+    recheckForm.status === 403);
+check('a refused re-check never reaches the checker', rechecked.length === 1);
+
 // Expiry, via the injected clock rather than a 12-hour wait.
 clockOffset = 13 * 60 * 60 * 1000;
 const expired = await post({runToken: token, automationId: 'a1'});
+const expiredRecheck = await postRecheck({runToken: pageToken});
 check('expired token refused', expired.status === 403);
 check('expired and unknown are byte-identical (not an oracle)',
     expired.status === unknown.status && expired.text === unknown.text);
+check('the TTL covers the re-check route as well',
+    expiredRecheck.status === 403 && rechecked.length === 1);
 
 // A fresh store, so the earlier requests do not count toward the limit.
 const fresh = createRunTokens();

@@ -93,6 +93,14 @@ on public.cookie_sets (org_id, deleted_at);
 alter table public.shared_extensions
 add column if not exists enabled boolean not null default true;
 
+-- ── 2026-08-05, profile avatar ────────────────────────────────────────────
+-- profiles.avatar -- what the Name column draws instead of the initials plate.
+-- A tagged union in one text column, same shape as folders.icon: `brand:<slug>`
+-- for a TAG_PRESETS brand mark, an https URL for an uploaded or pasted picture,
+-- null for the initials. Anything unrecognized downgrades to the initials.
+alter table public.profiles
+add column if not exists avatar text;
+
 -- ── 2026-08-05, automations ───────────────────────────────────────────────
 -- NOT INLINED HERE. Run 2026-08-05-automations.sql next, as its own paste.
 --
@@ -105,17 +113,48 @@ add column if not exists enabled boolean not null default true;
 -- Run it after this file: profiles.automation_id references automations(id),
 -- so the table has to exist first.
 
+-- ── 2026-08-05, the two automations follow-ups ────────────────────────────
+-- ALSO NOT INLINED HERE, and both run *after* 2026-08-05-automations.sql --
+-- each touches something that file creates. In order:
+--
+--   1. 2026-08-05-automation-tags.sql
+--      Adds automations.tags. Load-bearing, not cosmetic: src/db/automations.ts
+--      names every column in its select, so without this column that table's
+--      whole read fails, and useCloudData's Promise.allSettled turns it into
+--      "my automations are gone" rather than an error pointing here. Apply it
+--      before shipping a build that reads it.
+--
+--   2. 2026-08-05-free-tier-two-automations.sql
+--      Moves organizations.automation_limit off 0 for free/starter, so the
+--      feature is visible without paying. Read its header before running --
+--      it flags that 'base' appears in the original 0-mapping while the site
+--      sells it as a paid tier, and asks you to confirm the live key set
+--      first.
+--
+--   3. 2026-08-05-teams.sql
+--      org_invites, the three membership RPCs, created_by defaults, and the
+--      apply_plan_entitlements function the website has always called and
+--      never had. Deliberately NOT folded into this file: it opens with a
+--      `drop table public.org_invites`, which would break the promise at the
+--      top of this one that every statement here is a no-op on a second run.
+--      Read its header before running -- it asks you to confirm org_invites
+--      is still empty first, and it flags that applying it to the one live
+--      org (plan 'team', seat_limit set by hand to 10) re-maps that org to 25
+--      seats.
+--
+-- All three are safe to re-run EXCEPT the org_invites drop in (3); see above.
+
 -- ── Check it worked ───────────────────────────────────────────────────────
--- Expect ten rows: cookie_sets.deleted_at, cookie_sets.folder_id,
+-- Expect eleven rows: cookie_sets.deleted_at, cookie_sets.folder_id,
 -- cookie_sets.tags, folders.color, folders.icon, folders.kind,
--- profiles.email, profiles.password, proxies.folder_id,
+-- profiles.avatar, profiles.email, profiles.password, proxies.folder_id,
 -- shared_extensions.enabled.
 select table_name, column_name
 from information_schema.columns
 where table_schema = 'public'
   and (
     (table_name = 'folders' and column_name in ('icon', 'color', 'kind')) or
-    (table_name = 'profiles' and column_name in ('email', 'password')) or
+    (table_name = 'profiles' and column_name in ('avatar', 'email', 'password')) or
     (table_name = 'proxies' and column_name = 'folder_id') or
     (table_name = 'cookie_sets' and column_name in ('folder_id', 'tags', 'deleted_at')) or
     (table_name = 'shared_extensions' and column_name = 'enabled')

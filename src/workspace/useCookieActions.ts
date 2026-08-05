@@ -240,6 +240,31 @@ export function useCookieActions({data, toast}: WorkspaceCore) {
     return true;
   }
 
+  // Empty Trash for cookie-sets.
+  //
+  // The referencing-profile cleanup is the same one purge() does and for the same
+  // reason -- the FK nulls cookie_set_id but nothing puts those profiles back
+  // into 'paste' mode. The ids come from the returned rows rather than from local
+  // state, so a set trashed on another device is cleaned up too rather than
+  // leaving a profile pointing at a cookie mode it no longer has a set for.
+  async function purgeAll(): Promise<boolean> {
+    let purgedIds: string[] = [];
+    const ok = await withDb(async (activeOrgId) => {
+      purgedIds = await db.cookieSets.purgeAll(activeOrgId);
+      const referencing = state.profiles.filter(
+          (profile) => profile.cookie_id && purgedIds.includes(profile.cookie_id));
+      for (const profile of referencing) {
+        await db.profiles.update(activeOrgId, profile.id, NO_COOKIES);
+      }
+    });
+    if (!ok) {
+      return false;
+    }
+    patch.cookies((list) => list.filter((cookie) => !cookie.deleted_at));
+    unassignLocally(purgedIds);
+    return true;
+  }
+
   // ---- assignment ------------------------------------------------------
 
   // The whole assignment for one set, as a set difference: profiles in
@@ -434,6 +459,7 @@ export function useCookieActions({data, toast}: WorkspaceCore) {
     softDelete,
     restore,
     purge,
+    purgeAll,
     assignToProfiles,
     loadEntries,
     saveEntries,

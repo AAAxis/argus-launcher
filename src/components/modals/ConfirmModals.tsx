@@ -136,6 +136,160 @@ export function ProxyDeleteModal({request, onClose, onDeleted}: {
   );
 }
 
+// Permanent deletion out of Trash: one profile, the selected ones, or the whole
+// bin.
+//
+// The three of these were raw window.confirm() calls, while the *soft* delete --
+// the reversible one -- got the styled dialog above with its "I understand"
+// checkbox. That was backwards: the irreversible action was the one you could
+// dismiss with a stray Return keypress, and a native confirm cannot say what
+// "forever" costs here (the on-disk browser directory, cookies and logged-in
+// sessions all go with it).
+export type PurgeRequest = {
+  // The rows to purge, or empty for "everything in Trash" -- which is counted
+  // rather than listed, because Empty Trash deliberately does not require
+  // selecting anything first.
+  ids: string[];
+  count: number;
+  label: string;
+};
+
+export function PurgeProfilesModal({request, onClose, onPurged}: {
+  request: PurgeRequest;
+  onClose: () => void;
+  onPurged: () => void;
+}) {
+  const {toast, profiles} = useWorkspace();
+  const {run, isPending} = useAsyncAction();
+  const [acknowledged, setAcknowledged] = useState(false);
+  const {ids, count, label} = request;
+  const emptyingAll = ids.length === 0;
+
+  async function confirm() {
+    // purgeAll rather than purge(everyId): the delete is one statement scoped by
+    // deleted_at, so a profile someone else trashed while this dialog was open
+    // goes too instead of being missed by an id list built before it existed.
+    const ok = emptyingAll ? await profiles.purgeAll() : await profiles.purge(ids);
+    if (!ok) {
+      return;
+    }
+    onPurged();
+    toast.setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} permanently deleted`);
+  }
+
+  return (
+    <Modal
+      className="small-modal"
+      onClose={onClose}
+      title={emptyingAll ? 'Empty Trash?' : `Permanently delete ${label}?`}
+      footer={
+        <>
+          <button className="ghost" onClick={onClose}>Cancel</button>
+          <BusyButton
+            className="danger"
+            busy={isPending('purge-profiles')}
+            busyLabel="Deleting…"
+            disabled={!acknowledged}
+            icon={<Trash2 size={16} />}
+            onClick={() => void run('purge-profiles', confirm)}
+          >
+            Delete forever
+          </BusyButton>
+        </>
+      }
+    >
+      <p className="error-detail">
+        {emptyingAll ?
+          `This permanently deletes all ${count} ${count === 1 ? 'profile' : 'profiles'} in Trash.` :
+          `This permanently deletes ${count === 1 ? 'this profile' : `these ${count} profiles`}.`}
+        {' '}
+        Cookies, saved logins and the browser data on disk go with
+        {count === 1 ? ' it' : ' them'}, and there is no way to get
+        {count === 1 ? ' it' : ' them'} back.
+      </p>
+      <label className="checkbox-confirm">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(event) => setAcknowledged(event.target.checked)}
+        />
+        <span>I understand this cannot be undone.</span>
+      </label>
+    </Modal>
+  );
+}
+
+// The cookie-set twin of PurgeProfilesModal. Separate rather than generalised for
+// the reason the two Move dialogs are separate: the consequence differs (a purged
+// set drops the profiles using it back to no cookies at all), and a props union
+// covering both would read worse than either.
+export function PurgeCookieSetsModal({request, onClose, onPurged}: {
+  request: PurgeRequest;
+  onClose: () => void;
+  onPurged: () => void;
+}) {
+  const {toast, cookies, data} = useWorkspace();
+  const {run, isPending} = useAsyncAction();
+  const [acknowledged, setAcknowledged] = useState(false);
+  const {ids: setIds, count, label} = request;
+  const emptyingAll = setIds.length === 0;
+
+  // Only profiles that are not themselves trashed: a trashed profile cannot
+  // launch, so telling the user it is about to lose its cookies is noise.
+  const affected = data.state.profiles.filter((profile) =>
+    !profile.deleted_at && profile.cookie_id &&
+    (emptyingAll ?
+      data.state.cookies.some((set) => set.id === profile.cookie_id && set.deleted_at) :
+      setIds.includes(profile.cookie_id))).length;
+
+  async function confirm() {
+    const ok = emptyingAll ? await cookies.purgeAll() : await cookies.purge(setIds);
+    if (!ok) {
+      return;
+    }
+    onPurged();
+    toast.setMessage(`${count} ${count === 1 ? 'cookie-set' : 'cookie-sets'} permanently deleted`);
+  }
+
+  return (
+    <Modal
+      className="small-modal"
+      onClose={onClose}
+      title={emptyingAll ? 'Empty cookie-set Trash?' : `Permanently delete ${label}?`}
+      footer={
+        <>
+          <button className="ghost" onClick={onClose}>Cancel</button>
+          <BusyButton
+            className="danger"
+            busy={isPending('purge-cookie-sets')}
+            busyLabel="Deleting…"
+            disabled={!acknowledged}
+            icon={<Trash2 size={16} />}
+            onClick={() => void run('purge-cookie-sets', confirm)}
+          >
+            Delete forever
+          </BusyButton>
+        </>
+      }
+    >
+      <p className="error-detail">
+        {emptyingAll ?
+          `This permanently deletes all ${count} ${count === 1 ? 'cookie-set' : 'cookie-sets'} in Trash, and the cookie files behind them.` :
+          `This permanently deletes ${count === 1 ? 'this cookie-set' : `these ${count} cookie-sets`}, and the cookie ${count === 1 ? 'file' : 'files'} behind ${count === 1 ? 'it' : 'them'}.`}
+        {affected > 0 && ` ${affected} ${affected === 1 ? 'profile that uses one will launch' : 'profiles that use one will launch'} with no cookies.`}
+      </p>
+      <label className="checkbox-confirm">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(event) => setAcknowledged(event.target.checked)}
+        />
+        <span>I understand this cannot be undone.</span>
+      </label>
+    </Modal>
+  );
+}
+
 export function ErrorModal({dialog, onClose}: {dialog: ErrorDialog; onClose: () => void}) {
   return (
     <Modal

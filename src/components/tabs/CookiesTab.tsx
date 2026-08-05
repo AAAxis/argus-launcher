@@ -1,7 +1,10 @@
-// The cookie-set library, laid out as the Profiles tab is: a filter toolbar, a
-// selection toolbar that appears when rows are ticked, the folder rail, the
-// table, and the pager. Deliberately the same order and the same class names --
-// two tabs that do the same kind of work should not need to be learned twice.
+// The cookie-set library, laid out as the Profiles tab is: a filter toolbar, the
+// folder rail, a selection toolbar that appears when rows are ticked, the table,
+// and the pager. Deliberately the same order and the same class names -- two tabs
+// that do the same kind of work should not need to be learned twice.
+//
+// The selection toolbar sits *under* the folder rail because it appears and
+// disappears: above it, every tick and untick moved the folder navigation.
 import {useState} from 'react';
 import {
   BookOpen, Copy, Cookie, FolderInput, FolderPlus, Pencil, SearchX, Trash2, UserPlus,
@@ -9,9 +12,12 @@ import {
 import {MoveCookieSetsModal} from '../modals/MoveCookieSetsModal';
 import {AssignedCell} from '../ui/AssignedCell';
 import {BusyButton} from '../ui/BusyButton';
+import {PurgeCookieSetsModal} from '../modals/ConfirmModals';
+import {Checkbox} from '../ui/Checkbox';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
+import {SortableTh} from '../ui/SortableTh';
 import {TagCell} from '../ui/TagChip';
 import {daysUntilPurge, TRASH_FOLDER_ID} from '../../lib/trash';
 import {formatDateShort} from '../../lib/text';
@@ -20,7 +26,9 @@ import {profileColorStyle} from '../../lib/profileColors';
 import {tagKey, tagLabel} from '../../lib/tags';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useSelection} from '../../hooks/useSelection';
+import {useTableSort} from '../../hooks/useTableSort';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {PurgeRequest} from '../modals/ConfirmModals';
 import type {ArgusCookie, ArgusFolder} from '../../types';
 
 // Whether a set is attached to anything. Its own filter rather than a column
@@ -63,12 +71,29 @@ export function CookiesTab({
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [moveOpen, setMoveOpen] = useState(false);
+  // The pending permanent delete, shared by the row button, the bulk button and
+  // Empty Trash -- one dialog, three ways in.
+  const [purge, setPurge] = useState<PurgeRequest | null>(null);
 
   const inTrash = folderId === TRASH_FOLDER_ID;
   const filtered = Boolean(search.trim() || tagFilter || usageFilter);
   const usage = cookies.usageCounts();
-  const visible = visibleCookieSets(
-      state.cookies, {folderId, tagFilter, usageFilter, search}, usage);
+
+  // Cookies and Used by are counts, so they open descending -- "which set has
+  // the most in it" and "what is everything leaning on" are the questions those
+  // columns get asked. A set nobody uses has no count at all rather than a
+  // zero, which keeps the unused ones out of the way of both.
+  const sorting = useTableSort<ArgusCookie>([
+    {key: 'name', value: (cookie) => cookie.name},
+    {key: 'count', value: (cookie) => cookie.count, firstDirection: 'desc'},
+    {key: 'used', value: (cookie) => usage.get(cookie.id) || undefined, firstDirection: 'desc'},
+    {key: 'folder', value: (cookie) =>
+      state.cookie_folders.find((folder) => folder.id === cookie.folder_id)?.name},
+    {key: 'updated', value: (cookie) => cookie.updated_at, firstDirection: 'desc'},
+  ], {onSortChange: () => setPage(0)});
+
+  const visible = sorting.sort(visibleCookieSets(
+      state.cookies, {folderId, tagFilter, usageFilter, search}, usage));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
   const activeFolder = inTrash ? null :
@@ -124,14 +149,20 @@ export function CookiesTab({
     }
   }
 
-  async function purgeSets(ids: string[], label: string) {
-    if (!window.confirm(`Permanently delete ${label}? This cannot be undone.`)) {
+  // The styled dialog rather than a window.confirm, matching the Profiles tab:
+  // this is the irreversible delete, so it is the one that should be hard to
+  // dismiss by accident and the one that says what it costs.
+  function purgeSets(ids: string[], label: string) {
+    setPurge({ids, count: ids.length, label});
+  }
+
+  // No ids: scoped by deleted_at server-side, which is what makes it safe with
+  // nothing selected. See db/cookieSets.purgeAll.
+  function emptyTrash() {
+    if (!trashCount) {
       return;
     }
-    if (await cookies.purge(ids)) {
-      toast.setMessage(`Deleted ${label}`);
-      selection.clear();
-    }
+    setPurge({ids: [], count: trashCount, label: 'everything in Trash'});
   }
 
   async function duplicateOne(cookie: ArgusCookie) {
@@ -208,76 +239,14 @@ export function CookiesTab({
           <option value="used">In use</option>
           <option value="unused">Unused</option>
         </select>
+        {/* In the toolbar, not the selection bar: the point is that it needs no
+          * selection. Same placement as the Profiles tab's. */}
+        {inTrash && trashCount > 0 && (
+          <button className="danger ghost" onClick={emptyTrash}>
+            <Trash2 size={16} /> Empty Trash ({trashCount})
+          </button>
+        )}
       </section>
-
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            {inTrash ? (
-              <>
-                <button
-                  className="ghost"
-                  onClick={() => void restoreSets([...selection.ids], selectionLabel(selection.size))}
-                >
-                  Restore selected
-                </button>
-                <button
-                  className="danger ghost"
-                  onClick={() => void purgeSets([...selection.ids], selectionLabel(selection.size))}
-                >
-                  <Trash2 size={16} /> Delete forever
-                </button>
-              </>
-            ) : (
-              <>
-                <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
-                  <option value="" disabled>Assign to folder…</option>
-                  <option value="">All cookie-sets</option>
-                  {state.cookie_folders.map((folder) => (
-                    <option key={folder.id} value={folder.id}>{folder.name}</option>
-                  ))}
-                </select>
-                {/* One set at a time, because a profile carries exactly one:
-                  * assigning three sets to one profile has no meaning, and
-                  * silently letting the last one win would be worse. */}
-                <button
-                  className="ghost"
-                  disabled={selection.size !== 1}
-                  onClick={() => {
-                    const picked = selection.selectedFrom(state.cookies)[0];
-                    if (picked) {
-                      onAssignCookieSet(picked);
-                    }
-                  }}
-                  title={selection.size === 1 ?
-                    'Choose which profiles use this cookie-set' :
-                    'Select exactly one cookie-set: a profile carries one at a time'}
-                >
-                  <UserPlus size={16} /> Assign to profiles
-                </button>
-                <select
-                  value=""
-                  onChange={(event) => {
-                    const format = event.target.value as 'json' | 'netscape';
-                    void run('export', () =>
-                      cookies.exportSets(selection.selectedFrom(state.cookies), format));
-                  }}
-                >
-                  <option value="" disabled>Export selected…</option>
-                  <option value="json">As JSON</option>
-                  <option value="netscape">As cookies.txt</option>
-                </select>
-                <button
-                  className="danger ghost"
-                  onClick={() => void trashSets([...selection.ids], selectionLabel(selection.size))}
-                >
-                  <Trash2 size={16} /> Delete selected
-                </button>
-              </>
-            )}
-          </div>
-        </section>
-      )}
 
       <section className="folder-row" aria-label="Folders">
         <button
@@ -350,26 +319,98 @@ export function CookiesTab({
         </button>
       </section>
 
+      {/* Below the folder rail, not above it: ticking a row used to insert this
+        * between the filters and the folders, pushing the folder cards and the
+        * table down by its height. */}
+      {selection.size > 0 && (
+        <section className="selection-toolbar">
+          <div className="selection-toolbar-actions">
+            {inTrash ? (
+              <>
+                <button
+                  className="ghost"
+                  onClick={() => void restoreSets([...selection.ids], selectionLabel(selection.size))}
+                >
+                  Restore selected
+                </button>
+                <button
+                  className="danger ghost"
+                  onClick={() => void purgeSets([...selection.ids], selectionLabel(selection.size))}
+                >
+                  <Trash2 size={16} /> Delete forever
+                </button>
+              </>
+            ) : (
+              <>
+                <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
+                  <option value="" disabled>Assign to folder…</option>
+                  <option value="">All cookie-sets</option>
+                  {state.cookie_folders.map((folder) => (
+                    <option key={folder.id} value={folder.id}>{folder.name}</option>
+                  ))}
+                </select>
+                {/* One set at a time, because a profile carries exactly one:
+                  * assigning three sets to one profile has no meaning, and
+                  * silently letting the last one win would be worse. */}
+                <button
+                  className="ghost"
+                  disabled={selection.size !== 1}
+                  onClick={() => {
+                    const picked = selection.selectedFrom(state.cookies)[0];
+                    if (picked) {
+                      onAssignCookieSet(picked);
+                    }
+                  }}
+                  title={selection.size === 1 ?
+                    'Choose which profiles use this cookie-set' :
+                    'Select exactly one cookie-set: a profile carries one at a time'}
+                >
+                  <UserPlus size={16} /> Assign to profiles
+                </button>
+                <select
+                  value=""
+                  onChange={(event) => {
+                    const format = event.target.value as 'json' | 'netscape';
+                    void run('export', () =>
+                      cookies.exportSets(selection.selectedFrom(state.cookies), format));
+                  }}
+                >
+                  <option value="" disabled>Export selected…</option>
+                  <option value="json">As JSON</option>
+                  <option value="netscape">As cookies.txt</option>
+                </select>
+                <button
+                  className="danger ghost"
+                  onClick={() => void trashSets([...selection.ids], selectionLabel(selection.size))}
+                >
+                  <Trash2 size={16} /> Delete selected
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="table-wrap">
         <table>
           <thead>
             <tr>
               <th>
                 {visible.length > 0 && (
-                  <input
-                    type="checkbox"
-                    aria-label="Select all"
+                  <Checkbox
+                    label={`Select all ${visible.length} cookie-sets on this page`}
                     checked={selection.allSelected(visible)}
+                    indeterminate={visible.some((item) => selection.has(item.id))}
                     onChange={() => selection.toggleAll(visible)}
                   />
                 )}
               </th>
-              <th>Name</th>
-              <th>Cookies</th>
-              <th>Used by</th>
-              <th>Folder</th>
+              <SortableTh label="Name" {...sorting.thProps('name')} />
+              <SortableTh label="Cookies" {...sorting.thProps('count')} />
+              <SortableTh label="Used by" {...sorting.thProps('used')} />
+              <SortableTh label="Folder" {...sorting.thProps('folder')} />
               <th>Tags</th>
-              <th>Updated</th>
+              <SortableTh label="Updated" {...sorting.thProps('updated')} />
               <th />
             </tr>
           </thead>
@@ -391,8 +432,8 @@ export function CookiesTab({
                   onClick={cookie.deleted_at ? undefined : () => onOpenCookieSet(cookie)}
                 >
                   <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      label={`Select ${cookie.name || 'cookie-set'}`}
                       checked={selection.has(cookie.id)}
                       onChange={() => selection.toggle(cookie.id)}
                     />
@@ -537,6 +578,17 @@ export function CookiesTab({
 
       {moveOpen && activeFolder && (
         <MoveCookieSetsModal folder={activeFolder} onClose={() => setMoveOpen(false)} />
+      )}
+
+      {purge && (
+        <PurgeCookieSetsModal
+          request={purge}
+          onClose={() => setPurge(null)}
+          onPurged={() => {
+            setPurge(null);
+            selection.clear();
+          }}
+        />
       )}
     </>
   );

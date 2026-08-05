@@ -63,6 +63,20 @@ export type ArgusProfile = {
   name: string;
   status?: string;
   color?: string;
+  // What the profiles table draws in the Name column instead of the initials
+  // plate. One text column carrying a tagged union, the same shape folders.icon
+  // uses for `flag:US` alongside its FOLDER_ICONS keys:
+  //
+  //   'brand:<slug>'  one of the TAG_PRESETS slugs (src/data/tagPresets.ts),
+  //                   drawn as that brand's own mark
+  //   'https://…'     a picture, uploaded to the `global` bucket or pasted
+  //   undefined       the initials plate, which is what every profile had
+  //                   before this field existed
+  //
+  // Anything else downgrades to the initials plate client-side, so removing a
+  // brand from the catalog costs a profile its logo rather than breaking it.
+  // Parsed in exactly one place: src/lib/profileAvatar.ts.
+  avatar?: string;
   tags?: string[];
   // Login credentials for whatever account this profile is logged into.
   // Stored in plaintext the same way ArgusProxy.password already is -- no
@@ -117,6 +131,15 @@ export type ArgusProfile = {
     rotate_on_launch?: boolean;
   };
   created_at?: string;
+  // Who made this profile, as an auth user id. Resolved to a name through
+  // CloudState.members, which is why the Profiles table only shows the column
+  // once there is more than one member to tell apart.
+  //
+  // Null on every row created before 2026-08-05-teams.sql set the column's
+  // default to auth.uid(): the column existed and was selected all along, but
+  // nothing ever wrote it. Those rows render "—" rather than being backfilled
+  // to the owner, because guessing an author is worse than admitting to none.
+  created_by?: string | null;
   // Soft-delete timestamp (ISO 8601). Set when a profile is moved to Trash;
   // the profile is hidden from the normal profiles list but kept for 30 days
   // (auto-purged on the next app launch after that) so an accidental delete
@@ -267,6 +290,10 @@ export type ArgusAutomation = {
   steps: AutomationStep[];
   // Seed values every run starts with, before any setVar or extract.
   variables?: AutomationVars;
+  // Free text, at most 5, normalized through normalizeTags on every write --
+  // the same contract profiles.tags has, and the same catalog behind the
+  // suggestions, so "facebook" means the same thing on both.
+  tags?: string[];
   // Shows as a tile on every profile's generated start page. Org-wide: the
   // per-profile slot is ArgusProfile.automation_id, and pins are the
   // many-to-many case that would otherwise need a join table.
@@ -337,6 +364,53 @@ export type OrgMembership = {
   role: OrgRole;
 };
 
+// One person on the team, as the roster needs them.
+//
+// This is NOT a row of org_members: that table holds ids and nothing else, and
+// Supabase does not expose auth.users to clients, so a member list built by a
+// join from here would render a column of uuids. The identity fields come from
+// the org_members_with_identity function, which reads auth.users on the
+// server for orgs the caller already belongs to.
+//
+// `display_name` and `avatar_url` are empty strings rather than null when the
+// person has set neither -- the callers fall back to the address and to an
+// initials plate, and one shape means no call site has to handle both.
+export type OrgMember = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  avatar_url: string;
+  role: OrgRole;
+  // When they joined this org, not when the account was created.
+  created_at: string;
+  // Who invited them. Null for the founding owner, who invited nobody.
+  invited_by: string | null;
+};
+
+export type OrgInviteStatus = 'pending' | 'accepted' | 'revoked';
+
+// An offer of a seat that has not been taken yet.
+//
+// Only owners and admins can read these -- every policy on org_invites is
+// is_org_admin, including select -- so this is Team-tab-local state rather than
+// part of CloudState. A member reading the table gets an empty list, not an
+// error, which is exactly the kind of silent nothing that does not belong in
+// the shared workspace cache.
+//
+// `role` is narrower than OrgRole on purpose: you cannot invite an owner.
+export type OrgInvite = {
+  id: string;
+  email: string;
+  role: Exclude<OrgRole, 'owner'>;
+  status: OrgInviteStatus;
+  // The credential. Minted server-side by create_org_invite and shown once, in
+  // the link the admin copies -- there is no email delivery.
+  token: string;
+  expires_at: string;
+  created_at: string;
+  invited_by: string | null;
+};
+
 export type CloudState = {
   profiles: ArgusProfile[];
   // Profile folders only. The proxy ones are held apart rather than mixed in
@@ -360,5 +434,12 @@ export type CloudState = {
   // only the history view wants them, so they are read on demand -- the same
   // reason cookie_sets.list() leaves the `cookies` column out.
   automations: ArgusAutomation[];
+  // Everyone in this org. Here rather than local to the Team tab because the
+  // Profiles table needs it too -- it is what turns profiles.created_by from a
+  // uuid into a name -- and reading it twice for two surfaces would be two
+  // round trips for one small list.
+  //
+  // Pending invites are deliberately NOT here; see OrgInvite.
+  members: OrgMember[];
   built_in_extensions?: BuiltInExtensionToggles;
 };

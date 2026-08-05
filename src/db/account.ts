@@ -116,6 +116,20 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
   'image/gif': 'gif',
 };
 
+// The object-path suffix for a picked image. Exported because profiles.ts
+// uploads avatars too and a second copy of this map would be a second place for
+// "we accept webp" to be answered differently.
+//
+// The browser is the authority on the type, but a file dragged from a share or
+// picked on a system with no mapping arrives with an empty `type`, so the name
+// is the fallback and `png` the last resort -- Storage needs *a* suffix and a
+// wrong one costs a content-type header, not the picture.
+export function imageExtensionFor(file: File): string {
+  return EXTENSION_BY_TYPE[file.type] ||
+    (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') ||
+    'png';
+}
+
 // Uploads to `avatars/<user id>/<timestamp>.<ext>` and records the public URL on
 // the user's metadata, which is what both this app and the website read.
 //
@@ -134,9 +148,7 @@ export async function uploadAvatar(file: File): Promise<User | null> {
   if (!userId) {
     throw new Error('You are not signed in.');
   }
-  const extension = EXTENSION_BY_TYPE[file.type] ||
-    (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
-  const objectPath = `avatars/${userId}/${Date.now()}.${extension}`;
+  const objectPath = `avatars/${userId}/${Date.now()}.${imageExtensionFor(file)}`;
   const {error: uploadError} = await client.storage
       .from(STORAGE_BUCKET)
       .upload(objectPath, file, {contentType: file.type || 'image/png', upsert: true});

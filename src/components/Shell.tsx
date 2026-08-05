@@ -56,10 +56,12 @@ export function Topbar({activeTab, actions}: {activeTab: TabId; actions: ReactNo
   const org = useOrg();
   return (
     <header className="topbar">
-      <div>
-        <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
-        <p>Argus Launcher owns cloud data. Argys Browser starts as a separate anonymous process.</p>
-      </div>
+      {/* The title alone. There used to be a line under it -- "Argus Launcher
+          owns cloud data. Argys Browser starts as a separate anonymous
+          process." -- which was the same sentence on all nine tabs, so it said
+          nothing about the one you were on and was read once and then never
+          again. */}
+      <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
       <div className="actions">
         {/* Only shown when the user is actually in more than one firm --
             the common case is one org, chosen silently. */}

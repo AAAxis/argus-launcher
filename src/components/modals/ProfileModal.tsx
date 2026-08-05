@@ -1,8 +1,9 @@
 import {useState} from 'react';
 import {
   Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
-  Tag, Terminal, Trash2, UserRound, Workflow,
+  Tag, Terminal, Trash2, UserRound, UserRoundCog, Workflow,
 } from 'lucide-react';
+import {AvatarPicker} from '../ui/AvatarPicker';
 import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
@@ -356,6 +357,28 @@ export function ProfileModal({
                   <option value={folder.id} key={folder.id}>{folder.name}</option>
                 ))}
               </select>
+            </Field>
+            {/* Above Colour, because they answer the same question -- how do I
+                find this row again in a table of forty -- and the colour plate
+                is what an empty avatar falls back to. */}
+            <Field
+              label="Avatar"
+              icon={<UserRoundCog size={14} />}
+              hint="A picture or a site's logo, shown beside the name in the profiles list."
+              wide
+              // Same reason as Status and Tags: the buttons and the popover
+              // trigger sit inside this field, and a <label> wrapping them
+              // would fire its implicit activation on the wrong control.
+              group
+            >
+              <AvatarPicker
+                color={draft.color}
+                name={draft.name}
+                onChange={(avatar) => set({avatar})}
+                onError={(message) => toast.setMessage(message)}
+                onUpload={(file) => profiles.uploadAvatar(draft.id, file)}
+                value={draft.avatar}
+              />
             </Field>
             <Field label="Colour" icon={<Palette size={14} />} wide group>
               <ColorPicker value={draft.color} onChange={(color) => set({color})} />

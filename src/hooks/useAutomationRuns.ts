@@ -160,10 +160,25 @@ export function useAutomationRuns(orgId: string | null, signedIn: boolean) {
         if (!launched.ok) {
           return {ok: false, error: launched.error || 'The profile did not launch.'};
         }
-        session = await native.resolveProfileCdp(profile.id);
-        if (!session.running || !session.cdpUrl) {
-          return {ok: false, error: 'The browser started but never answered on its debugging port.'};
+        // Waited for, not re-resolved. Chromium binds --remote-debugging-port
+        // and writes DevToolsActivePort a second or two after spawn, so asking
+        // resolveProfileCdp again here loses the race almost every time and
+        // reports a window that is opening as one that never answered.
+        // waitForCdp polls the port this process just handed out, which is the
+        // same thing the on-launch trigger does (useProfileActions) and the
+        // HTTP launch-automation route does (waitForCdpReady in main.cjs).
+        //
+        // The already-open branch above stays on resolveProfileCdp on purpose:
+        // there is no port in hand there, and its two-tier lookup is what lets
+        // a run attach to a session this process did not start.
+        const ready = await native.waitForCdp?.(port, 20000);
+        if (!ready?.ok || !ready.cdpUrl) {
+          return {
+            ok: false,
+            error: ready?.error || 'The browser started but never answered on its debugging port.',
+          };
         }
+        session = {running: true, cdpUrl: ready.cdpUrl, pid: null};
       }
       const result = await native.startAutomationRun({
         automation,

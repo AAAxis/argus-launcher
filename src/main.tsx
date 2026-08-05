@@ -4,6 +4,10 @@ import {OrgProvider} from './org';
 import {ThemeProvider} from './theme';
 import {WorkspaceProvider} from './workspace/WorkspaceProvider';
 import './styles.css';
+// After styles.css, not before: these rules used to be the last 340 lines of
+// that file, and several of them lean on winning a tie against an earlier rule
+// of equal specificity. Import order is cascade order.
+import './styles/automations.css';
 
 // OrgProvider owns the auth subscription and resolves which organization's data
 // App should show, so it has to sit above App rather than inside it.

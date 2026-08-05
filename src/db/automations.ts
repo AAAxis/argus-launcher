@@ -4,7 +4,7 @@ import {automationPatchToRow, automationToRow, rowToAutomation} from './mappers'
 import type {AutomationRow} from './rows';
 
 const COLUMNS =
-  'id,org_id,name,description,steps,variables,pinned,timeout_ms,close_on_finish,' +
+  'id,org_id,name,description,steps,variables,tags,pinned,timeout_ms,close_on_finish,' +
   'created_by,created_at,updated_at';
 
 export async function list(orgId: string): Promise<ArgusAutomation[]> {

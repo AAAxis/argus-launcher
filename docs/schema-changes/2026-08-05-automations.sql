@@ -177,6 +177,9 @@ create policy "org members delete runs" on public.automation_runs
 -- 0002 revoked client UPDATE on organizations and re-granted it for
 -- (name, built_in_extensions) only, so this column is service-role only and an
 -- org cannot raise its own cap. Nothing further to grant.
+-- Superseded by 2026-08-05-free-tier-two-automations.sql, which moves the
+-- default to 2 and lifts existing free orgs off 0. Left as it shipped -- this
+-- file is the record of what was applied, not the current intent.
 alter table public.organizations
 add column if not exists automation_limit integer default 0;
 

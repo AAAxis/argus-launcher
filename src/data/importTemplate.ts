@@ -1,39 +1,97 @@
-// The sample CSV behind the importer's "Download example" button.
+// The sample CSV behind the importer's "Download example" button, and the one
+// place that says what a column is called.
 //
 // The columns here are not a suggestion: they are exactly the keys
-// planCsvImport() in workspace/useProfileActions.ts reads off each row. Any
-// other column in the file is parsed and then ignored, which is the failure the
+// previewCsvImport() in workspace/csvImport.ts reads off each row. Any other
+// column in the file is parsed and then ignored, which is the failure the
 // example exists to prevent -- the format used to be described in prose only,
 // so the first import attempt was usually a header-name guess.
-import {toCsv} from '../lib/csv';
+//
+// `aliases` is what makes an exported file re-importable. The profile exporter
+// used to write `proxy` and `status` while the importer read `proxy_name` and
+// `status_name`, so a file this app produced could not be fed back into it:
+// every row reported a proxy it could not parse, because it was reading a
+// column that was not there. The exporter now writes the canonical names, and
+// the aliases keep every file exported before that fix working.
+import {normalizeHeaderKey, toCsv} from '../lib/csv';
 
-// name and proxy_name are the two the importer will refuse a row without: a row
-// with no name is skipped outright, and one whose proxy_name does not parse is
-// skipped with the string it could not read.
-export const importColumns: Array<{name: string; required?: boolean; note: string}> = [
+export type ImportColumn = {
+  name: string;
+  required?: boolean;
+  aliases?: string[];
+  note: string;
+};
+
+// name is the only column the importer will refuse a row without. A row with
+// no readable proxy is reported too, but as something to fix rather than a
+// reason to throw the row away -- see ImportIssue in workspace/csvImport.ts.
+export const importColumns: ImportColumn[] = [
   {
     name: 'name',
     required: true,
+    aliases: ['profile_name'],
     note: 'Profile name. A row without one is skipped.',
   },
   {
     name: 'proxy_name',
     required: true,
-    note: 'Connection string, exactly http:// or socks5:// then host:port:username:password. ' +
-      'Leave the last two empty for an open proxy (host:port::). Proxies are matched and ' +
-      'reused by host/port/username, so repeating one does not duplicate it.',
+    aliases: ['proxy', 'proxy_url'],
+    note: 'Connection string: http:// or socks5:// then host:port, with an optional ' +
+      ':username:password. socks5://username:password@host:port and a bare ' +
+      'host:port:username:password work too. Include the credentials if the proxy needs ' +
+      'them — most exports from other tools leave them out, and a proxy that needs a login ' +
+      'and has none will fail its check. Proxies are matched and reused by ' +
+      'type/host/port/username, so repeating one does not duplicate it.',
+  },
+  {
+    name: 'proxy_mode',
+    note: 'assigned (default), direct for a profile that deliberately uses no proxy, or ' +
+      'free_proxy. A direct row is not reported as missing a proxy.',
   },
   {
     name: 'profile_id',
+    aliases: ['id'],
     note: 'Re-importing with the same id updates that profile and reclaims its existing ' +
       'browser directory, cookies and sessions. Letters, digits, dot, dash and underscore ' +
       'only. Left empty, a new id is generated.',
   },
-  {name: 'status_name', note: 'Defaults to Ready.'},
-  {name: 'folder', note: 'Created on demand as "Imported <value>" if it does not exist.'},
-  {name: 'tags', note: 'Comma-separated.'},
+  {name: 'status_name', aliases: ['status'], note: 'Defaults to Ready.'},
+  {
+    name: 'folder',
+    aliases: ['folder_name'],
+    note: 'The folder this profile belongs in. Nothing is created from this value on its ' +
+      'own -- you choose what happens to it after reviewing the import.',
+  },
+  {name: 'tags', note: 'Comma-separated. Semicolons work too.'},
+  {name: 'start_url', note: 'Page the profile opens on launch.'},
   {name: 'created_at', note: 'ISO timestamp. Defaults to the time of import.'},
+  {
+    name: 'os',
+    note: 'Windows 11, Windows 10, macOS, Ubuntu, Android or iOS. Picks a matching device ' +
+      'identity. Anything else falls back to Windows 11.',
+  },
+  {name: 'browser_version', note: 'Auto, or a specific Chrome version. Defaults to Auto.'},
+  {name: 'user_agent', note: 'Used verbatim when set. Left empty, it is derived from the OS.'},
+  {name: 'language', note: 'Accept-Language header, or "Auto from proxy".'},
+  {name: 'timezone', note: 'IANA zone name, or "Auto from proxy".'},
 ];
+
+const keysByColumn = new Map(importColumns.map((column) =>
+  [column.name, [column.name, ...(column.aliases || [])].map(normalizeHeaderKey)]));
+
+// Reads one canonical column off a parsed row, falling back through that
+// column's aliases. Trimmed here so every caller gets the same treatment --
+// `created_at` used to reach Date.parse with whatever whitespace the file had
+// while its neighbours were trimmed individually at the point of use.
+export function columnValue(row: Record<string, string>, column: string): string {
+  for (const key of keysByColumn.get(column) || [normalizeHeaderKey(column)]) {
+    const value = row[key];
+    if (value !== undefined && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+  return '';
+}
 
 // Documentation ranges (RFC 5737 / 3849) rather than anything routable, so a
 // copied-and-run example cannot point at someone else's host.
@@ -45,17 +103,30 @@ const exampleRows: Record<string, string>[] = [
     status_name: 'Ready',
     folder: 'Facebook',
     tags: 'warmup, facebook',
+    start_url: 'https://www.facebook.com/',
     created_at: '2026-01-15T09:00:00.000Z',
+    os: 'Windows 11',
   },
   {
+    // The credential-less shape. The trailing colons are optional now, so this
+    // row is also the example that they are.
     name: 'Shop EU 02',
-    // The credential-less shape: the trailing colons stay, both fields empty.
-    proxy_name: 'http://203.0.113.44:8080::',
+    proxy_name: 'http://203.0.113.44:8080',
     profile_id: 'shop-eu-002',
     status_name: 'Active',
     folder: 'Storefronts',
     tags: 'shop',
     created_at: '',
+    os: 'macOS',
+  },
+  {
+    // A profile that wants no proxy at all, which is a different thing from a
+    // profile whose proxy is missing.
+    name: 'Local QA 03',
+    proxy_mode: 'direct',
+    profile_id: 'local-qa-003',
+    status_name: 'Ready',
+    os: 'Android',
   },
 ];
 

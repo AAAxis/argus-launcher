@@ -1,13 +1,18 @@
 import {useState} from 'react';
 import {
-  Download, FolderInput, FolderPlus, Pencil, Plus, SearchX, Trash2, Upload, Waypoints, X,
+  Download, FolderInput, FolderPlus, KeyRound, Pencil, Plus, SearchX, ShieldCheck, Trash2,
+  Upload, Waypoints, X,
 } from 'lucide-react';
 import {MoveProxiesModal} from '../modals/MoveProxiesModal';
+import {SetProxyCredentialsModal} from '../modals/SetProxyCredentialsModal';
 import {AssignedCell} from '../ui/AssignedCell';
+import {Checkbox} from '../ui/Checkbox';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {FlagIcon} from '../ui/icons';
 import {PaginationBar} from '../ui/PaginationBar';
+import {ProxyCheckCell, storedCheckState} from '../ui/ProxyCheckCell';
+import {SortableTh} from '../ui/SortableTh';
 import {
   isProxyAssigned, profilesUsingProxy, proxyCountryLabel, proxySearchText,
 } from '../../lib/proxies';
@@ -18,6 +23,7 @@ import {SITE_URL} from '../../lib/auth';
 import {PROXY_PROVIDERS, providerPath} from '../../data/proxyProviders';
 import {native} from '../../native';
 import {useSelection} from '../../hooks/useSelection';
+import {useTableSort} from '../../hooks/useTableSort';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
 
@@ -51,7 +57,7 @@ export function ProxiesTab({
   onFillCountryDone,
   onRequestDelete,
 }: ProxiesTabProps) {
-  const {data, toast, library, proxies, checkingProxyId} = useWorkspace();
+  const {data, toast, library, proxies, checkingProxyIds} = useWorkspace();
   const state = data.state;
   const selection = useSelection<ArgusProxy>();
 
@@ -60,10 +66,31 @@ export function ProxiesTab({
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
 
   const assigned = (proxy: ArgusProxy) => isProxyAssigned(proxy, state.profiles);
+
+  // Name falls back to the host the same way the cell does, so sorting by Name
+  // never strands the unnamed rows. Last check sorts on the timestamp behind
+  // "3h ago", and a proxy that has never been checked has no timestamp -- it
+  // sinks to the bottom in both directions rather than heading a descending
+  // sort, which is the whole point of asking for the column.
+  const sorting = useTableSort<ArgusProxy>([
+    {key: 'name', value: (proxy) => proxy.name || proxy.host},
+    {key: 'type', value: (proxy) => (proxy.type || 'http').toUpperCase()},
+    {key: 'host', value: (proxy) => `${proxy.host}:${proxy.port}`},
+    {key: 'country', value: (proxy) => proxy.country || proxy.country_code},
+    {key: 'checked', value: (proxy) => proxy.checked_at, firstDirection: 'desc'},
+    {key: 'folder', value: (proxy) =>
+      state.proxy_folders.find((folder) => folder.id === proxy.folder_id)?.name},
+    {key: 'assigned', value: (proxy) =>
+      profilesUsingProxy(proxy, state.profiles).length || undefined,
+    firstDirection: 'desc'},
+  ], {onSortChange: () => setPage(0)});
+
   const filtered = Boolean(search.trim() || assignedFilter);
-  const visible = visibleProxies(state.proxies, {folderId, search, assignedFilter, assigned});
+  const visible = sorting.sort(
+      visibleProxies(state.proxies, {folderId, search, assignedFilter, assigned}));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
   const activeFolder = state.proxy_folders.find((folder) => folder.id === folderId) || null;
@@ -135,40 +162,20 @@ export function ProxiesTab({
           <option value="unassigned">Not assigned</option>
         </select>
         {visible.length > 0 && (
+          <button
+            className="ghost"
+            onClick={() => void proxies.checkMany(visible)}
+            title="Check every proxy this filter is showing"
+          >
+            <ShieldCheck size={16} /> Check all
+          </button>
+        )}
+        {visible.length > 0 && (
           <button className="ghost" onClick={() => void proxies.exportToCsv(visible)}>
             <Download size={16} /> Export all
           </button>
         )}
       </section>
-
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
-              <option value="" disabled>Assign to folder…</option>
-              <option value="">All proxies</option>
-              {state.proxy_folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>{folder.name}</option>
-              ))}
-            </select>
-            <button
-              className="ghost"
-              onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
-            >
-              <Download size={16} /> Export selected
-            </button>
-            <button
-              className="danger ghost"
-              onClick={() => onRequestDelete(
-                  [...selection.ids],
-                  `${selection.size} selected ${selection.size === 1 ? 'proxy' : 'proxies'}`,
-                  selection.clear)}
-            >
-              <Trash2 size={16} /> Delete selected
-            </button>
-          </div>
-        </section>
-      )}
 
       {/* The same folder navigation the Profiles tab has, minus Trash: a proxy
         * is deleted outright, there is no soft-delete to hold it. */}
@@ -231,27 +238,72 @@ export function ProxiesTab({
         </button>
       </section>
 
+      {/* Below the folder rail, not above it. Ticking a row used to insert this
+        * between the filters and the folders, which pushed the folder cards and
+        * the whole table down by its height -- the navigation moving because of
+        * a selection made inside it. */}
+      {selection.size > 0 && (
+        <section className="selection-toolbar">
+          <div className="selection-toolbar-actions">
+            <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
+              <option value="" disabled>Assign to folder…</option>
+              <option value="">All proxies</option>
+              {state.proxy_folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
+            <button
+              className="ghost"
+              onClick={() => void proxies.checkMany(selection.selectedFrom(state.proxies))}
+            >
+              <ShieldCheck size={16} /> Check selected
+            </button>
+            {/* The fix for a library imported from a file that carried no
+              * credentials: the proxies are already saved and already assigned,
+              * so setting the login here repairs those profiles in place. */}
+            <button className="ghost" onClick={() => setCredentialsOpen(true)}>
+              <KeyRound size={16} /> Set credentials…
+            </button>
+            <button
+              className="ghost"
+              onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
+            >
+              <Download size={16} /> Export selected
+            </button>
+            <button
+              className="danger ghost"
+              onClick={() => onRequestDelete(
+                  [...selection.ids],
+                  `${selection.size} selected ${selection.size === 1 ? 'proxy' : 'proxies'}`,
+                  selection.clear)}
+            >
+              <Trash2 size={16} /> Delete selected
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="table-wrap">
         <table>
           <thead>
             <tr>
               <th>
                 {visible.length > 0 && (
-                  <input
-                    type="checkbox"
-                    aria-label="Select all"
+                  <Checkbox
+                    label={`Select all ${visible.length} proxies on this page`}
                     checked={selection.allSelected(visible)}
+                    indeterminate={visible.some((item) => selection.has(item.id))}
                     onChange={() => selection.toggleAll(visible)}
                   />
                 )}
               </th>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Host</th>
-              <th>Country</th>
-              <th>Last check</th>
-              <th>Folder</th>
-              <th>Assigned to</th>
+              <SortableTh label="Name" {...sorting.thProps('name')} />
+              <SortableTh label="Type" {...sorting.thProps('type')} />
+              <SortableTh label="Host" {...sorting.thProps('host')} />
+              <SortableTh label="Country" {...sorting.thProps('country')} />
+              <SortableTh label="Last check" {...sorting.thProps('checked')} />
+              <SortableTh label="Folder" {...sorting.thProps('folder')} />
+              <SortableTh label="Assigned to" {...sorting.thProps('assigned')} />
               <th />
             </tr>
           </thead>
@@ -262,8 +314,8 @@ export function ProxiesTab({
               return (
                 <tr key={proxy.id} className={selection.has(proxy.id) ? 'row-checked' : ''}>
                   <td className="checkbox-cell">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      label={`Select ${proxy.name || proxy.host}`}
                       checked={selection.has(proxy.id)}
                       onChange={() => selection.toggle(proxy.id)}
                     />
@@ -277,8 +329,13 @@ export function ProxiesTab({
                   <td>{(proxy.type || 'http').toUpperCase()}</td>
                   <td className="proxy-host-cell">{proxy.host}:{proxy.port}</td>
                   <td>{proxyCountryLabel(proxy) || '-'}</td>
-                  <td className={proxy.check_error ? 'proxy-check-cell failed' : 'proxy-check-cell'}>
-                    {checkingProxyId === proxy.id ? 'Checking…' : describeLastCheck(proxy)}
+                  <td className="proxy-check-cell">
+                    <ProxyCheckCell
+                      state={checkingProxyIds.has(proxy.id) ?
+                        {status: 'checking'} :
+                        storedCheckState(proxy)}
+                      age={proxy.check_error ? undefined : proxy.checked_at}
+                    />
                   </td>
                   <td>
                     {folder ? (
@@ -290,6 +347,15 @@ export function ProxiesTab({
                   </td>
                   <td><AssignedCell holders={profilesUsingProxy(proxy, state.profiles)} /></td>
                   <td>
+                    <button
+                      aria-label={`Check ${label}`}
+                      className="ghost icon-button row-action"
+                      disabled={checkingProxyIds.has(proxy.id)}
+                      onClick={() => void proxies.checkOnce(proxy)}
+                      title={`Check ${label} now`}
+                    >
+                      <ShieldCheck size={16} />
+                    </button>
                     <button
                       aria-label={`Edit ${label}`}
                       className="ghost icon-button row-action"
@@ -366,6 +432,14 @@ export function ProxiesTab({
             setMoveOpen(false);
             onFillCountryDone();
           }}
+        />
+      )}
+
+      {credentialsOpen && (
+        <SetProxyCredentialsModal
+          targets={selection.selectedFrom(state.proxies)}
+          onClose={() => setCredentialsOpen(false)}
+          onDone={selection.clear}
         />
       )}
     </>
@@ -487,40 +561,10 @@ function ProviderStrip({onDismiss}: {onDismiss: () => void}) {
   );
 }
 
-// Short enough for a table cell. The card had room for country, IP and ping on
-// one line; the country and the flag now have columns of their own, so what is
-// left to say here is how it went and how long ago.
-function describeLastCheck(proxy: ArgusProxy) {
-  if (!proxy.checked_at) {
-    return 'Not checked';
-  }
-  if (proxy.check_error) {
-    return `Failed · ${proxy.check_error}`;
-  }
-  return `${proxy.ping_ms || 0} ms · ${sinceLabel(proxy.checked_at)}`;
-}
-
-// Coarse on purpose: a check is a background sweep, and "3h ago" is the only
-// resolution anyone acts on. Anything older than a week is a date.
-function sinceLabel(iso: string) {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) {
-    return 'unknown';
-  }
-  const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) {
-    return 'just now';
-  }
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-  const days = Math.floor(hours / 24);
-  return days <= 7 ? `${days}d ago` : iso.slice(0, 10);
-}
+// describeLastCheck and sinceLabel used to live here. They are in
+// components/ui/ProxyCheckCell.tsx now, because the Profiles tab and the import
+// review table ask the same question of the same data and were each answering it
+// their own way.
 
 // Folder first, then the assignment filter, then the search narrows whatever
 // those left -- the same order the Profiles tab filters in.

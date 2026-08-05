@@ -172,11 +172,14 @@ export function useIntegrations(apiKeys: ApiKeys, apiState: ApiState | null) {
   function reasonFor(integration: Integration): string {
     const config = configs[integration.id];
     const hasKey = apiKeys.keysFor(integration.id).length > 0;
+    // Nothing to explain: an unconnected card is not in a state that needs a
+    // reason, and whether the tool is on this machine is now the presence chip's
+    // job in the card's head. This used to return one of two sentences here --
+    // "Found on this machine" / "X was not found on this machine" -- which put
+    // the phrase at the foot of every card in the grid, where a row of them read
+    // as a claim rather than a detection result.
     if (!hasKey) {
-      if (config && !config.installed) {
-        return `${integration.name} was not found on this machine`;
-      }
-      return config?.installed ? 'Found on this machine' : '';
+      return '';
     }
     if (!config) {
       return 'Checking…';

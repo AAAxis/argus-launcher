@@ -62,12 +62,22 @@ export type CookieFileSelection = {
   base64?: string;
 };
 
+// `reason` is why the check failed, classified in main by classifyProxyFailure.
+// `error` is already a sentence written for a person, so nothing has to switch on
+// this to produce copy -- it is here so the UI can treat a credentials problem
+// differently from a dead host (offer the credentials editor, say) without
+// pattern-matching English.
+export type ProxyFailureReason =
+  | 'auth-required' | 'auth-rejected' | 'dns' | 'unreachable' | 'timeout'
+  | 'lookup' | 'unknown';
+
 export type ProxyCheckResult = {
   ok: boolean;
   ip?: string;
   country?: string;
   countryCode?: string;
   pingMs?: number;
+  reason?: ProxyFailureReason;
   error?: string;
 };
 
@@ -244,6 +254,16 @@ type ArgusNative = {
   // Which agent tools look present on this machine, in one call.
   detectIntegrations?(): Promise<Record<string, boolean>>;
   checkProxy?(proxy: ProxyConfig): Promise<ProxyCheckResult>;
+  // How many elements a selector matches on a profile's open page. Read-only:
+  // it evaluates querySelectorAll(...).length and nothing else, so the step
+  // editor's Check button cannot submit the form it is describing.
+  checkSelector?(profileId: string, selector: string): Promise<{
+    ok: boolean;
+    count?: number;
+    // The profile is not open, which is a thing to say rather than an error.
+    notRunning?: boolean;
+    error?: string;
+  }>;
   // Opens a page in the user's real browser. The main process only honours
   // https: URLs on hosts we own (plus localhost in dev), so a rejected URL
   // resolves false rather than throwing.
@@ -288,12 +308,18 @@ type ArgusNative = {
     error?: string;
   }>;
   // A per-launch credential for the generated start page, which is a file://
-  // document with no key of its own. It authorizes running one of the listed
-  // automations against this profile on this port, and nothing else.
+  // document with no key of its own. It authorizes exactly two things: running
+  // one of the listed automations against this profile on this port, and
+  // re-checking this profile's assigned proxy. Nothing else.
+  //
+  // cdpPort is null on a launch with nothing to run -- there is no debugging
+  // port on those, and the token is minted anyway so the page can still
+  // re-check its proxy. An empty `automations` list matches no id, so such a
+  // token can run nothing.
   mintRunToken?(
     profileId: string,
     profileName: string,
-    cdpPort: number,
+    cdpPort: number | null,
     automations: Array<{id: string; name: string; steps: unknown[]}>,
   ): Promise<string>;
   // Waits for a port this process handed out to start answering. The on-launch
@@ -471,7 +497,11 @@ type ArgusNative = {
     result?: {deleted: boolean; unassignedProfileIds: string[]},
     error?: string,
   ): void;
-  // POST /v1/profiles/update: partial field patch (name/tags/status/color/folder_id/email/password).
+  // POST /v1/profiles/update: partial field patch
+  // (name/tags/status/color/avatar/folder_id/email/password). `avatar` is
+  // narrowed to `brand:<slug>` or '' in main.cjs -- the https-URL half of the
+  // field is the editor's only, so a key cannot make the launcher fetch a
+  // picture from a host of the caller's choosing.
   // Proxy has its own endpoint (assign-proxy, above) and fingerprint has its
   // own endpoint (update-fingerprint, below) since both need extra handling
   // beyond a plain field overwrite.
@@ -479,7 +509,8 @@ type ArgusNative = {
     callback: (payload: {
       requestId: string;
       profileId: string;
-      fields: Partial<Pick<ArgusProfile, 'name' | 'tags' | 'status' | 'color' | 'folder_id' | 'email' | 'password'>>;
+      fields: Partial<Pick<ArgusProfile,
+        'name' | 'tags' | 'status' | 'color' | 'avatar' | 'folder_id' | 'email' | 'password'>>;
       // null grants every folder; an array is the allow-list this key may
       // write to. Both ends of a folder move are checked against it.
       allowedFolders: string[] | null;
@@ -542,6 +573,25 @@ type ArgusNative = {
     result?: {ok: boolean; pid?: number; error?: string},
     error?: string,
   ): void;
+  // The shared pair for routes declared in electron/api/routes.json, in place
+  // of a named on*/send* pair each. `channel` is checked against the table in
+  // preload before anything is subscribed, so an unknown name is inert rather
+  // than a way to listen in on every other channel.
+  //
+  // The payload is deliberately loose here: main.cjs has already checked it
+  // against the route's declared fields, and each handler in
+  // useAutomationBridge narrows it to the shape that route sends.
+  onApiRequest?(
+    channel: string,
+    callback: (payload: never) => void,
+  ): () => void;
+  sendApiResult?(
+    requestId: string,
+    result?: unknown,
+    error?: string,
+    // The HTTP code to answer with. Omitted means 500.
+    status?: number,
+  ): void;
   onListProfilesRequest?(
     callback: (payload: {requestId: string; folder: string | null; allowedFolders: string[] | null}) => void,
   ): () => void;
@@ -574,6 +624,20 @@ type ArgusNative = {
     approved: boolean,
     folderScope: string[] | null,
     keyName: string,
+  ): void;
+  // POST /v1/proxies/recheck-from-page: a launch's start page asking for its
+  // own proxy line to be brought up to date. main.cjs has already verified the
+  // run token and takes profileId off that token's entry, so nothing the page
+  // sent chooses which proxy is tested. The answer is the panel's next three
+  // fields, composed by homeProxyStatus -- the same function that wrote the
+  // wording the page launched with.
+  onRecheckProxyRequest?(
+    callback: (payload: {requestId: string; profileId: string}) => void,
+  ): () => void;
+  sendRecheckProxyResult?(
+    requestId: string,
+    result?: {proxyOk: boolean; title: string; detail: string},
+    error?: string,
   ): void;
 };
 

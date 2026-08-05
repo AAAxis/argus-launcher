@@ -6,6 +6,8 @@
 //
 // Two screens rather than three because there are only two questions people
 // arrive with. What is this, and where do I get one.
+import cookieManagerShot from '../assets/intro/cookie-manager.png';
+import cookieSetShot from '../assets/intro/cookie-set.png';
 import type {IntroStep} from './profileIntro';
 
 export const COOKIE_INTRO_STEPS: IntroStep[] = [
@@ -17,8 +19,11 @@ export const COOKIE_INTRO_STEPS: IntroStep[] = [
       '2FA code. That file is a cookie-set. Assign one to a profile and it launches ' +
       'already signed in; assign the same set to several profiles and they all open on ' +
       'the same account.',
-    caption: 'The library, with each set showing which profiles use it.',
-    figure: 'cookies-list',
+    // Captions describe what is actually in the frame, not what the step is
+    // about -- a caption the picture does not support is worse than none.
+    caption: 'A cookie-set opened: every cookie in it, and the profiles using it.',
+    figure: 'cookie-set',
+    image: cookieSetShot,
   },
   {
     title: 'Where to get them',
@@ -30,7 +35,8 @@ export const COOKIE_INTRO_STEPS: IntroStep[] = [
       'file on "+ Cookie-set" and it is in the library. Cookies expire, so a set that ' +
       'worked last month may need re-exporting — open one to see what is in it and when ' +
       'it runs out.',
-    caption: 'Exporting a live session from the Argus Cookie Manager.',
-    figure: 'cookies-export',
+    caption: 'The Argus Cookie Manager, in a launched profile\'s extensions menu.',
+    figure: 'cookie-manager',
+    image: cookieManagerShot,
   },
 ];

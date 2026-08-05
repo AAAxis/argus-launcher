@@ -2,20 +2,17 @@ import * as db from '../db';
 import {toCsv} from '../lib/csv';
 import {buildLaunchPayload} from '../lib/launch';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
-import {matchedProxyForProfile, parseProxyConnectionString, proxyDedupeKey} from '../lib/proxies';
-import {isFsSafeId} from '../lib/trash';
-import {normalizeTags} from '../lib/tags';
-import {numberOrNull} from '../lib/text';
+import {matchedProxyForProfile} from '../lib/proxies';
+import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
-import {fingerprintFromDraftPatch, tagsFromDraft} from '../drafts';
-import {
-  defaultWindowsFingerprintPattern,
-  languagePresets,
-  mediaDevicePresets,
-  randomFingerprintPatch,
-} from '../lib/fingerprintPresets';
-import {DEFAULT_PROFILE_COLOR} from '../lib/profileColors';
-import {newId} from './core';
+import {fingerprintFromDraftPatch} from '../drafts';
+import {randomFingerprintPatch} from '../lib/fingerprintPresets';
+import {importColumns} from '../data/importTemplate';
+import {planCsvImport, previewCsvImport, profileExportRow} from './csvImport';
+import type {
+  FolderDecision, ImportLibrary, ImportResult, ImportRow,
+} from './csvImport';
+import type {ParsedCsvRow} from '../lib/csv';
 import type {ProxyActions} from './useProxyActions';
 import type {WorkspaceCore} from './core';
 import type {CookieImportFields} from '../lib/cookieUpload';
@@ -24,7 +21,7 @@ import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../types';
 export type ProfileActions = ReturnType<typeof useProfileActions>;
 
 export function useProfileActions(
-    {data, toast, selectedProfileId, setSelectedProfileId, setCheckingProxyId}: WorkspaceCore,
+    {data, toast, selectedProfileId, setSelectedProfileId, beginProxyCheck, endProxyCheck}: WorkspaceCore,
     proxies: ProxyActions) {
   const {state, setState, withDb, patch} = data;
 
@@ -63,6 +60,18 @@ export function useProfileActions(
       [...list, profile]);
     setSelectedProfileId(profile.id);
     return true;
+  }
+
+  // Puts a picture in Storage and hands back its URL. Deliberately not withDb:
+  // this writes no row, it only produces the value the editor's draft carries
+  // until the user presses Save, so a picture uploaded and then cancelled
+  // leaves the profile exactly as it was. It throws rather than toasting,
+  // because the caller has to know not to set the draft.
+  async function uploadAvatar(profileId: string, file: File): Promise<string> {
+    if (!data.orgId) {
+      throw new Error('Sign in before uploading a picture.');
+    }
+    return db.profiles.uploadAvatar(data.orgId, profileId, file);
   }
 
   // A proxy is offered for "also delete" only when every profile assigned to
@@ -131,6 +140,17 @@ export function useProfileActions(
     return true;
   }
 
+  // Empty Trash. The local patch drops every trashed row rather than the ids the
+  // statement returned: those are the same set, and filtering on deleted_at keeps
+  // the two sides describing Trash the same way.
+  async function purgeAll(): Promise<boolean> {
+    if (!await withDb((activeOrgId) => db.profiles.purgeAll(activeOrgId))) {
+      return false;
+    }
+    patch.profiles((list) => list.filter((item) => !item.deleted_at));
+    return true;
+  }
+
   async function assignToFolder(profileIds: string[], folderId: string | null): Promise<boolean> {
     const ok = await withDb(async (activeOrgId) => {
       for (const id of profileIds) {
@@ -172,7 +192,7 @@ export function useProfileActions(
       return 'blocked';
     }
     toast.setMessage(`Checking proxy for ${profile.name}`);
-    setCheckingProxyId(assigned.id);
+    beginProxyCheck(assigned.id);
     let checked: ArgusProxy;
     try {
       checked = await proxies.runCheck(assigned);
@@ -184,7 +204,7 @@ export function useProfileActions(
       toast.fail('Launch blocked', `Proxy for ${profile.name} failed its check: ${message}`);
       return 'blocked';
     } finally {
-      setCheckingProxyId('');
+      endProxyCheck(assigned.id);
     }
     if (checked.check_error) {
       toast.fail('Launch blocked',
@@ -227,31 +247,41 @@ export function useProfileActions(
       // window opening or an error dialog.
       toast.setMessage(`Launching ${target.name}`);
 
-      // The debugging port is opened ONLY when something is going to drive this
-      // session. An always-on --remote-debugging-port would be a real
-      // anti-detect regression: the port is connectable by any local process,
-      // and CDP attachment is observable from the page. So a profile with no
-      // automation attached launches exactly as it did before, with no extra
-      // switches at all.
       const attached = target.automation_id ?
         state.automations.find((item) => item.id === target.automation_id) :
         null;
+      // What this launch's start page will offer as tiles: the attached
+      // automation plus every pinned one. Computed before the port decision
+      // because it is what makes the decision -- buildLaunchPayload derives the
+      // same list from the same function, so the tiles and the port behind them
+      // cannot disagree.
+      const tiles = startPageAutomations(state.automations, target);
+
+      // The debugging port is opened ONLY when something might drive this
+      // session. An always-on --remote-debugging-port would be a real
+      // anti-detect regression: the port is connectable by any local process,
+      // and CDP attachment is observable from the page. Pinning an automation
+      // to start pages is the opt-in -- it is what puts a run button inside the
+      // browser, and a button that cannot reach a port is a phantom control. A
+      // workspace that pins nothing and attaches nothing still launches exactly
+      // as it did before, with no extra switches at all.
       //
       // No --remote-allow-origins either. It used to be '*' here, which let any
       // web page in any browser on this machine drive an open profile if it
       // found the port. Our clients all connect from Node through
       // electron/cdp-core.cjs and send no Origin, which Chromium accepts.
-      const cdpPort = attached ? await native.reserveCdpPort?.() : undefined;
+      const cdpPort = attached || tiles.length > 0 ?
+        await native.reserveCdpPort?.() :
+        undefined;
       const extraArgs = cdpPort ? [`--remote-debugging-port=${cdpPort}`] : [];
 
-      // The token only exists when a port does. An ordinary launch carries no
-      // credential in its home.html at all.
-      const tiles = cdpPort ?
-        state.automations.filter((item) => item.pinned || item.id === target.automation_id) :
-        [];
-      const runToken = cdpPort && tiles.length > 0 ?
-        await native.mintRunToken?.(target.id, target.name, cdpPort, tiles) :
-        '';
+      // Minted on every launch, not only when there are tiles: the page needs a
+      // credential to re-check its own proxy, which is the one thing it can do
+      // with no automations at all. A token whose automation list is empty
+      // authorizes exactly that and nothing else -- authorize() looks every
+      // requested id up in the list, and an empty list matches none.
+      const runToken = await native.mintRunToken?.(
+          target.id, target.name, cdpPort ?? null, tiles) || '';
       // The port comes from the running server rather than a second copy of the
       // constant: AUTOMATION_API_PORT lives in main.cjs, and a hardcoded 39219
       // here would be one more place to get wrong if it ever moves.
@@ -309,28 +339,11 @@ export function useProfileActions(
       toast.setMessage('Native file export is not available. Restart Argus Launcher and try again.');
       return;
     }
-    const header = [
-      'name', 'status', 'folder', 'proxy', 'tags', 'start_url', 'created_at',
-      'os', 'browser_version', 'user_agent', 'language', 'timezone',
-    ];
-    const csv = toCsv(header, list, (profile) => {
-      const proxy = proxyFor(profile);
-      const folder = folderFor(profile);
-      return {
-        name: profile.name || '',
-        status: profile.status || '',
-        folder: folder?.name || '',
-        proxy: proxy ? `${proxy.type || 'http'}://${proxy.host}:${proxy.port}` : '',
-        tags: profile.tags?.join('; ') || '',
-        start_url: profile.start_url || '',
-        created_at: profile.created_at || '',
-        os: profile.fingerprint?.os || '',
-        browser_version: profile.fingerprint?.browser_version || '',
-        user_agent: profile.fingerprint?.user_agent || '',
-        language: profile.fingerprint?.language || '',
-        timezone: profile.fingerprint?.timezone || '',
-      };
-    });
+    // The importer's own column names, in the importer's own value formats, so
+    // an exported file can be fed straight back in -- see profileExportRow.
+    const header = importColumns.map((column) => column.name);
+    const csv = toCsv(header, list, (profile) =>
+      profileExportRow(profile, proxyFor(profile), folderFor(profile)));
     const savedPath = await native.saveTextFile(`argys-profiles-${Date.now()}.csv`, csv);
     if (savedPath) {
       toast.setMessage(`Exported ${list.length} ${list.length === 1 ? 'profile' : 'profiles'} to ${savedPath.split('/').pop()}`);
@@ -378,35 +391,56 @@ export function useProfileActions(
     return {matched: cookiePatches.size, total: selected.length};
   }
 
-  async function importFromCsv(rows: Record<string, string>[]): Promise<ImportResult | null> {
-    const plan = planCsvImport(rows, state.profiles, state.proxies, state.folders);
+  function importLibrary(): ImportLibrary {
+    return {profiles: state.profiles, proxies: state.proxies, folders: state.folders};
+  }
+
+  // Reads the file without writing anything, so the dialog can show it as a
+  // table and let the user fix it first.
+  function previewImport(parsed: ParsedCsvRow[]) {
+    return previewCsvImport(parsed, importLibrary());
+  }
+
+  async function importFromCsv(
+      rows: ImportRow[], folderDecision: FolderDecision): Promise<ImportResult> {
+    const plan = planCsvImport(rows, folderDecision, importLibrary());
     // FK order: a profile cannot reference a folder or proxy that is not there
     // yet. Unlike the single blob write this replaces, these are separate
     // statements -- if the org hits its profile limit partway through, the rows
-    // written before that point stay written, and the counts below are what the
-    // loop planned rather than what landed.
+    // written before that point stay written.
+    const writtenFolders: string[] = [];
+    const writtenProxies: string[] = [];
     const writtenProfiles: string[] = [];
     const ok = await withDb(async (activeOrgId) => {
       for (const folder of plan.newFolders) {
         await db.folders.create(activeOrgId, folder);
+        writtenFolders.push(folder.id);
       }
-      for (const proxy of plan.newProxies) {
+      for (const proxy of plan.upsertProxies) {
         await db.proxies.upsert(activeOrgId, proxy);
+        writtenProxies.push(proxy.id);
       }
       for (const {profile, exists} of plan.touchedProfiles) {
         await db.profiles.save(activeOrgId, profile, exists);
         writtenProfiles.push(profile.id);
       }
     });
+    // Only what actually reached the database goes into local state. Folders
+    // and proxies used to be set unconditionally, so a failed write still left
+    // them on screen until the next reload.
+    const landed = (id: string, written: string[], current: {id: string}[]) =>
+      written.includes(id) || current.some((item) => item.id === id);
     setState((current) => ({
       ...current,
-      folders: plan.folders,
-      proxies: plan.proxies,
+      folders: plan.folders.filter((folder) => landed(folder.id, writtenFolders, current.folders)),
+      proxies: plan.proxies.filter((proxy) => landed(proxy.id, writtenProxies, current.proxies)),
       profiles: plan.profiles.filter((profile) =>
-        writtenProfiles.includes(profile.id) ||
-        current.profiles.some((item) => item.id === profile.id)),
+        landed(profile.id, writtenProfiles, current.profiles)),
     }));
-    return ok ? plan.result : null;
+    // Returned even when the write failed partway. Returning null meant the
+    // dialog showed no summary at all for an import that had already created
+    // rows, which is the one case the summary is most needed.
+    return ok ? plan.result : {...plan.result, partial: true};
   }
 
   return {
@@ -414,205 +448,20 @@ export function useProfileActions(
     folderFor,
     update,
     save,
+    uploadAvatar,
     exclusiveProxyIdsFor,
     softDelete,
     restore,
     purge,
+    purgeAll,
     assignToFolder,
     launch,
     exportToCsv,
     matchCookies,
+    previewImport,
     importFromCsv,
   };
 }
 
-export type ImportResult = {
-  created: number;
-  updated: number;
-  proxiesCreated: number;
-  proxiesReused: number;
-  foldersCreated: number;
-  // Rows that carried more than MAX_PROFILE_TAGS tags and had the extras
-  // dropped. Reported rather than silently trimmed: a CSV written against
-  // another tool has no reason to know this app's limit, and losing a tag
-  // without being told is the kind of thing found weeks later.
-  tagsTrimmed: number;
-  skipped: Array<{name: string; reason: string}>;
-};
-
-// Works out what a Dolphin-style inventory CSV would change, without writing
-// anything. Pure, so the "what will this do" half of the importer is testable
-// on its own and the caller only has to sequence the writes.
-function planCsvImport(
-    rows: Record<string, string>[],
-    existingProfiles: ArgusProfile[],
-    existingProxies: ArgusProxy[],
-    existingFolders: ArgusFolder[]) {
-  const profiles = [...existingProfiles];
-  const proxies = [...existingProxies];
-  const folders = [...existingFolders];
-  // What this run actually has to write. The blob path rewrote everything; rows
-  // the CSV never mentioned are now left alone.
-  const newProxies: ArgusProxy[] = [];
-  const newFolders: ArgusFolder[] = [];
-  const touchedProfiles: Array<{profile: ArgusProfile; exists: boolean}> = [];
-
-  const proxyIndexByKey = new Map<string, number>();
-  proxies.forEach((proxy, index) => {
-    proxyIndexByKey.set(
-        proxyDedupeKey(proxy.type || 'http', proxy.host, proxy.port, proxy.username || ''), index);
-  });
-  const folderIdByCsvValue = new Map<string, string>();
-  folders.forEach((folder) => {
-    const match = /^Imported (.+)$/.exec(folder.name);
-    if (match) {
-      folderIdByCsvValue.set(match[1], folder.id);
-    }
-  });
-
-  const result: ImportResult = {
-    created: 0,
-    updated: 0,
-    proxiesCreated: 0,
-    proxiesReused: 0,
-    foldersCreated: 0,
-    tagsTrimmed: 0,
-    skipped: [],
-  };
-
-  for (const row of rows) {
-    const name = (row.name || '').trim();
-    if (!name) {
-      result.skipped.push({name: row.profile_id || '(unnamed)', reason: 'Missing name'});
-      continue;
-    }
-
-    let proxyId: string | null = null;
-    const parsedProxy = parseProxyConnectionString(row.proxy_name || '');
-    if (parsedProxy) {
-      const key = proxyDedupeKey(
-          parsedProxy.type, parsedProxy.host, parsedProxy.port, parsedProxy.username);
-      const existingIndex = proxyIndexByKey.get(key);
-      if (existingIndex !== undefined) {
-        proxyId = proxies[existingIndex].id;
-        result.proxiesReused++;
-      } else {
-        const proxy: ArgusProxy = {
-          id: newId(proxies.length),
-          name: row.proxy_id ? `${name} proxy` : `${parsedProxy.host}:${parsedProxy.port}`,
-          type: parsedProxy.type,
-          host: parsedProxy.host,
-          port: parsedProxy.port,
-          username: parsedProxy.username || undefined,
-          password: parsedProxy.password || undefined,
-        };
-        proxies.push(proxy);
-        newProxies.push(proxy);
-        proxyIndexByKey.set(key, proxies.length - 1);
-        proxyId = proxy.id;
-        result.proxiesCreated++;
-      }
-    } else {
-      result.skipped.push({
-        name,
-        reason: `Could not parse proxy from "${row.proxy_name || row.proxy_host || 'unknown'}"`,
-      });
-    }
-
-    let folderId: string | null = null;
-    const csvFolder = (row.folder || '').trim();
-    if (csvFolder) {
-      const existingFolderId = folderIdByCsvValue.get(csvFolder);
-      if (existingFolderId) {
-        folderId = existingFolderId;
-      } else {
-        const folder = {
-          id: newId(folders.length),
-          name: `Imported ${csvFolder}`,
-          created_at: new Date().toISOString(),
-        };
-        folders.push(folder);
-        newFolders.push(folder);
-        folderIdByCsvValue.set(csvFolder, folder.id);
-        folderId = folder.id;
-        result.foldersCreated++;
-      }
-    }
-
-    // profile_id is written verbatim on purpose: re-creating a profile with
-    // its exact original id is what reclaims an existing
-    // E:\ArgysProfiles\<id> directory, cookies and logged-in sessions
-    // intact. Which is also why a malformed one has to be refused here
-    // rather than quietly renumbered.
-    const importId = (row.profile_id || '').trim() || newId();
-    if (!isFsSafeId(importId)) {
-      result.skipped.push({
-        name,
-        reason: `Profile id "${importId}" can't be a folder name (letters, digits, dot, dash, underscore only)`,
-      });
-      continue;
-    }
-    const existingIndex = profiles.findIndex((item) => item.id === importId);
-    const existing = existingIndex >= 0 ? profiles[existingIndex] : null;
-    const createdAt = Date.parse(row.created_at || '') ?
-      new Date(row.created_at).toISOString() :
-      new Date().toISOString();
-    const csvTags = tagsFromDraft(row.tags || '');
-    const tags = normalizeTags(csvTags);
-    if (tags.length < csvTags.length) {
-      result.tagsTrimmed++;
-    }
-    const profile: ArgusProfile = {
-      id: importId,
-      name,
-      status: row.status_name?.trim() || 'Ready',
-      color: existing?.color ?? DEFAULT_PROFILE_COLOR,
-      folder_id: folderId,
-      proxy_id: proxyId,
-      tags,
-      start_url: null,
-      cookie_import_path: null,
-      cookie_import_url: null,
-      cookie_import_name: null,
-      cookie_import_count: null,
-      command_line_switches: null,
-      fingerprint: existing?.fingerprint ?? importedProfileFingerprint(),
-      created_at: existing?.created_at ?? createdAt,
-    };
-    if (existing) {
-      profiles[existingIndex] = profile;
-      result.updated++;
-    } else {
-      profiles.push(profile);
-      result.created++;
-    }
-    touchedProfiles.push({profile, exists: Boolean(existing)});
-  }
-
-  return {profiles, proxies, folders, newProxies, newFolders, touchedProfiles, result};
-}
-
-function importedProfileFingerprint(): NonNullable<ArgusProfile['fingerprint']> {
-  return {
-    os: 'Windows 11',
-    browser_version: 'Auto',
-    language: languagePresets[0],
-    timezone: 'Auto from proxy',
-    geolocation: 'Ask',
-    webrtc: 'Proxy only',
-    canvas: 'Noise',
-    webgl: 'Noise',
-    webgpu: 'Real',
-    client_rects: 'Noise',
-    audio: 'Noise',
-    webgl_vendor: defaultWindowsFingerprintPattern.fingerprint_webgl_vendor,
-    webgl_renderer: defaultWindowsFingerprintPattern.fingerprint_webgl_renderer,
-    screen: defaultWindowsFingerprintPattern.fingerprint_screen,
-    cpu_model: defaultWindowsFingerprintPattern.fingerprint_cpu_model,
-    cpu_cores: numberOrNull(defaultWindowsFingerprintPattern.fingerprint_cpu_cores),
-    memory_gb: numberOrNull(defaultWindowsFingerprintPattern.fingerprint_memory_gb),
-    media_devices: mediaDevicePresets[0],
-    do_not_track: false,
-    rotate_on_launch: true,
-  };
-}
+// Re-exported so the import dialog keeps one place to import these from.
+export type {FolderDecision, ImportPreview, ImportResult, ImportRow} from './csvImport';

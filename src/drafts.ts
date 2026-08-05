@@ -29,6 +29,9 @@ export type ProfileDraft = {
   name: string;
   status: string;
   color: string;
+  // `brand:<slug>`, an https URL, or '' for the initials plate. See
+  // ArgusProfile.avatar; parsed in src/lib/profileAvatar.ts.
+  avatar: string;
   folder_id: string;
   // Login credentials for whatever account this profile is signed into --
   // stored plaintext the same way proxy_search/proxy credentials already
@@ -131,6 +134,7 @@ export function newProfileDraft(): ProfileDraft {
     name: `Profile ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`,
     status: 'Ready',
     color: DEFAULT_PROFILE_COLOR,
+    avatar: '',
     folder_id: '',
     email: '',
     password: '',
@@ -184,6 +188,7 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     // opens on the matching preset key instead of showing a seventh, custom
     // swatch that happens to be the same colour.
     color: normalizeProfileColor(profile.color),
+    avatar: profile.avatar || '',
     folder_id: profile.folder_id || '',
     email: profile.email || '',
     password: profile.password || '',
@@ -278,6 +283,7 @@ export function profileFromDraft(draft: ProfileDraft, createdAt?: string): Argus
     name: draft.name.trim(),
     status: draft.status.trim() || 'Ready',
     color: draft.color || DEFAULT_PROFILE_COLOR,
+    avatar: draft.avatar.trim() || undefined,
     folder_id: draft.folder_id.trim() || null,
     email: draft.email.trim() || undefined,
     password: draft.password || undefined,

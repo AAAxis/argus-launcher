@@ -21,7 +21,8 @@
 // and the grid ends in an Add tile, so the same information is there as an
 // invitation instead of an absence.
 import {useState} from 'react';
-import {BadgeCheck, Check, Download, Link2, Plus, Trash2} from 'lucide-react';
+import {BadgeCheck, Check, Download, Link2, Plus, ShieldCheck, Trash2} from 'lucide-react';
+import {Badge} from '../ui/Badge';
 import {ExtensionMark} from '../ui/icons';
 import {
   BUILT_IN_EXTENSIONS, CATALOG_CATEGORIES, EXTENSION_CATALOG, extensionLogo,
@@ -35,11 +36,21 @@ import type {BuiltInExtensionToggles, SharedExtension} from '../../types';
 type View = 'installed' | 'discover';
 
 export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
+  const {data} = useWorkspace();
   const [view, setView] = useState<View>('installed');
+  // Bundled plus shared, which is what "Installed" means on the chip above and
+  // in the grid below. Off ones are still installed, so this is not a count of
+  // what is running.
+  const installedCount =
+    BUILT_IN_EXTENSIONS.length + data.state.shared_extensions.length;
 
   return (
     <section className="extensions-tab">
-      <div className="extensions-head">
+      {/* The tab's frame, on the same paper surface the Integrations bar uses:
+          what you are looking at on the left, how many of them and how to get
+          another on the right. Loose on the page these three read as three
+          unrelated controls sitting above the cards. */}
+      <section className="integration-bar">
         {/* radiogroup, matching the proxy-mode chips in ProfileModal -- these
           * are one choice of two, and a `tablist` would owe the reader
           * aria-controls and real tabpanels that this does not have. */}
@@ -57,10 +68,15 @@ export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
             </button>
           ))}
         </div>
-        <button className="ghost" onClick={onAddExtension}>
-          <Link2 size={16} /> Add from link or folder
-        </button>
-      </div>
+        <div className="integration-bar-side">
+          <span className="integration-bar-count">
+            <strong>{installedCount}</strong> installed
+          </span>
+          <button className="ghost" onClick={onAddExtension}>
+            <Link2 size={16} /> Add from link or folder
+          </button>
+        </div>
+      </section>
 
       {view === 'installed' ?
         <InstalledView onBrowse={() => setView('discover')} /> :
@@ -83,11 +99,18 @@ function InstalledView({onBrowse}: {onBrowse: () => void}) {
 
   return (
     <>
+      {/* Shaped like the Integrations tab's note, for the same reason: it is a
+          standing fact about the screen rather than a message about something
+          that just happened, and a bare grey paragraph above a grid of cards
+          reads as a caption for the first card. */}
       {!org.isAdmin && org.orgId && (
-        <p className="extensions-note">
-          The bundled extensions apply to everyone in {org.org?.name || 'this organization'},
-          so only an owner or admin can change them.
-        </p>
+        <section className="api-note">
+          <ShieldCheck size={18} />
+          <span>
+            The bundled extensions apply to everyone in {org.org?.name || 'this organization'},
+            so only an owner or admin can change them.
+          </span>
+        </section>
       )}
 
       <div className="extension-grid">
@@ -200,13 +223,17 @@ function CatalogCard({entry, installed, onInstall}: {
       <div className="extension-card-head">
         <ExtensionMark logo={extensionLogo(entry.slug)} />
         <h3>{entry.name}</h3>
+        {/* Green, the same tone Connected takes on the Integrations tab: this
+            is the one chip in the catalog that means "already yours", and it
+            answers the Install button that would otherwise be here. */}
+        {installed && <Badge tone="active" icon={<Check size={12} />}>Installed</Badge>}
       </div>
       <p>{entry.tagline}</p>
-      <div className="extension-card-foot">
-        {installed ?
-          <span className="status-pill"><Check size={14} /> Installed</span> :
-          <button onClick={onInstall}><Download size={16} /> Install</button>}
-      </div>
+      {!installed && (
+        <div className="extension-card-foot">
+          <button onClick={onInstall}><Download size={16} /> Install</button>
+        </div>
+      )}
     </article>
   );
 }
@@ -234,20 +261,24 @@ function ExtensionCard({action, badge, enabled, logo, name, note, onToggle, tagl
       <div className="extension-card-head">
         <ExtensionMark logo={logo} tint={tint} />
         <h3>{name}</h3>
+        {/* Where an extension came from, beside its name rather than in the
+          * card's foot -- it is part of the extension's identity, not of the
+          * controls. Bundled ones carry a verified mark in the blue "checked
+          * fact" tone: they ship with Argus and were not fetched from a store,
+          * which is the one thing about a browser extension worth vouching for.
+          * Everything else -- Web Store, Shared folder -- states its provenance
+          * in the neutral tone and makes no claim about it. */}
+        <Badge
+          tone={verified ? 'info' : 'neutral'}
+          icon={verified ? <BadgeCheck size={12} /> : undefined}
+        >
+          {badge}
+        </Badge>
         {action}
       </div>
       <p>{tagline}</p>
       {note && <p className="extension-card-note">{note}</p>}
       <div className="extension-card-foot">
-        {/* Bundled extensions carry a verified mark: they ship with Argus and
-          * were not fetched from a store, which is the one thing about a
-          * browser extension worth vouching for. Everything else -- Web Store,
-          * Shared folder -- states its provenance in the neutral tone and
-          * makes no claim about it. */}
-        <span className={verified ? 'status-pill' : 'status-pill is-idle'}>
-          {verified && <BadgeCheck size={14} />}
-          {badge}
-        </span>
         <label className="switch" aria-label={`${enabled ? 'Disable' : 'Enable'} ${name}`}>
           <input
             checked={enabled}

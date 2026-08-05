@@ -55,8 +55,24 @@ Get-CimInstance Win32_Process |
 
 ## Current Important Behavior
 
-- Direct connection is disabled for profiles. Saving or launching a profile requires a
-  valid proxy.
+- A profile has three proxy modes (`ProxyMode` in `src/types.ts`): `assigned`, `direct`
+  and `free_proxy`. **Only `assigned` requires a proxy.** `ProfileModal`'s validation
+  refuses a save without one in that mode alone ("Proxy is required, or pick Direct /
+  Free Proxy instead"), and `resolveLaunchProxy` returns `null` — launch, no proxy, no
+  block — for the other two. An undefined `proxy_mode` means `assigned`, for profiles
+  saved before the field existed. (This entry used to claim direct was disabled
+  entirely. It has not been for some time.)
+- **Switching a profile to Direct must clear Chromium's own `proxy` pref, not just the
+  `argus.profile_data` block.** They are separate keys in the same Preferences file, and
+  the second is the one that routes traffic: a proxied launch leaves
+  `socks5://127.0.0.1:<bridge port>` in it, pointing at a SOCKS bridge that dies with the
+  session. Nothing on the browser side clears it on a direct launch — the startup
+  fail-safe is skipped for `--argus-profile-launch`, and `InitializeAsync` returns early
+  on the empty `assigned_proxy_id`, so `RevertToDirect` never runs. So
+  `writeProfileProxyAssignment` writes `prefs.proxy = {mode: 'direct'}` itself. Drop that
+  line and the *second* launch of any profile that once had a proxy fails every
+  navigation, loopback included (the applicator sets no bypass rules), while the first
+  launch and the whole UI look correct.
 - A profile carries at most **5 tags** (`MAX_PROFILE_TAGS`). `normalizeTags()` in
   `src/lib/tags.ts` is the only enforcement point and all three write paths call it —
   `profileFromDraft`, the CSV importer and the automation bridge's profile patch. Do not
@@ -86,7 +102,25 @@ Get-CimInstance Win32_Process |
 - Argys Browser launch must open a launcher-provided local home file or a real profile
   start URL. It must not open Supabase login, `localhost`, `127.0.0.1`,
   `argus-launcher`, or `about:blank`.
-- Proxy checks are automatic background checks. Do not add a manual check button back.
+- Proxy checks are automatic background checks **in the launcher**. Do not add a manual
+  check button back to the Proxies tab. There are two exceptions, both surfaces the
+  background sweep cannot serve:
+  - The generated browser start page has a Re-check button on its proxy panel: that page
+    shows a country and a latency measured once at launch, a session outlives that by
+    hours, and you cannot reach the launcher from inside an anonymous window — so it is
+    the only surface with no other way to ask. It goes through
+    `POST /v1/proxies/recheck-from-page` (see the Automations section below), which
+    answers in the renderer so the result is recorded against the proxy row exactly as
+    the background sweep would have recorded it.
+  - The profile import review step has a **Check proxies** button
+    (`components/modals/ImportProfilesModal.tsx`). The sweep only ever sees saved rows,
+    and the whole point of that screen is to decide *before* saving — a file of proxies
+    that cannot connect should be found there, not discovered profile by profile at
+    launch. It is explicit and never blocks the import, checks at most
+    `CHECK_CONCURRENCY` (5) at a time through `lib/concurrency.ts` rather than one curl
+    per row, and routes a row already matched to a stored proxy through
+    `testConnectionAndRecord` so that result lands exactly as the sweep would write it.
+    A row whose proxy is not saved yet is only tested.
 - Profile folders and proxy folders share one `public.folders` table, told apart by
   `folders.kind` (`'profile'` / `'proxy'`). `useCloudData` splits the single read into
   `state.folders` and `state.proxy_folders` — that split is the only thing keeping a proxy
@@ -198,9 +232,69 @@ injection, and a `{{ }}` inside real JavaScript would be silently rewritten.
 Values reach a script through `args`, which are interpolated and passed as a
 JSON-encoded argument.
 
+**The local API's routes live in `electron/api/routes.json`.** `main.cjs` builds
+its pathname allow-list from it, `mcp/tools.cjs` generates the automations tools
+from it, and the API tab renders it. Before that table there were three
+hand-written copies of one list and they had already drifted — the API tab
+documented `POST /v1/proxies`, `POST /v1/profiles` and
+`POST /v1/profiles/{id}/launch`, none of which were ever routed, so every agent
+handed the brief burned its first turns on 404s. Add a route to the table, not
+to the allow-list, and run `scripts/verify-api-routes.mjs`.
+
+**The automations tools are generated, and the filter is `channel || local`, not
+`mcp`.** Nine profile/proxy routes also carry an `mcp` name so the agent brief
+can list every tool from one file; filtering the generator on `mcp` alone builds
+a second, field-less copy of each of those nine. `tools/list` then answers with
+thirty tools and `argus_update_profile` resolves to the copy that forwards no
+fields. `verify-api-routes` checks for exactly this.
+
+**A folder-scoped key may not author automations.** They are org-wide with no
+folder of their own, so scope cannot be applied to them the way it is applied to
+a profile — a key granted one folder could otherwise rewrite a workflow every
+other folder runs. List, read and run are allowed; create, update and delete are
+`403`. Enforced in `main.cjs` off the route's `scope` field.
+
+**The showcase example is an ordinary automation.** `src/data/showcaseAutomation.ts`
+is a plain template with **no `id`** — `exampleAutomation()` mints one with
+`newId()` at insert, because the id becomes a directory name under
+`<userData>/AutomationRuns/` and has to satisfy `automations_id_fs_safe`; a
+constant would also collide on the primary key the second time anyone loaded
+it. Once inserted it is a row like any other. Nothing reads it at runtime,
+nothing keys off its name, and no code path asks "is this the example?" —
+keep it that way, or the first user who renames it finds a feature that
+stopped working. Its `else` branch is currently the one that always runs: we do
+not rank for "argus browser" and the site is not indexed.
+
 **Do not add `--remote-allow-origins`.** It used to be `*` on every automation
 launch, which let any web page reach the CDP socket. Our clients send no
 `Origin` and Chromium accepts that.
+
+**The debugging port is opened when a launch has start-page tiles, not on every
+launch.** `useProfileActions.launch` reserves one when the profile has an
+automation attached *or* any automation is pinned — `startPageAutomations()` in
+`src/lib/startPageAutomations.ts` is the single answer to "what tiles does this
+launch have", and `buildLaunchPayload` renders the tiles from the same call, so
+the port and the tiles cannot disagree. Pinning is the opt-in: a workspace that
+pins nothing and attaches nothing still launches with no extra switches at all.
+Do not widen this to every launch — an always-on `--remote-debugging-port` is
+connectable by any local process and CDP attachment is observable from the page.
+
+**The two page routes are not part of the keyed API surface.**
+`POST /v1/automations/run-from-page` and `POST /v1/proxies/recheck-from-page` sit
+*above* the bearer gate in `main.cjs` and authenticate with the per-launch run
+token instead, because the caller is a `file://` document that has no key and
+must never be given one. They are deliberately absent from
+`electron/api/routes.json`; `verify-api-routes.mjs` skips them by name. Both take
+their id off the token's entry rather than the request body, which is what makes
+them safe to open at all — the run route names an automation from a list minted
+with the token, and the re-check route names nothing. Every refusal on both is
+the same 403 with the same body, so neither is an oracle. If you add a third,
+extend `scripts/verify-run-token.mjs` with its refusal paths.
+
+**A run token is minted on every launch**, including one with nothing pinned and
+nothing attached — the proxy panel needs it. Those carry `cdpPort: null` and an
+empty automations list, and `authorize()` looks every requested id up in that
+list, so such a token can re-check and nothing else.
 
 ## Verification Checklist
 
@@ -212,12 +306,16 @@ npm run typecheck
 npm run build
 ```
 
-Both must be clean. There is no test suite, but there are two end-to-end
-verification scripts, and anything touching the runner or the start-page token
-should run them:
+Both must be clean. There is no test suite, but there are three end-to-end
+verification scripts, and anything touching the runner, the start-page token or
+the local API should run them:
 
 ```
 node scripts/verify-automation.mjs   # drives a real browser through a workflow
 node scripts/verify-run-token.mjs    # the start-page endpoint's refusal paths
-``` Then restart the app and click through the
+node scripts/verify-api-routes.mjs   # the route table vs what main.cjs serves
+```
+
+`verify-api-routes` needs nothing running — no Electron, no browser, no
+Supabase — so there is no excuse for skipping it. Then restart the app and click through the
 path you changed.

@@ -224,7 +224,11 @@ async function main() {
   } finally {
     child.kill();
     server.close();
-    rmSync(workDir, {recursive: true, force: true});
+    // child.kill() signals, it does not wait, so the browser is often still
+    // flushing its user-data-dir here -- which surfaced as an ENOTEMPTY that
+    // failed the whole script *after* all twelve checks had already passed.
+    // force: covers "already gone"; maxRetries: covers "not gone yet".
+    rmSync(workDir, {recursive: true, force: true, maxRetries: 10, retryDelay: 200});
   }
 
   const failed = results.filter((r) => !r.ok);

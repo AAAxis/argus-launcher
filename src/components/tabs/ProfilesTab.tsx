@@ -1,26 +1,32 @@
 import {useState} from 'react';
 import {
-  BookOpen, Cookie, Download, FolderInput, FolderPlus, Pencil, Play, SearchX, Trash2, UserPlus,
-  UsersRound,
+  BookOpen, Cookie, Download, FolderInput, FolderPlus, Pencil, Play, SearchX, ShieldCheck,
+  Trash2, UserPlus, UsersRound,
 } from 'lucide-react';
 import {MoveProfilesModal} from '../modals/MoveProfilesModal';
+import {PurgeProfilesModal} from '../modals/ConfirmModals';
 import {BusyButton} from '../ui/BusyButton';
+import {Checkbox} from '../ui/Checkbox';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
 import {PlatformIcon} from '../ui/icons';
+import {ProxyCheckCell, storedCheckState} from '../ui/ProxyCheckCell';
+import {ProfileAvatar} from '../ui/ProfileAvatar';
+import {SortableTh} from '../ui/SortableTh';
 import {StatusPicker} from '../ui/StatusChip';
 import {TagCell} from '../ui/TagChip';
 import {daysUntilPurge, TRASH_FOLDER_ID} from '../../lib/trash';
-import {formatDateShort, initials} from '../../lib/text';
+import {formatDateShort} from '../../lib/text';
 import {paginate} from '../../lib/paginate';
-import {profileColorStyle} from '../../lib/profileColors';
 import {tagKey, tagLabel} from '../../lib/tags';
 import {native} from '../../native';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useSelection} from '../../hooks/useSelection';
+import {useTableSort} from '../../hooks/useTableSort';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
-import type {ArgusFolder, ArgusProfile} from '../../types';
+import type {PurgeRequest} from '../modals/ConfirmModals';
+import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
 
 export type ProfilesTabProps = {
   // Controlled by the shell: creating a folder from the dialog selects it here.
@@ -55,8 +61,8 @@ export function ProfilesTab({
   onShowIntro,
 }: ProfilesTabProps) {
   const {
-    data, toast, library, profiles, selectedProfileId, setSelectedProfileId, statusOptions,
-    tagOptions,
+    data, toast, library, profiles, proxies, checkingProxyIds, selectedProfileId,
+    setSelectedProfileId, statusOptions, tagOptions,
   } = useWorkspace();
   const state = data.state;
   const {run, isPending} = useAsyncAction();
@@ -70,10 +76,31 @@ export function ProfilesTab({
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [moveOpen, setMoveOpen] = useState(false);
+  // The pending permanent delete, shared by the row button, the bulk button and
+  // Empty Trash -- one dialog, three ways in.
+  const [purge, setPurge] = useState<PurgeRequest | null>(null);
+
+  // What each column sorts BY, which is not always what its cell renders:
+  // Platform is the fingerprint's OS behind a brand mark, Folder is a name
+  // resolved from an id, Proxy is the host:port behind "Direct". A profile with
+  // no platform, no folder or no proxy returns undefined and sinks to the
+  // bottom in both directions -- see useTableSort.
+  const sorting = useTableSort<ArgusProfile>([
+    {key: 'name', value: (profile) => profile.name},
+    {key: 'platform', value: (profile) => profile.fingerprint?.os},
+    {key: 'status', value: (profile) => profile.status || 'Ready'},
+    {key: 'created', value: (profile) => profile.created_at, firstDirection: 'desc'},
+    {key: 'folder', value: (profile) => profiles.folderFor(profile)?.name},
+    {key: 'proxy', value: (profile) => {
+      const assigned = profiles.proxyFor(profile);
+      return assigned ? `${assigned.host}:${assigned.port}` : undefined;
+    }},
+  ], {onSortChange: () => setPage(0)});
 
   const inTrash = folderId === TRASH_FOLDER_ID;
   const filtered = Boolean(search.trim() || statusFilter || tagFilter);
-  const visible = visibleProfiles(state.profiles, {folderId, statusFilter, tagFilter, search});
+  const visible = sorting.sort(
+      visibleProfiles(state.profiles, {folderId, statusFilter, tagFilter, search}));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
   // The real folder the view is pointed at, if any: "" is All profiles and
@@ -136,19 +163,45 @@ export function ProfilesTab({
     toast.setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} restored`);
   }
 
-  async function purgeSelection() {
-    const count = selection.size;
-    if (!count) {
+  // The three permanent-delete paths all raise the same dialog rather than a
+  // window.confirm. It is the irreversible action, so it gets the "I understand"
+  // checkbox the reversible one already had -- and a native confirm cannot say
+  // that the on-disk browser directory and logged-in sessions go too.
+  function purgeSelection() {
+    if (!selection.size) {
       return;
     }
-    if (!window.confirm(`Permanently delete ${count} selected ${count === 1 ? 'profile' : 'profiles'}? This cannot be undone.`)) {
+    setPurge({
+      ids: [...selection.ids],
+      count: selection.size,
+      label: `${selection.size} selected ${selection.size === 1 ? 'profile' : 'profiles'}`,
+    });
+  }
+
+  // No ids: the delete is scoped by deleted_at server-side, which is what makes
+  // it safe without a selection. See db/profiles.purgeAll.
+  function emptyTrash() {
+    if (!trashCount) {
       return;
     }
-    if (!await profiles.purge([...selection.ids])) {
+    setPurge({ids: [], count: trashCount, label: 'everything in Trash'});
+  }
+
+  // The proxies behind the selected profiles, deduplicated -- several profiles
+  // sharing one proxy should check it once, not once each.
+  function checkSelectionProxies() {
+    const targets = new Map<string, ArgusProxy>();
+    for (const profile of selection.selectedFrom(state.profiles)) {
+      const proxy = profiles.proxyFor(profile);
+      if (proxy) {
+        targets.set(proxy.id, proxy);
+      }
+    }
+    if (!targets.size) {
+      toast.setMessage('None of the selected profiles has a proxy assigned.');
       return;
     }
-    selection.clear();
-    toast.setMessage(`${count} ${count === 1 ? 'profile' : 'profiles'} permanently deleted`);
+    void proxies.checkMany([...targets.values()]);
   }
 
   async function restoreOne(profile: ArgusProfile) {
@@ -181,13 +234,8 @@ export function ProfilesTab({
     toast.setMessage(`${folder.name} folder deleted`);
   }
 
-  async function purgeOne(profile: ArgusProfile) {
-    if (!window.confirm(`Permanently delete ${profile.name}? This cannot be undone.`)) {
-      return;
-    }
-    if (await profiles.purge([profile.id])) {
-      toast.setMessage(`${profile.name} permanently deleted`);
-    }
+  function purgeOne(profile: ArgusProfile) {
+    setPurge({ids: [profile.id], count: 1, label: profile.name});
   }
 
   if (workspaceEmpty) {
@@ -235,56 +283,15 @@ export function ProfilesTab({
             </option>
           ))}
         </select>
+        {/* In the toolbar rather than the selection bar, because the whole point
+          * is that it needs no selection: emptying Trash after a failed import
+          * meant ticking every row across every page first. */}
+        {inTrash && trashCount > 0 && (
+          <button className="danger ghost" onClick={emptyTrash}>
+            <Trash2 size={16} /> Empty Trash ({trashCount})
+          </button>
+        )}
       </section>
-
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            {inTrash ? (
-              <>
-                <button className="ghost" onClick={restoreSelection}>Restore selected</button>
-                <button className="danger ghost" onClick={purgeSelection}>
-                  <Trash2 size={16} /> Delete forever
-                </button>
-              </>
-            ) : (
-              <>
-                <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
-                  <option value="" disabled>Assign to folder…</option>
-                  <option value="">All profiles</option>
-                  {state.folders.map((folder) => (
-                    <option key={folder.id} value={folder.id}>{folder.name}</option>
-                  ))}
-                </select>
-                <BusyButton
-                  className="ghost"
-                  busy={isPending('import-cookies')}
-                  icon={<Cookie size={16} />}
-                  busyLabel="Importing…"
-                  onClick={() => void run('import-cookies', importCookiesForSelection)}
-                >
-                  Import cookies
-                </BusyButton>
-                <button
-                  className="ghost"
-                  onClick={() => void profiles.exportToCsv(selection.selectedFrom(state.profiles))}
-                >
-                  <Download size={16} /> Export selected
-                </button>
-                <button
-                  className="danger ghost"
-                  onClick={() => onRequestDelete(
-                      [...selection.ids],
-                      `${selection.size} selected ${selection.size === 1 ? 'profile' : 'profiles'}`,
-                      selection.clear)}
-                >
-                  <Trash2 size={16} /> Delete selected
-                </button>
-              </>
-            )}
-          </div>
-        </section>
-      )}
 
       {/* The folder navigation, in full: All profiles, the folders themselves,
         * Trash, and the way to make another one. This replaced a dropdown --
@@ -361,26 +368,91 @@ export function ProfilesTab({
         </button>
       </section>
 
+      {/* Below the folder rail, not above it. Ticking a row used to insert this
+        * between the filters and the folders, which pushed the folder cards --
+        * and the whole table under them -- down by its height. */}
+      {selection.size > 0 && (
+        <section className="selection-toolbar">
+          <div className="selection-toolbar-actions">
+            {inTrash ? (
+              <>
+                <button className="ghost" onClick={restoreSelection}>Restore selected</button>
+                <button className="danger ghost" onClick={purgeSelection}>
+                  <Trash2 size={16} /> Delete forever
+                </button>
+              </>
+            ) : (
+              <>
+                <select value="" onChange={(event) => void moveSelectionToFolder(event.target.value)}>
+                  <option value="" disabled>Assign to folder…</option>
+                  <option value="">All profiles</option>
+                  {state.folders.map((folder) => (
+                    <option key={folder.id} value={folder.id}>{folder.name}</option>
+                  ))}
+                </select>
+                <button className="ghost" onClick={checkSelectionProxies}>
+                  <ShieldCheck size={16} /> Check proxies
+                </button>
+                <BusyButton
+                  className="ghost"
+                  busy={isPending('import-cookies')}
+                  icon={<Cookie size={16} />}
+                  busyLabel="Importing…"
+                  onClick={() => void run('import-cookies', importCookiesForSelection)}
+                >
+                  Import cookies
+                </BusyButton>
+                <button
+                  className="ghost"
+                  onClick={() => void profiles.exportToCsv(selection.selectedFrom(state.profiles))}
+                >
+                  <Download size={16} /> Export selected
+                </button>
+                <button
+                  className="danger ghost"
+                  onClick={() => onRequestDelete(
+                      [...selection.ids],
+                      `${selection.size} selected ${selection.size === 1 ? 'profile' : 'profiles'}`,
+                      selection.clear)}
+                >
+                  <Trash2 size={16} /> Delete selected
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="table-wrap">
         <table>
           <thead>
             <tr>
               <th>
                 {visible.length > 0 && (
-                  <input
-                    type="checkbox"
-                    aria-label="Select all"
+                  <Checkbox
+                    label={`Select all ${visible.length} profiles on this page`}
                     checked={selection.allSelected(visible)}
+                    indeterminate={visible.some((item) => selection.has(item.id))}
                     onChange={() => selection.toggleAll(visible)}
                   />
                 )}
               </th>
-              <th>Name</th>
-              <th>Platform</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Folder</th>
-              <th>Proxy</th>
+              <SortableTh label="Name" {...sorting.thProps('name')} />
+              <SortableTh label="Platform" {...sorting.thProps('platform')} />
+              <SortableTh label="Status" {...sorting.thProps('status')} />
+              {/* Only once there is somebody to tell apart. On a one-person
+                * workspace every row would answer "you", which is a column of
+                * noise -- the same judgement that hides the org switcher until
+                * you belong to more than one org. */}
+              {/* "Date added", not "Created": the same created_at, named for
+                * what the reader is actually scanning this column for -- the day
+                * the profile joined this workspace. The sort key stays `created`
+                * because it names the field, not the header. */}
+              <SortableTh label="Date added" {...sorting.thProps('created')} />
+              <SortableTh label="Folder" {...sorting.thProps('folder')} />
+              <SortableTh label="Proxy" {...sorting.thProps('proxy')} />
+              {/* Tags is a set, not a value -- there is no order to sort a row
+                * of chips by that means anything to the person reading it. */}
               <th>Tags</th>
               <th />
             </tr>
@@ -396,16 +468,14 @@ export function ProfilesTab({
               return (
                 <tr key={profile.id} className={rowClass} onClick={() => setSelectedProfileId(profile.id)}>
                   <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      label={`Select ${profile.name || profile.id}`}
                       checked={selection.has(profile.id)}
                       onChange={() => selection.toggle(profile.id)}
                     />
                   </td>
                   <td className="name-cell">
-                    <span className="avatar" style={profileColorStyle(profile.color)}>
-                      {initials(profile.name)}
-                    </span>
+                    <ProfileAvatar profile={profile} />
                     {profile.name}
                   </td>
                   <td className="platform-cell">
@@ -427,7 +497,23 @@ export function ProfilesTab({
                       `${daysUntilPurge(profile.deleted_at)}d left in Trash` :
                       <FolderLabel folder={folder} />}
                   </td>
-                  <td>{proxy ? `${proxy.host}:${proxy.port}` : 'Direct'}</td>
+                  {/* The connection and its health together. The cell used to be
+                    * host:port alone, so the one thing you actually want from
+                    * this column -- does this profile's proxy work -- meant
+                    * opening the Proxies tab and finding the row by hand. */}
+                  <td className="profile-proxy-cell">
+                    {proxy ? (
+                      <>
+                        <span className="profile-proxy-host">{proxy.host}:{proxy.port}</span>
+                        <ProxyCheckCell
+                          state={checkingProxyIds.has(proxy.id) ?
+                            {status: 'checking'} :
+                            storedCheckState(proxy)}
+                          age={proxy.check_error ? undefined : proxy.checked_at}
+                        />
+                      </>
+                    ) : 'Direct'}
+                  </td>
                   <td><TagCell tags={profile.tags} /></td>
                   <td>
                     {profile.deleted_at ? (
@@ -441,7 +527,7 @@ export function ProfilesTab({
                           aria-label={`Permanently delete ${profile.name}`}
                           onClick={(event) => {
                             event.stopPropagation();
-                            void purgeOne(profile);
+                            purgeOne(profile);
                           }}
                         >
                           <Trash2 size={16} />
@@ -457,6 +543,24 @@ export function ProfilesTab({
                         >
                           Launch
                         </BusyButton>
+                        {/* Only for a profile that has a proxy: a direct one has
+                          * nothing to check, and a disabled button there would
+                          * suggest the check was unavailable rather than
+                          * inapplicable. */}
+                        {proxy && (
+                          <button
+                            aria-label={`Check proxy for ${profile.name}`}
+                            className="ghost icon-button row-action"
+                            disabled={checkingProxyIds.has(proxy.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void proxies.checkOnce(proxy);
+                            }}
+                            title={`Check ${proxy.host}:${proxy.port} now`}
+                          >
+                            <ShieldCheck size={16} />
+                          </button>
+                        )}
                         {/* Bordered rather than bare: beside a filled Launch
                           * button, a naked glyph read as decoration on the
                           * row instead of as something to press. */}
@@ -490,8 +594,8 @@ export function ProfilesTab({
             })}
             {items.length === 0 && (
               <tr className="empty-row-tr">
-                {/* Nine columns, not the eight this used to claim -- a short
-                  * colSpan leaves a stray empty cell at the end of the row. */}
+                {/* Nine columns. A short colSpan leaves a stray empty cell at
+                  * the end of the row. */}
                 <td colSpan={9}>
                   <EmptyState
                     icon={<SearchX size={22} />}
@@ -546,6 +650,17 @@ export function ProfilesTab({
           onClose={() => {
             setMoveOpen(false);
             onFillTagDone();
+          }}
+        />
+      )}
+
+      {purge && (
+        <PurgeProfilesModal
+          request={purge}
+          onClose={() => setPurge(null)}
+          onPurged={() => {
+            setPurge(null);
+            selection.clear();
           }}
         />
       )}

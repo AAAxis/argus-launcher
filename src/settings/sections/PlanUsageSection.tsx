@@ -8,6 +8,7 @@
 import {useEffect, useState} from 'react';
 import {ExternalLink} from 'lucide-react';
 import * as db from '../../db';
+import {Meter} from '../../components/ui/Meter';
 import {formatDate} from '../../lib/text';
 import {useOrg} from '../../org';
 import {hasUpgrade, planLabel, planPrice} from '../../plans';
@@ -18,31 +19,6 @@ type Props = {
   automationCount: number;
   onOpenSite: (pathname: string) => void;
 };
-
-function Meter({used, limit}: {used: number; limit: number | null}) {
-  // A null limit is Enterprise's "unlimited": there is no denominator, so there
-  // is no bar to fill -- showing a full one would read as "at your limit".
-  if (limit === null || limit <= 0) {
-    return (
-      <div className="settings-meter">
-        <strong>{used}</strong>
-        <span>of unlimited</span>
-      </div>
-    );
-  }
-  const percent = Math.min(100, Math.round((used / limit) * 100));
-  return (
-    <div className="settings-meter">
-      <div className="settings-meter-numbers">
-        <strong>{used}</strong>
-        <span>of {limit}</span>
-      </div>
-      <div className="settings-meter-track" aria-hidden="true">
-        <span className={percent >= 100 ? 'full' : ''} style={{width: `${percent}%`}} />
-      </div>
-    </div>
-  );
-}
 
 export function PlanUsageSection({profileCount, automationCount, onOpenSite}: Props) {
   const org = useOrg();
@@ -119,7 +95,10 @@ export function PlanUsageSection({profileCount, automationCount, onOpenSite}: Pr
           <Meter used={automationCount} limit={org.org?.automation_limit ?? null} />
         </SettingsRow>
 
-        <SettingsRow label="Members" description="People who can sign in to this workspace.">
+        <SettingsRow
+          label="Members"
+          description="People who can sign in to this workspace. Manage them on the Team tab."
+        >
           {seats === null ?
             <SettingsValue>—</SettingsValue> :
             <Meter used={seats} limit={org.org?.seat_limit ?? null} />}

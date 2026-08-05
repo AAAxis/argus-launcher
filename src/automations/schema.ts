@@ -51,6 +51,13 @@ export type FieldSpec = {
   // A regex the value must match, as a string. Applied by the validator and by
   // the editor; variable names use it to stay addressable as {{vars.x}}.
   pattern?: string;
+  // Marks a field the editor can test against a live page. 'selector' puts a
+  // Check button beside the input, which counts what it matches on the open
+  // profile. Declared here rather than inferred from the key name, because
+  // `attr` and `into` are also text fields on the same steps and neither is a
+  // selector -- and because a step type added later may name its selector
+  // something else.
+  check?: 'selector';
   // Show this field only when a sibling holds one of these values. The value is
   // a single string or a list of them.
   showWhen?: Record<string, string | string[]>;

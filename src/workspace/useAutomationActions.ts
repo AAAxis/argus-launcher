@@ -7,6 +7,7 @@ import {useAutomationRuns} from '../hooks/useAutomationRuns';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {native} from '../native';
+import {SHOWCASE_AUTOMATION} from '../data/showcaseAutomation';
 import {newId} from './core';
 import type {WorkspaceCore} from './core';
 import type {ArgusAutomation, ArgusProfile} from '../types';
@@ -32,6 +33,21 @@ export function useAutomationActions(
       timeout_ms: 300000,
       close_on_finish: false,
     };
+  }
+
+  // The pre-written example, minted the same way a blank one is.
+  //
+  // The id is added here rather than baked into src/data/showcaseAutomation.ts:
+  // it becomes a directory name under <userData>/AutomationRuns/, so a constant
+  // would hand every org the same one and make loading the example twice a
+  // primary-key collision instead of two independent rows.
+  //
+  // Deep-cloned, not spread. The template is a module-level constant and its
+  // steps are nested arrays that the editor edits in place -- a shallow copy
+  // would let the first person who edits the example rewrite what everyone
+  // loads next, for the rest of the session.
+  function exampleAutomation(): ArgusAutomation {
+    return {...structuredClone(SHOWCASE_AUTOMATION), id: newId()};
   }
 
   // create vs replace is the caller's call, never an upsert -- see the comment
@@ -96,7 +112,7 @@ export function useAutomationActions(
     const bridge = native;
     if (!bridge) {
       toast.setMessage('Automation needs the desktop app.');
-      return;
+      return {ok: false as const, error: 'Automation needs the desktop app.'};
     }
     toast.setMessage(`Starting ${automation.name}`);
     const result = await startRun(automation, profile, {
@@ -114,10 +130,15 @@ export function useAutomationActions(
     });
     if (!result.ok) {
       toast.fail(`Couldn't run ${automation.name}`, result.error);
-      return;
+      return result;
     }
     toast.setMessage(`Running ${automation.name}`);
+    // Returned as well as toasted: the API bridge answers its HTTP caller with
+    // the run id, and a toast is no use to an agent.
+    return result;
   }
 
-  return {runs, attach, newAutomation, remove, run, save, setPinned, cancelRun};
+  return {
+    runs, attach, exampleAutomation, newAutomation, remove, run, save, setPinned, cancelRun,
+  };
 }

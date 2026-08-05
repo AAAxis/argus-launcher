@@ -1,0 +1,334 @@
+{
+  "$comment": [
+    "The local automation API's route table, and the one place it is written down.",
+    "",
+    "It used to be three: the pathname allow-list in electron/main.cjs, the tool",
+    "catalogue in electron/mcp/tools.cjs, and API_GROUPS in src/data/apiDocs.ts.",
+    "Three hand-maintained copies of one list, kept in step by a comment -- and they",
+    "had already drifted. apiDocs documented POST /v1/proxies, POST /v1/profiles and",
+    "POST /v1/profiles/{id}/launch, none of which are routed, and advertised a",
+    "`notes` field on /v1/profiles/update that the handler's whitelist does not have.",
+    "Agents handed that brief burned their first turns on 404s.",
+    "",
+    "Same device as electron/automation/step-schema.json: JSON, because nothing",
+    "compiles electron/ and a TypeScript table would have to be maintained twice.",
+    "src/api/routes.ts pins it to a type; scripts/verify-api-routes.mjs asserts the",
+    "table and main.cjs's allow-list agree in both directions.",
+    "",
+    "`channel` marks a route whose dispatch is driven from this table. The older",
+    "routes are documented here but still dispatched by their hand-written blocks in",
+    "main.cjs -- migrating those is a separate job, and the verify script is what",
+    "stops the two descriptions diverging in the meantime.",
+    "",
+    "`scope`: 'any' accepts any valid key; 'unscoped' additionally requires a key",
+    "with no folderScope. Automations are org-wide objects with no folder of their",
+    "own, so a key granted one folder must not be able to author them.",
+    "",
+    "`mcp` names the tool in electron/mcp/tools.cjs that fronts this route, where",
+    "one exists. Not every route has one on purpose -- each tool costs context in",
+    "every session, so destructive and bulk routes stay HTTP-only."
+  ],
+  "$sessionToolsComment": [
+    "MCP tools that drive an open page over CDP directly and so have no route of",
+    "their own -- they resolve a port through POST /v1/profiles/cdp and then talk",
+    "to the browser. Listed here only so an agent brief can name every tool from",
+    "one file; the definitions live in electron/mcp/tools.cjs."
+  ],
+  "sessionTools": [
+    "argus_list_tabs",
+    "argus_navigate",
+    "argus_read_page",
+    "argus_screenshot",
+    "argus_eval"
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v1/profiles",
+      "mcp": "argus_list_profiles",
+      "group": "Profiles",
+      "label": "List profiles (optional ?folder=<id>)",
+      "scope": "any"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/get",
+      "mcp": "argus_get_profile",
+      "group": "Profiles",
+      "label": "Read one profile",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/update",
+      "mcp": "argus_update_profile",
+      "group": "Profiles",
+      "label": "Update name, status, tags, colour, avatar or folder",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"status\": \"Ready\", \"tags\": [\"warmup\"], \"avatar\": \"brand:instagram\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/assign-proxy",
+      "mcp": "argus_assign_proxy",
+      "group": "Profiles",
+      "label": "Put a profile on a proxy from the library",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"proxyId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/launch-automation",
+      "mcp": "argus_launch_profile",
+      "group": "Profiles",
+      "label": "Open a profile for automation; returns its CDP url. Reuses a running session unless relaunch is set",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"relaunch\": false }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/cdp",
+      "mcp": "argus_profile_session",
+      "group": "Profiles",
+      "label": "Where a running profile's CDP endpoint is, without launching it",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/close-automation",
+      "mcp": "argus_close_profile",
+      "group": "Profiles",
+      "label": "Close a session this key opened",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/delete",
+      "group": "Profiles",
+      "label": "Move a profile to Trash (permanent: true to purge)",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"permanent\": false }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/update-fingerprint",
+      "group": "Profiles",
+      "label": "Re-roll or override a profile's fingerprint",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/proxies",
+      "mcp": "argus_list_proxies",
+      "group": "Proxies",
+      "label": "List proxies",
+      "scope": "any"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/create",
+      "group": "Proxies",
+      "label": "Add proxy",
+      "scope": "any",
+      "body": "{ \"name\": \"US proxy\", \"type\": \"socks5\", \"host\": \"1.2.3.4\", \"port\": 1080 }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/update",
+      "group": "Proxies",
+      "label": "Update a proxy",
+      "scope": "any",
+      "body": "{ \"proxyId\": \"<id>\", \"name\": \"US proxy\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/check",
+      "mcp": "argus_check_proxy",
+      "group": "Proxies",
+      "label": "Check reachability and egress IP",
+      "scope": "any",
+      "body": "{ \"host\": \"1.2.3.4\", \"port\": 1080, \"type\": \"socks5\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/delete",
+      "group": "Proxies",
+      "label": "Remove a proxy",
+      "scope": "any",
+      "body": "{ \"proxyId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/reimport",
+      "group": "Proxies",
+      "label": "Re-import proxies from a file on disk",
+      "scope": "any",
+      "body": "{ \"filePath\": \"/path/to/proxies.txt\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cookies/bulk-match",
+      "group": "Cookies",
+      "label": "Match exported cookie files in a folder to profiles by name",
+      "scope": "any",
+      "body": "{ \"folderPath\": \"/path/to/cookies\", \"profileIds\": [\"<id>\"] }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cookies/push-local",
+      "group": "Cookies",
+      "label": "Attach a cookie file on disk to one profile",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"filePath\": \"/path/to/cookies.json\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/monitoring/report",
+      "group": "Monitoring",
+      "label": "Report a run's outcome from an external script",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"status\": \"ok\" }"
+    },
+
+    {
+      "method": "GET",
+      "path": "/v1/automations",
+      "group": "Automations",
+      "label": "List the org's automations, with step counts",
+      "scope": "any",
+      "channel": "argus:list-automations-request",
+      "mcp": "argus_list_automations",
+      "mcpDescription": "List the automations in this workspace. Returns id, name, description, step count and where each is wired in.",
+      "fields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/automations/schema",
+      "group": "Automations",
+      "label": "The step catalogue: every step type, its fields and how they validate",
+      "scope": "any",
+      "local": true,
+      "mcp": "argus_automation_schema",
+      "mcpDescription": "The step vocabulary an automation is written in. Call this before argus_create_automation rather than guessing field names.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/get",
+      "group": "Automations",
+      "label": "Read one automation, including its full step tree",
+      "scope": "any",
+      "channel": "argus:get-automation-request",
+      "mcp": "argus_get_automation",
+      "mcpDescription": "Read one automation's full step tree, in the same shape argus_create_automation accepts.",
+      "body": "{ \"automationId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/create",
+      "group": "Automations",
+      "label": "Create an automation. Steps are validated before anything is stored",
+      "scope": "unscoped",
+      "channel": "argus:create-automation-request",
+      "mcp": "argus_create_automation",
+      "mcpDescription": "Create an automation from a list of steps. Call argus_automation_schema first for the step vocabulary. Steps are validated before anything is stored, and the error names the exact path that failed.",
+      "body": "{ \"name\": \"Sign in\", \"steps\": [{ \"id\": \"s1\", \"type\": \"goto\", \"url\": \"https://example.com\" }] }",
+      "fields": [
+        {"key": "name", "type": "string", "required": true},
+        {"key": "description", "type": "string"},
+        {
+          "key": "steps",
+          "type": "steps",
+          "required": true,
+          "description": "The step tree. See argus_automation_schema for the field list of each type."
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "description": "Free-text labels, at most 5. Extras are dropped."
+        },
+        {
+          "key": "pinned",
+          "type": "boolean",
+          "description": "Show as a tile on every profile's start page."
+        },
+        {
+          "key": "timeoutMs",
+          "type": "number",
+          "description": "Whole-run ceiling in milliseconds. Capped at 600000."
+        },
+        {
+          "key": "closeOnFinish",
+          "type": "boolean",
+          "description": "Close the browser when the run ends. Defaults true for runs started over the API."
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/update",
+      "group": "Automations",
+      "label": "Change an automation's name, description, steps or wiring",
+      "scope": "unscoped",
+      "channel": "argus:update-automation-request",
+      "mcp": "argus_update_automation",
+      "mcpDescription": "Change an existing automation. Only the fields you send are written; omitting steps leaves the step tree alone.",
+      "body": "{ \"automationId\": \"<id>\", \"name\": \"Sign in\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {"key": "name", "type": "string"},
+        {"key": "description", "type": "string"},
+        {
+          "key": "steps",
+          "type": "steps",
+          "description": "Replaces the whole step tree. Omit to leave it unchanged."
+        },
+        {"key": "tags", "type": "tags", "description": "Replaces the whole list. At most 5."},
+        {"key": "pinned", "type": "boolean"},
+        {"key": "timeoutMs", "type": "number"},
+        {"key": "closeOnFinish", "type": "boolean"}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/delete",
+      "group": "Automations",
+      "label": "Delete an automation. Profiles running it on launch are detached",
+      "scope": "unscoped",
+      "channel": "argus:delete-automation-request",
+      "mcp": "argus_delete_automation",
+      "mcpDescription": "Delete an automation permanently. Automations have no Trash. Profiles that ran it on launch are detached and its past runs stay readable.",
+      "body": "{ \"automationId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/run",
+      "group": "Automations",
+      "label": "Run an automation against a profile, launching it if needed",
+      "scope": "any",
+      "channel": "argus:run-automation-request",
+      "mcp": "argus_run_automation",
+      "mcpDescription": "Run an automation against a profile, launching the profile if it is not already open. Returns a run id immediately; the run continues in the background.",
+      "body": "{ \"automationId\": \"<id>\", \"profileId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {"key": "profileId", "type": "string", "required": true},
+        {
+          "key": "vars",
+          "type": "object",
+          "description": "Seed variables the run starts with, readable as {{vars.<name>}}."
+        }
+      ]
+    }
+  ]
+}

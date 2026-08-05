@@ -6,11 +6,15 @@
 // inline WITHOUT clobbering the step list -- you keep editing the text until it
 // is right, rather than losing it the moment you mistype a brace.
 import {useState} from 'react';
+import {Pencil} from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {Field} from '../ui/Field';
 import {BusyButton} from '../ui/BusyButton';
+import {TagInput} from '../ui/TagInput';
 import {StepList} from '../automations/StepList';
 import {STEP_SCHEMA} from '../../automations/schema';
+import {MAX_PROFILE_TAGS} from '../../lib/tags';
+import type {TagUsage} from '../../lib/tags';
 import type {ArgusAutomation} from '../../types';
 import type {AutomationStep} from '../../automations/types';
 
@@ -60,9 +64,84 @@ function validate(steps: unknown, path = 'steps', depth = 0): string[] {
   return problems;
 }
 
-export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
+// The automation's name, as the dialog's heading.
+//
+// It was a labelled input in the sidebar, below the Steps/JSON toggle and above
+// four settings -- so the one thing that identifies what you are editing sat
+// fifth in a column of equals, while the header said "New automation" no matter
+// what you had typed. Same call as StatusChip: the name is the value, the
+// pencil is the way to change it.
+function TitleField({value, onChange}: {
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  // Held locally while editing so Escape has something to revert to, and so an
+  // empty box mid-retype does not disable Save on every keystroke.
+  const [text, setText] = useState(value);
+
+  if (!editing) {
+    return (
+      <span className="automation-title">
+        <span className="automation-title-text">{value.trim() || 'Untitled automation'}</span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Rename this automation"
+          title="Rename"
+          onClick={() => {
+            setText(value);
+            setEditing(true);
+          }}
+        ><Pencil size={14} /></button>
+      </span>
+    );
+  }
+
+  function commit() {
+    setEditing(false);
+    const next = text.trim();
+    // An empty name blocks Save, and silently keeping the old one would hide
+    // that the rename did not take. Empty is allowed through and the footer
+    // says why.
+    onChange(next);
+  }
+
+  return (
+    <span className="automation-title">
+      <input
+        type="text"
+        className="automation-title-input"
+        autoFocus
+        value={text}
+        placeholder="Name this automation"
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commit();
+          }
+          if (event.key === 'Escape') {
+            // Stops the dialog closing as well -- Modal listens for Escape.
+            event.stopPropagation();
+            setText(value);
+            setEditing(false);
+          }
+        }}
+      />
+    </span>
+  );
+}
+
+export function AutomationModal({
+  automation, exists, tagOptions = [], checkProfile, onClose, onSave, onRun,
+}: {
   automation: ArgusAutomation;
   exists: boolean;
+  // Every tag in use across the workspace, for the suggestion row.
+  tagOptions?: TagUsage[];
+  // The profile a step's Check button tests its selector against.
+  checkProfile?: {id: string; name: string} | null;
   onClose: () => void;
   onSave: (next: ArgusAutomation) => Promise<string | null>;
   onRun?: (next: ArgusAutomation) => void;
@@ -110,7 +189,12 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
     <Modal
       onClose={onClose}
       className="automation-modal"
-      title={exists ? draft.name || 'Automation' : 'New automation'}
+      title={
+        <TitleField
+          value={draft.name}
+          onChange={(name) => setDraft({...draft, name})}
+        />
+      }
       subtitle={`${draft.steps.length} step${draft.steps.length === 1 ? '' : 's'}`}
       footer={
         <>
@@ -127,19 +211,24 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
     >
       <div className="profile-editor-layout">
         <div className="profile-editor-main">
+          {/* choice-chip, and `active` not `is-active`. Both were wrong, and
+              they cancelled out into something that looked intentional: with
+              neither class applied the two buttons fell back to the base rule
+              and rendered as identical accent pills, so the view you were in
+              was the one you could not see. */}
           <div className="choice-chips" role="radiogroup" aria-label="Editor view">
             <button
               type="button"
               role="radio"
               aria-checked={view === 'steps'}
-              className={view === 'steps' ? 'is-active' : ''}
+              className={`choice-chip${view === 'steps' ? ' active' : ''}`}
               onClick={() => setView('steps')}
             >Steps</button>
             <button
               type="button"
               role="radio"
               aria-checked={view === 'json'}
-              className={view === 'json' ? 'is-active' : ''}
+              className={`choice-chip${view === 'json' ? ' active' : ''}`}
               onClick={() => {
                 setJson(JSON.stringify(draft.steps, null, 2));
                 setJsonError('');
@@ -151,6 +240,7 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
           {view === 'steps' ? (
             <StepList
               steps={draft.steps}
+              checkProfile={checkProfile}
               onChange={(steps) => setDraft({...draft, steps})}
             />
           ) : (
@@ -176,17 +266,27 @@ export function AutomationModal({automation, exists, onClose, onSave, onRun}: {
         </div>
 
         <aside className="profile-editor-side">
-          <Field label="Name">
-            <input
-              value={draft.name}
-              onChange={(event) => setDraft({...draft, name: event.target.value})}
-            />
-          </Field>
+          {/* Name has moved to the dialog's heading -- this column is settings
+              now, not identity. */}
           <Field label="Description">
             <textarea
               rows={2}
               value={draft.description || ''}
               onChange={(event) => setDraft({...draft, description: event.target.value})}
+            />
+          </Field>
+          <Field
+            label="Tags"
+            hint={`At most ${MAX_PROFILE_TAGS}. Shared catalogue with profiles.`}
+            // group, not a label: TagInput is a row of buttons, and a <label>
+            // wrapping them fires its implicit activation on the first one.
+            group
+          >
+            <TagInput
+              options={tagOptions}
+              placeholder="signup, client-a"
+              value={draft.tags || []}
+              onChange={(tags) => setDraft({...draft, tags})}
             />
           </Field>
           <div className="automation-field">

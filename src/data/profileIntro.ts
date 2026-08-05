@@ -15,6 +15,10 @@ export type IntroStep = {
   // makes sense while the picture is a placeholder.
   caption: string;
   figure: string;
+  // The screenshot itself, once one exists. Omitted while `figure` is still only
+  // a name: the modal then draws its labelled placeholder at the same aspect
+  // ratio, so the two kinds of step sit at the same height in the same dialog.
+  image?: string;
 };
 
 export const PROFILE_INTRO_STEPS: IntroStep[] = [

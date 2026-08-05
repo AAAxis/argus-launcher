@@ -20,7 +20,7 @@
       {"key": "for", "kind": "select", "label": "Condition", "required": true, "default": "selector",
        "options": ["selector", "selectorGone", "url", "text"]},
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
-       "showWhen": {"for": ["selector", "selectorGone"]}},
+       "showWhen": {"for": ["selector", "selectorGone"]}, "check": "selector"},
       {"key": "url", "kind": "text", "label": "URL contains", "interpolate": true,
        "showWhen": {"for": "url"}},
       {"key": "text", "kind": "text", "label": "Page contains text", "interpolate": true,
@@ -34,7 +34,7 @@
     "cdp": ["Runtime", "Input"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
-       "interpolate": true},
+       "interpolate": true, "check": "selector"},
       {"key": "nth", "kind": "number", "label": "Match index", "min": 0,
        "hint": "Zero-based. Leave empty for the first match."}
     ]
@@ -46,7 +46,7 @@
     "cdp": ["Runtime", "Input"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
-       "interpolate": true},
+       "interpolate": true, "check": "selector"},
       {"key": "text", "kind": "text", "label": "Text", "required": true, "interpolate": true,
        "hint": "Supports {{profile.email}} and {{profile.password}}."},
       {"key": "clear", "kind": "boolean", "label": "Clear the field first", "default": true},
@@ -64,7 +64,7 @@
       {"key": "to", "kind": "select", "label": "Scroll to", "required": true, "default": "bottom",
        "options": ["bottom", "top", "selector"]},
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
-       "showWhen": {"to": "selector"}}
+       "showWhen": {"to": "selector"}, "check": "selector"}
     ]
   },
   "extract": {
@@ -74,7 +74,7 @@
     "cdp": ["Runtime"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
-       "interpolate": true},
+       "interpolate": true, "check": "selector"},
       {"key": "what", "kind": "select", "label": "Read", "default": "text",
        "options": ["text", "html", "attr", "value"]},
       {"key": "attr", "kind": "text", "label": "Attribute", "interpolate": true,
@@ -107,7 +107,7 @@
     "cdp": ["Page", "DOM"],
     "fields": [
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
-       "hint": "Leave empty to capture the viewport."},
+       "hint": "Leave empty to capture the viewport.", "check": "selector"},
       {"key": "fullPage", "kind": "boolean", "label": "Full page"}
     ]
   },
@@ -159,8 +159,8 @@
     "cdp": ["Runtime"],
     "fields": [
       {"key": "condition", "kind": "condition", "label": "Condition", "required": true},
-      {"key": "then", "kind": "steps", "label": "Then"},
-      {"key": "else", "kind": "steps", "label": "Otherwise"}
+      {"key": "then", "kind": "steps", "label": "Yes"},
+      {"key": "else", "kind": "steps", "label": "No"}
     ]
   },
   "loop": {
@@ -178,7 +178,7 @@
        "hint": "A whole-field template resolving to an array. Each item is {{loop.item}}."},
       {"key": "maxIterations", "kind": "number", "label": "Safety cap", "min": 1, "max": 1000,
        "default": 100},
-      {"key": "body", "kind": "steps", "label": "Steps"}
+      {"key": "body", "kind": "steps", "label": "Each time"}
     ]
   }
 }

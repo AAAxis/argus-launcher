@@ -16,8 +16,8 @@ import {repairProxyAssignments} from '../lib/proxies';
 import {trashCutoffIso} from '../lib/trash';
 import type {Toast} from '../hooks/useToast';
 import type {
-  ArgusAutomation, ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, CloudState, SharedBookmark,
-  SharedExtension,
+  ArgusAutomation, ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy, CloudState, OrgMember,
+  SharedBookmark, SharedExtension,
 } from '../types';
 
 export type CloudData = ReturnType<typeof useCloudData>;
@@ -80,6 +80,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setState((current) => ({...current, shared_bookmarks: fn(current.shared_bookmarks)})),
     automations: (fn: (list: ArgusAutomation[]) => ArgusAutomation[]) =>
       setState((current) => ({...current, automations: fn(current.automations)})),
+    members: (fn: (list: OrgMember[]) => OrgMember[]) =>
+      setState((current) => ({...current, members: fn(current.members)})),
   };
 
   // One parallel read per table instead of five sequential selects against one
@@ -94,7 +96,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setLoading(true);
     }
     try {
-      // allSettled, not all. These nine reads are independent, and Promise.all
+      // allSettled, not all. These ten reads are independent, and Promise.all
       // rejects the whole batch on the first failure -- which meant one table
       // the client could not read left `loaded` unassigned, setState never
       // called, and the entire workspace rendering as defaultCloudState. A
@@ -104,7 +106,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       // the tables they actually affect.
       const [profilesResult, proxiesResult, foldersResult, cookiesResult, extensionsResult,
         bookmarksResult, statusesResult, automationsResult,
-        organizationResult] = await Promise.allSettled([
+        organizationResult, membersResult] = await Promise.allSettled([
         db.profiles.list(targetOrgId),
         db.proxies.list(targetOrgId),
         db.folders.list(targetOrgId),
@@ -114,6 +116,10 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         db.statuses.list(targetOrgId),
         db.automations.list(targetOrgId),
         db.orgs.getOrg(targetOrgId),
+        // The roster. Read here rather than by the Team tab because the
+        // Profiles table needs it too -- it is what turns created_by into a
+        // name -- and a tab-local read would fetch it twice.
+        db.team.listMembers(targetOrgId),
       ]);
 
       const failures: string[] = [];
@@ -145,6 +151,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       const customStatuses = take('statuses', statusesResult, []);
       const automations = take('automations', automationsResult, []);
       const organization = take('organization', organizationResult, null);
+      const members = take('team members', membersResult, []);
       const mergedBookmarks = mergeBookmarks(bookmarkRows, socialBookmarks);
 
       // A partial load is shown but never written back from. Every self-healing
@@ -172,6 +179,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
           ...(automationsResult.status === 'fulfilled' ? {automations} : {}),
           ...(organizationResult.status === 'fulfilled' ?
             {built_in_extensions: organization?.built_in_extensions} : {}),
+          ...(membersResult.status === 'fulfilled' ? {members} : {}),
         }));
         // Toasted even when quiet: a failing table stays failing, so silence
         // here is the same "everything vanished" mystery in a smaller frame.
@@ -193,6 +201,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         shared_bookmarks: mergedBookmarks.bookmarks,
         custom_statuses: customStatuses,
         automations,
+        members,
         built_in_extensions: organization?.built_in_extensions,
       };
 

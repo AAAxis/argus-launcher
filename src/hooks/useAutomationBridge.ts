@@ -10,15 +10,18 @@ import type {DependencyList} from 'react';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
+import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
 import {normalizeTags} from '../lib/tags';
 import {comparable} from '../lib/text';
-import {repairProxyAssignments} from '../lib/proxies';
+import {matchedProxyForProfile, repairProxyAssignments} from '../lib/proxies';
+import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
 import {supabase} from '../supabase';
 import {newId} from '../workspace/core';
 import type {CookieFileSelection} from '../native';
 import type {WorkspaceValue} from '../workspace/WorkspaceProvider';
-import type {ArgusProxy} from '../types';
+import type {AutomationStep} from '../automations/types';
+import type {ArgusAutomation, ArgusProxy} from '../types';
 
 // One subscribe/respond pair, with the try/catch every handler needs. Fifteen
 // copies of that boilerplate is where the two handlers that forgot to answer on
@@ -49,8 +52,49 @@ function useChannel<Req extends {requestId: string}, Res>(
   }, deps);
 }
 
+// An error that names its own HTTP code. Everything thrown by a handler is a
+// 500 by default, which is the wrong answer for "no automation by that id" --
+// an agent that reads 500 retries, and an agent that reads 404 stops.
+class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+// The table-driven equivalent of useChannel: one shared channel pair for every
+// route declared in electron/api/routes.json, rather than a named on*/send*
+// pair per route.
+function useApiChannel<Req extends {requestId: string}, Res>(
+    channel: string,
+    handler: (payload: Req) => Res | Promise<Res>,
+    deps: DependencyList) {
+  useEffect(() => {
+    const subscribe = native?.onApiRequest;
+    const respond = native?.sendApiResult;
+    if (!subscribe || !respond) {
+      return;
+    }
+    return subscribe(channel, (payload: Req) => {
+      void (async () => {
+        try {
+          respond(payload.requestId, await handler(payload));
+        } catch (error) {
+          respond(
+              payload.requestId, undefined,
+              error instanceof Error ? error.message : String(error),
+              error instanceof ApiError ? error.status : 500);
+        }
+      })();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
 export function useAutomationBridge(workspace: WorkspaceValue) {
-  const {data, toast, profiles: profileActions} = workspace;
+  const {
+    data, toast, automations: automationActions, profiles: profileActions,
+    proxies: proxyActions,
+  } = workspace;
   const state = data.state;
   const {withDb, patch, setState} = data;
   const cloud = [state] as const;
@@ -184,6 +228,47 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         setState((current) => ({...current, proxies, profiles: repairedProfiles}));
         toast.setMessage(`Reimported proxies: ${updated} updated, ${created} created`);
         return {updated, created, total: rows.length};
+      },
+      cloud);
+
+  // POST /v1/proxies/recheck-from-page -- a launch's own start page asking for
+  // its proxy line to be brought up to date.
+  //
+  // The page shows a country and a latency measured once, at launch, and a
+  // session outlives that by hours. This is the only surface that can ask for a
+  // fresh one: you cannot reach the launcher from inside an anonymous window.
+  //
+  // It answers here rather than in main.cjs because both halves of the answer
+  // live in the renderer -- recordCheck writes the result to the proxy row, so
+  // the Proxies tab and every other profile on that proxy agree with what the
+  // page now says, and homeProxyStatus is the one place the panel's wording is
+  // decided. main.cjs has already verified the run token; the profile id on the
+  // request came off that token's entry, not off the request body, so there is
+  // nothing here for a caller to choose.
+  useChannel(
+      native?.onRecheckProxyRequest,
+      native?.sendRecheckProxyResult,
+      async ({profileId}) => {
+        const profile = state.profiles.find((item) => item.id === profileId);
+        if (!profile) {
+          throw new Error('That profile is no longer in this workspace');
+        }
+        const proxy = matchedProxyForProfile(profile, state.proxies);
+        if (!canRecheckProxy(profile, proxy) || !proxy) {
+          // The page only draws the button when there is something to re-check,
+          // so this is a workspace that changed under an open session. Answer
+          // with the current status rather than an error: "no proxy assigned"
+          // is exactly what the panel should now say.
+          const status = homeProxyStatus(profile, proxy);
+          return {proxyOk: status.ok, title: status.title, detail: status.detail};
+        }
+        // Failures are recorded too, the same way the background sweep records
+        // them -- a proxy that has stopped working should say so on its card as
+        // well as on the page that just found out.
+        const checked = await proxyActions.runCheck(proxy);
+        await proxyActions.recordCheck(checked);
+        const status = homeProxyStatus(profile, checked);
+        return {proxyOk: status.ok, title: status.title, detail: status.detail};
       },
       cloud);
 
@@ -465,8 +550,18 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
             return {ok: false, error: `Proxy for ${profile.name} is invalid`};
           }
         }
+        // The same start page a hand-launched profile gets. This window is a
+        // real browser someone may well look at, and it already has a debugging
+        // port, so there is no reason for it to be the one launch whose page
+        // cannot run its tiles or re-check its proxy. Minted with the port the
+        // caller reserved, so a tile drives this session rather than a stale one.
+        const runToken = await native?.mintRunToken?.(
+            profile.id, profile.name, cdpPort,
+            startPageAutomations(state.automations, profile)) || '';
+        const apiPort = runToken ? (await native?.getApiStatus?.())?.port : 0;
         const result = await launchProfile(
-            buildLaunchPayload(profile, proxy, state),
+            buildLaunchPayload(profile, proxy, state,
+                runToken && apiPort ? {port: apiPort, token: runToken} : null),
             [`--remote-debugging-port=${cdpPort}`]);
         return {ok: result.ok, pid: result.pid, error: result.error};
       },
@@ -500,4 +595,176 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         return {ok: true} as const;
       },
       []);
+
+  // ── Automations ────────────────────────────────────────────────────────────
+  // The five routes an agent authors workflows through. main.cjs has already
+  // validated the declared fields and the step tree, and has already refused a
+  // folder-scoped key on create/update/delete -- automations are org-wide and
+  // have no folder to scope against.
+
+  // Deliberately not the whole step tree: a workspace with thirty automations
+  // would put every step of every one of them into an agent's context on a
+  // request that only asked what exists. argus_get_automation is one call away.
+  useApiChannel(
+      'argus:list-automations-request',
+      () => ({
+        automations: state.automations.map((automation) => ({
+          id: automation.id,
+          name: automation.name,
+          description: automation.description || null,
+          stepCount: automation.steps.length,
+          pinned: Boolean(automation.pinned),
+          runsOnLaunchFor: state.profiles
+              .filter((profile) => !profile.deleted_at &&
+                profile.automation_id === automation.id)
+              .map((profile) => profile.id),
+        })),
+      }),
+      cloud);
+
+  useApiChannel(
+      'argus:get-automation-request',
+      ({automationId}: {requestId: string; automationId: string}) => {
+        const found = state.automations.find((item) => item.id === automationId);
+        if (!found) {
+          throw new ApiError(`No automation with id ${automationId}`, 404);
+        }
+        return {automation: found};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:create-automation-request',
+      async (payload: {
+        requestId: string;
+        name: string;
+        description?: string;
+        steps: AutomationStep[];
+        tags?: string[];
+        pinned?: boolean;
+        timeoutMs?: number;
+        closeOnFinish?: boolean;
+      }) => {
+        requireSignedIn();
+        const automation: ArgusAutomation = {
+          // Minted here, never taken from the caller: the id doubles as a
+          // directory name under <userData>/AutomationRuns and the column has
+          // a filesystem-safety check constraint on it.
+          id: newId(),
+          name: payload.name.trim(),
+          description: payload.description?.trim() || null,
+          steps: payload.steps,
+          variables: {},
+          // automationToRow runs these through normalizeTags, which is the one
+          // enforcement point for the 5-tag cap -- an agent posting eight gets
+          // five, on the same terms as the editor and the CSV importer.
+          tags: payload.tags || [],
+          pinned: Boolean(payload.pinned),
+          timeout_ms: Math.min(payload.timeoutMs ?? 300000, 600000),
+          close_on_finish: Boolean(payload.closeOnFinish),
+        };
+        // exists: false, so this is an INSERT and never an upsert. The org's
+        // automation_limit is enforced by trg_automation_limit on the way in
+        // and comes back through here as a plain sentence.
+        const error = await automationActions.save(automation, false);
+        if (error) {
+          throw new ApiError(error, 400);
+        }
+        toast.setMessage(`Created ${automation.name}`);
+        return {automation};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:update-automation-request',
+      async (payload: {
+        requestId: string;
+        automationId: string;
+        name?: string;
+        description?: string;
+        steps?: AutomationStep[];
+        tags?: string[];
+        pinned?: boolean;
+        timeoutMs?: number;
+        closeOnFinish?: boolean;
+      }) => {
+        requireSignedIn();
+        const existing = state.automations.find((item) => item.id === payload.automationId);
+        if (!existing) {
+          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
+        }
+        // Only what was sent. Spreading the payload wholesale would write
+        // `undefined` over every field the caller left out, which is how a
+        // rename would silently empty the step list.
+        const next: ArgusAutomation = {
+          ...existing,
+          ...(payload.name !== undefined ? {name: payload.name.trim()} : {}),
+          ...(payload.description !== undefined ?
+            {description: payload.description.trim() || null} :
+            {}),
+          ...(payload.steps !== undefined ? {steps: payload.steps} : {}),
+          ...(payload.tags !== undefined ? {tags: payload.tags} : {}),
+          ...(payload.pinned !== undefined ? {pinned: payload.pinned} : {}),
+          ...(payload.timeoutMs !== undefined ?
+            {timeout_ms: Math.min(payload.timeoutMs, 600000)} :
+            {}),
+          ...(payload.closeOnFinish !== undefined ?
+            {close_on_finish: payload.closeOnFinish} :
+            {}),
+        };
+        const error = await automationActions.save(next, true);
+        if (error) {
+          throw new ApiError(error, 400);
+        }
+        toast.setMessage(`Updated ${next.name}`);
+        return {automation: next};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:delete-automation-request',
+      async ({automationId}: {requestId: string; automationId: string}) => {
+        requireSignedIn();
+        const existing = state.automations.find((item) => item.id === automationId);
+        if (!existing) {
+          throw new ApiError(`No automation with id ${automationId}`, 404);
+        }
+        await automationActions.remove([automationId]);
+        toast.setMessage(`Deleted ${existing.name}`);
+        return {deleted: automationId};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:run-automation-request',
+      async (payload: {
+        requestId: string;
+        automationId: string;
+        profileId: string;
+        vars?: Record<string, unknown>;
+        allowedFolders?: string[] | null;
+      }) => {
+        const automation = state.automations.find((item) => item.id === payload.automationId);
+        if (!automation) {
+          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
+        }
+        // The profile still goes through the folder gate. A scoped key may run
+        // a shared automation, but only against a profile it can see -- and
+        // re-read from the database, not from this window's render cache, for
+        // the reason resolveInScope documents.
+        const profile = await resolveInScope(payload.profileId, payload.allowedFolders);
+        if (!profile) {
+          throw new ApiError(
+              `Profile ${payload.profileId} is not visible to this key`, 403);
+        }
+        const result = await automationActions.run(automation, profile, {
+          trigger: 'mcp',
+          vars: payload.vars,
+        });
+        if (!result?.ok) {
+          throw new ApiError(result?.error || 'The run did not start.', 409);
+        }
+        return {runId: result.runId, automationId: automation.id, profileId: profile.id};
+      },
+      cloud);
 }

@@ -14,6 +14,7 @@ import {StartPageTab} from './components/tabs/StartPageTab';
 import {AutomationsTab} from './components/tabs/AutomationsTab';
 import {ExtensionsTab} from './components/tabs/ExtensionsTab';
 import {IntegrationsTab} from './components/tabs/IntegrationsTab';
+import {TeamTab} from './components/tabs/TeamTab';
 import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
 import {AutomationModal} from './components/modals/AutomationModal';
 import {RunLogModal} from './components/modals/RunLogModal';
@@ -22,8 +23,9 @@ import {ProfileDeleteModal, ProxyDeleteModal, ErrorModal} from './components/mod
 import {BookmarkModal, FolderModal, ProxyModal, StatusModal} from './components/modals/EditorModals';
 import {IntegrationModal} from './components/modals/IntegrationModal';
 import {
-  BookmarkImportModal, CookiePickerModal, ExtensionAddModal, ImportModal, ProxyImportModal,
+  BookmarkImportModal, CookiePickerModal, ExtensionAddModal, ProxyImportModal,
 } from './components/modals/LibraryModals';
+import {ImportProfilesModal} from './components/modals/ImportProfilesModal';
 import {IntroModal} from './components/modals/IntroModal';
 import {ProfileModal} from './components/modals/ProfileModal';
 import {
@@ -36,7 +38,10 @@ import {COOKIE_INTRO_STEPS} from './data/cookieIntro';
 import {PROFILE_INTRO_STEPS} from './data/profileIntro';
 import {DEFAULT_FOLDER_ICON} from './data/folderIcons';
 import {DEFAULT_PROFILE_COLOR, normalizeProfileColor} from './lib/profileColors';
+import {newProfileDraft, profileFromDraft} from './drafts';
 import {findIntegration} from './data/integrations';
+import {SITE_LINKS} from './data/links';
+import {runTarget} from './automations/target';
 import {SITE_URL} from './lib/auth';
 import {hasSeenProfileIntro, markProfileIntroSeen} from './lib/introSeen';
 import {TRASH_FOLDER_ID} from './lib/trash';
@@ -217,7 +222,7 @@ export function App() {
       {editors.extensionAddOpen && (
         <ExtensionAddModal onClose={() => editors.setExtensionAddOpen(false)} />
       )}
-      {editors.importOpen && <ImportModal onClose={() => editors.setImportOpen(false)} />}
+      {editors.importOpen && <ImportProfilesModal onClose={() => editors.setImportOpen(false)} />}
       {editors.proxyImportOpen && (
         <ProxyImportModal onClose={() => editors.setProxyImportOpen(false)} />
       )}
@@ -322,6 +327,15 @@ export function App() {
         <AutomationModal
           automation={automationDraft.automation}
           exists={automationDraft.exists}
+          tagOptions={workspace.tagOptions}
+          // The profile a step's Check button tests its selector against: the
+          // same one the Run button would use, so the page you check against is
+          // the page you run on.
+          checkProfile={runTarget(
+              data.state,
+              automationDraft.automation,
+              workspace.selectedProfileId,
+          )}
           onClose={() => setAutomationDraft(null)}
           onSave={(next) => workspace.automations.save(next, automationDraft.exists)}
         />
@@ -440,8 +454,11 @@ export function App() {
         return (
           <AutomationsTab
             onNew={() => setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}
+            onLoadExample={() => void loadExampleAutomation()}
+            onCreateDemoProfile={() => void createDemoProfile()}
             onEdit={(automation) => setAutomationDraft({automation, exists: true})}
             onHistory={setHistoryFor}
+            onOpenSite={openAccountPage}
           />
         );
       case 'extensions':
@@ -454,12 +471,16 @@ export function App() {
             onOpen={integrations.open}
           />
         );
+      // No renderTopActions() case, like Automations and Extensions: the Invite
+      // button belongs in this tab's own bar, beside the seat count it changes.
+      case 'team':
+        return <TeamTab onOpenSite={openAccountPage} />;
       case 'api':
         return (
           <ApiTab
             apiKeys={apiKeys}
             signedInEmail={org.email}
-            onOpenDocs={() => openAccountPage('/docs/api')}
+            onOpenDocs={() => openAccountPage(SITE_LINKS.docs)}
             onKeyCreated={setRevealedKey}
           />
         );
@@ -504,24 +525,10 @@ export function App() {
             <button onClick={editors.newProfile}><UserPlus size={18} /> Add profile</button>
           </>
         );
-      case 'automations': {
-        // UX only. trg_automation_limit is the real gate; describeDbError turns
-        // its exception into the same sentence if this ever disagrees.
-        const limit = org.org?.automation_limit ?? 0;
-        const atCap = limit !== null && data.state.automations.length >= limit;
-        return (
-          <button
-            disabled={atCap}
-            title={atCap ?
-              'Your plan doesn\'t include any more automations.' :
-              'Create an automation'}
-            onClick={() =>
-              setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}
-          >
-            <Plus size={18} /> New automation
-          </button>
-        );
-      }
+      // 'automations' has no case, on the same terms as 'extensions': both put
+      // their create action in the tab's own .integration-bar, where it sits
+      // beside the count it changes. A second copy in the Topbar would be two
+      // buttons to keep in step over one plan-cap check.
       case 'proxies':
         return (
           <>
@@ -557,6 +564,44 @@ export function App() {
         );
       default:
         return null;
+    }
+  }
+
+  // Inserts the pre-written example, then opens it for editing.
+  //
+  // The row is written before the editor opens (exists: false -> an INSERT,
+  // never an upsert -- see the trg_automation_limit note in db/automations.ts),
+  // so what the user is looking at is a real automation from the first frame
+  // rather than a draft that only becomes real if they press Save. save()
+  // hands the failure back instead of toasting it, so this has to surface it --
+  // and it is the path that reports automation_limit_reached when an org's cap
+  // has not been raised, which is a message worth showing verbatim.
+  async function loadExampleAutomation() {
+    const automation = workspace.automations.exampleAutomation();
+    const error = await workspace.automations.save(automation, false);
+    if (error) {
+      toast.setMessage(error);
+      return;
+    }
+    setAutomationDraft({automation, exists: true});
+  }
+
+  // A Direct-mode profile for the example to run against.
+  //
+  // Built through newProfileDraft/profileFromDraft rather than assembled here,
+  // so the fingerprint, colour and tag defaults come from the same place every
+  // other new profile gets them from -- a hand-rolled row would drift the first
+  // time those defaults change. Direct mode needs no proxy credentials, which
+  // is the only reason this can be a one-click offer at all; profiles.save
+  // selects the new profile, which is what runTarget then resolves against.
+  async function createDemoProfile() {
+    const profile = profileFromDraft({
+      ...newProfileDraft(),
+      name: 'Demo',
+      proxy_mode: 'direct',
+    });
+    if (await workspace.profiles.save(profile)) {
+      toast.setMessage('Created the Demo profile — it browses direct, with no proxy.');
     }
   }
 

@@ -1,4 +1,11 @@
 const {contextBridge, ipcRenderer} = require('electron');
+const {routes: apiRoutes} = require('./api/routes.json');
+
+// The channels a table-driven API route may use. An allow-list, not a
+// pass-through: onApiRequest takes a channel name from the renderer, and a
+// renderer that could name any channel could subscribe to every one of them.
+const API_CHANNELS = new Set(
+    apiRoutes.map((route) => route.channel).filter(Boolean));
 
 contextBridge.exposeInMainWorld('argusNative', {
   launchProfile: (payload, extraArgs) => ipcRenderer.invoke('argus:launch-profile', payload, extraArgs),
@@ -18,6 +25,8 @@ contextBridge.exposeInMainWorld('argusNative', {
     ipcRenderer.invoke('argus:verify-integration', {integrationId}),
   detectIntegrations: () => ipcRenderer.invoke('argus:detect-integrations'),
   checkProxy: (proxy) => ipcRenderer.invoke('argus:check-proxy', proxy),
+  checkSelector: (profileId, selector) =>
+    ipcRenderer.invoke('argus:check-selector', {profileId, selector}),
   openExternal: (url) => ipcRenderer.invoke('argus:open-external', url),
   bookmarkFavicon: (url) => ipcRenderer.invoke('argus:bookmark-favicon', url),
   setTheme: (preference) => ipcRenderer.invoke('argus:set-theme', preference),
@@ -187,6 +196,23 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendListProfilesResult: (requestId, result, error) =>
     ipcRenderer.send('argus:list-profiles-result', {requestId, result, error}),
+  // One subscribe/reply pair for every table-driven route, rather than a named
+  // method per route. The dozen pairs around this one are the same four lines
+  // with a different string in them; adding five more for the automations
+  // routes would have been the point where that stopped being a style question.
+  onApiRequest: (channel, callback) => {
+    if (!API_CHANNELS.has(channel)) {
+      return () => undefined;
+    }
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  // `status` lets the renderer pick the HTTP code: 404 for a row that is not
+  // there, 403 for one this key may not see. Without it every refusal would be
+  // reported as a server error.
+  sendApiResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:api-result', {requestId, result, error, status}),
   onMonitoringReportRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:monitoring-report-request', listener);
@@ -201,4 +227,15 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendOAuthAuthorizeResult: (requestId, approved, folderScope, keyName) =>
     ipcRenderer.send('argus:oauth-authorize-result', {requestId, approved, folderScope, keyName}),
+  // A launch's start page asking for its own proxy to be re-checked. Answered
+  // here rather than in main because the renderer is what can record the result
+  // against the proxy row and compose the panel's next line -- see
+  // recheckFromPage in main.cjs.
+  onRecheckProxyRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:recheck-proxy-request', listener);
+    return () => ipcRenderer.removeListener('argus:recheck-proxy-request', listener);
+  },
+  sendRecheckProxyResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:recheck-proxy-result', {requestId, result, error}),
 });

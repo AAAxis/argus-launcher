@@ -22,6 +22,7 @@ export * as profiles from './profiles';
 export * as proxies from './proxies';
 export * as runs from './runs';
 export * as statuses from './statuses';
+export * as team from './team';
 
 export {CloudUnavailableError, STORAGE_BUCKET, supabase} from './client';
 export {describeDbError} from './errors';

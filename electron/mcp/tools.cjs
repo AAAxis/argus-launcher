@@ -13,6 +13,7 @@
 //    added behind an explicit opt-in if anyone asks.
 
 const cdp = require('./cdp.cjs');
+const {routes: apiRoutes} = require('../api/routes.json');
 
 const DEFAULT_READ_CHARS = 20000;
 
@@ -123,7 +124,7 @@ const TOOLS = [
     // `notes` used to be advertised here and silently did nothing -- the route's
     // field whitelist has no such column, so an agent could report success on a
     // write that never happened.
-    description: 'Change a profile\'s name, status, tags, colour or folder.',
+    description: 'Change a profile\'s name, status, tags, colour, avatar or folder.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -133,6 +134,10 @@ const TOOLS = [
         tags: {type: 'array', items: {type: 'string'},
           description: 'At most 5; extras are dropped.'},
         color: {type: 'string'},
+        avatar: {type: 'string',
+          description: 'The mark shown beside the name: "brand:<slug>" for one of the ' +
+            'built-in site logos (brand:instagram, brand:facebook, brand:x, brand:tiktok, ' +
+            '…), or "" to go back to the initials. Uploaded pictures are set in the app.'},
         folderId: {type: 'string'},
       },
       required: ['profileId'],
@@ -144,7 +149,7 @@ const TOOLS = [
     // dropped here rather than relied on being rejected downstream.
     run: async ({api, args}) => {
       const patch = {profileId: args.profileId};
-      for (const field of ['name', 'status', 'tags', 'color', 'folderId']) {
+      for (const field of ['name', 'status', 'tags', 'color', 'avatar', 'folderId']) {
         if (args[field] !== undefined) {
           patch[field] = args[field];
         }
@@ -279,6 +284,100 @@ const TOOLS = [
         await cdp.evaluate(await requireCdpUrl(api, args.profileId), args.expression)),
   },
 ];
+
+// ── The automations tools ────────────────────────────────────────────────────
+// Generated from the route table rather than written out one by one. The table
+// already carries the path, the method, the field list and the description, and
+// a hand-written copy of those is exactly the drift this table was added to
+// stop -- the profiles and proxies tools above are still hand-written, and the
+// catalogue they duplicate had already fallen out of step with what main.cjs
+// routes.
+
+function inputSchemaFor(route) {
+  const properties = {};
+  const required = [];
+  for (const field of route.fields || []) {
+    // A step tree is an array of objects whose real shape lives in
+    // step-schema.json. Inlining that here would put 184 lines of catalogue
+    // into every session's context; the description points at the tool that
+    // returns it on demand instead.
+    properties[field.key] =
+      field.type === 'steps' ?
+        {type: 'array', items: {type: 'object'}, description: field.description} :
+      field.type === 'tags' ?
+        {type: 'array', items: {type: 'string'}, description: field.description} :
+        {type: field.type, description: field.description};
+    if (field.required) {
+      required.push(field.key);
+    }
+  }
+  return {type: 'object', properties, required};
+}
+
+// The step catalogue, cut down to what an agent needs to write a valid step:
+// the type, what it is called, and its fields with the required ones marked.
+// The full spec -- hints, placeholders, patterns, showWhen -- stays behind
+// GET /v1/automations/schema for anything that needs it.
+function compactSchema(steps) {
+  return Object.entries(steps).map(([type, spec]) => ({
+    type,
+    label: spec.label,
+    summary: spec.summary,
+    fields: (spec.fields || []).map((field) => {
+      const parts = [`${field.key}: ${field.kind}`];
+      if (field.required) {
+        parts.push('required');
+      }
+      if (field.options) {
+        parts.push(`one of ${field.options.join('|')}`);
+      }
+      if (field.kind === 'steps') {
+        parts.push('nested steps');
+      }
+      return parts.join(', ');
+    }),
+  }));
+}
+
+// `channel || local`, not `mcp`. Nine of the routes above also carry an `mcp`
+// name -- they are the hand-written tools, cross-referenced there so the agent
+// brief can list every tool from one file -- and filtering on `mcp` alone
+// generated a second, field-less copy of each of them. tools/list answered with
+// thirty tools and BY_NAME resolved argus_update_profile to the generated one,
+// which forwards no fields at all.
+const AUTOMATION_TOOLS = apiRoutes
+    .filter((route) => route.mcp && (route.channel || route.local))
+    .map((route) => ({
+  name: route.mcp,
+  description: route.mcpDescription,
+  inputSchema: inputSchemaFor(route),
+  run: async ({api, args}) => {
+    if (route.path === '/v1/automations/schema') {
+      const answer = await api.get(route.path);
+      return text({
+        steps: compactSchema(answer.steps),
+        note: 'Every step also takes id (required, unique), label, enabled, ' +
+          'timeoutMs, onError (stop|continue|retry) and retries. Full field ' +
+          'specs: GET /v1/automations/schema.',
+      });
+    }
+    if (route.method === 'GET') {
+      return text(await api.get(route.path));
+    }
+    // Only declared fields travel, for the reason argus_update_profile spells
+    // out above: a route may accept more than its tool advertises, and an
+    // agent that guesses a name should not be able to reach it.
+    const body = {};
+    for (const field of route.fields || []) {
+      if (args[field.key] !== undefined) {
+        body[field.key] = args[field.key];
+      }
+    }
+    return text(await api.post(route.path, body));
+  },
+}));
+
+TOOLS.push(...AUTOMATION_TOOLS);
 
 const BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 

@@ -18,7 +18,8 @@
 // identity, and the disclosure below the bar answers the second half once for
 // all ten of them rather than ten times over.
 import {useEffect, useMemo, useState} from 'react';
-import {Clock, KeyRound, Plug, Search, TriangleAlert, Unplug} from 'lucide-react';
+import {Clock, KeyRound, MonitorCheck, MonitorX, Plug, Search, TriangleAlert, Unplug} from 'lucide-react';
+import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {EmptyState} from '../ui/EmptyState';
 import {IntegrationMark} from '../ui/icons';
@@ -85,24 +86,59 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
 
   return (
     <div className={`integration-card is-${state}`}>
+      {/* Both chips sit with the name, at the top of the card. The presence one
+          used to be a sentence in the card's foot ("Cursor was not found on
+          this machine"), which put the least conditional fact about a tool --
+          whether it is even here -- last, and repeated the phrase "found on
+          this machine" down the whole grid until it read as a claim every card
+          was making. As a chip beside the name it is one word-shaped thing you
+          can scan a column of. */}
       <div className="integration-card-head">
         <IntegrationMark integration={integration} />
         <h2>{integration.name}</h2>
-        {state === 'connected' && <span className="status-pill"><span className="status-dot" />Connected</span>}
+        {state === 'connected' && (
+          <Badge tone="active" icon={<span className="status-chip-dot" />}>Connected</Badge>
+        )}
         {state === 'attention' && (
-          <span className="status-pill is-warn"><TriangleAlert size={12} />Needs attention</span>
+          <Badge tone="warmup" icon={<TriangleAlert size={12} />}>Needs attention</Badge>
         )}
         {/* Muted rather than amber: nothing is broken and there is nothing to
             fix here -- the tool simply is not on this machine, so calling this
             Connected would be the lie this state exists to remove. */}
         {state === 'awaiting-tool' && (
-          <span className="status-pill is-idle"><Clock size={12} />Waiting for {integration.name}</span>
+          <Badge icon={<Clock size={12} />}>Waiting for {integration.name}</Badge>
         )}
-        {/* Said out loud rather than left blank. A card with no pill at all is
+        {/* Said out loud rather than left blank. A card with no chip at all is
             indistinguishable from one whose status has not loaded yet, and this
-            is the state nine of the ten cards are in on a first visit. */}
-        {state === 'idle' && (
-          <span className="status-pill is-idle"><Unplug size={12} />Not connected</span>
+            is the state most of the cards are in on a first visit. */}
+        {state === 'idle' && <Badge icon={<Unplug size={12} />}>Not connected</Badge>}
+        {/* Only alongside "Not connected": the other three states already imply
+            the answer -- you cannot be Connected to something that is not here,
+            and "Waiting for X" says it outright. Detection is real: it looks for
+            an application bundle, an executable, or a file only that tool
+            writes, never for the config file this app itself creates. The chip
+            carries the exact path it found as its tooltip, so it shows its
+            working rather than asking to be believed. The two manual cards have
+            nothing to detect -- the server reports them present so they are
+            never labelled missing -- so they keep the connection chip and skip
+            this one. */}
+        {state === 'idle' && !manual && config && (
+          config.installed ? (
+            <Badge
+              tone="info"
+              icon={<MonitorCheck size={12} />}
+              title={config.installedEvidence ? `Found: ${config.installedEvidence}` : undefined}
+            >
+              Found on this machine
+            </Badge>
+          ) : (
+            <Badge
+              icon={<MonitorX size={12} />}
+              title={`Nothing on disk identifies ${integration.name}. You can still set it up — the settings are harmless on their own and will be waiting when you install it.`}
+            >
+              Not on this machine
+            </Badge>
+          )
         )}
       </div>
       <p>{integration.description}</p>
@@ -115,7 +151,13 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
           has no reason left to give, so it gets the scope and the last use; a
           card that needs attention gives up those two for the one sentence
           naming what to do -- printing "All folders · used 2h ago" over a
-          connection that is broken is worse than printing nothing. */}
+          connection that is broken is worse than printing nothing.
+
+          Dropped entirely when there is neither, which on a first visit is most
+          of the grid: an unconnected card has no key and, now that presence is a
+          chip in the head, no reason left to give, so this was reserving 36px of
+          nothing under every description. */}
+      {(key || reason) && (
       <div className="integration-card-meta">
         {key ? (
           <>
@@ -131,6 +173,7 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
           </>
         ) : <span>{reason}</span>}
       </div>
+      )}
 
       {/* Never more than two, and the second is always the quiet one. Repair
           only ever accompanies Manage (it needs a key and a broken entry, which
@@ -219,27 +262,37 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
 
   return (
     <section className="api-panel">
+      {/* Two clusters on one surface: what the tab runs on, and how to get
+          around it. Left is the local API -- the one dependency every card
+          shares -- as a chip plus the address it is answering on. Right is the
+          count and the filter, which are both ways of narrowing ten cards. */}
       <section className="integration-bar">
-        <span className={apiReady ? 'status-pill' : 'status-pill is-warn'}>
-          <span className="status-dot" />
-          {apiReady ? 'Local API ready' : `Local API ${apiState?.status || 'not running'}`}
-        </span>
-        <code>{apiState?.url || API_BASE_URL}</code>
-        {/* The one number worth carrying at the top: with ten cards spread over
-            three sections, "how much of this is actually live" is otherwise a
-            counting exercise. */}
-        <span className="integration-bar-count">
-          {connectedCount} of {INTEGRATIONS.length} connected
-        </span>
-        <label className="integration-search">
-          <Search size={15} />
-          <input
-            aria-label="Search integrations"
-            placeholder="Search integrations"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <div className="integration-bar-main">
+          <Badge
+            tone={apiReady ? 'active' : 'warmup'}
+            icon={<span className="status-chip-dot" />}
+          >
+            {apiReady ? 'Local API ready' : `Local API ${apiState?.status || 'not running'}`}
+          </Badge>
+          <code title={apiState?.url || API_BASE_URL}>{apiState?.url || API_BASE_URL}</code>
+        </div>
+        <div className="integration-bar-side">
+          {/* The one number worth carrying at the top: with ten cards spread
+              over three sections, "how much of this is actually live" is
+              otherwise a counting exercise. */}
+          <span className="integration-bar-count">
+            <strong>{connectedCount}</strong> of {INTEGRATIONS.length} connected
+          </span>
+          <label className="integration-search">
+            <Search size={15} />
+            <input
+              aria-label="Search integrations"
+              placeholder="Search integrations"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+        </div>
       </section>
 
       {/* The pill above states the fact; this states what the fact means. A

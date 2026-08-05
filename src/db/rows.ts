@@ -28,6 +28,41 @@ export type OrgMemberRow = {
   user_id: string;
   role: string;
   created_at: string;
+  // Who added them. Has existed since 0001 and was never written until
+  // accept_org_invite started carrying it across from the invite.
+  invited_by: string | null;
+};
+
+// What org_members_with_identity() returns -- NOT a table row.
+//
+// org_members holds ids and nothing else, and auth.users is not exposed to
+// clients, so the roster comes from a SECURITY DEFINER function that joins the
+// two server-side for orgs the caller belongs to. Added 2026-08-05-teams.sql.
+export type OrgMemberIdentityRow = {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  role: string;
+  created_at: string;
+  invited_by: string | null;
+};
+
+// Added 2026-08-05-teams.sql. The table existed before that but was unused and
+// empty; the migration drops and recreates it, so this shape is the only one
+// that has ever been read.
+export type OrgInviteRow = {
+  id: string;
+  org_id: string;
+  email: string;
+  role: string;
+  token: string;
+  status: string;
+  invited_by: string | null;
+  accepted_by: string | null;
+  expires_at: string;
+  created_at: string;
+  accepted_at: string | null;
 };
 
 // id is text, not uuid: a profile id is also its on-disk directory name under
@@ -64,6 +99,9 @@ export type ProfileRow = {
   password: string | null;
   // The automation to run when this profile launches. Added 2026-08-05.
   automation_id: string | null;
+  // The profile's picture: `brand:<slug>`, an https URL, or null for the
+  // initials plate. Added 2026-08-05. See ArgusProfile.avatar in src/types.ts.
+  avatar: string | null;
 };
 
 export type ProxyRow = {
@@ -172,6 +210,7 @@ export type AutomationRow = {
   description: string | null;
   steps: unknown[];
   variables: Record<string, unknown> | null;
+  tags: string[] | null;
   pinned: boolean | null;
   timeout_ms: number | null;
   close_on_finish: boolean | null;

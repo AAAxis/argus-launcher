@@ -1,6 +1,6 @@
 # What an AI agent can do through the Argus MCP server
 
-Scope: the 14 tools in `electron/mcp/tools.cjs`, the loopback automation API in
+Scope: the 21 tools in `electron/mcp/tools.cjs`, the loopback automation API in
 `electron/main.cjs` they call, and the renderer handlers in
 `src/hooks/useAutomationBridge.ts` that actually answer.
 
@@ -18,7 +18,7 @@ reported by the server: `1.0.55`.
 
 ## 1. The surface
 
-**[verified]** `tools/list` returns exactly 14 tools:
+**[verified]** `tools/list` returns exactly 21 tools:
 
 | Tool | Backed by | Verified? |
 |---|---|---|
@@ -36,9 +36,34 @@ reported by the server: `1.0.55`.
 | `argus_read_page` | CDP `Runtime.evaluate` | read only |
 | `argus_screenshot` | CDP `Page.captureScreenshot` | read only |
 | `argus_eval` | CDP `Runtime.evaluate` | read only |
+| `argus_list_automations` | `GET /v1/automations` | read only |
+| `argus_automation_schema` | `GET /v1/automations/schema` | read only |
+| `argus_get_automation` | `POST /v1/automations/get` | read only |
+| `argus_create_automation` | `POST /v1/automations/create` | read only |
+| `argus_update_automation` | `POST /v1/automations/update` | read only |
+| `argus_delete_automation` | `POST /v1/automations/delete` | read only |
+| `argus_run_automation` | `POST /v1/automations/run` | read only |
 
-Nine tools are thin wrappers over loopback HTTP routes; five need a running
+Sixteen tools are thin wrappers over loopback HTTP routes; five need a running
 browser and speak CDP directly (`electron/mcp/cdp.cjs`).
+
+The seven automations tools are **generated** from `electron/api/routes.json`
+rather than written out, so their names, descriptions and input schemas cannot
+drift from the routes they call. `scripts/verify-api-routes.mjs` checks the rest
+of the table the same way. The nine profile/proxy wrappers above them are still
+hand-written.
+
+Two things about that surface worth stating plainly, because they are the
+answers to the questions an agent asks first:
+
+- **Automations are org-wide and have no folder.** A folder-scoped key may list,
+  read and run them; only an unscoped key may create, change or delete one.
+  Anything else would let a key granted one folder rewrite a workflow every
+  other folder runs. Refusals are `403`.
+- **Steps are validated in the main process before anything is stored**, by the
+  same `validateSteps` the runner uses (`electron/automation/steps.cjs`). An
+  agent cannot persist a workflow the runner would then refuse, and the error
+  names the failing path (`steps[2].then[0].selector is required`).
 
 **[verified]** The server is dual-era: it answers both `initialize` (returning
 `protocolVersion: 2025-06-18`) and `server/discover` (returning

@@ -7,6 +7,7 @@
 // `cookie_set_id` there, and two scalar fields are arrays in the database.
 // Renaming the app types would touch every tab and dialog in main.tsx, so the
 // translation lives here instead and the UI keeps reading what it always read.
+import {normalizeTags} from '../lib/tags';
 import type {
   ArgusAutomation,
   ArgusCookie,
@@ -16,6 +17,9 @@ import type {
   ArgusProxy,
   AutomationRun,
   BuiltInExtensionToggles,
+  OrgInvite,
+  OrgMember,
+  OrgRole,
   ProxyMode,
   SharedBookmark,
   SharedExtension,
@@ -34,6 +38,8 @@ import type {
   CustomStatusRow,
   FolderRow,
   OrganizationRow,
+  OrgInviteRow,
+  OrgMemberIdentityRow,
   ProfileRow,
   ProxyRow,
   SharedBookmarkRow,
@@ -97,6 +103,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     name: row.name,
     status: undef(row.status),
     color: undef(row.color),
+    avatar: undef(row.avatar),
     tags: undef(row.tags),
     email: undef(row.email),
     password: undef(row.password),
@@ -114,6 +121,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     command_line_switches: switchesToText(row.command_line_switches),
     fingerprint,
     created_at: undef(row.created_at),
+    created_by: row.created_by,
     deleted_at: row.deleted_at,
   };
 }
@@ -124,6 +132,12 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
 // softDelete/restore/purge alone, so an ordinary edit -- from a session that
 // has not noticed someone else trashed this profile -- cannot bring it back.
 // That is verification check 3 of prompt 05 in one omitted line.
+//
+// `created_by` is omitted for a related reason, and it matters twice. On insert
+// the column's DEFAULT auth.uid() fills it, which is the only version of it
+// that cannot be forged. On update -- `replace` sends every key of this object
+// -- omitting it is what stops a colleague's edit from rewriting authorship to
+// themselves.
 //
 // `updated_at` is set here because no trigger maintains it: 0001/0005 give the
 // column a default but nothing refreshes it on update.
@@ -145,6 +159,7 @@ export function profileToRow(orgId: string, profile: ArgusProfile): Insert<Profi
     start_urls: startUrl ? [startUrl] : [],
     command_line_switches: switchesToArray(profile.command_line_switches),
     color: profile.color ?? null,
+    avatar: profile.avatar ?? null,
     proxy_mode: profile.proxy_mode ?? null,
     cookie_mode: profile.cookie_mode ?? null,
     cookie_import_path: profile.cookie_import_path ?? null,
@@ -169,6 +184,9 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
   }
   if ('color' in patch) {
     row.color = patch.color ?? null;
+  }
+  if ('avatar' in patch) {
+    row.avatar = patch.avatar ?? null;
   }
   if ('tags' in patch) {
     row.tags = patch.tags ?? [];
@@ -417,6 +435,7 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
     description: row.description,
     steps: (row.steps || []) as AutomationStep[],
     variables: (row.variables || {}) as AutomationVars,
+    tags: row.tags || [],
     pinned: row.pinned ?? false,
     timeout_ms: row.timeout_ms ?? undefined,
     close_on_finish: row.close_on_finish ?? false,
@@ -437,6 +456,9 @@ export function automationToRow(
     description: automation.description ?? null,
     steps: automation.steps as unknown[],
     variables: (automation.variables || {}) as Record<string, unknown>,
+    // normalizeTags is the only enforcement point for the 5-tag cap and it is
+    // applied at the edges, exactly as it is for profiles -- see AGENTS.md.
+    tags: normalizeTags(automation.tags || []),
     pinned: automation.pinned ?? false,
     timeout_ms: automation.timeout_ms ?? 300000,
     close_on_finish: automation.close_on_finish ?? false,
@@ -459,6 +481,9 @@ export function automationPatchToRow(
   }
   if ('variables' in patch) {
     row.variables = (patch.variables || {}) as Record<string, unknown>;
+  }
+  if ('tags' in patch) {
+    row.tags = normalizeTags(patch.tags || []);
   }
   if ('pinned' in patch) {
     row.pinned = patch.pinned ?? false;
@@ -512,6 +537,45 @@ export function runToRow(orgId: string, run: AutomationRun): Insert<AutomationRu
     error: run.error ?? null,
     vars: (run.vars || {}) as Record<string, unknown>,
     log: (run.log || []) as unknown[],
+  };
+}
+
+// ---- team ---------------------------------------------------------------
+
+// An unknown role reads as 'member', the least privileged of the three.
+//
+// The column has a CHECK constraint so this should be unreachable, but the
+// direction of the fallback is the point: if a future role is added and an old
+// build reads it, showing that person as a member under-states what they can do
+// rather than handing the UI's admin controls to someone this build cannot
+// reason about. RLS decides either way; this only decides what is drawn.
+function orgRole(value: string): OrgRole {
+  return value === 'owner' || value === 'admin' ? value : 'member';
+}
+
+export function rowToMember(row: OrgMemberIdentityRow): OrgMember {
+  return {
+    user_id: row.user_id,
+    email: row.email || '',
+    display_name: row.display_name || '',
+    avatar_url: row.avatar_url || '',
+    role: orgRole(row.role),
+    created_at: row.created_at,
+    invited_by: row.invited_by,
+  };
+}
+
+export function rowToInvite(row: OrgInviteRow): OrgInvite {
+  return {
+    id: row.id,
+    email: row.email,
+    // Never 'owner': the table's own check refuses it, and the type says so.
+    role: row.role === 'admin' ? 'admin' : 'member',
+    status: row.status === 'accepted' || row.status === 'revoked' ? row.status : 'pending',
+    token: row.token,
+    expires_at: row.expires_at,
+    created_at: row.created_at,
+    invited_by: row.invited_by,
   };
 }
 

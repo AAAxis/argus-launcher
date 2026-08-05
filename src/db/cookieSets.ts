@@ -162,6 +162,25 @@ export async function purge(orgId: string, ids: string[]): Promise<void> {
   raise(error, 'cookieSets.purge');
 }
 
+// Empty Trash. Mirrors profiles.purgeAll exactly, including why it is scoped by
+// deleted_at rather than by an id list: that is what makes it safe to offer with
+// nothing selected, and it also catches anything trashed elsewhere while the
+// dialog was open.
+export async function purgeAll(orgId: string): Promise<string[]> {
+  const client = optionalClient();
+  if (!client) {
+    return [];
+  }
+  const {data, error} = await client
+      .from('cookie_sets')
+      .delete()
+      .eq('org_id', orgId)
+      .not('deleted_at', 'is', null)
+      .select('id');
+  raise(error, 'cookieSets.purgeAll');
+  return ((data || []) as Array<{id: string}>).map((row) => row.id);
+}
+
 // The 30-day Trash expiry, as one statement. Returns the ids it removed so the
 // caller can report a count. Mirrors profiles.purgeExpired exactly.
 export async function purgeExpired(orgId: string, cutoffIso: string): Promise<string[]> {

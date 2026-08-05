@@ -12,9 +12,15 @@ const {pathToFileURL} = require('node:url');
 const {resolveFavicon} = require('./favicons.cjs');
 const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
+const cdpCore = require('./cdp-core.cjs');
 const automationRunner = require('./automation/runner.cjs');
 const automationStore = require('./automation/store.cjs');
-const {createRunTokens, handleRunFromPage} = require('./automation/run-token.cjs');
+const automationSteps = require('./automation/steps.cjs');
+const stepSchema = require('./automation/step-schema.json');
+const {
+  createRunTokens, handleRecheckFromPage, handleRunFromPage,
+} = require('./automation/run-token.cjs');
+const {routes: apiRoutes} = require('./api/routes.json');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
 // Two shapes, and nothing else is honoured:
@@ -1559,6 +1565,21 @@ function writeProfileProxyAssignment(userDataDir, proxy) {
     profileData.proxy_http_port = 0;
     profileData.proxy_username = '';
     profileData.proxy_password = '';
+    // Cleared too, or a profile that once ran on an HTTP proxy keeps
+    // proxy_transport: "http" beside a zeroed proxy_http_port -- a shape no
+    // launch ever produces, left for the next reader to puzzle over.
+    profileData.proxy_transport = '';
+    // And Chromium's OWN proxy pref, which is a different key entirely and the
+    // one that actually routes traffic. On a proxied launch the browser writes
+    // socks5://127.0.0.1:<bridge port> into it (argus::ApplySocksProxyToProfile),
+    // and nothing clears it on the way back out: ArgusProfileService's startup
+    // fail-safe is deliberately skipped for --argus-profile-launch sessions,
+    // and InitializeAsync returns early on the now-empty assigned_proxy_id
+    // above, so RevertToDirect/ClearProxyFromProfile never runs. Without this
+    // line, switching a profile to Direct and relaunching it points the browser
+    // at a SOCKS bridge that no longer exists and every navigation fails --
+    // including loopback, since the applicator sets no bypass rules.
+    prefs.proxy = {mode: 'direct'};
   }
   prefs.argus = {...(prefs.argus || {}), profile_data: profileData};
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
@@ -1611,6 +1632,81 @@ function proxyCheckCurlBinary() {
   return process.platform === 'win32' ? 'curl.exe' : '/usr/bin/curl';
 }
 
+// How bad a proxy failure is to *act on*, worst-actionable first. checkProxy
+// reports the highest-ranked failure of its three attempts rather than pasting
+// all three together, and this is the order.
+//
+// Auth outranks everything because all three attempts share one proxy: an auth
+// failure is a fact about the proxy, whereas a timeout may be the geolocation
+// service having a bad minute. 'unknown' sorts last so a real diagnosis always
+// beats a raw curl string.
+// 'lookup' sorts last: curl reached the internet through the proxy and the
+// geolocation service refused, which is not the proxy's fault and must never
+// outrank an actual connection failure.
+const PROXY_FAILURE_RANK = [
+  'auth-rejected', 'auth-required', 'dns', 'unreachable', 'timeout', 'unknown', 'lookup',
+];
+
+// Turn a curl exit code + stderr into a cause and a sentence a person can act on.
+//
+// The reason this exists: the raw curl text never contains the word
+// "credentials". A SOCKS5 proxy that wants a username and password answers an
+// anonymous handshake by hanging up, and curl reports that as "connection to
+// proxy closed" -- so a whole CSV of credential-less proxies used to fail with a
+// message that read like the proxies were dead. They were not; they were
+// unauthenticated. Verified against a live provider:
+//
+//   socks5, no credentials    -> 97 "connection to proxy closed"
+//   socks5, wrong credentials -> 97 "User was rejected by the SOCKS5 server"
+//   http,   no credentials    -> 56 "CONNECT tunnel failed, response 407"
+//   http,   wrong credentials -> 56 "CONNECT tunnel failed, response 401"
+//
+// `sentCredentials` is what separates "needs credentials" from "these
+// credentials are wrong" for 407, which is returned in both cases.
+function classifyProxyFailure(code, rawMessage, sentCredentials) {
+  const message = String(rawMessage || '').trim();
+  const lower = message.toLowerCase();
+  const fallback = message || `curl exited ${code}`;
+
+  if (lower.includes('user was rejected by the socks5 server')) {
+    return {reason: 'auth-rejected', error: 'Proxy rejected these credentials (SOCKS5 refused the login)'};
+  }
+  if (lower.includes('no authentication method was acceptable') ||
+      lower.includes('unacceptable authentication method')) {
+    return {reason: 'auth-required', error: 'Proxy needs a username and password (it does not allow anonymous access)'};
+  }
+  const status = lower.match(/response (\d{3})/);
+  if (status) {
+    if (status[1] === '407') {
+      return sentCredentials ?
+        {reason: 'auth-rejected', error: 'Proxy rejected these credentials (407 Proxy Authentication Required)'} :
+        {reason: 'auth-required', error: 'Proxy needs a username and password (407 Proxy Authentication Required)'};
+    }
+    if (status[1] === '401' || status[1] === '403') {
+      return {reason: 'auth-rejected', error: `Proxy rejected these credentials (${status[1]})`};
+    }
+  }
+  // Inferred rather than reported, so the wording hedges. Only when we sent
+  // nothing -- a proxy that hangs up on credentials we did supply is a
+  // different problem, and claiming "needs a password" there would be wrong.
+  if (lower.includes('connection to proxy closed') && !sentCredentials) {
+    return {
+      reason: 'auth-required',
+      error: 'Proxy closed the connection without a login — it needs a username and password',
+    };
+  }
+  if (lower.includes('could not resolve proxy')) {
+    return {reason: 'dns', error: 'Proxy host could not be resolved — check the hostname'};
+  }
+  if (code === 28 || lower.includes('timed out') || lower.includes('timeout')) {
+    return {reason: 'timeout', error: 'Proxy did not respond in time'};
+  }
+  if (code === 7 || lower.includes('failed to connect') || lower.includes('connection refused')) {
+    return {reason: 'unreachable', error: 'Could not connect to the proxy — check the host and port'};
+  }
+  return {reason: 'unknown', error: fallback};
+}
+
 // Runs one curl attempt against `endpoint` through the proxy and resolves to a
 // normalized result -- never rejects, so Promise.allSettled/race logic upstream
 // doesn't need try/catch around each attempt.
@@ -1628,7 +1724,8 @@ function checkProxyEndpoint(proxy, endpoint) {
       '--max-time', '10',
       '--proxy', proxyUrl(proxy),
     ];
-    if (proxy.username || proxy.password) {
+    const sentCredentials = Boolean(proxy.username || proxy.password);
+    if (sentCredentials) {
       args.push('--proxy-user', `${proxy.username || ''}:${proxy.password || ''}`);
     }
     args.push(endpoint);
@@ -1638,18 +1735,29 @@ function checkProxyEndpoint(proxy, endpoint) {
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', (error) => {
-      resolve({ok: false, endpoint, error: error.message});
+      // Spawn failed -- curl never ran, so there is nothing about the proxy to
+      // classify. 'unknown' keeps it ranked below any real diagnosis.
+      resolve({ok: false, endpoint, reason: 'unknown', error: error.message});
     });
     child.on('close', (code) => {
       const pingMs = Date.now() - startedAt;
       if (code !== 0) {
-        resolve({ok: false, endpoint, error: (stderr || stdout || `curl exited ${code}`).trim()});
+        const failure = classifyProxyFailure(code, stderr || stdout, sentCredentials);
+        resolve({ok: false, endpoint, reason: failure.reason, error: failure.error});
         return;
       }
       try {
         const data = JSON.parse(stdout);
         if (data.error || data.status === 'fail') {
-          resolve({ok: false, endpoint, error: data.reason || data.message || `Lookup failed at ${endpoint}`});
+          // curl got through the proxy and the geolocation service answered with
+          // a refusal, so this says nothing bad about the proxy -- hence its own
+          // reason, ranked below every real proxy fault.
+          resolve({
+            ok: false,
+            endpoint,
+            reason: 'lookup',
+            error: data.reason || data.message || `Lookup failed at ${endpoint}`,
+          });
           return;
         }
         const country = data.country_name || data.countryName || data.country;
@@ -1657,7 +1765,7 @@ function checkProxyEndpoint(proxy, endpoint) {
           (typeof data.country === 'string' && data.country.length === 2 ? data.country : undefined);
         resolve({ok: true, endpoint, ip: data.ip || data.query, country, countryCode, pingMs});
       } catch {
-        resolve({ok: false, endpoint, error: `Invalid response from ${endpoint}`});
+        resolve({ok: false, endpoint, reason: 'lookup', error: `Invalid response from ${endpoint}`});
       }
     });
   });
@@ -1681,10 +1789,27 @@ async function checkProxy(proxy) {
   if (success) {
     return {ok: true, ip: success.ip, country: success.country, countryCode: success.countryCode, pingMs: success.pingMs};
   }
+  // All three attempts go through the same proxy, so joining their errors used
+  // to print the same sentence three times over ("connection to proxy closed ·
+  // connection to proxy closed · connection to proxy closed"). Report the single
+  // most actionable failure instead, and only mention a differing second cause.
+  const ranked = results
+      .filter((result) => result.error)
+      .sort((a, b) =>
+        PROXY_FAILURE_RANK.indexOf(a.reason || 'unknown') -
+        PROXY_FAILURE_RANK.indexOf(b.reason || 'unknown'));
+  const best = ranked[0];
+  if (!best) {
+    return {ok: false, pingMs: Date.now() - started, error: 'Proxy check failed'};
+  }
+  const alsoSaw = [...new Set(ranked.slice(1)
+      .filter((result) => result.error !== best.error)
+      .map((result) => result.error))];
   return {
     ok: false,
     pingMs: Date.now() - started,
-    error: results.map((result) => result.error).filter(Boolean).join(' · ') || 'Proxy check failed',
+    reason: best.reason || 'unknown',
+    error: alsoSaw.length ? `${best.error} (also: ${alsoSaw.join('; ')})` : best.error,
   };
 }
 
@@ -1734,13 +1859,19 @@ function killExistingProfileProcess(profileId, userDataDir) {
   }
 }
 
+// Only reached when the renderer sent no homeHtml -- a launch driven by the
+// local API before cloud state has loaded, say. It carries its own colours
+// because it cannot import src/lib/palette.ts (nothing compiles electron/), so
+// they are written out here to match: --surface/--ink/--ink-soft in both
+// themes, with prefers-color-scheme doing the choosing since a payload this
+// degraded carries no theme either.
 function fallbackHomeHtml(profileName) {
   const safeName = String(profileName || 'Profile')
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${safeName}</title>
-<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf8;color:#1d1c18;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{text-align:center}h1{font-size:36px;margin:0 0 10px}p{color:#716b62;font-size:17px}</style>
+<style>:root{color-scheme:light dark;--surface:#f7f7f7;--ink:#1f1f1f;--ink-soft:#676767}@media (prefers-color-scheme:dark){:root{--surface:#1b1b1b;--ink:#e9e9e9;--ink-soft:#9e9e9e}}body{margin:0;display:grid;min-height:100vh;place-items:center;background:var(--surface);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{text-align:center}h1{font-size:20px;letter-spacing:-0.01em;margin:0 0 4px}p{color:var(--ink-soft);font-size:13px}</style>
 </head><body><main><h1>${safeName}</h1><p>Anonymous Argys Browser session</p></main></body></html>`;
 }
 
@@ -1761,8 +1892,19 @@ function writeHomeFile(payload) {
   return pathToFileURL(homePath).toString();
 }
 
-function writeProfileStartupPrefs(userDataDir, launchUrl) {
-  if (!userDataDir || !launchUrl) {
+// Two URLs, not one. `startupUrl` is where the *first* tab goes -- the profile's
+// start_url when it has one. `argusHomeUrl` is the generated ArgysHome/home.html,
+// and it is where *every other* tab goes: the new-tab page and the home button.
+//
+// These used to be a single `launchUrl` argument, which meant a profile with a
+// start_url had newtab_page_location_override pointed at it too, so every Cmd+T
+// for the life of that profile opened the start URL instead of the Argus home
+// page. The four Android rows in a customer's CSV import were the only ones
+// carrying start_url=facebook.com, which made it look like a mobile-fingerprint
+// bug; it was neither mobile nor fingerprint. The first tab never needed the
+// override -- it is opened by the positional URL arg and session.startup_urls.
+function writeProfileStartupPrefs(userDataDir, startupUrl, argusHomeUrl) {
+  if (!userDataDir || !startupUrl) {
     return;
   }
   const defaultDir = path.join(userDataDir, 'Default');
@@ -1774,14 +1916,20 @@ function writeProfileStartupPrefs(userDataDir, launchUrl) {
   } catch {
     prefs = {};
   }
-  prefs.homepage = launchUrl;
+  // Falling back to startupUrl keeps a caller that only knows one URL working,
+  // rather than silently clearing the override and handing back Chromium's own
+  // new-tab page.
+  const newTabUrl = argusHomeUrl || startupUrl;
+  prefs.homepage = newTabUrl;
+  // The Argus home page is a file:// page, not the NTP, so the home button has
+  // to be told to use `homepage` rather than treat it as the new-tab page.
   prefs.homepage_is_newtabpage = false;
-  prefs.newtab_page_location_override = launchUrl;
+  prefs.newtab_page_location_override = newTabUrl;
   prefs.session = {
     ...(prefs.session || {}),
     restore_on_startup: 4,
-    startup_urls: [launchUrl],
-    urls_to_restore_on_startup: [launchUrl],
+    startup_urls: [startupUrl],
+    urls_to_restore_on_startup: [startupUrl],
   };
   prefs.pinned_tabs = [];
   prefs.tabs = {
@@ -2090,8 +2238,11 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   // omitted and the browser keeps the shared bundle icon.
   const profileDockIcon =
     profileIconPng(payload.color, nativeTheme.shouldUseDarkColors);
-  const launchUrl = payload.startUrl || writeHomeFile(payload);
-  writeProfileStartupPrefs(payload.userDataDir, launchUrl);
+  // Always written, even when the profile has a start_url: the home page is the
+  // new-tab page for the whole session, not just the fallback for the first tab.
+  const argusHomeUrl = writeHomeFile(payload);
+  const launchUrl = payload.startUrl || argusHomeUrl;
+  writeProfileStartupPrefs(payload.userDataDir, launchUrl, argusHomeUrl);
   writeProfileProxyAssignment(payload.userDataDir, payload.proxy);
   const cookieManagerPath = payload.enableCookieManager !== false ?
     await writeProfileCookieManagerExtension(payload) : '';
@@ -3008,6 +3159,132 @@ const AUTOMATION_API_PORT = 39219;
 const pendingAutomationRequests = new Map();
 const AUTOMATION_REQUEST_TIMEOUT_MS = 20000;
 
+// Every route this server answers, from electron/api/routes.json. The allow-list
+// below the bearer gate is derived from it rather than written out again, which
+// is what stops the served surface and the documented surface disagreeing --
+// scripts/verify-api-routes.mjs asserts the two still match.
+const ROUTE_BY_KEY = new Map(apiRoutes.map((route) => [`${route.method} ${route.path}`, route]));
+
+// Routes carrying a `channel` are dispatched straight from the table: validate
+// the declared fields, forward to the renderer, wait. The older routes keep
+// their hand-written blocks further down.
+const TABLE_ROUTES = apiRoutes.filter((route) => route.channel || route.local);
+
+// One request/response round trip to the renderer.
+//
+// The dozen ipcMain.on('...-result') handlers above are the same fifteen lines
+// each -- look up the pending request, clear its timeout, unwrap {result,
+// error} -- copied once per route. New routes share this pair instead of adding
+// a thirteenth copy.
+function askRenderer(res, channel, payload) {
+  if (!mainWindow) {
+    sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
+    return;
+  }
+  const requestId = crypto.randomUUID();
+  const timeout = setTimeout(() => {
+    pendingAutomationRequests.delete(requestId);
+    sendJson(res, 504, {status: false, msg: 'Timed out waiting for Argus Launcher to respond'});
+  }, AUTOMATION_REQUEST_TIMEOUT_MS);
+  pendingAutomationRequests.set(requestId, {res, timeout});
+  mainWindow.webContents.send(channel, {requestId, ...payload});
+}
+
+ipcMain.on('argus:api-result', (_event, {requestId, result, error, status}) => {
+  const pending = pendingAutomationRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingAutomationRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    // The renderer chooses the code: 404 for a missing row, 403 for one this
+    // key may not see, 400 for steps that do not validate. Defaulting to 500
+    // would report every one of those as our fault.
+    sendJson(pending.res, status || 500, {status: false, msg: error});
+    return;
+  }
+  sendJson(pending.res, 200, {status: true, ...result});
+});
+
+// Reads and parses a JSON request body, answering 400 itself if it is not
+// JSON. Capped because the table routes accept a step tree, which is the only
+// body on this server that is not a handful of ids -- an unbounded read on a
+// loopback port any local process can reach is a way to spend all our memory.
+const MAX_API_BODY_BYTES = 512 * 1024;
+
+function readJsonBody(req, res, next) {
+  let body = '';
+  let tooLarge = false;
+  req.on('data', (chunk) => {
+    if (tooLarge) {
+      return;
+    }
+    body += chunk;
+    if (body.length > MAX_API_BODY_BYTES) {
+      tooLarge = true;
+      sendJson(res, 413, {status: false, msg: 'Request body is too large'});
+      req.destroy();
+    }
+  });
+  req.on('end', () => {
+    if (tooLarge) {
+      return;
+    }
+    try {
+      next(JSON.parse(body || '{}'));
+    } catch {
+      sendJson(res, 400, {status: false, msg: 'Invalid JSON body'});
+    }
+  });
+}
+
+// Checks a body against the route's declared fields and returns either the
+// forwarded payload or an error string. Only declared fields travel: the same
+// rule the MCP tools follow, for the same reason -- an undeclared key that
+// happens to match a column downstream is a write nobody documented.
+function payloadForRoute(route, body) {
+  const out = {};
+  for (const field of route.fields || []) {
+    const value = body[field.key];
+    if (value === undefined || value === null) {
+      if (field.required) {
+        return {error: `${field.key} is required`};
+      }
+      continue;
+    }
+    const okType =
+      field.type === 'string' ? typeof value === 'string' :
+      field.type === 'number' ? typeof value === 'number' && Number.isFinite(value) :
+      field.type === 'boolean' ? typeof value === 'boolean' :
+      field.type === 'steps' ? Array.isArray(value) :
+      field.type === 'tags' ?
+        Array.isArray(value) && value.every((item) => typeof item === 'string') :
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!okType) {
+      const expected =
+        field.type === 'steps' ? 'list of steps' :
+        field.type === 'tags' ? 'list of strings' :
+        field.type;
+      return {error: `${field.key} must be a ${expected}`};
+    }
+    if (field.type === 'string' && !value.trim() && field.required) {
+      return {error: `${field.key} is required`};
+    }
+    out[field.key] = value;
+  }
+  // Validated here rather than in the renderer so a workflow the runner would
+  // refuse never reaches the database. validateSteps produces path-addressed
+  // messages ("steps[2].then[0].selector is required") written for agents.
+  if (out.steps) {
+    const problems = automationSteps.validateSteps(out.steps, stepSchema);
+    if (problems.length > 0) {
+      return {error: `These steps are not valid: ${problems.slice(0, 5).join('; ')}`};
+    }
+  }
+  return {payload: out};
+}
+
 // Loopback-only isn't the same as trusted: any local process (including a
 // page open in an ordinary browser tab, since this server answers with
 // permissive CORS headers) can already reach 127.0.0.1. Named, scoped,
@@ -3344,6 +3621,53 @@ ipcMain.handle('argus:resolve-profile-cdp', async (_event, {profileId}) => {
     return await resolveProfileCdp(profileId);
   } catch (error) {
     return {running: false, error: error?.message || String(error)};
+  }
+});
+
+// How many elements a selector matches on a profile's open page.
+//
+// The editor's Check button. Read-only by construction: it evaluates
+// querySelectorAll(...).length and returns a number, so there is no argument
+// about whether "testing" a click step might submit a form. The selector is
+// JSON-encoded into the expression rather than concatenated -- it is text the
+// user typed, and this is the one place in the editor that puts it into a
+// string that a page will execute.
+//
+// Reuses withPage, which opens a socket and closes it in a finally. A pool was
+// rejected for the MCP tools for the same reason it is not wanted here: a
+// stale handle is worth more debugging than a connection is worth saving.
+ipcMain.handle('argus:check-selector', async (_event, {profileId, selector}) => {
+  const query = String(selector || '').trim();
+  if (!query) {
+    return {ok: false, error: 'Enter a selector first.'};
+  }
+  try {
+    const session = await resolveProfileCdp(profileId);
+    if (!session.running || !session.cdpUrl) {
+      return {ok: false, notRunning: true, error: 'That profile is not open.'};
+    }
+    return await cdpCore.withPage(session.cdpUrl, async (page) => {
+      const result = await page.send('Runtime.evaluate', {
+        // The try/catch is inside the page: an invalid selector throws
+        // SyntaxError from querySelectorAll, and "h1[" is a typo to report as
+        // one, not a failure of the check itself.
+        expression: `(() => {
+          try {
+            return {count: document.querySelectorAll(${JSON.stringify(query)}).length};
+          } catch (error) {
+            return {invalid: String(error && error.message || error)};
+          }
+        })()`,
+        returnByValue: true,
+      });
+      const value = result.result?.value || {};
+      if (value.invalid) {
+        return {ok: false, error: `Not a valid CSS selector: ${value.invalid}`};
+      }
+      return {ok: true, count: Number(value.count) || 0};
+    });
+  } catch (error) {
+    return {ok: false, error: error?.message || String(error)};
   }
 });
 
@@ -3718,6 +4042,12 @@ function runFromPage(req, res) {
     sendJson,
     startRun: async (entry, automation) => {
       const session = await resolveProfileCdp(entry.profileId);
+      // A token whose automations list is non-empty was minted alongside a
+      // reserved port, so this cannot normally be reached -- but a run with
+      // nowhere to connect has to say so rather than dial http://127.0.0.1:null.
+      if (!session.running && !entry.cdpPort) {
+        throw Object.assign(new Error('This session has no debugging port'), {status: 409});
+      }
       const cdpUrl = session.running && session.cdpUrl ?
         session.cdpUrl :
         `http://127.0.0.1:${entry.cdpPort}`;
@@ -3730,6 +4060,60 @@ function runFromPage(req, res) {
         onEvent: sendRunEvent,
       });
     },
+  });
+}
+
+// Re-checks the proxy assigned to a launch's profile, asked for by that
+// launch's start page.
+//
+// It goes through the renderer rather than calling checkProxy() here, which
+// would be shorter. The renderer owns the cloud data: it can record the result
+// against the proxy row (useProxyActions.recordCheck), so the Proxies tab and
+// every other profile using that proxy agree with what the page now says, and
+// it owns homeProxyStatus, which is the one place the panel's wording is
+// decided. Answering from here would mean a second copy of both.
+const pendingPageRequests = new Map();
+
+function askRendererForRecheck(profileId) {
+  return new Promise((resolve, reject) => {
+    if (!mainWindow) {
+      reject(Object.assign(new Error('Argus Launcher is not open'), {status: 503}));
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    // A proxy check is three concurrent curl runs with --max-time 10, so it
+    // fits inside the standard automation timeout with room to spare.
+    const timeout = setTimeout(() => {
+      pendingPageRequests.delete(requestId);
+      reject(Object.assign(
+          new Error('Timed out waiting for Argus Launcher to answer'), {status: 504}));
+    }, AUTOMATION_REQUEST_TIMEOUT_MS);
+    pendingPageRequests.set(requestId, {resolve, reject, timeout});
+    mainWindow.webContents.send('argus:recheck-proxy-request', {requestId, profileId});
+  });
+}
+
+ipcMain.on('argus:recheck-proxy-result', (_event, {requestId, result, error}) => {
+  const pending = pendingPageRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingPageRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.reject(Object.assign(new Error(error), {status: 500}));
+    return;
+  }
+  pending.resolve(result);
+});
+
+function recheckFromPage(req, res) {
+  handleRecheckFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    recheck: (entry) => askRendererForRecheck(entry.profileId),
   });
 }
 
@@ -3817,10 +4201,17 @@ function startAutomationApiServer() {
     }
 
     // Above the bearer gate on purpose: the caller is a file:// page, which has
-    // no key and must never be given one. It authenticates with a per-launch run
-    // token instead -- see runTokens for what that does and does not authorize.
+    // no key and must never be given one. Both authenticate with a per-launch
+    // run token instead -- see runTokens for what that does and does not
+    // authorize. Neither is in electron/api/routes.json: they are not part of
+    // the keyed surface and must never be advertised as one, which is why
+    // verify-api-routes skips them by name.
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/run-from-page') {
       runFromPage(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/proxies/recheck-from-page') {
+      recheckFromPage(req, res);
       return;
     }
 
@@ -3829,6 +4220,46 @@ function startAutomationApiServer() {
       sendJson(res, 401, {status: false, msg: 'Missing or invalid Authorization bearer token'});
       return;
     }
+
+    // Table-driven routes, ahead of the hand-written blocks below.
+    //
+    // Automations are org-wide objects with no folder of their own, so folder
+    // scope cannot be applied to them the way it is applied to a profile. A
+    // scoped key may therefore list, read and run them -- running still checks
+    // the profile's folder in the renderer -- but may not author them. Anything
+    // else would let a key granted one folder rewrite a workflow every other
+    // folder runs.
+    const tableRoute = ROUTE_BY_KEY.get(`${req.method} ${parsedUrl.pathname}`);
+    if (tableRoute && (tableRoute.channel || tableRoute.local)) {
+      if (tableRoute.scope === 'unscoped' && key.folderScope) {
+        sendJson(res, 403, {
+          status: false,
+          msg: 'This key is scoped to a folder, and automations are shared across all of them. ' +
+            'Use an unscoped key to create, change or delete one.',
+        });
+        return;
+      }
+      if (tableRoute.local) {
+        // Answered here: the step catalogue is a static file in this process,
+        // and a renderer round trip for it would only add a way to fail.
+        sendJson(res, 200, {status: true, steps: stepSchema});
+        return;
+      }
+      if (req.method === 'GET') {
+        askRenderer(res, tableRoute.channel, {allowedFolders: key.folderScope});
+        return;
+      }
+      readJsonBody(req, res, (payload) => {
+        const {payload: forwarded, error} = payloadForRoute(tableRoute, payload);
+        if (error) {
+          sendJson(res, 400, {status: false, msg: error});
+          return;
+        }
+        askRenderer(res, tableRoute.channel, {...forwarded, allowedFolders: key.folderScope});
+      });
+      return;
+    }
+
     if (req.method === 'GET' && parsedUrl.pathname === '/v1/profiles') {
       if (!mainWindow) {
         sendJson(res, 503, {status: false, msg: 'Argus Launcher window is not open'});
@@ -3861,23 +4292,10 @@ function startAutomationApiServer() {
       mainWindow.webContents.send('argus:list-proxies-request', {requestId});
       return;
     }
-    if (req.method !== 'POST' ||
-        (parsedUrl.pathname !== '/v1/cookies/bulk-match' &&
-         parsedUrl.pathname !== '/v1/cookies/push-local' &&
-         parsedUrl.pathname !== '/v1/proxies/reimport' &&
-         parsedUrl.pathname !== '/v1/proxies/create' &&
-         parsedUrl.pathname !== '/v1/proxies/update' &&
-         parsedUrl.pathname !== '/v1/proxies/delete' &&
-         parsedUrl.pathname !== '/v1/proxies/check' &&
-         parsedUrl.pathname !== '/v1/profiles/assign-proxy' &&
-         parsedUrl.pathname !== '/v1/profiles/get' &&
-         parsedUrl.pathname !== '/v1/profiles/update' &&
-         parsedUrl.pathname !== '/v1/profiles/delete' &&
-         parsedUrl.pathname !== '/v1/profiles/update-fingerprint' &&
-         parsedUrl.pathname !== '/v1/profiles/launch-automation' &&
-         parsedUrl.pathname !== '/v1/profiles/close-automation' &&
-         parsedUrl.pathname !== '/v1/profiles/cdp' &&
-         parsedUrl.pathname !== '/v1/monitoring/report')) {
+    // Was sixteen chained pathname comparisons. Same set, read off the table
+    // that also documents them, so a route cannot be served without being
+    // documented or documented without being served.
+    if (req.method !== 'POST' || !ROUTE_BY_KEY.has(`POST ${parsedUrl.pathname}`)) {
       sendJson(res, 404, {status: false, msg: 'Not found'});
       return;
     }
@@ -4167,6 +4585,16 @@ function startAutomationApiServer() {
         if (Array.isArray(payload.tags)) fields.tags = payload.tags.filter((tag) => typeof tag === 'string');
         if (typeof payload.status === 'string') fields.status = payload.status;
         if (typeof payload.color === 'string') fields.color = payload.color;
+        // Brand marks only, and the empty string to clear. ArgusProfile.avatar
+        // also accepts an https URL, but that half is the editor's: a URL here
+        // would let a key holder point every avatar in the org at a host of
+        // their choosing and have the launcher fetch it on every render. A
+        // `brand:` slug is a dozen bytes resolved against a catalog that ships
+        // with the app, so it cannot reach the network at all.
+        if (payload.avatar === '' ||
+            (typeof payload.avatar === 'string' && payload.avatar.startsWith('brand:'))) {
+          fields.avatar = payload.avatar;
+        }
         if (typeof payload.folderId === 'string' || payload.folderId === null) fields.folder_id = payload.folderId;
         if (typeof payload.email === 'string') fields.email = payload.email;
         if (typeof payload.password === 'string') fields.password = payload.password;
@@ -4206,12 +4634,25 @@ function startAutomationApiServer() {
           detail: typeof payload.detail === 'string' ? payload.detail : '',
           screenshotBase64: typeof payload.screenshotBase64 === 'string' ? payload.screenshotBase64 : null,
         });
-      } else {
+      } else if (parsedUrl.pathname === '/v1/cookies/bulk-match') {
         mainWindow.webContents.send('argus:bulk-match-cookies-request', {
           requestId,
           folderPath: payload.folderPath,
           // profileIds omitted/empty means "match against every profile".
           profileIds: Array.isArray(payload.profileIds) ? payload.profileIds : null,
+        });
+      } else {
+        // bulk-match used to be this branch, reached by elimination. That was
+        // survivable while the allow-list above was written out by hand -- the
+        // two lists were edited together or not at all. Now that the allow-list
+        // is derived from routes.json, a route added to the table without a
+        // handler here would have been silently answered as a cookie import
+        // against whatever folderPath the caller happened to send.
+        pendingAutomationRequests.delete(requestId);
+        clearTimeout(timeout);
+        sendJson(res, 501, {
+          status: false,
+          msg: `${parsedUrl.pathname} is documented but not implemented`,
         });
       }
     });
