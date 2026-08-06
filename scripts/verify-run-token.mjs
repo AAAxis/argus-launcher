@@ -12,6 +12,7 @@
 //
 //   node scripts/verify-run-token.mjs
 import {createServer} from 'node:http';
+import {createConnection} from 'node:net';
 import {createRequire} from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -58,7 +59,9 @@ const server = createServer((req, res) => {
     handleCookiePushFromPage({
       req, res, tokens, sendJson,
       pushCookies: async (entry, cookies) => {
-        pushed.push({profileId: entry.profileId, count: cookies.length});
+        // `cookies` is kept, not just its length, so a chunk-boundary
+        // corruption test can inspect the actual value that arrived.
+        pushed.push({profileId: entry.profileId, count: cookies.length, cookies});
         return {saved: cookies.length};
       },
     });
@@ -94,6 +97,37 @@ async function post(body, headers = {'Content-Type': 'application/json'}, path =
 
 const postRecheck = (body, headers) =>
   post(body, headers || {'Content-Type': 'application/json'}, '/recheck');
+
+// Sends a raw HTTP/1.1 POST with the body split into two separate socket
+// writes at `splitAt` bytes -- fetch() cannot control TCP framing closely
+// enough to force a multi-byte character to straddle a chunk boundary, which
+// is exactly the case the StringDecoder fix has to survive.
+function rawSplitPost(path, bodyBuf, splitAt) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(PORT, '127.0.0.1', () => {
+      socket.setNoDelay(true);
+      const head = `POST ${path} HTTP/1.1\r\nHost: 127.0.0.1:${PORT}\r\n` +
+          `Content-Type: application/json\r\nContent-Length: ${bodyBuf.length}\r\nConnection: close\r\n\r\n`;
+      socket.write(Buffer.concat([Buffer.from(head, 'utf8'), bodyBuf.subarray(0, splitAt)]), () => {
+        // The delay matters: without it, both writes can still land in one
+        // OS-level read on loopback and the split proves nothing. This gives
+        // the server time to actually consume the first partial chunk before
+        // the rest of the character arrives.
+        setTimeout(() => socket.write(bodyBuf.subarray(splitAt)), 20);
+      });
+    });
+    let raw = Buffer.alloc(0);
+    socket.on('data', (chunk) => {
+      raw = Buffer.concat([raw, chunk]);
+    });
+    socket.on('end', () => {
+      const text = raw.toString('utf8');
+      const status = Number(text.split('\r\n', 1)[0].split(' ')[1]);
+      resolve({status, text: text.slice(text.indexOf('\r\n\r\n') + 4)});
+    });
+    socket.on('error', reject);
+  });
+}
 
 await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve));
 
@@ -241,6 +275,69 @@ check('the TTL covers the re-check route as well',
   check('an expired token is refused on the cookie routes too, byte-identically to unknown',
       expiredCookiePush.status === 403 && expiredCookiePush.text === expiredCookieUnknown.text,
       expiredCookiePush.text);
+}
+
+// ---- F3 regression: a non-object JSON body must not crash the process -----
+// Each check below mints its own token so it neither draws on nor pollutes
+// the rate-limit arithmetic the blocks above and below depend on.
+{
+  const nullBody = await post(null, {'Content-Type': 'application/json'}, '/cookie-pull');
+  check('a literal `null` JSON body on a cookie route is refused, not thrown (F3 regression)',
+      nullBody.status === 403 && nullBody.text === unknown.text, nullBody.text);
+
+  // The real assertion is the process surviving to answer this at all: the
+  // pre-fix bug dereferenced `payload.runToken` on `null` inside an async
+  // handler with no unhandledRejection listener anywhere upstream, which
+  // is a crash, not a rejected promise the caller can catch.
+  const stillUpToken = tokens.mint({profileId: 'prof-still-up', profileName: 'S', cdpPort: null, automations: []});
+  const stillUp = await post({runToken: stillUpToken}, {'Content-Type': 'application/json'}, '/cookie-pull');
+  check('the server is still answering requests after a null-body request (F3 regression)',
+      stillUp.status === 200, stillUp.text);
+}
+
+// ---- F1 regression: UTF-16 length under the cap, UTF-8 byte length over ---
+{
+  // Each of these characters is one UTF-16 code unit but three UTF-8 bytes:
+  // 2000 of them is ~2000 by `.length` (comfortably under the 4096-byte page
+  // cap) but ~6000 bytes on the wire (comfortably over it). A cap compared
+  // against `body.length` instead of wire bytes admits this; the byte-counted
+  // cap must not.
+  const wideChars = '日'.repeat(2000);
+  const overByteCap = await post({runToken: 'irrelevant', big: wideChars})
+      .then(() => 'answered', () => 'destroyed');
+  check('a body under the UTF-16-length cap but over the UTF-8-byte cap is destroyed (F1 regression)',
+      overByteCap === 'destroyed', overByteCap);
+}
+
+// ---- F2 regression: a multi-byte character split across two socket writes -
+{
+  const multibyteToken = tokens.mint({profileId: 'prof-multibyte', profileName: 'MB', cdpPort: null, automations: []});
+  const cookieValue = '日本語クッキー😀Ω';
+  const payloadBuf = Buffer.from(
+      JSON.stringify({runToken: multibyteToken, cookies: [{name: 'mb', value: cookieValue}]}), 'utf8');
+  // Cut partway into the value's bytes -- every character in it is 2+ UTF-8
+  // bytes, so this lands mid-character rather than on a boundary.
+  const valueOffset = payloadBuf.indexOf(Buffer.from(cookieValue, 'utf8'));
+  const split = await rawSplitPost('/cookie-push', payloadBuf, valueOffset + 4);
+  check('a multi-byte character split across two socket writes arrives byte-exact, not U+FFFD (F2 regression)',
+      split.status === 200 && pushed.at(-1).cookies?.[0]?.value === cookieValue,
+      JSON.stringify(pushed.at(-1)));
+}
+
+// ---- F4 mirror direction: page-route bucket exhausted, cookie route unaffected
+{
+  const mirrorToken = tokens.mint({profileId: 'prof-mirror', profileName: 'M', cdpPort: null, automations: []});
+  const pageStatuses = [];
+  for (let i = 0; i < 11; i++) {
+    pageStatuses.push((await post({runToken: mirrorToken, automationId: 'nope'})).status);
+  }
+  check('this token\'s page-route (run/recheck) bucket rate-limits at 10 per minute',
+      pageStatuses.slice(0, 10).every((status) => status === 403) && pageStatuses[10] === 429,
+      `statuses ${pageStatuses.join(',')}`);
+
+  const cookiePullWhilePageExhausted = await post({runToken: mirrorToken}, {'Content-Type': 'application/json'}, '/cookie-pull');
+  check('a cookie route still answers 200 while the same token\'s page-route bucket is exhausted (F4 mirror direction)',
+      cookiePullWhilePageExhausted.status === 200, cookiePullWhilePageExhausted.text);
 }
 
 // A fresh store, so the earlier requests do not count toward the limit.
