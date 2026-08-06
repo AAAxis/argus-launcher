@@ -1,25 +1,51 @@
-/* Palette matches editor.css / the launcher's own table views -- this popup
- * is the surface almost every user actually sees, so it has to read as the
- * same product as the full editor and the desktop app. */
+/* Design tokens, copied from the launcher's own palette (src/styles.css) as
+ * literal values -- this stylesheet loads in its own extension page and never
+ * shares a cascade with the app, so `var(--paper)` here has to resolve locally.
+ * Names match the launcher's so the mapping stays legible without cross-
+ * referencing the source file.
+ *
+ * This used to be a warm cream/beige palette (#fbfaf8 bg, #ded6c8 borders)
+ * lifted from this extension's own older stylesheet, which predates the
+ * launcher's current neutral-grey one and read as a different product sitting
+ * next to it. Achromatic now, matching the launcher: R, G and B equal in every
+ * neutral below. */
 :root {
-  --bg: #fbfaf8;
-  --ink: #171613;
-  --muted: #716b62;
-  --border: #ded6c8;
-  --card: #f3f1ec;
-  --green: #1a7f3c;
-  --green-bg: #e9f7ee;
-  --red: #d53c32;
-  --red-bg: #fff1ef;
-  --amber: #b45309;
-  --amber-bg: #fdf3e7;
+  --paper: #f2f2f2;
+  --surface: #f7f7f7;
+  --raised: #ffffff;
+  --hover: #ededed;
+
+  --ink: #1f1f1f;
+  --ink-soft: #676767;
+
+  --border: #e0e0e0;
+
+  /* The primary/filled control. Ink rather than a hue -- see styles.css's own
+   * note on --accent -- and distinct from --ink itself, the way the launcher
+   * keeps them, even though the two are close. */
+  --accent: #1a1a1a;
+  --accent-strong: #000000;
+  --accent-ink: #ffffff;
+
+  --danger: #c5453c;
+  --danger-bg: #fdf2f1;
+
+  /* The sync card's tones. Named for the launcher's profile-status pair they
+   * borrow (--status-active-*, --status-warmup-*) rather than for the colour,
+   * so a future retune of "success green" or "warning amber" moves both
+   * surfaces together. */
+  --status-active-bg: #eefaf1;
+  --status-active-ink: #1e7a45;
+  --status-warmup-bg: #fff7e6;
+  --status-warmup-ink: #92600f;
+
   --radius: 8px;
 }
 
 * { box-sizing: border-box; }
 
 body {
-  background: var(--bg);
+  background: var(--paper);
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 0;
@@ -36,9 +62,9 @@ header { align-items: center; display: flex; gap: 8px; }
 header .app-icon { display: flex; flex: none; }
 h1 { font-size: 15px; font-weight: 700; margin: 0; }
 .chip {
-  background: var(--card);
+  background: var(--surface);
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--ink-soft);
   flex: none;
   font-size: 11px;
   font-weight: 600;
@@ -51,25 +77,25 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
 }
 
 /* ---- sync card: the headline ------------------------------------------- */
-.card { background: var(--card); border-radius: 10px; display: grid; gap: 8px; padding: 10px; }
+.card { background: var(--surface); border-radius: 10px; display: grid; gap: 8px; padding: 10px; }
 .card-row { align-items: center; display: flex; gap: 9px; }
 .card-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
 .card-text strong { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-text span { color: var(--muted); display: block; font-size: 11px; overflow-wrap: break-word; }
-.status-icon { color: var(--muted); flex: none; }
+.card-text span { color: var(--ink-soft); display: block; font-size: 11px; overflow-wrap: break-word; }
+.status-icon { color: var(--ink-soft); flex: none; }
 .status-icon svg { display: block; }
 
-.card.tone-ok { background: var(--green-bg); }
-.card.tone-ok .card-text strong { color: var(--green); }
-.card.tone-ok .status-icon { color: var(--green); }
-.card.tone-bad { background: var(--red-bg); }
-.card.tone-bad .card-text strong { color: var(--red); }
-.card.tone-bad .status-icon { color: var(--red); }
-.card.tone-warn { background: var(--amber-bg); }
-.card.tone-warn .card-text strong { color: var(--amber); }
-.card.tone-warn .status-icon { color: var(--amber); }
+.card.tone-ok { background: var(--status-active-bg); }
+.card.tone-ok .card-text strong { color: var(--status-active-ink); }
+.card.tone-ok .status-icon { color: var(--status-active-ink); }
+.card.tone-bad { background: var(--danger-bg); }
+.card.tone-bad .card-text strong { color: var(--danger); }
+.card.tone-bad .status-icon { color: var(--danger); }
+.card.tone-warn { background: var(--status-warmup-bg); }
+.card.tone-warn .card-text strong { color: var(--status-warmup-ink); }
+.card.tone-warn .status-icon { color: var(--status-warmup-ink); }
 /* tone-off (unavailable / not yet synced) intentionally keeps the neutral
- * --card/--muted styling above -- it is not an error, just no signal yet. */
+ * --surface/--ink-soft styling above -- it is not an error, just no signal yet. */
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .status-icon.spin svg, .icon.spin svg { animation: spin 1s linear infinite; }
@@ -88,7 +114,7 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
   transition: background .15s;
 }
 .slider::before {
-  background: #fff;
+  background: var(--raised);
   border-radius: 50%;
   content: "";
   height: 14px;
@@ -98,13 +124,18 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
   transition: transform .15s;
   width: 14px;
 }
-.switch input:checked + .slider { background: var(--green); }
+/* Accent, not the success green: this switch is a boolean setting (auto-sync
+ * on/off), the same kind of control as styles.css's own .switch, which fills
+ * with --accent when checked. The sync card above is where green/red/amber
+ * carry meaning -- doubling that vocabulary onto an on/off toggle would make
+ * "checked" read as "healthy" when the two are unrelated. */
+.switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(14px); }
 .switch input:disabled + .slider { cursor: default; opacity: .5; }
 
 /* ---- seed-import status line -------------------------------------------- */
-.seed-status { align-items: center; color: var(--muted); display: flex; font-size: 11.5px; gap: 6px; padding: 0 2px; }
-.seed-status.seeded { color: var(--green); }
+.seed-status { align-items: center; color: var(--ink-soft); display: flex; font-size: 11.5px; gap: 6px; padding: 0 2px; }
+.seed-status.seeded { color: var(--status-active-ink); }
 .mini-icon { color: inherit; flex: none; }
 .mini-icon svg { display: block; }
 
@@ -116,15 +147,15 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
    * long domain) sizes the track to its content instead of respecting 1fr,
    * so the ellipsis rule below never gets to fire and the layout gets
    * pushed wide instead. */
-  background: var(--card); border-radius: var(--radius); min-width: 0; padding: 8px 10px;
+  background: var(--surface); border-radius: var(--radius); min-width: 0; padding: 8px 10px;
 }
 .stat-number { display: block; font-size: 17px; font-weight: 700; line-height: 1.2; }
-.stat small { color: var(--muted); display: block; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat small { color: var(--ink-soft); display: block; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- buttons -------------------------------------------------------------- */
 button, .import-label {
   align-items: center;
-  background: #fff;
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--ink);
@@ -138,15 +169,15 @@ button, .import-label {
   padding: 9px 12px;
   transition: background .12s, border-color .12s;
 }
-button:hover, .import-label:hover { background: var(--card); }
-button:focus-visible, .import-label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 1px; }
+button:hover, .import-label:hover { background: var(--hover); }
+button:focus-visible, .import-label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
 button:disabled { cursor: default; opacity: .5; }
-button:disabled:hover { background: #fff; }
-button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
-button.primary:hover { background: #000; }
-button.primary:disabled:hover { background: var(--ink); }
-button.ghost { background: transparent; border-color: transparent; color: var(--muted); font-weight: 600; padding: 5px 8px; }
-button.ghost:hover { background: var(--card); color: var(--ink); }
+button:disabled:hover { background: var(--raised); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover { background: var(--accent-strong); }
+button.primary:disabled:hover { background: var(--accent); }
+button.ghost { background: transparent; border-color: transparent; color: var(--ink-soft); font-weight: 600; padding: 5px 8px; }
+button.ghost:hover { background: var(--hover); color: var(--ink); }
 .icon, .mini-icon { display: inline-flex; }
 .icon svg, .mini-icon svg {
   fill: none;
@@ -165,11 +196,11 @@ button.ghost:hover { background: var(--card); color: var(--ink); }
  * would stay visible -- and eat clicks on whatever is behind it -- despite
  * the hidden attribute. */
 .menu:not([hidden]) {
-  background: #fff;
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   bottom: calc(100% + 4px);
-  box-shadow: 0 8px 24px rgb(23 22 19 / .12);
+  box-shadow: 0 8px 24px rgb(31 31 31 / .12);
   display: grid;
   left: 0;
   padding: 4px;
@@ -183,11 +214,11 @@ button.ghost:hover { background: var(--card); color: var(--ink); }
 
 .seed-status, .status {
   border-radius: 8px;
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 12px;
   margin: 0;
   min-height: 15px;
   padding: 0 2px;
 }
 .status:empty { display: none; }
-.status.error { color: var(--red); font-weight: 600; }
+.status.error { color: var(--danger); font-weight: 600; }
