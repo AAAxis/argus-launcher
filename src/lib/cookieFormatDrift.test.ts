@@ -13,9 +13,13 @@ const FIXTURES = [
   JSON.stringify({cookies: [{name: 'ms', value: 'v', domain: 'x.io', expiration_date: 1899999999000,
     http_only: 1, same_site: 'strict'}]}),
   '# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t1899999999\tsid\tva\tlue\n',
-  JSON.stringify([{name: '', value: 'dropped'}, {value: 'no-name'}, {name: 'no-domain-no-url'},
-    // Whitespace-only name: a dropped .trim() would let this one through.
-    {name: '   ', value: 'whitespace-name-dropped'}]),
+  JSON.stringify([{name: '', value: 'dropped'}, {value: 'no-name'}, {name: 'no-domain-no-url'}]),
+  // Whitespace-only name, WITH a valid domain: the domain/url guard cannot
+  // save this one, so the name guard's `.trim()` is the sole thing keeping
+  // it dropped. (A whitespace-only name paired with no domain/url, as in an
+  // earlier version of this fixture, is dropped either way and proves
+  // nothing about .trim() specifically.)
+  JSON.stringify([{name: '   ', value: 'whitespace-name-dropped', domain: 'ws.io'}]),
   // Millisecond expiry that would slip through undetected if either side
   // dropped the >10000000000 coercion: seconds vs ms differ by 1000x, not
   // just formatting.
