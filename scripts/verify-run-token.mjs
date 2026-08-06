@@ -183,6 +183,14 @@ check('the TTL covers the re-check route as well',
       pushed.length === 1 && pushed[0].profileId === 'prof-cookie' && pushed[0].count === 2,
   `status ${good.status}`);
 
+  // The payload names no profile -- the entry's own profile is used
+  // regardless of what the caller writes into the body, so a leaked token
+  // cannot be aimed at someone else's cookies by lying about whose they are.
+  const decoy = await post({runToken: token, profileId: 'victim', cookies: [{name: 'z'}]},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  check('a decoy profileId in the payload is ignored; the push lands on the token\'s own profile',
+      decoy.status === 200 && pushed.at(-1).profileId === 'prof-cookie', JSON.stringify(pushed.at(-1)));
+
   const bad = await post({runToken: 'nope', cookies: []},
       {'Content-Type': 'application/json'}, '/cookie-push');
   const badRecheck = await postRecheck({runToken: 'nope'});
@@ -194,19 +202,45 @@ check('the TTL covers the re-check route as well',
       pull.status === 200 && JSON.parse(pull.text).cookies[0].domain === 'prof-cookie',
       pull.text);
 
-  // The cookie bucket is separate: 12/min per token. The two calls above spent
-  // 2; the next 10 succeed and the 13th is refused with 429.
-  let last = 0;
-  for (let i = 0; i < 11; i++) {
-    last = (await post({runToken: token}, {'Content-Type': 'application/json'}, '/cookie-pull')).status;
+  // The cookie bucket is separate: 12/min per token. Three calls above (push,
+  // decoy push, pull) spent 3 of it; the next 9 must succeed and the 10th (the
+  // 13th overall) must be refused with 429. Checking only the last status
+  // would also pass for a bucket SHARED with the run/recheck routes -- every
+  // status is asserted so this actually proves the 12/min cap, not just that
+  // *some* call eventually gets rate-limited.
+  const pullStatuses = [];
+  for (let i = 0; i < 10; i++) {
+    pullStatuses.push((await post({runToken: token}, {'Content-Type': 'application/json'}, '/cookie-pull')).status);
   }
-  check('cookie bucket rate-limits at 12 per token per minute', last === 429, `last status ${last}`);
+  check('cookie bucket rate-limits at exactly 12 per token per minute',
+      pullStatuses.slice(0, 9).every((status) => status === 200) && pullStatuses[9] === 429,
+      `statuses ${pullStatuses.join(',')}`);
+
+  // The same token can still use the page routes while its cookie bucket is
+  // exhausted -- proving the two buckets don't starve each other, not just
+  // that each one counts up independently.
+  const recheckWhileCookieExhausted = await postRecheck({runToken: token});
+  check('the page-route bucket is unaffected by an exhausted cookie bucket',
+      recheckWhileCookieExhausted.status === 200, recheckWhileCookieExhausted.text);
 
   // A payload over the cookie cap destroys the connection rather than buffering.
   const bigValue = 'x'.repeat(COOKIE_MAX_BODY_BYTES + 1024);
   const oversized = await post({runToken: token, cookies: [{name: 'big', value: bigValue}]},
       {'Content-Type': 'application/json'}, '/cookie-push').then(() => 'answered', () => 'destroyed');
   check('cookie push over the 10 MB cap is destroyed', oversized === 'destroyed', oversized);
+
+  // Expiry via the clock this script already controls, on the cookie routes
+  // too. A token of its own -- `token`'s cookie budget is already spent above,
+  // and a 429 here would be mistaken for the 403 this is actually testing.
+  const expiryToken = tokens.mint({profileId: 'prof-cookie-2', profileName: 'C2', cdpPort: null, automations: []});
+  clockOffset += 13 * 60 * 60 * 1000;
+  const expiredCookiePush = await post({runToken: expiryToken, cookies: []},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  const expiredCookieUnknown = await post({runToken: 'e'.repeat(64), cookies: []},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  check('an expired token is refused on the cookie routes too, byte-identically to unknown',
+      expiredCookiePush.status === 403 && expiredCookiePush.text === expiredCookieUnknown.text,
+      expiredCookiePush.text);
 }
 
 // A fresh store, so the earlier requests do not count toward the limit.

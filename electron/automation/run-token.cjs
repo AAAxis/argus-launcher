@@ -32,6 +32,7 @@
 // from what actually ships, which for an auth path is the whole ballgame.
 
 const crypto = require('node:crypto');
+const {StringDecoder} = require('node:string_decoder');
 
 const TTL_MS = 12 * 60 * 60 * 1000;
 // 32 random bytes makes guessing a non-issue. These limits exist so the
@@ -203,17 +204,38 @@ function handlePageRequest({req, res, tokens, sendJson, authorizeWith, work, max
     return;
   }
   let body = '';
+  let bytes = 0;
+  // `body.length` after `body += chunk` counts UTF-16 code units, not wire
+  // bytes -- multi-byte characters would let the cap admit up to ~3x its
+  // stated size, and coercing each Buffer to a string independently can split
+  // a multi-byte character across a socket-read boundary, corrupting it to
+  // U+FFFD without JSON.parse ever noticing. `bytes` is measured off the raw
+  // chunks, and StringDecoder holds back any trailing partial character until
+  // the bytes that complete it arrive.
+  const decoder = new StringDecoder('utf8');
   req.on('data', (chunk) => {
-    body += chunk;
-    if (body.length > maxBodyBytes) {
+    bytes += chunk.length;
+    if (bytes > maxBodyBytes) {
       req.destroy();
+      return;
     }
+    body += decoder.write(chunk);
   });
   req.on('end', async () => {
+    body += decoder.end();
     let payload;
     try {
       payload = JSON.parse(body || '{}');
     } catch {
+      sendJson(res, 403, {status: false, msg: 'Not allowed'});
+      return;
+    }
+    // JSON.parse accepts any JSON value, not just objects -- a body of `null`
+    // parses cleanly and would otherwise be dereferenced below with nothing to
+    // catch the crash, killing the process rather than answering the request.
+    // Same refusal as every other auth failure: this must not be an oracle
+    // either.
+    if (!payload || typeof payload !== 'object') {
       sendJson(res, 403, {status: false, msg: 'Not allowed'});
       return;
     }
