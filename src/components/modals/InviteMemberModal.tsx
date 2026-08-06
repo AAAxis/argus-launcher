@@ -5,11 +5,15 @@
 // would put a "done" screen between the admin and the only thing they actually
 // need, which is the link.
 //
-// There is no email delivery anywhere in this product -- Supabase sends OTP
-// codes and nothing else -- so the second state says so outright instead of
-// implying the invite is already on its way. An owner who closes this without
-// copying the link has to revoke and re-invite, which the copy step is placed
-// to make unlikely.
+// The invitation is emailed now, by the website (see lib/inviteEmail.ts), but
+// the link is still shown and still copyable. Two reasons it did not simply
+// become "sent, done": the send can fail while the invite succeeds -- they are
+// separate round trips on purpose -- and even a delivered invitation lands in a
+// stranger's spam often enough that an owner needs a way to pass it on by hand.
+//
+// So the second state reports which of the two happened rather than assuming.
+// It used to say "we don't email it" outright, which was true then and is the
+// kind of sentence that quietly becomes a lie.
 //
 // There is no role to pick. Everyone invited joins as a member, with full access
 // to the workspace's contents and settings; the owner is whoever holds the
@@ -26,7 +30,7 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
   // Returns the link, or the sentence explaining why it could not be created.
   // The same Promise-returns-the-error convention the automation editor uses,
   // except this one carries a value back on success too.
-  onInvite: (email: string) => Promise<{url: string} | {error: string}>;
+  onInvite: (email: string) => Promise<{url: string; emailed: boolean} | {error: string}>;
   // Shown so the owner can see the cost of what they are about to do before
   // they do it. null is unlimited.
   seatsLeft: number | null;
@@ -35,6 +39,7 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [link, setLink] = useState('');
+  const [emailed, setEmailed] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function create() {
@@ -46,6 +51,7 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
       setError(result.error);
       return;
     }
+    setEmailed(result.emailed);
     setLink(result.url);
   }
 
@@ -66,7 +72,7 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
       <Modal
         className="small-modal invite-modal"
         onClose={onClose}
-        title="Invite created"
+        title={emailed ? 'Invitation sent' : 'Invite created'}
         subtitle={`${email.trim()} · joins as a member`}
         footer={<button onClick={onClose}>Done</button>}
       >
@@ -79,8 +85,10 @@ export function InviteMemberModal({onClose, onInvite, seatsLeft}: {
           </button>
         </div>
         <p className="field-hint">
-          Send this link to them yourself — we don't email it. It works once, expires in
-          seven days, and only for the address above.
+          {emailed ?
+            'We emailed this link to them. Share it directly too if it does not arrive — ' :
+            'We could not email it, so send this link to them yourself. '}
+          It works once, expires in seven days, and only for the address above.
         </p>
       </Modal>
     );

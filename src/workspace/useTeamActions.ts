@@ -13,6 +13,7 @@ import {useCallback, useState} from 'react';
 import * as db from '../db';
 import {describeDbError} from '../db/errors';
 import {SITE_URL} from '../lib/auth';
+import {sendInviteEmail} from '../lib/inviteEmail';
 import type {WorkspaceCore} from './core';
 import type {OrgInvite} from '../types';
 
@@ -70,16 +71,26 @@ export function useTeamActions({data, toast}: WorkspaceCore) {
   // one carries a value back on the happy path. The dialog renders the error
   // inline next to the field that caused it rather than raising a toast, so
   // both halves of the result are its business.
+  //
+  // `emailed` is reported separately from `url` rather than folded into the
+  // error case, because a failed send is not a failed invite. The row exists,
+  // the seat is reserved and the link works; the only thing that changed is who
+  // has to deliver it. The dialog says which of those happened and shows the
+  // link either way.
   async function createInvite(
       orgId: string, email: string,
-  ): Promise<{url: string} | {error: string}> {
+  ): Promise<{url: string; emailed: boolean} | {error: string}> {
+    let created;
     try {
-      const created = await db.team.createInvite(orgId, email);
-      await loadInvites(orgId);
-      return {url: inviteUrl(created.token)};
+      created = await db.team.createInvite(orgId, email);
     } catch (error) {
       return {error: describeDbError(error, 'Could not create the invite.')};
     }
+    // Past this point the invite is real, so nothing below may turn the result
+    // into an error. sendInviteEmail never throws (see lib/inviteEmail.ts).
+    const emailed = await sendInviteEmail(created.token);
+    await loadInvites(orgId);
+    return {url: inviteUrl(created.token), emailed};
   }
 
   async function revokeInvite(orgId: string, id: string): Promise<void> {

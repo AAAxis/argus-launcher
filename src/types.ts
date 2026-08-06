@@ -527,8 +527,9 @@ export type OrgInvite = {
   email: string;
   role: 'member';
   status: OrgInviteStatus;
-  // The credential. Minted server-side by create_org_invite and shown once, in
-  // the link the owner copies -- there is no email delivery.
+  // The credential. Minted server-side by create_org_invite, emailed to the
+  // invitee by the website, and shown once in the dialog so the owner can pass
+  // it on by hand when the email does not arrive.
   token: string;
   expires_at: string;
   created_at: string;

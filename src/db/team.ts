@@ -110,9 +110,11 @@ export type CreatedInvite = {id: string; token: string; expires_at: string};
 // trg_seat_limit raises, deliberately, so both refusals read identically to the
 // user however they arrive.
 //
-// Returns the token so the caller can build the link. This is the only moment
-// it is available to the client; there is no email delivery, so if the owner
-// closes the dialog without copying it they have to revoke and re-invite.
+// Returns the token so the caller can build the link and hand it to
+// lib/inviteEmail.ts, which asks the website to email it. This is the only
+// moment the token is available to the client, so the dialog still shows the
+// link: the send is a separate round trip and can fail while this one succeeded,
+// and an invitation can always land in a stranger's spam.
 //
 // No role parameter: every invite offers membership, and create_org_invite
 // refuses anything else. p_role is still sent, explicitly, because the function
