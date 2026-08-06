@@ -63,10 +63,14 @@ async function profileMeta() {
 //                    threw (nothing was listening). An HTTP error status
 //                    (403/429/5xx) still counts as reachable:true -- the
 //                    launcher answered, it just refused or rejected.
-//   lastErrorKind    '' | 'network' | 'rejected' | 'rate-limited' |
-//                    'saved-none' | 'import-failed' | 'internal'. 'network'
-//                    is the only kind that pairs with reachable:false; the
-//                    rest are answered rejections of one shape or another.
+//   lastErrorKind    '' | 'network' | 'refused' | 'server-error' |
+//                    'rate-limited' | 'saved-none' | 'import-failed' |
+//                    'internal'. 'network' is the only kind that pairs with
+//                    reachable:false; the rest are answered rejections of
+//                    one shape or another. 'refused' (HTTP 403, "Not
+//                    allowed") is specifically a dead/invalid run token;
+//                    'server-error' is everything else non-2xx (5xx, or an
+//                    unparseable body) and says nothing about the token.
 //   lastErrorSource  '' | 'push' | 'pull' -- which operation produced
 //                    lastError/lastErrorKind, since both share these fields.
 //   signature        SHA-256 hex digest of ArgusCookieFormat.jarSignature(),
@@ -118,12 +122,21 @@ function setSyncState(patch) {
 
 // ---- badge -----------------------------------------------------------------
 // One glance at the toolbar answers "did my session make it to the launcher".
-// reachable:false and lastErrorKind:'rejected'/'rate-limited' are kept
-// visually distinct (Important 3): a dead token (rejected) and a live but
-// throttled connection (rate-limited, self-clearing) are both very different
-// from the launcher process not answering at all, and collapsing them into
-// one red bang was actively misleading for the one class of bug this whole
-// feature exists to fix (a stale/expired run token).
+// reachable:false, lastErrorKind:'refused', and lastErrorKind:'rate-limited'
+// are kept visually distinct (Important 3): a dead token, a live-but-refused
+// server error, and a throttled-but-self-clearing connection are all very
+// different from the launcher process not answering at all, and collapsing
+// them into one red bang was actively misleading for the one class of bug
+// this whole feature exists to fix (a stale/expired run token).
+//
+// The '×' glyph specifically means "your run token looks dead" -- gated on
+// lastErrorSource === 'push' so a pull failure (e.g. loadEntries throwing,
+// answered as its own HTTP 500 "server-error") can never paint it. A pull
+// hitting a genuine 403 does still leave `refused` in lastError text for the
+// popup to read, it just does not drive this specific glyph, which is
+// documented as describing push sync status. 'server-error' (any 5xx, or an
+// unparseable body) never gets a dedicated glyph on either path -- it falls
+// through to pending/inSync, same as the app-level kinds below.
 async function updateBadge(sync) {
   const state = sync || await getSyncState();
   let text = '';
@@ -132,7 +145,7 @@ async function updateBadge(sync) {
     if (!state.reachable) {
       text = '!';
       color = '#d53c32';
-    } else if (state.lastErrorKind === 'rejected') {
+    } else if (state.lastErrorKind === 'refused' && state.lastErrorSource === 'push') {
       text = '×';
       color = '#d53c32';
     } else if (state.lastErrorKind === 'rate-limited') {
@@ -158,12 +171,20 @@ async function updateBadge(sync) {
 
 // ---- launcher round trip -----------------------------------------------------
 // Shared by push and pull so both classify failures the same way (Important
-// 1 and 3): a thrown fetch (nothing answered) is 'network'; a response that
-// parses but carries status:false or a non-2xx is 'rejected', except 429
-// specifically which is 'rate-limited' (self-clearing, unlike a dead token).
-// An unparseable body on an otherwise-ok response is folded into 'rejected'
-// with its own wording rather than the nonsensical "answered HTTP 200" a bare
-// throw would have produced (an ok status is never itself the failure).
+// 1 and 3): a thrown fetch (nothing answered) is 'network'. A response that
+// parses but carries status:false or a non-2xx is split three ways by status
+// code: 429 is 'rate-limited' (self-clearing, unlike a dead token); 403 is
+// 'refused', run-token.cjs's one and only "Not allowed" refusal, i.e.
+// specifically a dead/invalid/expired run token; everything else (5xx, or a
+// 200 whose body would not parse) is 'server-error' and says nothing about
+// the token -- run-token.cjs's own work() failures (a dead proxy, a
+// renderer-side throw like loadEntries) surface as exactly this, not as 403.
+function classifyStatus(status) {
+  if (status === 429) return 'rate-limited';
+  if (status === 403) return 'refused';
+  return 'server-error';
+}
+
 async function fetchLauncher(url, payload) {
   let response;
   try {
@@ -180,7 +201,7 @@ async function fetchLauncher(url, payload) {
     body = await response.json();
   } catch {
     return {
-      ok: false, kind: 'rejected',
+      ok: false, kind: classifyStatus(response.status),
       message: `Launcher answered HTTP ${response.status} with a response that could not be parsed.`,
     };
   }
@@ -189,7 +210,7 @@ async function fetchLauncher(url, payload) {
   }
   return {
     ok: false,
-    kind: response.status === 429 ? 'rate-limited' : 'rejected',
+    kind: classifyStatus(response.status),
     message: (body && body.msg) || `Launcher answered HTTP ${response.status}`,
   };
 }
@@ -221,14 +242,27 @@ async function pushToLauncher(opts) {
       return {ok: false, error: 'Sync is paused.'};
     }
 
-    if (!manual && state.lastAttemptAt && Date.now() - state.lastAttemptAt < PUSH_MIN_INTERVAL_MS) {
-      queuePush(PUSH_MIN_INTERVAL_MS - (Date.now() - state.lastAttemptAt));
-      return {ok: false, error: 'Waiting for the minimum interval between pushes.'};
+    if (!manual && state.lastAttemptAt) {
+      const elapsed = Date.now() - state.lastAttemptAt;
+      // A negative elapsed value only happens if the system clock moved
+      // backwards (NTP correction) -- treat that as "the floor is already
+      // satisfied" rather than computing a wait as large as the rollback
+      // itself, which would otherwise recompute identically (blocking
+      // automatic sync for the rollback's whole duration) on every re-entry.
+      if (elapsed >= 0 && elapsed < PUSH_MIN_INTERVAL_MS) {
+        queuePush(Math.min(PUSH_MIN_INTERVAL_MS - elapsed, PUSH_MIN_INTERVAL_MS));
+        return {ok: false, error: 'Waiting for the minimum interval between pushes.'};
+      }
     }
 
     const cookies = await chrome.cookies.getAll({});
     const signature = await hashText(ArgusCookieFormat.jarSignature(cookies));
-    if (!manual && state.inSync && state.signature === signature) {
+    // The shortcut requires a clean last attempt, not just a matching
+    // signature: skipping the fetch while an unresolved lastErrorKind sits in
+    // state would let a transient failure (network blip, a 5xx) stick
+    // forever once the jar goes quiet, since nothing would ever run the real
+    // request that could clear it.
+    if (!manual && state.inSync && state.signature === signature && !state.lastErrorKind) {
       await setSyncState({pushPending: false});
       return {ok: true, unchanged: true};
     }
@@ -284,7 +318,7 @@ async function pushToLauncher(opts) {
     console.error('Argus cookie sync: push crashed', error);
     await setSyncState({
       pushPending: false, lastError: message, lastErrorKind: 'internal', lastErrorSource: 'push',
-    }).catch(() => {});
+    }).catch(reportUnhandled('persisting push crash state'));
     return {ok: false, error: message};
   }
 }
@@ -387,7 +421,7 @@ async function pullFromLauncher() {
     console.error('Argus cookie sync: pull crashed', error);
     await setSyncState({
       lastError: message, lastErrorKind: 'internal', lastErrorSource: 'pull',
-    }).catch(() => {});
+    }).catch(reportUnhandled('persisting pull crash state'));
     return {ok: false, error: message};
   }
 }
