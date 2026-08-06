@@ -87,5 +87,6 @@ export function buildLaunchPayload(
     // before their toggles existed keeps them; CaptchaPlugin defaults off
     // because it costs a download), and that polarity lives in the registry.
     builtInExtensions: state.built_in_extensions,
+    startPage: startPage || null,
   };
 }

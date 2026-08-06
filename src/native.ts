@@ -56,6 +56,12 @@ export type LaunchProfilePayload = {
   // electron/built-in-extensions.cjs's business alone. Adding a fifth is a row
   // in that table, not another field here.
   builtInExtensions?: BuiltInExtensionToggles;
+  // This launch's page credential and the loopback port to spend it on — the
+  // same {port, token} embedded in homeHtml. Carried as a field too so
+  // built-in-extensions.cjs can hand it to the cookie-manager extension
+  // (argus-launch.json). Null when minting failed; the extension then shows
+  // sync as unavailable rather than broken.
+  startPage?: {port: number; token: string} | null;
 };
 
 export type CookieFileSelection = {

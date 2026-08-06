@@ -53,6 +53,17 @@ const BUILT_IN_EXTENSIONS = [
         id: payload.id || '',
         name: payload.name || '',
       }, null, 2));
+      // The per-launch credential the sync engine spends against the loopback
+      // API (see /v1/cookies/push-from-profile in main.cjs). Written only when
+      // the launch minted a token, so background.js reads the file's absence
+      // as "sync unavailable" (e.g. the extension loaded outside a profile
+      // launch). 0600 like the other file that carries this token.
+      if (payload.startPage && payload.startPage.token) {
+        fs.writeFileSync(path.join(extensionDir, 'argus-launch.json'), JSON.stringify({
+          token: payload.startPage.token,
+          apiPort: payload.startPage.port,
+        }, null, 2), {mode: 0o600});
+      }
       const seedPath = path.join(extensionDir, 'seed-cookies.json');
       const writeSeedCookies = (cookies) => {
         if (cookies.length) {
