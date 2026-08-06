@@ -10,7 +10,7 @@ import type {DependencyList} from 'react';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {cookieFileToBase64, cookiesFromJsonValue, toCookieJson} from '../lib/cookieFile';
-import {resolveLiveSetAction} from '../lib/cookieSync';
+import {assignedSet, resolveLiveSetAction} from '../lib/cookieSync';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
 import {normalizeTags} from '../lib/tags';
@@ -177,18 +177,43 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         }
         const entries = cookiesFromJsonValue(pushed);
         const action = resolveLiveSetAction(profile, state.cookies);
+        // A non-array payload.cookies coerces to [] before this handler ever
+        // sees it (run-token.cjs), and cookiesFromJsonValue drops every entry
+        // it cannot normalize -- so an empty `entries` is far more likely to
+        // be a jar read before the profile's session restored, or a field
+        // spelling this build does not recognize, than the user genuinely
+        // clearing every cookie. Saving it would overwrite source_url and the
+        // cache with nothing, with no undo through the UI, and the profile's
+        // next launch would sign in with nothing. Treat it as a no-op on both
+        // paths: an update leaves the existing set untouched, and a create is
+        // skipped outright rather than clutter the library with an empty set
+        // (or, worse, swap an already-assigned curated set out for one).
+        if (entries.length === 0) {
+          return {saved: 0, set: action.kind === 'update' ? action.set.name : undefined};
+        }
         if (action.kind === 'update') {
           if (!await cookieActions.saveEntries(action.set, entries)) {
             throw new Error('Could not save the pushed cookies.');
           }
           return {saved: entries.length, set: action.set.name};
         }
-        const created = await cookieActions.addCookieSet({
-          path: `live-sync:${profile.id}`,
-          name: `${action.name}.json`,
-          count: entries.length,
-          base64: cookieFileToBase64(toCookieJson(entries)),
-        });
+        let created;
+        try {
+          created = await cookieActions.addCookieSet({
+            path: `live-sync:${profile.id}`,
+            name: `${action.name}.json`,
+            count: entries.length,
+            base64: cookieFileToBase64(toCookieJson(entries)),
+          });
+        } catch (error) {
+          // addCookieSet's upload step can throw a raw Storage/Postgres
+          // message (see cloudCookieFromSelection); a signed-in user can see
+          // the real reason in the console, but the extension over the
+          // loopback API gets the same generic wording as every other
+          // failure on this route.
+          console.error('cookie-sync push: could not create the live set', error);
+          throw new Error('Could not create the live cookie set.');
+        }
         if (!created) {
           throw new Error('Could not create the live cookie set.');
         }
@@ -212,14 +237,20 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         if (!profile) {
           throw new Error('This launch\'s profile no longer exists.');
         }
-        const assigned = profile.cookie_mode === 'saved' && profile.cookie_id ?
-          state.cookies.find(
-              (item) => item.id === profile.cookie_id && !item.deleted_at) :
-          null;
+        const assigned = assignedSet(profile, state.cookies);
         if (!assigned) {
           return {cookies: [], set: null};
         }
-        const rows = await cookieActions.loadEntries(assigned);
+        let rows;
+        try {
+          rows = await cookieActions.loadEntries(assigned);
+        } catch (error) {
+          // loadEntries throws the raw Postgres/Storage message so the
+          // inspector can show *why* a set would not open; over the loopback
+          // API that detail is not for the extension, only the console.
+          console.error('cookie-sync pull: could not read the assigned set', error);
+          throw new Error('Could not read the assigned cookie set.');
+        }
         return {
           cookies: rows.map(({id: _rowId, ...entry}) => entry),
           set: assigned.name,

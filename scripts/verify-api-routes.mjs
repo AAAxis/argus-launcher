@@ -119,8 +119,9 @@ pass(`${PAGE_ROUTES.size} page routes are served and stay off the keyed table`);
 // route that got moved below the gate as surely as one that was never wired
 // up. The anchor is the CALL site, not `function resolveAutomationKey(req) {`
 // -- that definition also contains the literal text `resolveAutomationKey(req)`
-// and sits above everything else in the file, which would make the offset
-// comparison pass unconditionally.
+// and sits above every route dispatch in the file, which would make every
+// route's offset come out larger than the anchor's and fail this check
+// unconditionally, for routes that are in fact correctly positioned.
 const gateOffset = mainSource.indexOf('const key = resolveAutomationKey(req);');
 check(gateOffset !== -1,
     'main.cjs no longer calls resolveAutomationKey(req) as expected -- update this check');

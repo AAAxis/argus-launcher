@@ -4,6 +4,7 @@
 // object separately, so a field added for one silently did nothing in the
 // other.
 import {anonymousHomeHtml, browserStartUrl, profileDataDir} from './homePage';
+import {assignedSet} from './cookieSync';
 import {buildRuntimeFingerprint, fingerprintSwitches} from './fingerprint';
 import {readSearchEngine} from './searchEngines';
 import {startPageAutomations} from './startPageAutomations';
@@ -34,9 +35,12 @@ export function buildLaunchPayload(
   // using it, so this only catches the window where another worker trashed a
   // set that this session has not reloaded yet -- but without it Trash would be
   // cosmetic for the one thing a cookie-set is actually for.
-  const savedCookie = profile.cookie_mode === 'saved' && profile.cookie_id ?
-    state.cookies.find((item) => item.id === profile.cookie_id && !item.deleted_at) :
-    null;
+  //
+  // assignedSet is the same lookup the cookie-sync bridge routes use (see
+  // cookieSync.ts) -- one place deciding "saved mode, id resolves, not
+  // trashed" so a launch and a pull can never disagree about what a profile
+  // is actually using.
+  const savedCookie = assignedSet(profile, state.cookies);
   // A profile on 'saved' launches with its set or with nothing. It must NOT
   // fall through to the legacy cookie_import_* fields, which is what the
   // ternaries below would otherwise do: those fields are hidden by the editor

@@ -40,6 +40,27 @@ describe('resolveLiveSetAction', () => {
     expect(resolveLiveSetAction(profile({name: 'Amazon DE'}), [set({name: 'Amazon US (live)'})]))
         .toEqual({kind: 'create', name: 'Amazon DE (live)'});
   });
+
+  // The forbidden case: a same-named set exists in the library but is NOT
+  // what this profile is assigned (s1, someone else's live set). Matching by
+  // name alone -- instead of by cookie_id first -- would return {kind:
+  // 'update', set: s1} here, which is profile A's push landing on profile
+  // B's (or a stray same-named) set.
+  it('never matches a same-named set that is not this profile\'s own assignment', () => {
+    expect(resolveLiveSetAction(
+        profile({cookie_id: 's2'}),
+        [set({id: 's1', name: 'Amazon US (live)'}), set({id: 's2', name: 'curated.json'})],
+    )).toEqual({kind: 'create', name: 'Amazon US (live)'});
+  });
+
+  // The real-world version of "not assigned": a profile left in 'paste' mode
+  // still carries a stale cookie_id from before the switch. Mode, not the
+  // presence of an id, is what decides whether that id means anything.
+  it('ignores a stale cookie_id when the profile is in paste mode', () => {
+    expect(resolveLiveSetAction(
+        profile({cookie_mode: 'paste'}), [set({name: 'Amazon US (live)'})],
+    )).toEqual({kind: 'create', name: 'Amazon US (live)'});
+  });
 });
 
 describe('liveSetName', () => {
