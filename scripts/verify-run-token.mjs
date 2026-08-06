@@ -17,6 +17,7 @@ import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   createRunTokens, handleRecheckFromPage, handleRunFromPage,
+  handleCookiePushFromPage, handleCookiePullFromPage, COOKIE_MAX_BODY_BYTES,
 } = require('../electron/automation/run-token.cjs');
 
 const PORT = 38998;
@@ -38,6 +39,7 @@ const tokens = createRunTokens({now: () => Date.now() + clockOffset});
 let started = 0;
 // Both page routes on one server, told apart by path exactly as main.cjs does.
 const rechecked = [];
+const pushed = [];
 const server = createServer((req, res) => {
   if (req.url === '/recheck') {
     handleRecheckFromPage({
@@ -49,6 +51,23 @@ const server = createServer((req, res) => {
         rechecked.push(entry.profileId);
         return {proxyOk: true, title: 'Anti-detect proxy active', detail: '1.2.3.4:80 · US · 90ms'};
       },
+    });
+    return;
+  }
+  if (req.url === '/cookie-push') {
+    handleCookiePushFromPage({
+      req, res, tokens, sendJson,
+      pushCookies: async (entry, cookies) => {
+        pushed.push({profileId: entry.profileId, count: cookies.length});
+        return {saved: cookies.length};
+      },
+    });
+    return;
+  }
+  if (req.url === '/cookie-pull') {
+    handleCookiePullFromPage({
+      req, res, tokens, sendJson,
+      pullCookies: async (entry) => ({cookies: [{name: 'sid', value: 'v', domain: entry.profileId}]}),
     });
     return;
   }
@@ -154,6 +173,41 @@ check('expired and unknown are byte-identical (not an oracle)',
     expired.status === unknown.status && expired.text === unknown.text);
 check('the TTL covers the re-check route as well',
     expiredRecheck.status === 403 && rechecked.length === 1);
+
+// ---- cookie-sync routes ----------------------------------------------------
+{
+  const token = tokens.mint({profileId: 'prof-cookie', profileName: 'C', cdpPort: null, automations: []});
+  const good = await post({runToken: token, cookies: [{name: 'a'}, {name: 'b'}]},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  check('cookie push with a valid token succeeds', good.status === 200 &&
+      pushed.length === 1 && pushed[0].profileId === 'prof-cookie' && pushed[0].count === 2,
+  `status ${good.status}`);
+
+  const bad = await post({runToken: 'nope', cookies: []},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  const badRecheck = await postRecheck({runToken: 'nope'});
+  check('cookie push refusal is indistinguishable from the page routes\'',
+      bad.status === 403 && bad.text === badRecheck.text, bad.text);
+
+  const pull = await post({runToken: token}, {'Content-Type': 'application/json'}, '/cookie-pull');
+  check('cookie pull returns the profile\'s cookies',
+      pull.status === 200 && JSON.parse(pull.text).cookies[0].domain === 'prof-cookie',
+      pull.text);
+
+  // The cookie bucket is separate: 12/min per token. The two calls above spent
+  // 2; the next 10 succeed and the 13th is refused with 429.
+  let last = 0;
+  for (let i = 0; i < 11; i++) {
+    last = (await post({runToken: token}, {'Content-Type': 'application/json'}, '/cookie-pull')).status;
+  }
+  check('cookie bucket rate-limits at 12 per token per minute', last === 429, `last status ${last}`);
+
+  // A payload over the cookie cap destroys the connection rather than buffering.
+  const bigValue = 'x'.repeat(COOKIE_MAX_BODY_BYTES + 1024);
+  const oversized = await post({runToken: token, cookies: [{name: 'big', value: bigValue}]},
+      {'Content-Type': 'application/json'}, '/cookie-push').then(() => 'answered', () => 'destroyed');
+  check('cookie push over the 10 MB cap is destroyed', oversized === 'destroyed', oversized);
+}
 
 // A fresh store, so the earlier requests do not count toward the limit.
 const fresh = createRunTokens();

@@ -39,10 +39,16 @@ const TTL_MS = 12 * 60 * 60 * 1000;
 // same as a right one.
 const RATE = {perTokenPerMin: 10, globalPerMin: 60};
 const MAX_BODY_BYTES = 4096;
+// The cookie-sync routes carry whole cookie jars, not 200-byte run requests:
+// their own body cap, and their own rate bucket so a busy sync can never
+// starve the start page's shared limiter (or be starved by it).
+const COOKIE_RATE = {perTokenPerMin: 12, globalPerMin: 120};
+const COOKIE_MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 function createRunTokens({now = () => Date.now()} = {}) {
   const tokens = new Map();
   const hits = [];
+  const cookieHits = [];
 
   function prune() {
     const at = now();
@@ -140,8 +146,38 @@ function createRunTokens({now = () => Date.now()} = {}) {
     return resolve(payload);
   }
 
+  function rateLimitCookie(token) {
+    const at = now();
+    while (cookieHits.length > 0 && at - cookieHits[0].at > 60000) {
+      cookieHits.shift();
+    }
+    if (cookieHits.length >= COOKIE_RATE.globalPerMin) {
+      return false;
+    }
+    if (cookieHits.filter((hit) => hit.token === token).length >= COOKIE_RATE.perTokenPerMin) {
+      return false;
+    }
+    cookieHits.push({token, at});
+    return true;
+  }
+
+  // The cookie-sync twin of resolve(): same refusal semantics, its own bucket.
+  function authorizeCookieSync(payload) {
+    const token = typeof payload.runToken === 'string' ? payload.runToken : '';
+    if (!rateLimitCookie(token)) {
+      return {ok: false, status: 429, body: {status: false, msg: 'Too many requests'}};
+    }
+    prune();
+    const entry = tokens.get(token);
+    if (!entry) {
+      return {ok: false, status: 403, body: {status: false, msg: 'Not allowed'}};
+    }
+    return {ok: true, entry};
+  }
+
   return {
     authorize,
+    authorizeCookieSync,
     authorizeRecheck,
     clear: () => tokens.clear(),
     dropForProfile,
@@ -156,7 +192,7 @@ function createRunTokens({now = () => Date.now()} = {}) {
 // work. `authorizeWith` names which of the two token checks applies and `work`
 // does the rest; both are injected so this file needs neither the runner, nor
 // the proxy checker, nor Electron.
-function handlePageRequest({req, res, tokens, sendJson, authorizeWith, work}) {
+function handlePageRequest({req, res, tokens, sendJson, authorizeWith, work, maxBodyBytes = MAX_BODY_BYTES}) {
   // A cross-origin <form> POST cannot set this, so requiring it means a hostile
   // page has to send a preflight -- which this server does not answer for these
   // routes. The loopback API sets Access-Control-Allow-Origin: * on its keyed
@@ -169,7 +205,7 @@ function handlePageRequest({req, res, tokens, sendJson, authorizeWith, work}) {
   let body = '';
   req.on('data', (chunk) => {
     body += chunk;
-    if (body.length > MAX_BODY_BYTES) {
+    if (body.length > maxBodyBytes) {
       req.destroy();
     }
   });
@@ -187,7 +223,7 @@ function handlePageRequest({req, res, tokens, sendJson, authorizeWith, work}) {
       return;
     }
     try {
-      sendJson(res, 200, {status: true, ...await work(verdict)});
+      sendJson(res, 200, {status: true, ...await work(verdict, payload)});
     } catch (error) {
       // A failure from the work itself is an answer the page can show, unlike
       // the refusals above: the caller already proved it holds a valid token,
@@ -225,11 +261,41 @@ function handleRecheckFromPage({req, res, tokens, sendJson, recheck}) {
   });
 }
 
+// Saves a running profile's live cookie jar into the launcher. The profile is
+// the token entry's own -- the payload names no profile, so a leaked token can
+// only ever write to the launch it was minted for.
+function handleCookiePushFromPage({req, res, tokens, sendJson, pushCookies}) {
+  handlePageRequest({
+    req, res, tokens, sendJson,
+    authorizeWith: 'authorizeCookieSync',
+    maxBodyBytes: COOKIE_MAX_BODY_BYTES,
+    work: async ({entry}, payload) => {
+      const cookies = Array.isArray(payload.cookies) ? payload.cookies : [];
+      return await pushCookies(entry, cookies);
+    },
+  });
+}
+
+// Hands the profile's assigned cookie set back to its running browser, for
+// "Load from Launcher" without a relaunch. Read-only; carries nothing but the
+// token, so there is nothing in the request for a caller to choose.
+function handleCookiePullFromPage({req, res, tokens, sendJson, pullCookies}) {
+  handlePageRequest({
+    req, res, tokens, sendJson,
+    authorizeWith: 'authorizeCookieSync',
+    work: async ({entry}) => await pullCookies(entry),
+  });
+}
+
 module.exports = {
+  COOKIE_MAX_BODY_BYTES,
+  COOKIE_RATE,
   MAX_BODY_BYTES,
   RATE,
   TTL_MS,
   createRunTokens,
+  handleCookiePullFromPage,
+  handleCookiePushFromPage,
   handleRecheckFromPage,
   handleRunFromPage,
 };
