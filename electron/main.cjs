@@ -3747,6 +3747,12 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
       cdpUrl: payload.cdpUrl,
       vars: payload.vars,
       onEvent: sendRunEvent,
+      // Lets a saveCookies step land its result the same way the extension's
+      // push does -- through the renderer, which owns the cloud write and the
+      // Cookies-tab toast (useAutomationBridge, same handler as the loopback
+      // API's cookie-sync push route below).
+      pushCookies: (profileId, cookies) =>
+        askRendererOnPageChannel('argus:cookie-sync-push-request', {profileId, cookies}),
       // close_on_finish, which until now was a checkbox that saved and did
       // nothing. Two conditions, not one: the automation has to ask for it AND
       // this run has to have opened the browser itself. ownsSession comes from
@@ -4218,6 +4224,8 @@ function runFromPage(req, res) {
         trigger: 'start-page',
         cdpUrl,
         onEvent: sendRunEvent,
+        pushCookies: (profileId, cookies) =>
+          askRendererOnPageChannel('argus:cookie-sync-push-request', {profileId, cookies}),
       });
     },
   });

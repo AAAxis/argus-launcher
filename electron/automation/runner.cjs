@@ -72,13 +72,17 @@ function summarize(step) {
 }
 
 class Run {
-  constructor({app, automation, profile, trigger, cdpUrl, vars, onEvent}) {
+  constructor({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies}) {
     this.app = app;
     this.automation = automation;
     this.profile = profile;
     this.trigger = trigger;
     this.cdpUrl = cdpUrl;
     this.onEvent = onEvent || (() => {});
+    // Absent when this launch cannot reach a renderer to push to (no window,
+    // or a caller that never asked for the capability) -- saveCookies throws
+    // rather than silently no-op-ing when this is undefined; see steps.cjs.
+    this.pushCookies = pushCookies;
     this.id = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     this.cancelled = false;
     this.screenshotIndex = 0;
@@ -153,6 +157,17 @@ class Run {
   async saveScreenshot(base64, stepId) {
     this.screenshotIndex += 1;
     return store.saveScreenshot(this.app, this.id, this.screenshotIndex, stepId, base64);
+  }
+
+  // Throws rather than no-op-ing when this.pushCookies was never supplied
+  // (a run started without a renderer to push to, e.g. from a route that
+  // never asked for the capability) -- a saveCookies step that appears to run
+  // and silently saves nothing is worse than one the log names as failed.
+  saveCookies(cookies) {
+    if (!this.pushCookies) {
+      throw new Error('This launch cannot save cookies to the Launcher');
+    }
+    return this.pushCookies(this.profile.id, cookies);
   }
 
   // Runs one step under its own timeout and error policy. Returns nothing;
@@ -276,6 +291,7 @@ class Run {
         log: (level, message) => this.log(level, message, {path, stepId: step.id, type: step.type}),
         deadline: Date.now() + timeout,
         saveScreenshot: (base64) => this.saveScreenshot(base64, step.id),
+        saveCookies: (cookies) => this.saveCookies(cookies),
       }),
       timeoutIn(timeout, summarize(step)),
     ]);
@@ -313,7 +329,7 @@ class Run {
 // run is minutes, so a route that awaited completion would 504 and look like a
 // hang in the runner rather than a timeout in the bridge.
 async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, onFinish,
-  onNotify}) {
+  onNotify, pushCookies}) {
   const problems = validateSteps(automation.steps || [], SCHEMA);
   if (problems.length > 0) {
     throw new Error(`This automation is not valid: ${problems.slice(0, 5).join('; ')}`);
@@ -332,7 +348,7 @@ async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, 
     throw error;
   }
 
-  const run = new Run({app, automation, profile, trigger, cdpUrl, vars, onEvent});
+  const run = new Run({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies});
   active.set(run.id, {run, profileId: profile.id});
   run.persist();
   onEvent({type: 'started', runId: run.id, run: run.record});

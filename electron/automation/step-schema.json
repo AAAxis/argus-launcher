@@ -218,6 +218,21 @@
     ],
     "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
   },
+  "saveCookies": {
+    "label": "Save cookies",
+    "icon": "cookie",
+    "summary": "Save cookies to the Launcher",
+    "cdp": ["Storage"],
+    "fields": [
+      {
+        "key": "domain",
+        "kind": "text",
+        "label": "Domain filter",
+        "interpolate": true,
+        "hint": "Leave empty to save every cookie in the profile."
+      }
+    ]
+  },
   "if": {
     "label": "If",
     "icon": "git-branch",

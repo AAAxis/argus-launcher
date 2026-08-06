@@ -122,6 +122,51 @@ async function pollUntil(cdp, expression, deadline, describe) {
   }
 }
 
+// Maps a CDP Storage.getCookies() cookie to the shape src/lib/cookieFile.ts
+// normalizeCookie() expects -- the same shape the extension pushes through
+// argus:cookie-sync-push-request. THE CONTRACT THAT MUST NOT DRIFT: see that
+// file's header.
+//
+// `expires` is CDP's seconds-since-epoch, with -1 (or anything <= 0) meaning a
+// session cookie -- expirationDate is omitted entirely rather than written as
+// 0 or -1, because normalizeCookie treats *any* expirationDate key as "has an
+// expiry". `sameSite` is omitted, not defaulted, when CDP omits it: the
+// renderer's own normalizer supplies its default, and hard-coding one here
+// would take that decision away from it.
+function cdpCookieToEntry(cookie) {
+  const entry = {
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.domain,
+    path: cookie.path,
+    secure: Boolean(cookie.secure),
+    httpOnly: Boolean(cookie.httpOnly),
+  };
+  const sameSite = {Strict: 'strict', Lax: 'lax', None: 'no_restriction'}[cookie.sameSite];
+  if (sameSite) {
+    entry.sameSite = sameSite;
+  }
+  if (Number.isFinite(cookie.expires) && cookie.expires > 0) {
+    entry.expirationDate = cookie.expires;
+  }
+  return entry;
+}
+
+// Empty filter keeps everything. Otherwise a cookie's domain -- stripped of
+// CDP's leading dot -- must equal the filter or be one of its subdomains, so
+// "example.com" keeps ".example.com" and "sub.example.com" but not
+// "notexample.com" (a plain suffix match would let that one through).
+function filterCookiesByDomain(cookies, domain) {
+  const filter = String(domain || '').trim();
+  if (!filter) {
+    return cookies;
+  }
+  return cookies.filter((cookie) => {
+    const bare = String(cookie.domain || '').replace(/^\./, '');
+    return bare === filter || bare.endsWith(`.${filter}`);
+  });
+}
+
 // ── executors ────────────────────────────────────────────────────────────────
 
 const EXECUTORS = {
@@ -413,6 +458,20 @@ const EXECUTORS = {
     // aiPrompt prompt above.
     log('info', `Sent ${String(step.message || '').length} characters via ${connector.name}`);
   },
+
+  // saveCookies has no CDP-level "does this launch support it" check -- the
+  // capability lives one level up, in runner.cjs's saveCookies(), which
+  // throws when this launch was started without a pushCookies callback rather
+  // than letting this executor silently save nothing.
+  async saveCookies({cdp, step, log, saveCookies}) {
+    const {cookies} = await cdp.send('Storage.getCookies');
+    const filtered = filterCookiesByDomain(cookies, step.domain);
+    const mapped = filtered.map(cdpCookieToEntry);
+    const result = await saveCookies(mapped);
+    log('info', `Saved ${mapped.length} cookies to the Launcher` +
+      (result && result.set ? ` (${result.set})` : ''));
+    return undefined;
+  },
 };
 
 // ── conditions ───────────────────────────────────────────────────────────────
@@ -541,4 +600,7 @@ function validateSteps(steps, schema, path = 'steps', depth = 0) {
   return problems;
 }
 
-module.exports = {EXECUTORS, evaluateCondition, sleep, validateSteps};
+module.exports = {
+  EXECUTORS, evaluateCondition, sleep, validateSteps,
+  cdpCookieToEntry, filterCookiesByDomain,
+};

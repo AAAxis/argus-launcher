@@ -26,6 +26,7 @@ export type StepType =
   | 'aiPrompt'
   | 'aiCheck'
   | 'notify'
+  | 'saveCookies'
   | 'if'
   | 'loop';
 
@@ -190,6 +191,15 @@ export type AutomationStep =
       message: string;
       // Used by email connectors; chat connectors ignore it.
       subject?: string;
+    })
+  | (StepBase & {
+      // Collects the running profile's cookies over CDP Storage.getCookies
+      // and pushes them to the launcher, which lands them as a
+      // "«profile» (live)" set -- same landing as the extension's push (Task
+      // 4). Runs in the main process, not the page: cookies never pass
+      // through page JS.
+      type: 'saveCookies';
+      domain?: string;
     })
   | (StepBase & {
       type: 'if';

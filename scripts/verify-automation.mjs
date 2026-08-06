@@ -110,6 +110,11 @@ const AUTOMATION = {
     // Proves onError:'continue' downgrades the run to `partial` rather than
     // failing it -- and that a failure is still logged, not swallowed.
     {id: 's13', type: 'click', selector: '#does-not-exist', onError: 'continue'},
+    // This runner.start() is not given a pushCookies callback (no Electron
+    // renderer here to push to), which is exactly the case the executor must
+    // not silently no-op on -- onError:'continue' keeps the run going so the
+    // rest of the checks below still get their turn.
+    {id: 's14', type: 'saveCookies', onError: 'continue'},
   ],
 };
 
@@ -207,6 +212,9 @@ async function main() {
         finished.vars.doubled === 42, JSON.stringify(finished.vars.doubled));
     check('the failing step was logged as an error, not swallowed',
         finished.log.some((e) => e.level === 'error' && e.stepId === 's13'));
+    check('saveCookies without a pushCookies capability threw a clear error, not a silent no-op',
+        finished.log.some((e) => e.stepId === 's14' && e.level === 'error' &&
+          e.message.includes('This launch cannot save cookies to the Launcher')));
     check('every step has a log line with a tree path',
         finished.log.filter((e) => e.path === '8.body.0').length === 3,
         `loop body lines: ${finished.log.filter((e) => e.path === '8.body.0').length}`);
