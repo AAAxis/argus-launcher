@@ -1,67 +1,184 @@
+/* Palette matches editor.css / the launcher's own table views -- this popup
+ * is the surface almost every user actually sees, so it has to read as the
+ * same product as the full editor and the desktop app. */
+:root {
+  --bg: #fbfaf8;
+  --ink: #171613;
+  --muted: #716b62;
+  --border: #ded6c8;
+  --card: #f3f1ec;
+  --green: #1a7f3c;
+  --green-bg: #e9f7ee;
+  --red: #d53c32;
+  --red-bg: #fff1ef;
+  --amber: #b45309;
+  --amber-bg: #fdf3e7;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
 body {
-  background: #fbfaf8;
-  color: #1d1c18;
+  background: var(--bg);
+  color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 0;
-  min-width: 260px;
+  width: 336px;
 }
 
-main {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
+main { display: grid; gap: 10px; padding: 14px; }
+
+header { align-items: center; display: flex; gap: 8px; }
+header .app-icon { border-radius: 5px; display: block; }
+h1 { font-size: 15px; font-weight: 700; margin: 0; }
+.chip {
+  background: var(--card);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+  max-width: 140px;
+  overflow: hidden;
+  padding: 3px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-h1 {
-  font-size: 18px;
-  margin: 0 0 4px;
+/* ---- sync card: the headline ------------------------------------------- */
+.card { background: var(--card); border-radius: 10px; display: grid; gap: 8px; padding: 10px; }
+.card-row { align-items: center; display: flex; gap: 9px; }
+.card-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.card-text strong { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-text span { color: var(--muted); display: block; font-size: 11px; overflow-wrap: break-word; }
+.status-icon { color: var(--muted); flex: none; }
+.status-icon svg { display: block; }
+
+.card.tone-ok { background: var(--green-bg); }
+.card.tone-ok .card-text strong { color: var(--green); }
+.card.tone-ok .status-icon { color: var(--green); }
+.card.tone-bad { background: var(--red-bg); }
+.card.tone-bad .card-text strong { color: var(--red); }
+.card.tone-bad .status-icon { color: var(--red); }
+.card.tone-warn { background: var(--amber-bg); }
+.card.tone-warn .card-text strong { color: var(--amber); }
+.card.tone-warn .status-icon { color: var(--amber); }
+/* tone-off (unavailable / not yet synced) intentionally keeps the neutral
+ * --card/--muted styling above -- it is not an error, just no signal yet. */
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.status-icon.spin svg, .icon.spin svg { animation: spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .status-icon.spin svg, .icon.spin svg { animation: none; }
 }
 
-button,
-.import {
+.switch { display: inline-block; flex: none; height: 18px; position: relative; width: 32px; }
+.switch input { height: 0; opacity: 0; width: 0; }
+.slider {
+  background: var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  inset: 0;
+  position: absolute;
+  transition: background .15s;
+}
+.slider::before {
+  background: #fff;
+  border-radius: 50%;
+  content: "";
+  height: 14px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform .15s;
+  width: 14px;
+}
+.switch input:checked + .slider { background: var(--green); }
+.switch input:checked + .slider::before { transform: translateX(14px); }
+.switch input:disabled + .slider { cursor: default; opacity: .5; }
+
+/* ---- seed-import status line -------------------------------------------- */
+.seed-status { align-items: center; color: var(--muted); display: flex; font-size: 11.5px; gap: 6px; padding: 0 2px; }
+.seed-status.seeded { color: var(--green); }
+.mini-icon { color: inherit; flex: none; }
+.mini-icon svg { display: block; }
+
+/* ---- cookie counts -------------------------------------------------------- */
+.stats { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+.stat {
+  background: var(--card); border-radius: var(--radius); padding: 8px 10px;
+}
+.stat-number { display: block; font-size: 17px; font-weight: 700; line-height: 1.2; }
+.stat small { color: var(--muted); display: block; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- buttons -------------------------------------------------------------- */
+button, .import-label {
   align-items: center;
-  background: #171613;
-  border: 0;
-  border-radius: 8px;
-  color: #fff;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink);
   cursor: pointer;
   display: flex;
-  font-size: 14px;
-  font-weight: 750;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
   justify-content: center;
-  padding: 10px 12px;
+  padding: 9px 12px;
+  transition: background .12s, border-color .12s;
+}
+button:hover, .import-label:hover { background: var(--card); }
+button:focus-visible, .import-label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 1px; }
+button:disabled { cursor: default; opacity: .5; }
+button:disabled:hover { background: #fff; }
+button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+button.primary:hover { background: #000; }
+button.primary:disabled:hover { background: var(--ink); }
+button.ghost { background: transparent; border-color: transparent; color: var(--muted); font-weight: 600; padding: 5px 8px; }
+button.ghost:hover { background: var(--card); color: var(--ink); }
+.icon, .mini-icon { display: inline-flex; }
+.icon svg, .mini-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
-.import {
+.row { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+.menu-wrap { position: relative; }
+.menu-wrap > button { width: 100%; }
+/* display is scoped to :not([hidden]) on purpose (same pitfall documented in
+ * editor.css): an unconditional `.menu { display: grid }` is an author style
+ * and beats the UA stylesheet's `[hidden] { display: none }`, so the menu
+ * would stay visible -- and eat clicks on whatever is behind it -- despite
+ * the hidden attribute. */
+.menu:not([hidden]) {
   background: #fff;
-  border: 1px solid #ded6c8;
-  color: #171613;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  bottom: calc(100% + 4px);
+  box-shadow: 0 8px 24px rgb(23 22 19 / .12);
+  display: grid;
+  left: 0;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  z-index: 5;
 }
+.menu button { border: 0; font-size: 12px; font-weight: 500; justify-content: flex-start; padding: 7px 8px; }
+.import-label input { display: none; }
+.import-label.busy { opacity: .7; pointer-events: none; }
 
-.import input {
-  display: none;
-}
-
-p {
-  color: #716b62;
+.seed-status, .status {
+  border-radius: 8px;
+  color: var(--muted);
   font-size: 12px;
   margin: 0;
+  min-height: 15px;
+  padding: 0 2px;
 }
-
-.seed-status {
-  background: #f3f1ec;
-  border-radius: 8px;
-  color: #46433d;
-  font-size: 12px;
-  padding: 8px 10px;
-}
-
-.seed-status.seeded {
-  background: #e9f7ee;
-  color: #1a7f3c;
-}
-
-.seed-status.not-seeded {
-  background: #fff1ef;
-  color: #d53c32;
-}
+.status:empty { display: none; }
+.status.error { color: var(--red); font-weight: 600; }
