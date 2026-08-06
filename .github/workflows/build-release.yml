@@ -15,8 +15,11 @@ env:
   R2_ENDPOINT: https://fdbfca2be2ba5fdd40b274450f22c6ad.r2.cloudflarestorage.com
   R2_BUCKET: global
   UPDATE_FEED_URL: ${{ vars.R2_PUBLIC_URL || 'https://pub-a6c0e96f900b4b698762591fddd497aa.r2.dev' }}
-  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+  # Public client-side values, deliberately hardcoded: the repo secrets went
+  # stale after the Supabase project migration and nobody with push access can
+  # edit them (admin-only). See docs/env.md.
+  VITE_SUPABASE_URL: https://jpsmdjtxuxlkyuotwxfg.supabase.co
+  VITE_SUPABASE_ANON_KEY: sb_publishable_jhFZBfL9XyxaiRX-dA_KXA_5gNZeNKD
 
 jobs:
   build-mac:
