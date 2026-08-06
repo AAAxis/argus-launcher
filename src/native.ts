@@ -464,6 +464,14 @@ type ArgusNative = {
     result?: {matched: boolean; count: number},
     error?: string,
   ): void;
+  onCookieSyncPushRequest?(
+      callback: (payload: {requestId: string; profileId: string; cookies: unknown[]}) => void,
+  ): () => void;
+  sendCookieSyncPushResult?(requestId: string, result: unknown, error?: string): void;
+  onCookieSyncPullRequest?(
+      callback: (payload: {requestId: string; profileId: string}) => void,
+  ): () => void;
+  sendCookieSyncPullResult?(requestId: string, result: unknown, error?: string): void;
   onReimportProxiesRequest?(
     callback: (payload: {requestId: string; proxies: Array<Record<string, unknown>>}) => void,
   ): () => void;

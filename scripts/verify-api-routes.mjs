@@ -75,15 +75,19 @@ const served = new Set();
 for (const match of mainSource.matchAll(/pathname === '(\/v1\/[^']+)'/g)) {
   served.add(match[1]);
 }
-// The two page routes authenticate with a per-launch run token instead of a key
-// and sit above the bearer gate on purpose -- they are not part of the keyed
-// surface and must never be advertised as one. run-from-page runs one of the
-// launch's own automations; recheck-from-page re-checks that launch's own
-// proxy. Both take an id from the token's entry rather than from the request,
-// which is what makes them safe to open to a file:// document.
+// These four page routes authenticate with a per-launch run token instead of a
+// key and sit above the bearer gate on purpose -- they are not part of the
+// keyed surface and must never be advertised as one. run-from-page runs one of
+// the launch's own automations; recheck-from-page re-checks that launch's own
+// proxy; push-from-profile/pull-for-profile sync the cookie-manager
+// extension's jar with that launch's profile. All four take an id from the
+// token's entry rather than from the request, which is what makes them safe to
+// open to a file:// document (or, for the cookie pair, the bundled extension).
 const PAGE_ROUTES = new Set([
   '/v1/automations/run-from-page',
   '/v1/proxies/recheck-from-page',
+  '/v1/cookies/push-from-profile',
+  '/v1/cookies/pull-for-profile',
 ]);
 
 for (const pathname of served) {
@@ -95,6 +99,18 @@ for (const pathname of served) {
       `main.cjs serves ${pathname} but the table does not document it`);
 }
 pass(`${served.size} pathnames in main.cjs are accounted for`);
+
+// Every route this file exempts as a page route must actually be served by
+// main.cjs -- otherwise PAGE_ROUTES could silently accumulate dead entries
+// (or, worse, hide a route that was renamed and never re-registered) with
+// nothing here to notice.
+for (const pathname of PAGE_ROUTES) {
+  check(served.has(pathname), `PAGE_ROUTES names ${pathname} but main.cjs does not serve it`);
+}
+check(
+    !routes.some((route) => PAGE_ROUTES.has(route.path)),
+    'a PAGE_ROUTES entry leaked into electron/api/routes.json, the keyed route table');
+pass(`${PAGE_ROUTES.size} page routes are served and stay off the keyed table`);
 
 // ── 3. Table-driven routes declare a channel preload will accept ─────────────
 const preloadSource = readFileSync(join(root, 'electron/preload.cjs'), 'utf8');

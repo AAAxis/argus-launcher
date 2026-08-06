@@ -24,7 +24,8 @@ const automationConnectors = require('./automation/connectors.cjs');
 const automationNotify = require('./automation/notify.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
-  createRunTokens, handleRecheckFromPage, handleRunFromPage,
+  createRunTokens, handleCookiePullFromPage, handleCookiePushFromPage,
+  handleRecheckFromPage, handleRunFromPage,
 } = require('./automation/run-token.cjs');
 const {routes: apiRoutes} = require('./api/routes.json');
 
@@ -4276,6 +4277,63 @@ function recheckFromPage(req, res) {
   });
 }
 
+// The cookie-sync page routes' renderer round trips. Same pendingPageRequests
+// map and the same settle shape as the recheck above; the work itself lives in
+// useAutomationBridge, which owns the cloud state and the Cookies-tab toast.
+function askRendererOnPageChannel(channel, payload) {
+  return new Promise((resolve, reject) => {
+    if (!mainWindow) {
+      reject(Object.assign(new Error('Argus Launcher is not open'), {status: 503}));
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const timeout = setTimeout(() => {
+      pendingPageRequests.delete(requestId);
+      reject(Object.assign(
+          new Error('Timed out waiting for Argus Launcher to answer'), {status: 504}));
+    }, AUTOMATION_REQUEST_TIMEOUT_MS);
+    pendingPageRequests.set(requestId, {resolve, reject, timeout});
+    mainWindow.webContents.send(channel, {requestId, ...payload});
+  });
+}
+
+function settlePageRequest(requestId, result, error) {
+  const pending = pendingPageRequests.get(requestId);
+  if (!pending) {
+    return;
+  }
+  pendingPageRequests.delete(requestId);
+  clearTimeout(pending.timeout);
+  if (error) {
+    pending.reject(Object.assign(new Error(error), {status: 500}));
+    return;
+  }
+  pending.resolve(result);
+}
+
+ipcMain.on('argus:cookie-sync-push-result', (_event, {requestId, result, error}) =>
+  settlePageRequest(requestId, result, error));
+ipcMain.on('argus:cookie-sync-pull-result', (_event, {requestId, result, error}) =>
+  settlePageRequest(requestId, result, error));
+
+function cookiePushFromProfile(req, res) {
+  handleCookiePushFromPage({
+    req, res, tokens: runTokens, sendJson,
+    pushCookies: (entry, cookies) =>
+      askRendererOnPageChannel('argus:cookie-sync-push-request',
+          {profileId: entry.profileId, cookies}),
+  });
+}
+
+function cookiePullForProfile(req, res) {
+  handleCookiePullFromPage({
+    req, res, tokens: runTokens, sendJson,
+    pullCookies: (entry) =>
+      askRendererOnPageChannel('argus:cookie-sync-pull-request',
+          {profileId: entry.profileId}),
+  });
+}
+
 function handleOAuthTokenExchange(req, res) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -4371,6 +4429,18 @@ function startAutomationApiServer() {
     }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/proxies/recheck-from-page') {
       recheckFromPage(req, res);
+      return;
+    }
+    // Same exemption as the two page routes above: the caller is the bundled
+    // cookie-manager extension holding a per-launch run token, not a keyed
+    // client. Neither route is in electron/api/routes.json on purpose;
+    // verify-api-routes skips them by name.
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/cookies/push-from-profile') {
+      cookiePushFromProfile(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/cookies/pull-for-profile') {
+      cookiePullForProfile(req, res);
       return;
     }
 

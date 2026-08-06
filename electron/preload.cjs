@@ -138,6 +138,20 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendPushLocalCookiesResult: (requestId, result, error) =>
     ipcRenderer.send('argus:push-local-cookies-result', {requestId, result, error}),
+  onCookieSyncPushRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:cookie-sync-push-request', listener);
+    return () => ipcRenderer.removeListener('argus:cookie-sync-push-request', listener);
+  },
+  sendCookieSyncPushResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:cookie-sync-push-result', {requestId, result, error}),
+  onCookieSyncPullRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:cookie-sync-pull-request', listener);
+    return () => ipcRenderer.removeListener('argus:cookie-sync-pull-request', listener);
+  },
+  sendCookieSyncPullResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:cookie-sync-pull-result', {requestId, result, error}),
   onReimportProxiesRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:reimport-proxies-request', listener);
