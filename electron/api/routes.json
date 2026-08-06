@@ -99,6 +99,40 @@
     },
     {
       "method": "POST",
+      "path": "/v1/profiles/notes",
+      "group": "Profiles",
+      "label": "Read a profile's notes, newest first",
+      "scope": "any",
+      "channel": "argus:list-profile-notes-request",
+      "mcp": "argus_profile_notes",
+      "mcpDescription": "The notes on a profile, newest first -- what it is for, who it belongs to, what has been tried on it. Each note carries its author and when it was written. Read this before acting on an unfamiliar profile: it is where the humans running this workspace write down the things the profile's name and tags cannot say.",
+      "body": "{ \"profileId\": \"<id>\", \"limit\": 50 }",
+      "fields": [
+        {"key": "profileId", "type": "string", "required": true,
+         "description": "The profile whose notes to read."},
+        {"key": "limit", "type": "number",
+         "description": "How many of the newest notes to return. Defaults to 50."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/notes/add",
+      "group": "Profiles",
+      "label": "Append a note to a profile",
+      "scope": "any",
+      "channel": "argus:add-profile-note-request",
+      "mcp": "argus_add_profile_note",
+      "mcpDescription": "Append a note to a profile's thread -- what you did to it, what you found, why it is set up the way it is. The note is filed under this API key's own name and marked as written by an agent, so it is distinguishable from what a person wrote. Notes are append-only over the API: there is no tool to edit or delete one, including your own.",
+      "body": "{ \"profileId\": \"<id>\", \"body\": \"Warmed up for 20 minutes; no checkpoint.\" }",
+      "fields": [
+        {"key": "profileId", "type": "string", "required": true,
+         "description": "The profile to annotate."},
+        {"key": "body", "type": "string", "required": true,
+         "description": "The note itself, up to 2000 characters."}
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/v1/profiles/assign-proxy",
       "mcp": "argus_assign_proxy",
       "group": "Profiles",

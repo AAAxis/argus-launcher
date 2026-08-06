@@ -11,6 +11,7 @@ let pageSize = 50;
 const selected = new Set();  // keys of selected rows
 let editing = null;          // the cookie being edited, or null for Add
 let lastFocused = null;      // element to refocus once the dialog closes
+let profileMetaName = '';    // for the save-as dialog's default name
 
 // chrome.cookies.Cookie -> the CookieEntry shape cookie-format understands.
 function toEntry(cookie) {
@@ -442,10 +443,81 @@ fetch(chrome.runtime.getURL('profile-meta.json'))
     .then((response) => response.ok ? response.json() : null)
     .then((meta) => {
       if (meta && meta.name) {
+        profileMetaName = meta.name;
         $('#profile-chip').textContent = meta.name;
         $('#profile-chip').hidden = false;
       }
     })
     .catch(() => {});
+
+// ---- save-as: name + scope dialog -------------------------------------------
+function defaultSaveAsName() {
+  const date = new Date().toISOString().slice(0, 10);
+  return profileMetaName ? `${profileMetaName} ${date}` : `Cookies ${date}`;
+}
+
+// Picks which of the three scopes this cookie set will be built from.
+// Priority (also the default selection below): a live selection is the most
+// specific thing the user could mean, then the filter they've typed/picked,
+// then everything -- each one only usable when it actually has rows in it.
+function scopeCookies(scope) {
+  if (scope === 'selected') return all.filter((cookie) => selected.has(keyOf(cookie)));
+  if (scope === 'filtered') return filtered;
+  return all;
+}
+
+function openSaveAsDialog() {
+  const form = $('#save-as-form');
+  const counts = {selected: selected.size, filtered: filtered.length, all: all.length};
+  $('#scope-selected-label').textContent = `Selected (${counts.selected})`;
+  $('#scope-filtered-label').textContent = `Current filter (${counts.filtered})`;
+  $('#scope-all-label').textContent = `All cookies (${counts.all})`;
+  for (const scope of ['selected', 'filtered', 'all']) {
+    form.querySelector(`input[name="scope"][value="${scope}"]`).disabled = counts[scope] === 0;
+  }
+  const defaultScope = counts.selected > 0 ? 'selected' : (counts.filtered > 0 ? 'filtered' : 'all');
+  form.querySelector(`input[name="scope"][value="${defaultScope}"]`).checked = true;
+  form.elements.name.value = defaultSaveAsName();
+  $('#save-as-dialog').showModal();
+  form.elements.name.focus();
+  form.elements.name.select();
+}
+
+$('#save-as-set-button').addEventListener('click', openSaveAsDialog);
+$('#save-as-cancel').addEventListener('click', () => $('#save-as-dialog').close('cancel'));
+
+$('#save-as-dialog').addEventListener('close', async () => {
+  // Same convention as #edit-dialog: only 'save' (the submit button's value)
+  // proceeds. Escape's native <dialog> cancel, and the Cancel button above,
+  // both leave returnValue as anything else.
+  if ($('#save-as-dialog').returnValue !== 'save') return;
+  const form = $('#save-as-form');
+  const name = form.elements.name.value.trim();
+  if (!name) {
+    setStatus('Enter a name for this cookie set', true);
+    return;
+  }
+  const scope = form.elements.scope.value;
+  const cookies = scopeCookies(scope);
+  if (!cookies.length) {
+    // Can happen if the chosen scope emptied out between opening the dialog
+    // and submitting (e.g. a live site cleared its own cookies while the
+    // dialog was open) -- the disabled-radio guard above only reflects
+    // counts as of open time.
+    setStatus('Nothing to save in that scope', true);
+    return;
+  }
+  setStatus('Saving to Cookies tab…');
+  try {
+    const result = await chrome.runtime.sendMessage({type: 'save-as-set', name, cookies});
+    if (result && result.ok) {
+      setStatus(`Saved ${result.saved} cookies to "${result.set}"`);
+    } else {
+      setStatus((result && result.error) || 'Could not save to the Cookies tab', true);
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  }
+});
 
 void reload();

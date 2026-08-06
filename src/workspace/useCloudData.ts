@@ -18,7 +18,7 @@ import type {Toast} from '../hooks/useToast';
 import type {
   ArgusAutomation, ArgusConnector, ArgusCookie, ArgusFolder, ArgusNotification, ArgusProfile,
   ArgusProxy,
-  CloudState, OrgMember,
+  CloudState, OrgMember, ProfileNoteSummary,
   SharedBookmark, SharedExtension,
 } from '../types';
 
@@ -89,6 +89,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setState((current) => ({...current, notifications: fn(current.notifications)})),
     members: (fn: (list: OrgMember[]) => OrgMember[]) =>
       setState((current) => ({...current, members: fn(current.members)})),
+    noteSummaries: (fn: (list: ProfileNoteSummary[]) => ProfileNoteSummary[]) =>
+      setState((current) => ({...current, note_summaries: fn(current.note_summaries)})),
   };
 
   // One parallel read per table instead of five sequential selects against one
@@ -114,7 +116,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       const [profilesResult, proxiesResult, foldersResult, cookiesResult, extensionsResult,
         bookmarksResult, statusesResult, automationsResult, connectorsResult,
         notificationsResult, notificationReadsResult,
-        organizationResult, membersResult] = await Promise.allSettled([
+        organizationResult, membersResult, noteSummariesResult] = await Promise.allSettled([
         db.profiles.list(targetOrgId),
         db.proxies.list(targetOrgId),
         db.folders.list(targetOrgId),
@@ -131,6 +133,10 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         // Profiles table needs it too -- it is what turns created_by into a
         // name -- and a tab-local read would fetch it twice.
         db.team.listMembers(targetOrgId),
+        // Newest note and count per profile -- not the threads, which are read
+        // on demand. One row per profile that has any notes, so a workspace
+        // that writes none pays for an empty result.
+        db.profileNotes.summaries(targetOrgId),
       ]);
 
       const failures: string[] = [];
@@ -172,6 +178,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       }));
       const organization = take('organization', organizationResult, null);
       const members = take('team members', membersResult, []);
+      const noteSummaries = take('profile notes', noteSummariesResult, []);
       const mergedBookmarks = mergeBookmarks(bookmarkRows, socialBookmarks);
 
       // A partial load is shown but never written back from. Every self-healing
@@ -202,6 +209,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
           ...(organizationResult.status === 'fulfilled' ?
             {built_in_extensions: organization?.built_in_extensions} : {}),
           ...(membersResult.status === 'fulfilled' ? {members} : {}),
+          ...(noteSummariesResult.status === 'fulfilled' ? {note_summaries: noteSummaries} : {}),
         }));
         // Toasted even when quiet: a failing table stays failing, so silence
         // here is the same "everything vanished" mystery in a smaller frame.
@@ -226,6 +234,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         connectors,
         notifications,
         members,
+        note_summaries: noteSummaries,
         built_in_extensions: organization?.built_in_extensions,
       };
 

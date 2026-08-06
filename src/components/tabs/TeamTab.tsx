@@ -21,7 +21,7 @@
 // belongs to whoever created the workspace.
 import {useEffect, useState} from 'react';
 import {
-  Copy, Crown, LogOut, Mail, Share2, Shield, Trash2, UserPlus, Users, X,
+  Copy, Crown, LogOut, Mail, Send, Share2, Shield, Trash2, UserPlus, Users, X,
 } from 'lucide-react';
 import {Badge} from '../ui/Badge';
 import {EmptyState} from '../ui/EmptyState';
@@ -100,12 +100,16 @@ export function TeamTab({view, onView, onShare, onOpenSite}: {
   onShare: (request: ShareRequest) => void;
   onOpenSite: (pathname: string) => void;
 }) {
-  const {data, team, shared, reload} = useWorkspace();
+  const {data, team, shared, reload, toast} = useWorkspace();
   const org = useOrg();
   const [inviting, setInviting] = useState(false);
   const [removing, setRemoving] = useState<OrgMember | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [copiedInviteId, setCopiedInviteId] = useState('');
+  // One at a time, so the row's button can say it is working. The website's
+  // 60-second floor is per invite, not per user, so two rows resending at once
+  // is legitimate -- this is only about which button is spinning.
+  const [resendingInviteId, setResendingInviteId] = useState('');
 
   const members = data.state.members;
   const orgId = org.orgId;
@@ -332,12 +336,30 @@ export function TeamTab({view, onView, onShare, onOpenSite}: {
                   invite={invite}
                   members={members}
                   copied={copiedInviteId === invite.id}
+                  resending={resendingInviteId === invite.id}
                   onCopy={() => {
                     void navigator.clipboard.writeText(inviteUrl(invite.token))
                         .then(() => setCopiedInviteId(invite.id))
                         // Clipboard access can be refused; saying nothing beats
                         // claiming a copy that did not happen.
                         .catch(() => setCopiedInviteId(''));
+                  }}
+                  onResend={() => {
+                    if (!orgId) {
+                      return;
+                    }
+                    setResendingInviteId(invite.id);
+                    void team.resendInvite(orgId, invite.token)
+                        .then((result) => {
+                          // Both outcomes are worth saying out loud. A silent
+                          // success reads as a click that did nothing, and a
+                          // silent failure is the thing this whole change
+                          // exists to stop.
+                          toast.setMessage(result.emailed ?
+                            `Invitation re-sent to ${invite.email}` :
+                            result.failure);
+                        })
+                        .finally(() => setResendingInviteId(''));
                   }}
                   onRevoke={() => {
                     if (orgId) {
@@ -614,11 +636,13 @@ function MemberRow({
   );
 }
 
-function InviteRow({invite, members, copied, onCopy, onRevoke}: {
+function InviteRow({invite, members, copied, resending, onCopy, onResend, onRevoke}: {
   invite: OrgInvite;
   members: OrgMember[];
   copied: boolean;
+  resending: boolean;
   onCopy: () => void;
+  onResend: () => void;
   onRevoke: () => void;
 }) {
   const expired = new Date(invite.expires_at).getTime() <= Date.now();
@@ -656,10 +680,23 @@ function InviteRow({invite, members, copied, onCopy, onRevoke}: {
 
       <td className="actions-cell">
         <div className="row-actions">
-          {/* No copy button on a dead link: the URL still exists but
-              accept_org_invite refuses it, so offering it would hand the admin
+          {/* Neither action on a dead link: the URL still exists but
+              accept_org_invite refuses it, and the send route answers
+              invite_expired -- so offering either would hand the admin
               something that fails for their teammate rather than for them. */}
           {!expired && (
+            <button className="ghost icon-button row-action" disabled={resending}
+              onClick={onResend}
+              title={resending ? 'Sending…' : `Email this invitation to ${invite.email} again`}>
+              <Send size={16} />
+            </button>
+          )}
+          {/* Copy is what is left when the email cannot get there. Once one has
+              gone out, a second copy delivered by hand is noise -- the invitee
+              already has it, and offering the link after every invite is what
+              made a website deployed without its Resend key look like a working
+              one. */}
+          {!expired && !invite.last_emailed_at && (
             <button className="ghost icon-button row-action" onClick={onCopy}
               title={copied ? 'Link copied' : 'Copy invite link'}>
               <Copy size={16} />

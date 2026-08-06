@@ -426,6 +426,56 @@ async function pullFromLauncher() {
   }
 }
 
+// ---- save-as (browser -> launcher, library save) ---------------------------
+// A user-named snapshot into the Cookies tab -- deliberately separate from
+// pushToLauncher above. It shares that function's transport (fetchLauncher,
+// the same push-from-profile route, `saveAs` in the body) but touches NONE of
+// its bookkeeping: no read or write of SYNC_STATE_KEY, so inSync, signature,
+// pushTokenHash and lastAttemptAt are exactly as this call found them. A
+// named snapshot is not a sync, and must never advance or reset the
+// watermark the automatic push loop depends on -- a failed save-as here must
+// not make the next real sync think it has something to retry, and a
+// successful one must not make it think a push already landed.
+//
+// Failures are returned straight to the caller (the popup's status line or
+// the editor's dialog), not persisted into lastError/lastErrorKind: those
+// fields drive the toolbar badge and the popup's sync card, both of which
+// describe the *automatic* sync loop. This is a one-off action the user is
+// watching happen; there is nothing for a badge glyph to add, and folding a
+// save-as failure into 'lastErrorSource: push' would make it indistinguishable
+// from a real sync failure (e.g. wrongly painting the "dead token" '×' badge
+// off a save-as that failed for an unrelated reason, like an empty jar).
+async function saveAsSet(name, cookies) {
+  try {
+    const config = await launchConfig();
+    if (!config) {
+      return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+    }
+    const jar = Array.isArray(cookies) ? cookies : await chrome.cookies.getAll({});
+    if (!jar.length) {
+      return {ok: false, error: 'There are no cookies to save.'};
+    }
+    const result = await fetchLauncher(
+        `http://127.0.0.1:${config.apiPort}/v1/cookies/push-from-profile`,
+        {runToken: config.token, cookies: jar, saveAs: name});
+    if (!result.ok) {
+      return {ok: false, error: result.message};
+    }
+    const saved = Number(result.body.saved) || 0;
+    if (!saved) {
+      // The launcher answered 200 but recognized none of the cookies -- same
+      // "the request completed but nothing came of it" case pushToLauncher
+      // treats as saved-none, just not persisted into sync state here.
+      return {ok: false, error: 'Argus Launcher did not recognize any of the cookies to save.'};
+    }
+    return {ok: true, saved, set: result.body.set || ''};
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error('Argus cookie sync: save-as-set crashed', error);
+    return {ok: false, error: message};
+  }
+}
+
 // ---- import / export -------------------------------------------------------
 function downloadFile(filename, text, mime) {
   const url = `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
@@ -557,6 +607,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         case 'pull-from-launcher':
           sendResponse(await pullFromLauncher());
+          return;
+        case 'save-as-set':
+          // `message.cookies` omitted -> the whole current jar (popup's
+          // "Save to Cookies tab…"); present -> exactly the rows the caller
+          // chose (editor's scope picker: selected / filtered / all).
+          sendResponse(await saveAsSet(message.name, message.cookies));
           return;
         case 'export-cookies':
           sendResponse(await exportCookies(message.scope, message.format));

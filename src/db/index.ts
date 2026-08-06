@@ -23,6 +23,7 @@ export * as extensions from './extensions';
 export * as folders from './folders';
 export * as notifications from './notifications';
 export * as orgs from './orgs';
+export * as profileNotes from './profileNotes';
 export * as profiles from './profiles';
 export * as proxies from './proxies';
 export * as runs from './runs';

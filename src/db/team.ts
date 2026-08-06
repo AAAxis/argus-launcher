@@ -28,7 +28,8 @@ import {rowToInvite, rowToMember} from './mappers';
 import type {OrgInviteRow, OrgMemberIdentityRow} from './rows';
 
 const INVITE_COLUMNS =
-  'id,org_id,email,role,token,status,invited_by,accepted_by,expires_at,created_at,accepted_at';
+  'id,org_id,email,role,token,status,invited_by,accepted_by,expires_at,created_at,accepted_at,' +
+  'last_emailed_at';
 
 // The whole roster, oldest membership first -- so the founding owner leads the
 // list and the order is stable as people come and go.

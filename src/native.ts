@@ -465,7 +465,9 @@ type ArgusNative = {
     error?: string,
   ): void;
   onCookieSyncPushRequest?(
-    callback: (payload: {requestId: string; profileId: string; cookies: unknown[]}) => void,
+    callback: (
+      payload: {requestId: string; profileId: string; cookies: unknown[]; saveAs?: string},
+    ) => void,
   ): () => void;
   sendCookieSyncPushResult?(
     requestId: string,

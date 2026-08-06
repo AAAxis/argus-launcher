@@ -156,13 +156,18 @@ function cdpCookieToEntry(cookie) {
 // CDP's leading dot -- must equal the filter or be one of its subdomains, so
 // "example.com" keeps ".example.com" and "sub.example.com" but not
 // "notexample.com" (a plain suffix match would let that one through).
+//
+// Both sides are lowercased and dot-stripped before comparing, not just the
+// cookie side: ".example.com" is the exact spelling the Cookies tab and every
+// export file show, and RFC 6265 domains are case-insensitive even though CDP
+// happens to hand them back lowercased -- a filter typed by hand is not.
 function filterCookiesByDomain(cookies, domain) {
-  const filter = String(domain || '').trim();
+  const filter = String(domain || '').trim().toLowerCase().replace(/^\./, '');
   if (!filter) {
     return cookies;
   }
   return cookies.filter((cookie) => {
-    const bare = String(cookie.domain || '').replace(/^\./, '');
+    const bare = String(cookie.domain || '').toLowerCase().replace(/^\./, '');
     return bare === filter || bare.endsWith(`.${filter}`);
   });
 }
@@ -468,9 +473,18 @@ const EXECUTORS = {
     const filtered = filterCookiesByDomain(cookies, step.domain);
     const mapped = filtered.map(cdpCookieToEntry);
     const result = await saveCookies(mapped);
-    log('info', `Saved ${mapped.length} cookies to the Launcher` +
-      (result && result.set ? ` (${result.set})` : ''));
-    return undefined;
+    // result.saved is what the renderer actually stored, not what was sent --
+    // cookiesFromJsonValue drops anything normalizeCookie() rejects, so this
+    // can be lower than mapped.length even on a genuine success. Fall back to
+    // mapped.length only when the capability's result carries no count.
+    const saved = result && Number.isFinite(result.saved) ? result.saved : mapped.length;
+    // mapped.length === 0 means the domain filter matched nothing in this
+    // profile. The renderer's empty-push guard no-ops on that (it will not
+    // wipe a live set down to nothing), so the step and the run both still
+    // read `ok` -- warn is the one place a mistyped filter is visible at all.
+    log(mapped.length === 0 ? 'warn' : 'info',
+        `Saved ${saved} cookies to the Launcher` +
+        (result && result.set ? ` (${result.set})` : ''));
   },
 };
 

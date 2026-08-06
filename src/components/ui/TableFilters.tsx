@@ -14,41 +14,15 @@
 // Built on Popover, the app's one floating layer: outside-click, Escape, resize
 // and scroll dismissal, and the flip-above-when-it-does-not-fit are already
 // solved there and must not be re-solved per picker.
-import {Check, ChevronDown, FolderInput, Hash} from 'lucide-react';
+import {FolderInput, Hash} from 'lucide-react';
+import {FilterOption} from './FilterOption';
 import {Popover} from './Popover';
 import {FolderGlyph} from './FolderGlyph';
 import {StatusChip} from './StatusChip';
 import {TagBadge, TagChip} from './TagChip';
 import {tagKey, tagLabel, tagPresetFor} from '../../lib/tags';
-import type {ReactNode} from 'react';
 import type {TagUsage} from '../../lib/tags';
 import type {ArgusFolder} from '../../types';
-
-// One row of any of the three panels. Same geometry as .status-pop-option and
-// .platform-pop-option -- 34px, left-aligned, tick at the far edge -- because a
-// fourth shape of popover list in one app is a fourth widget to learn.
-function FilterOption({active, label, onPick, children}: {
-  active: boolean;
-  // The accessible name. The row's visible content is a chip or a glyph plus a
-  // word, and for the tag rows the mark carries no text at all.
-  label: string;
-  onPick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      aria-label={label}
-      aria-selected={active}
-      className={active ? 'filter-pop-option active' : 'filter-pop-option'}
-      onClick={onPick}
-      role="option"
-      type="button"
-    >
-      {children}
-      {active && <Check className="filter-pop-tick" size={13} strokeWidth={2.5} />}
-    </button>
-  );
-}
 
 const ALL_STATUSES = 'All statuses';
 
@@ -72,7 +46,6 @@ export function StatusFilter({value, options, onChange}: {
           {value ?
             <StatusChip status={value} /> :
             <span className="filter-trigger-label">{ALL_STATUSES}</span>}
-          <ChevronDown size={16} strokeWidth={2} />
         </>
       }
     >
@@ -140,7 +113,6 @@ export function TagFilter({value, options, onChange}: {
           {shown ?
             <TagChip tag={shown} /> :
             <span className="filter-trigger-label">{ALL_TAGS}</span>}
-          <ChevronDown size={16} strokeWidth={2} />
         </>
       }
     >
@@ -208,14 +180,16 @@ export function FolderSelect({folders, noFolderLabel, onPick}: {
     <Popover
       label="Assign to folder"
       panelClassName="filter-pop"
-      triggerClassName="filter-trigger"
+      // A ghost button, not the flat .filter-trigger the two real filters take.
+      // This one lives in the selection toolbar among Check proxies, Import
+      // cookies and Export selected -- it is an action, as the note above says,
+      // and one borderless control in a row of five bordered ones reads as a
+      // rendering fault rather than as a quieter kind of button.
+      triggerClassName="ghost"
       width={244}
       trigger={
         <>
-          <span className="filter-trigger-label">
-            <FolderInput size={15} strokeWidth={1.9} /> Assign to folder
-          </span>
-          <ChevronDown size={16} strokeWidth={2} />
+          <FolderInput size={15} strokeWidth={1.9} /> Assign to folder
         </>
       }
     >

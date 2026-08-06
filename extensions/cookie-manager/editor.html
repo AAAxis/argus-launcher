@@ -36,6 +36,13 @@
       Add cookie
     </button>
     <button id="delete-selected" type="button" disabled>Delete selected</button>
+    <button id="save-as-set-button" type="button">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M19 21 12 16l-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Save to Cookies tab&hellip;
+    </button>
     <div class="menu-wrap">
       <button id="export-menu-button" type="button" aria-haspopup="true" aria-expanded="false">Export ▾</button>
       <div id="export-menu" class="menu" hidden role="menu">
@@ -111,6 +118,36 @@
              so pressing Enter in any field submits it, not this one. -->
         <button id="edit-cancel" class="ghost" type="button">Cancel</button>
         <button value="save" class="primary" id="edit-save" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Same dialog styling as #edit-dialog above. The scope choice is what
+       makes this worth two clicks instead of exporting a whole-jar file and
+       trimming it by hand: pick exactly what's in front of you (a
+       selection), what you searched for (the filter), or everything. -->
+  <dialog id="save-as-dialog">
+    <form method="dialog" id="save-as-form">
+      <h2>Save to Cookies tab</h2>
+      <label>Name <input name="name" type="text" maxlength="80" autocomplete="off" required></label>
+      <fieldset id="save-as-scope">
+        <legend>What to save</legend>
+        <label>
+          <input type="radio" name="scope" value="selected">
+          <span id="scope-selected-label">Selected</span>
+        </label>
+        <label>
+          <input type="radio" name="scope" value="filtered">
+          <span id="scope-filtered-label">Current filter</span>
+        </label>
+        <label>
+          <input type="radio" name="scope" value="all">
+          <span id="scope-all-label">All cookies</span>
+        </label>
+      </fieldset>
+      <div class="dialog-buttons">
+        <button id="save-as-cancel" class="ghost" type="button">Cancel</button>
+        <button value="save" class="primary" id="save-as-confirm" type="submit">Save</button>
       </div>
     </form>
   </dialog>

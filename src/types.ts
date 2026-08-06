@@ -508,6 +508,47 @@ export type OrgMember = {
   invited_by: string | null;
 };
 
+// Who wrote a note. Two values, and the distinction is not cosmetic: the local
+// API and the MCP server write through the renderer's Supabase session, so an
+// agent's note and the signed-in human's note reach the database with the same
+// created_by. This is the only field that tells them apart.
+export type NoteAuthorKind = 'user' | 'agent';
+
+// One entry in a profile's note thread -- what this profile is for, why it is
+// set up the way it is, what was tried on it.
+//
+// Append-only in spirit: anyone in the org can add one and read all of them,
+// but only the author can edit or delete their own, and agent-written notes are
+// immutable to everyone. A backlog whose entries can be rewritten by whoever
+// reads them last is not a record of anything.
+export type ProfileNote = {
+  id: string;
+  profile_id: string;
+  body: string;
+  author_kind: NoteAuthorKind;
+  // The auth user id the write went through. Resolved to a name against
+  // CloudState.members by assigneeName(), the same way profiles.created_by is.
+  // Null once that member has left the org.
+  created_by: string | null;
+  // The API key's name, on agent notes only. Null for anything a person wrote.
+  author_label: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// A profile's note thread reduced to what a table row needs: how many, and the
+// newest one. Read from the profile_note_summaries view.
+export type ProfileNoteSummary = {
+  profile_id: string;
+  note_count: number;
+  last_id: string;
+  last_body: string;
+  last_author_kind: NoteAuthorKind;
+  last_created_by: string | null;
+  last_author_label: string | null;
+  last_created_at: string;
+};
+
 export type OrgInviteStatus = 'pending' | 'accepted' | 'revoked';
 
 // An offer of a seat that has not been taken yet.
@@ -534,6 +575,11 @@ export type OrgInvite = {
   expires_at: string;
   created_at: string;
   invited_by: string | null;
+  // When the website last emailed this invitation, or null if it never has.
+  // The Team tab shows a copy-the-link button only while this is null: once a
+  // message is out, the owner delivering a second copy by hand is noise rather
+  // than help.
+  last_emailed_at: string | null;
 };
 
 // What one teammate can hand to another. Deliberately not every table: a folder
@@ -611,5 +657,11 @@ export type CloudState = {
   //
   // Pending invites are deliberately NOT here; see OrgInvite.
   members: OrgMember[];
+  // One row per profile that has any notes: the newest note and how many there
+  // are. The SUMMARIES are here; the threads are not. A thread is unbounded and
+  // only wanted when somebody opens one, so it is read on demand -- the same
+  // split runs and cookie payloads already get. Without this the Notes column
+  // would be a query per visible row.
+  note_summaries: ProfileNoteSummary[];
   built_in_extensions?: BuiltInExtensionToggles;
 };

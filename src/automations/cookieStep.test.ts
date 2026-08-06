@@ -3,7 +3,7 @@
 // hand-written .d.cts) rather than a copy -- see notifyOnFinish.test.ts for
 // the same pattern.
 import {describe, expect, it} from 'vitest';
-import {cdpCookieToEntry, filterCookiesByDomain} from '../../electron/automation/steps.cjs';
+import {EXECUTORS, cdpCookieToEntry, filterCookiesByDomain} from '../../electron/automation/steps.cjs';
 
 function cdpCookie(overrides: Partial<Parameters<typeof cdpCookieToEntry>[0]> = {}) {
   return {
@@ -84,5 +84,88 @@ describe('filterCookiesByDomain', () => {
   it('does not match a domain that merely ends with the filter as a substring', () => {
     const kept = filterCookiesByDomain(cookies, 'example.com').map((c) => c.name);
     expect(kept).not.toContain('d');
+  });
+
+  // The exact spelling shown in the Cookies tab and every export file --
+  // .example.com must work as a filter too, not just as a cookie's own domain.
+  it('accepts a leading-dot filter (the spelling users actually see)', () => {
+    const kept = filterCookiesByDomain(cookies, '.example.com').map((c) => c.name);
+    expect(kept.sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  // RFC 6265 cookie domains are case-insensitive; CDP happens to lowercase
+  // them, but a hand-typed filter in the step editor is not guaranteed to be.
+  it('matches case-insensitively', () => {
+    const kept = filterCookiesByDomain(cookies, 'Example.COM').map((c) => c.name);
+    expect(kept.sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('EXECUTORS.saveCookies', () => {
+  function fakeCdp(cookies: ReturnType<typeof cdpCookie>[]) {
+    return {send: async () => ({cookies})};
+  }
+  function capturingLog() {
+    const entries: {level: string; message: string}[] = [];
+    return {log: (level: string, message: string) => entries.push({level, message}), entries};
+  }
+
+  // Catches the trap the reviewer flagged: pushing `filtered` (raw CDP shape)
+  // instead of `mapped` (the normalizeCookie shape) would pass every other
+  // test here, because the throw-on-missing-capability path never looks at
+  // its argument -- only this test inspects what actually crosses into
+  // saveCookies().
+  it('pushes the MAPPED shape to saveCookies, not the raw CDP cookies', async () => {
+    const {log} = capturingLog();
+    let captured: unknown;
+    const saveCookies = async (cookies: unknown) => {
+      captured = cookies;
+      return {saved: 1, set: 'Amazon (live)'};
+    };
+    await EXECUTORS.saveCookies({
+      cdp: fakeCdp([cdpCookie({name: 'a', domain: 'example.com', sameSite: 'None'})]),
+      step: {domain: ''},
+      log,
+      saveCookies,
+    });
+    expect(captured).toEqual([{
+      name: 'a', value: 'abc123', domain: 'example.com', path: '/',
+      secure: true, httpOnly: true, sameSite: 'no_restriction', expirationDate: 1893456000,
+    }]);
+  });
+
+  // Catches logging mapped.length instead of the capability's own count:
+  // two cookies are sent but the fake capability reports only one stored
+  // (cookiesFromJsonValue can drop a row normalizeCookie rejects), and the
+  // log line must say what was actually kept.
+  it('logs what the capability reports as saved, not what was sent', async () => {
+    const {log, entries} = capturingLog();
+    const saveCookies = async () => ({saved: 1, set: 'Amazon (live)'});
+    await EXECUTORS.saveCookies({
+      cdp: fakeCdp([
+        cdpCookie({name: 'a', domain: 'example.com'}),
+        cdpCookie({name: 'b', domain: 'example.com'}),
+      ]),
+      step: {domain: ''},
+      log,
+      saveCookies,
+    });
+    expect(entries[0].message).toBe('Saved 1 cookies to the Launcher (Amazon (live))');
+    expect(entries[0].level).toBe('info');
+  });
+
+  // The one place a mistyped filter is visible: mapped.length === 0 must warn,
+  // not info, even though the step and the run both still end up `ok`.
+  it('warns rather than infos when the domain filter matches nothing', async () => {
+    const {log, entries} = capturingLog();
+    const saveCookies = async () => ({saved: 0, set: 'Amazon (live)'});
+    await EXECUTORS.saveCookies({
+      cdp: fakeCdp([cdpCookie({domain: 'other.org'})]),
+      step: {domain: 'example.com'},
+      log,
+      saveCookies,
+    });
+    expect(entries[0].level).toBe('warn');
+    expect(entries[0].message).toContain('Saved 0 cookies');
   });
 });

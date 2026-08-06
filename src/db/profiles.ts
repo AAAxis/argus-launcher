@@ -4,8 +4,11 @@ import {optionalClient, raise, requireClient, STORAGE_BUCKET} from './client';
 import {profilePatchToRow, profileToRow, rowToProfile} from './mappers';
 import type {ProfileRow} from './rows';
 
+// No `notes`. That column was dead from the baseline -- never mapped, never
+// written, rejected by the API's update whitelist -- and 20260807000000 drops it
+// in favour of profile_notes, the attributed thread. See src/db/profileNotes.ts.
 const COLUMNS =
-  'id,org_id,name,notes,folder_id,proxy_id,cookie_set_id,fingerprint,status,tags,start_urls,' +
+  'id,org_id,name,folder_id,proxy_id,cookie_set_id,fingerprint,status,tags,start_urls,' +
   'command_line_switches,created_by,deleted_at,updated_at,created_at,color,proxy_mode,' +
   'cookie_mode,cookie_import_path,cookie_import_url,cookie_import_name,cookie_import_count,' +
   'email,password,automation_id,avatar,assigned_to';

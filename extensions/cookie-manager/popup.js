@@ -197,6 +197,11 @@ function renderSync(sync) {
   $('#sync-toggle').disabled = !sync.available;
   $('#sync-now').disabled = !sync.available;
   $('#pull').disabled = !sync.available;
+  // Save-as goes over the same run-token route as sync, so it needs the same
+  // "was this window launched from Argus Launcher" precondition -- unlike
+  // sync-now/pull it does not also need inSync/paused, since it is not the
+  // automatic loop.
+  $('#save-as-toggle').disabled = !sync.available;
 }
 
 function renderSeed(seed) {
@@ -225,6 +230,12 @@ function renderCounts(counts) {
   $('#site-label').textContent = counts.siteDomain || 'This site';
 }
 
+// Read by openSaveAsForm() below for the prefilled default name. Module-level
+// rather than re-fetched on open: get-status is already a round trip refresh()
+// makes on every load and after every action, so the profile name is never
+// more than one of those old by the time the button is clicked.
+let currentProfileName = '';
+
 async function refresh() {
   const status = await send({type: 'get-status'});
   if (!status || !status.sync) {
@@ -238,8 +249,9 @@ async function refresh() {
     return;
   }
   const chip = $('#profile-chip');
-  if (status.profile && status.profile.name) {
-    chip.textContent = status.profile.name;
+  currentProfileName = (status.profile && status.profile.name) || '';
+  if (currentProfileName) {
+    chip.textContent = currentProfileName;
     chip.hidden = false;
   } else {
     chip.hidden = true;
@@ -309,6 +321,56 @@ $('#pull').addEventListener('click', () => withBusy($('#pull'), async () => {
   }
   await refresh();
 }));
+
+// ---- save-as: inline expanding name field -----------------------------------
+function defaultSaveAsName() {
+  const date = new Date().toISOString().slice(0, 10);
+  return currentProfileName ? `${currentProfileName} ${date}` : `Cookies ${date}`;
+}
+
+function openSaveAsForm() {
+  $('#save-as-toggle').hidden = true;
+  $('#save-as-form').hidden = false;
+  const input = $('#save-as-name');
+  input.value = defaultSaveAsName();
+  input.focus();
+  input.select();
+}
+
+function closeSaveAsForm() {
+  $('#save-as-form').hidden = true;
+  $('#save-as-toggle').hidden = false;
+}
+
+$('#save-as-toggle').addEventListener('click', openSaveAsForm);
+$('#save-as-cancel').addEventListener('click', () => closeSaveAsForm());
+$('#save-as-form').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeSaveAsForm();
+  }
+});
+// The name input's Enter submits the form natively; this only handles the
+// async work and reporting, the same withBusy/setStatus contract every other
+// action here follows -- no action may leave the button (or, here, the form)
+// stuck mid-request with nothing said.
+$('#save-as-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  void withBusy($('#save-as-confirm'), async () => {
+    const name = $('#save-as-name').value;
+    setStatus('Saving to Cookies tab…');
+    const result = await send({type: 'save-as-set', name});
+    if (result.ok) {
+      setStatus(`Saved ${result.saved} cookies to "${result.set}"`);
+      closeSaveAsForm();
+    } else {
+      // Left open on failure (an empty/whitespace name, an unreachable
+      // launcher) so the user can fix the input and retry without re-opening
+      // the form and losing what they typed.
+      setStatus(result.error || 'Could not save to the Cookies tab', true);
+    }
+  });
+});
 
 $('#open-editor').addEventListener('click', () => {
   void chrome.tabs.create({url: chrome.runtime.getURL('editor.html')});

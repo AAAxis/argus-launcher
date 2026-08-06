@@ -221,7 +221,7 @@
   "saveCookies": {
     "label": "Save cookies",
     "icon": "cookie",
-    "summary": "Save cookies to the Launcher",
+    "summary": "Save cookies to the Launcher {domain}",
     "cdp": ["Storage"],
     "fields": [
       {
@@ -229,9 +229,10 @@
         "kind": "text",
         "label": "Domain filter",
         "interpolate": true,
-        "hint": "Leave empty to save every cookie in the profile."
+        "hint": "Leave empty to save every cookie in the profile. Matches a bare domain (example.com) or the leading-dot form (.example.com), case-insensitively, plus its subdomains."
       }
-    ]
+    ],
+    "note": "With a filter set, the live cookie set is REPLACED by exactly this filtered subset -- running this step again with a narrower filter after a full sync discards every other domain's cookies from that set."
   },
   "if": {
     "label": "If",

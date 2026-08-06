@@ -13,6 +13,7 @@ import {useCloudData} from './useCloudData';
 import {useCookieActions} from './useCookieActions';
 import {useLibraryActions} from './useLibraryActions';
 import {useProfileActions} from './useProfileActions';
+import {useProfileNotes} from './useProfileNotes';
 import {useConnectorActions} from './useConnectorActions';
 import {useAutomationActions} from './useAutomationActions';
 import {useProxyActions} from './useProxyActions';
@@ -25,6 +26,7 @@ import type {CloudData} from './useCloudData';
 import type {CookieActions} from './useCookieActions';
 import type {LibraryActions} from './useLibraryActions';
 import type {ProfileActions} from './useProfileActions';
+import type {ProfileNoteActions} from './useProfileNotes';
 import type {ConnectorActions} from './useConnectorActions';
 import type {AutomationActions} from './useAutomationActions';
 import type {ProxyActions} from './useProxyActions';
@@ -35,6 +37,10 @@ export type WorkspaceValue = {
   data: CloudData;
   toast: Toast;
   profiles: ProfileActions;
+  // A profile's note thread. Separate from ProfileActions because a note is not
+  // a column on the profile row -- it is its own table, read on demand, and the
+  // only thing in CloudState it touches is the summary the Notes column shows.
+  profileNotes: ProfileNoteActions;
   proxies: ProxyActions;
   library: LibraryActions;
   cookies: CookieActions;
@@ -121,6 +127,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   };
   const proxies = useProxyActions(core);
   const profiles = useProfileActions(core, proxies);
+  const profileNotes = useProfileNotes(core);
   const library = useLibraryActions(core);
   const cookies = useCookieActions(core);
   // Takes orgId and the sign-in state directly rather than through core: run
@@ -249,6 +256,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     data,
     toast,
     profiles,
+    profileNotes,
     proxies,
     library,
     cookies,

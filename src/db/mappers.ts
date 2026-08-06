@@ -19,9 +19,12 @@ import type {
   AutomationRun,
   ArgusNotification,
   BuiltInExtensionToggles,
+  NoteAuthorKind,
   OrgInvite,
   OrgMember,
   OrgRole,
+  ProfileNote,
+  ProfileNoteSummary,
   ProxyMode,
   Handoff,
   HandoffKind,
@@ -47,6 +50,8 @@ import type {
   OrganizationRow,
   OrgInviteRow,
   OrgMemberIdentityRow,
+  ProfileNoteRow,
+  ProfileNoteSummaryRow,
   ProfileRow,
   ProxyRow,
   HandoffRow,
@@ -269,6 +274,46 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
     row.deleted_at = patch.deleted_at ?? null;
   }
   return row;
+}
+
+// ---- profile notes ------------------------------------------------------
+
+// author_kind is narrowed here rather than trusted. The check constraint means
+// the database cannot hold a third value, but this row also arrives from a
+// PostgREST response typed as `unknown`, and defaulting to 'user' on anything
+// unrecognised is the safe direction: a note that renders as a person's when it
+// should have said agent is a display bug, where the reverse would hand an
+// edit button for an agent's note to whoever is signed in.
+function noteAuthorKind(value: string): NoteAuthorKind {
+  return value === 'agent' ? 'agent' : 'user';
+}
+
+export function rowToProfileNote(row: ProfileNoteRow): ProfileNote {
+  return {
+    id: row.id,
+    profile_id: row.profile_id,
+    body: row.body,
+    author_kind: noteAuthorKind(row.author_kind),
+    created_by: row.created_by,
+    author_label: row.author_label,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+export function rowToProfileNoteSummary(row: ProfileNoteSummaryRow): ProfileNoteSummary {
+  return {
+    profile_id: row.profile_id,
+    // count(*) comes back as a bigint, which PostgREST serialises as a JSON
+    // number here but has been known to send as a string on other drivers.
+    note_count: Number(row.note_count) || 0,
+    last_id: row.last_id,
+    last_body: row.last_body,
+    last_author_kind: noteAuthorKind(row.last_author_kind),
+    last_created_by: row.last_created_by,
+    last_author_label: row.last_author_label,
+    last_created_at: row.last_created_at,
+  };
 }
 
 // ---- proxies ------------------------------------------------------------
@@ -700,6 +745,7 @@ export function rowToInvite(row: OrgInviteRow): OrgInvite {
     expires_at: row.expires_at,
     created_at: row.created_at,
     invited_by: row.invited_by,
+    last_emailed_at: row.last_emailed_at ?? null,
   };
 }
 

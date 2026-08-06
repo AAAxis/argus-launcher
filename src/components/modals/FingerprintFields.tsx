@@ -26,10 +26,10 @@ import {
   AUTO_FROM_PROXY,
 } from '../../lib/fingerprintPresets';
 import {Field} from '../ui/Field';
+import {FormGroup} from '../ui/FormGroup';
 import {PlatformPicker} from '../ui/PlatformPicker';
 import {withFingerprintOs} from '../../drafts';
 import chromeLogo from '../../assets/platform/chrome.svg';
-import type {ReactNode} from 'react';
 import type {ProfileDraft} from '../../drafts';
 
 export function FingerprintFields({draft, onChange}: {
@@ -41,7 +41,7 @@ export function FingerprintFields({draft, onChange}: {
 
   return (
     <>
-      <FpGroup
+      <FormGroup
         title="Identity"
         hint="Who the browser says it is. The platform decides what the rest of this dialog is allowed to be — picking it re-rolls the hardware below."
       >
@@ -115,9 +115,9 @@ export function FingerprintFields({draft, onChange}: {
             <option>Custom</option>
           </select>
         </Field>
-      </FpGroup>
+      </FormGroup>
 
-      <FpGroup
+      <FormGroup
         title="Hardware"
         hint="The machine the browser claims to run on. Picked as whole real devices rather than mixed freely."
       >
@@ -208,9 +208,9 @@ export function FingerprintFields({draft, onChange}: {
             {mediaDevicePresets.map((item) => <option value={item} key={item}>{item}</option>)}
           </select>
         </Field>
-      </FpGroup>
+      </FormGroup>
 
-      <FpGroup
+      <FormGroup
         title="Privacy & noise"
         hint="What the browser does to the APIs a site would otherwise use to fingerprint it. Noise perturbs the reading per profile; Block refuses it outright, which is itself distinctive."
       >
@@ -266,27 +266,8 @@ export function FingerprintFields({draft, onChange}: {
           />
           <span>Rotate fingerprint on each browser launch</span>
         </label>
-      </FpGroup>
+      </FormGroup>
     </>
-  );
-}
-
-// One block of the fingerprint form: a heading, a line saying what the block is
-// for, and the same two-column field grid the rest of the app uses. Spans the
-// host .profile-form grid, so the three stack rather than sitting side by side.
-function FpGroup({title, hint, children}: {
-  title: string;
-  hint: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="fp-group">
-      <div className="fp-group-head">
-        <h4>{title}</h4>
-        <p>{hint}</p>
-      </div>
-      {children}
-    </section>
   );
 }
 

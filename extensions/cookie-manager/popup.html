@@ -60,6 +60,25 @@
       Load from Launcher
     </button>
 
+    <!-- A library save into the Cookies tab, distinct from the automatic
+         "(live)" sync above. window.prompt() is unreliable inside an
+         extension popup, so this expands inline instead: the button hides
+         and a name field takes its place, prefilled and focused. -->
+    <div id="save-as-wrap" class="save-as-wrap">
+      <button id="save-as-toggle" type="button">
+        <span class="icon" data-icon="cookie"></span>
+        Save to Cookies tab&hellip;
+      </button>
+      <form id="save-as-form" class="save-as-form" hidden>
+        <input id="save-as-name" type="text" maxlength="80" autocomplete="off"
+            aria-label="Name for this cookie set">
+        <div class="save-as-actions">
+          <button id="save-as-cancel" class="ghost" type="button">Cancel</button>
+          <button id="save-as-confirm" class="primary" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+
     <div class="row">
       <div class="menu-wrap">
         <button id="export-menu-button" type="button" aria-haspopup="true" aria-expanded="false">

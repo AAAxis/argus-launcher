@@ -10,8 +10,9 @@ import type {DependencyList} from 'react';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {cookieFileToBase64, cookiesFromJsonValue, toCookieJson} from '../lib/cookieFile';
-import {assignedSet, resolveLiveSetAction} from '../lib/cookieSync';
+import {assignedSet, resolveLiveSetAction, sanitizeSetName} from '../lib/cookieSync';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
+import {assigneeName} from '../lib/assignees';
 import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
 import {normalizeTags} from '../lib/tags';
 import {comparable} from '../lib/text';
@@ -101,6 +102,7 @@ function useApiChannel<Req extends {requestId: string}, Res>(
 export function useAutomationBridge(workspace: WorkspaceValue) {
   const {
     data, toast, automations: automationActions, profiles: profileActions,
+    profileNotes: profileNoteActions,
     proxies: proxyActions, cookies: cookieActions,
   } = workspace;
   const state = data.state;
@@ -169,13 +171,61 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onCookieSyncPushRequest,
       native?.sendCookieSyncPushResult,
-      async ({profileId, cookies: pushed}) => {
+      async ({profileId, cookies: pushed, saveAs}) => {
         const profile = state.profiles.find(
             (item) => item.id === profileId && !item.deleted_at);
         if (!profile) {
           throw new Error('This launch\'s profile no longer exists.');
         }
         const entries = cookiesFromJsonValue(pushed);
+
+        // A library save (popup's "Save to Cookies tab…" / editor's dialog),
+        // not a sync: `saveAs` diverts the whole request to a NEW named set
+        // and returns before any of the live-set logic below ever runs --
+        // the live set is neither read nor written, and the set created here
+        // is never assigned to the profile. That is what makes it safe for
+        // the user to save a curated snapshot without it being silently
+        // overwritten by the next automatic push, and without it silently
+        // becoming what the profile launches with.
+        //
+        // Duplicate names are allowed alongside each other rather than
+        // merged or overwritten: cookie_sets.name has no uniqueness
+        // constraint, and overwriting a same-named set on a bare string
+        // match is exactly the failure mode ("(live)" clobbering a curated
+        // set) resolveLiveSetAction above exists to avoid. A second
+        // "amazon-login" is a nuisance the user can rename or delete from
+        // the Cookies tab; a silently overwritten snapshot is unrecoverable.
+        if (saveAs !== undefined) {
+          const sanitized = sanitizeSetName(saveAs);
+          if (!sanitized.ok) {
+            throw new Error(sanitized.error);
+          }
+          // Same empty-push guard as the live sync below, and for the same
+          // reason: an empty jar is far more likely to be a session that has
+          // not restored yet than a genuine "save nothing", and there is no
+          // undo through the UI for a set created with zero cookies in it.
+          if (entries.length === 0) {
+            throw new Error('There are no cookies to save.');
+          }
+          let created;
+          try {
+            created = await cookieActions.addCookieSet({
+              path: `saved-set:${profile.id}:${Date.now()}`,
+              name: `${sanitized.name}.json`,
+              count: entries.length,
+              base64: cookieFileToBase64(toCookieJson(entries)),
+            });
+          } catch (error) {
+            console.error('cookie-sync push: could not create the named set', error);
+            throw new Error('Could not save these cookies to the Cookies tab.');
+          }
+          if (!created) {
+            throw new Error('Could not save these cookies to the Cookies tab.');
+          }
+          toast.setMessage(`Saved ${entries.length} cookies to "${created.name}"`);
+          return {saved: entries.length, set: created.name};
+        }
+
         const action = resolveLiveSetAction(profile, state.cookies);
         // A non-array payload.cookies coerces to [] before this handler ever
         // sees it (run-token.cjs), and cookiesFromJsonValue drops every entry
@@ -420,7 +470,33 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         if (!profile || (allowedFolders && !allowedFolders.includes(profile.folder_id || ''))) {
           return {profile: null};
         }
-        return {profile};
+        // The note summary rides along, and the whole thread does not.
+        //
+        // A profile read that says nothing about its notes leaves an agent no
+        // reason to suspect they exist, which defeats the point of writing them
+        // -- "do not warm this one up" is precisely the instruction that has to
+        // arrive unasked-for. But the thread is unbounded and this reply is
+        // already the largest object on this bridge, so what travels is the
+        // newest note and a count, with the tool that returns the rest named in
+        // the reply itself.
+        const summary = state.note_summaries.find((item) => item.profile_id === profile.id);
+        return {
+          profile,
+          notes: summary ? {
+            count: summary.note_count,
+            latest: {
+              body: summary.last_body,
+              author: summary.last_author_kind === 'agent' ?
+                summary.last_author_label || 'Agent' :
+                assigneeName(summary.last_created_by, state.members) || 'Unknown',
+              authorKind: summary.last_author_kind,
+              createdAt: summary.last_created_at,
+            },
+            more: summary.note_count > 1 ?
+              'Read the rest with argus_profile_notes.' :
+              undefined,
+          } : {count: 0},
+        };
       },
       cloud);
 
@@ -832,6 +908,88 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         return {automation: next};
       },
       cloud);
+
+  // ── Profile notes ─────────────────────────────────────────────────────────
+  //
+  // Read and append, and deliberately nothing else. There is no edit or delete
+  // over this bridge, for a reason that is not squeamishness: every write here
+  // runs through the signed-in user's Supabase session, so RLS sees
+  // created_by = auth.uid() on that person's own notes and would happily let an
+  // agent rewrite them. The database can refuse an agent editing an agent note
+  // -- author_kind = 'user' is in the update policy -- but it cannot tell that
+  // a write claiming to be the user is not. So agents append to the backlog and
+  // never rewrite it, and the missing tools are the enforcement.
+  useApiChannel(
+      'argus:list-profile-notes-request',
+      async (payload: {
+        requestId: string;
+        profileId: string;
+        limit?: number;
+        allowedFolders?: string[] | null;
+      }) => {
+        requireSignedIn();
+        const profile = await resolveInScope(payload.profileId, payload.allowedFolders);
+        if (!profile) {
+          throw new ApiError(
+              `Profile ${payload.profileId} is not visible to this key`, 403);
+        }
+        const notes = await db.profileNotes.list(data.orgId as string, profile.id, {
+          limit: typeof payload.limit === 'number' ? payload.limit : undefined,
+        });
+        // The author is resolved to a name here rather than handed over as a
+        // uuid: an agent has no way to look one up, and `created_by` alone would
+        // make every note read as an opaque id.
+        return {
+          profileId: profile.id,
+          notes: notes.map((note) => ({
+            id: note.id,
+            body: note.body,
+            author: note.author_kind === 'agent' ?
+              note.author_label || 'Agent' :
+              assigneeName(note.created_by, state.members) || 'Unknown',
+            authorKind: note.author_kind,
+            createdAt: note.created_at,
+            updatedAt: note.updated_at,
+          })),
+        };
+      },
+      [state, data.orgId]);
+
+  useApiChannel(
+      'argus:add-profile-note-request',
+      async (payload: {
+        requestId: string;
+        profileId: string;
+        body: string;
+        agent?: {id: string; name: string};
+        allowedFolders?: string[] | null;
+      }) => {
+        requireSignedIn();
+        const body = typeof payload.body === 'string' ? payload.body.trim() : '';
+        if (!body) {
+          throw new ApiError('A note needs a body.', 400);
+        }
+        if (body.length > 2000) {
+          throw new ApiError('A note is at most 2000 characters.', 400);
+        }
+        const profile = await resolveInScope(payload.profileId, payload.allowedFolders);
+        if (!profile) {
+          throw new ApiError(
+              `Profile ${payload.profileId} is not visible to this key`, 403);
+        }
+        // The key's own name is what the note is filed under. Falling back to a
+        // bare 'Agent' rather than to the signed-in user is the point of the
+        // whole path: an unnamed key is still not a person.
+        const note = await profileNoteActions.add(profile.id, body, {
+          label: payload.agent?.name || 'Agent',
+        });
+        if (!note) {
+          throw new Error('Failed to save to cloud state.');
+        }
+        toast.setMessage(`Noted on ${profile.name}`);
+        return {noteId: note.id, profileId: profile.id, createdAt: note.created_at};
+      },
+      [state, data.orgId]);
 
   useApiChannel(
       'argus:delete-automation-request',

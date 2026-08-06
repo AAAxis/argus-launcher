@@ -2043,41 +2043,69 @@ img.settings-identity-avatar {
  * components/ui/TableFilters.tsx -- the status filter, the tag filter and the
  * selection bar's assign-to-folder.
  *
- * The trigger is drawn to match the canonical <select> exactly: same fill,
- * border, height, pill and minimum width. That is the point. Two of the
- * toolbar's dropdowns are still native selects, and a row that mixes two
- * silhouettes reads as two kinds of control when they do the same kind of job.
- * What a select could not do is show the value -- these hold the real status
- * chip, the real tag chip or the folder's own glyph.
+ * These used to be drawn as the canonical <select>: bordered pill, --raised
+ * fill, 180px minimum, chevron at the far end. The reasoning was that the
+ * toolbar still holds two native selects and a row mixing two silhouettes reads
+ * as two kinds of control. What that missed is that a bordered box per filter
+ * is three boxes sitting above a table whose own headers -- the controls these
+ * are most like, since both narrow what the rows say -- carry no box at all.
+ * The toolbar read as heavier than the thing it filters.
  *
- * --raised, not the --raised-soft the ghost buttons take: these are the search
- * box's neighbours and belong to its surface, not to the buttons'. */
+ * So a filter is now drawn as .th-sort, literally: nothing at rest, and under
+ * the pointer the same --hover plate at --radius-xs, bled 6px/8px past the
+ * label, with the label going from --ink-soft to --ink. One highlight in this
+ * view, not three. The chevron went with the box -- .cell-trigger's note
+ * (below) covers why a marker per control is noise, and it holds here.
+ *
+ * Padding rather than .th-sort's padding-plus-cancelling-negative-margin: the
+ * header has a <th>'s own 14px to eat into, and pulling 8px back here would
+ * close the toolbar's 10px flex gap to 2px between two adjacent filters. */
 .filter-trigger {
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  align-items: center;
+  /* Not stretch. .table-toolbar is a flex row with no align-items, so a control
+     with no height of its own would grow to the 40px search box and paint a
+     plate half again as tall as the label it highlights. */
+  align-self: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
   color: var(--ink);
   font-weight: 500;
-  gap: 8px;
-  justify-content: space-between;
-  min-height: var(--control-h);
-  min-width: 180px;
-  /* Less on the right than the left: the chevron is already inset by its own
-     box, and matching 15px pushed it visibly off-centre against the curve. */
-  padding: 0 13px 0 15px;
+  gap: 7px;
+  /* Content-sized now that the 180px floor is gone, so it needs a ceiling
+     instead: a long tag used to ellipsize inside the fixed pill, and without
+     one it would grow the toolbar until the search box gave up its width. */
+  max-width: 240px;
+  min-height: 0;
+  padding: 6px 8px;
 }
 
-.filter-trigger:not(:disabled):hover {
-  border-color: var(--ink-faint);
+/* A chip inside the trigger has to be able to shrink. .tag-chip is flex: none
+   everywhere else -- in a table cell it must keep its full width -- but here it
+   is the whole of a capped control. */
+.filter-trigger .status-chip,
+.filter-trigger .tag-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.filter-trigger:not(:disabled):hover,
+.filter-trigger[aria-expanded='true'] {
+  background: var(--hover);
   /* Buttons in this app do not lift. See the note on `button:hover`. */
   box-shadow: none;
+  color: var(--ink);
 }
 
-/* Open is drawn the way a focused select is, so the control does not change
-   family the moment its panel appears. */
-.filter-trigger[aria-expanded='true'] {
-  border-color: var(--accent);
+/* Open takes the same fill as hover: the panel is a click away from the pointer
+   leaving the trigger, and a filter that goes flat the moment you reach into
+   its list has stopped saying which control the list belongs to. Same rule
+   .cell-trigger follows. */
+.filter-trigger:focus-visible {
   box-shadow: var(--focus-ring);
+  outline: none;
 }
 
 .filter-trigger-label {
@@ -2091,22 +2119,11 @@ img.settings-identity-avatar {
   white-space: nowrap;
 }
 
-/* The chevron. flex: none so a long folder name ellipsizes instead of squeezing
-   it, and quiet, because it is punctuation rather than content. */
-.filter-trigger > svg:last-child {
-  color: var(--ink-soft);
-  flex: none;
-}
-
-/* A chip inside the trigger has to be able to shrink. .tag-chip is flex: none
-   everywhere else -- in a table cell it must keep its full width -- but here it
-   is one of two children of a 180px control, and a long tag would otherwise
-   push the chevron out of the button rather than ellipsizing. */
-.filter-trigger .status-chip,
-.filter-trigger .tag-chip {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
+/* The header's tell, and the whole reason the fill is worth having: quiet until
+   the pointer arrives, then the same ink as any other label being pressed. */
+.filter-trigger:not(:disabled):hover .filter-trigger-label,
+.filter-trigger[aria-expanded='true'] .filter-trigger-label {
+  color: var(--ink);
 }
 
 /* The panel. Same rows as the status, platform and column pickers -- left
@@ -2178,6 +2195,524 @@ img.settings-identity-avatar {
 .filter-pop-tick {
   flex: none;
   margin-left: auto;
+}
+
+/* ── Cell controls ──────────────────────────────────────────────────────────
+ * components/ui/CellControls.tsx -- the Profiles table's editable cells.
+ *
+ * The table is `table-layout: auto`, so a column's width is computed from its
+ * content. That is the constraint every rule below is written against: an
+ * affordance that appears on hover must not change any box, or the browser
+ * redistributes width across the whole table and the jitter is visible on every
+ * row at once. Two ways to satisfy that, and both are used here -- the caret is
+ * always drawn and only changes opacity, and the copy button is absolutely
+ * positioned so the width algorithm never sees it at all.
+ *
+ * This is the opposite of what .status-picker-edit used to do: `opacity: 0` on
+ * an in-flow 26px button hid the paint and kept the box, so every status chip
+ * in the table carried ~30px of permanent blank to its right. */
+
+/* At rest, the value and nothing else -- no border, no fill, no caret. A
+ * bordered box around every status in a fifty-row table is a column of controls
+ * again, which is the thing StatusChip exists to stop, and eighteen carets down
+ * a row is the same noise the pencils were.
+ *
+ * The affordance is the hover. Under the pointer the cell lifts onto a fill and
+ * takes a pointer cursor, which is what every other button in this app does;
+ * nothing has to be marked as pressable in advance because the pointer finds it
+ * the moment it matters.
+ *
+ * The fill is drawn by an absolutely positioned ::before inset past the
+ * element's own edges, NOT by padding on the button.
+ *
+ * Padding plus .th-sort's cancelling negative margin is the obvious way to do
+ * this and it is wrong here. A <th> is sized by every cell in its column, so
+ * the header can shed 12px and still measure the same; a `width: 1%` data cell
+ * is sized by this element alone. Padding out and margin back in leaves the
+ * column at the old width while the button's content box is 12px narrower than
+ * its own text -- so every value in the table lost its last few characters to
+ * an ellipsis, chips included.
+ *
+ * Out of flow, nothing is measured: the fill bleeds into the cell's own 14px
+ * gutter so the target reads as a target rather than as a tight box around the
+ * text, and the width algorithm never sees it. Same principle as the copy
+ * button below. */
+.cell-trigger {
+  align-items: center;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  margin: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  position: relative;
+  text-align: left;
+}
+
+/* Deliberately the same fill a sortable header takes: --hover, --radius-xs, and
+   the same -6px/-8px bleed past the text that .th-sort gets from its cancelling
+   margin. A header and a cell are the two pressable things in this table and
+   they should highlight identically -- one hover treatment, not two. */
+.cell-trigger::before {
+  background: transparent;
+  border-radius: var(--radius-xs);
+  content: '';
+  inset: -6px -8px;
+  position: absolute;
+  transition: background-color 0.12s var(--ease);
+}
+
+.cell-trigger:not(:disabled):hover::before,
+.cell-trigger[aria-expanded='true']::before {
+  background: var(--hover);
+}
+
+/* Except when the value is a chip, which already has a box of its own.
+ *
+ * The fill is right for a bare value -- a name, a platform, a timezone -- where
+ * there is nothing to press until the pointer draws one. A status chip is
+ * already a bordered pill with its own tint, so the plate drew a grey rounded
+ * rectangle behind a coloured pill: two nested boxes saying one thing, and the
+ * outer one is the one that does not belong to the value.
+ *
+ * So the chip is the affordance and the chip is what reacts -- its border goes
+ * to the tone's own ink, which is the move .proxy-check.failed already makes,
+ * and needs no per-tone rule because .status-chip sets `color` to that ink.
+ *
+ * A class rather than :has(> .cell-trigger-value > .status-chip): that selector
+ * ties with the hover rule above and would win on source order alone, which is
+ * not a thing to leave a hover state resting on. CellPicker's `chip` prop sets
+ * this, so the call site says which it is. */
+.cell-trigger-chip::before {
+  content: none;
+}
+
+.cell-trigger-chip:not(:disabled):hover .status-chip,
+.cell-trigger-chip[aria-expanded='true'] .status-chip {
+  border-color: currentColor;
+}
+
+.cell-trigger:not(:disabled):hover,
+.cell-trigger[aria-expanded='true'] {
+  background: none;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.cell-trigger:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.cell-trigger:focus-visible::before {
+  box-shadow: var(--focus-ring);
+}
+
+.cell-trigger:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* min-width: 0 so a long value ellipsizes inside the trigger rather than
+   running out of the cell.
+   position: relative because the fill behind it is an absolutely positioned
+   ::before on the trigger: both are positioned, so they paint in DOM order and
+   the value lands on top. Without it the fill would cover the very thing it is
+   highlighting. */
+.cell-trigger-value {
+  align-items: center;
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A cell that navigates rather than edits. The same fill as any other trigger
+   -- it is a button and should read as one -- with the accent carrying the one
+   distinction worth drawing, that pressing it leaves the row. */
+.cell-link:not(:disabled):hover {
+  color: var(--accent);
+}
+
+.cell-pop-search {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--ink-faint);
+  display: flex;
+  gap: 7px;
+  margin: -4px -4px 4px;
+  padding: 0 10px 6px;
+}
+
+/* The field carries no chrome of its own -- the panel's edge is already a
+   border, and a second box inside it reads as a form. */
+.cell-pop-search input {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--ink);
+  flex: 1;
+  font: inherit;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0;
+}
+
+.cell-pop-search input:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+/* Capped rather than unbounded: the timezone picker offers ~60 rows, and a
+   panel taller than the window cannot be flipped above its trigger. Popover
+   deliberately does not close on a scroll inside its own panel.
+   overflow-x pinned to hidden because setting one axis computes the other from
+   `visible` up to `auto` -- left alone, a long row would scroll sideways
+   instead of ellipsizing, which is a second scrollbar inside a dropdown. */
+.cell-pop-list {
+  max-height: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* A grid item's min-width is `auto`, which means it cannot shrink below its own
+   min-content -- and with a nowrap label that is the whole string. The three
+   toolbar filters never hit this because a status or a tag is one short word;
+   a proxy row is "DE-01 · SOCKS5 · 198.51.100.24:8080" and ran straight out of
+   the panel, taking its tick with it. Zero here is what lets .filter-pop-name's
+   own ellipsis actually apply. */
+.cell-pop-list .filter-pop-option {
+  min-width: 0;
+}
+
+.cell-pop-empty {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin: 0;
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.cell-pop-footer {
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px -4px -4px;
+  padding: 6px 4px 0;
+}
+
+.cell-pop-footer button {
+  flex: 1 1 auto;
+  min-height: 30px;
+}
+
+/* ── The inline text editor ─────────────────────────────────────────────── */
+
+.cell-edit {
+  display: grid;
+  gap: 8px;
+}
+
+.cell-edit input {
+  width: 100%;
+}
+
+.cell-edit-problem {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+}
+
+.cell-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* `flex: 1 1 auto`, not `flex: 1`. The shorthand's basis of 0 makes four
+   buttons four equal columns, which sounds tidy and means their widths are
+   decided by the panel rather than by their labels -- so Save, Dismiss, Copy
+   and Clear each got a quarter of 320px, which is narrower than "Dismiss"
+   needs, and the row overran the panel. An `auto` basis sizes each to its own
+   label, shares out only what is left over, and lets the row wrap if a
+   translation ever makes them too wide for one line. */
+.cell-edit-actions button {
+  flex: 1 1 auto;
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+/* ── The tag set ────────────────────────────────────────────────────────────
+ * CellTags. Takes .cell-trigger-chip for the same reason Status does: the value
+ * is chips, which draw their own boxes, so a plate behind them would be a box
+ * around a row of boxes. */
+.cell-tags-add {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Roomier than the pickers': this panel holds a text input, a row of chips and
+   the suggestion row under them, where a picker holds a list. */
+.cell-tags-pop {
+  padding: 12px;
+}
+
+/* The trigger wraps TagCell, whose own rule is `display: inline-flex` with a
+   gap -- it needs to be able to shrink inside the trigger or a row of five
+   badges sets this column's width for the whole table. */
+.cell-trigger-chip .tag-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Notes ──────────────────────────────────────────────────────────────────
+ * components/ui/NotesPanel.tsx, and the Notes cell that opens it.
+ *
+ * One thread component, two surfaces: this popover and the Edit profile
+ * dialog's Notes section. Everything below is written against both, so nothing
+ * here may assume the panel's width -- the dialog gives it a whole column. */
+
+/* The cell. One line of the newest note, clipped, with the count after it. Not
+   the note's own words wrapped over three rows: this column shares a table with
+   seventeen others and a row that grows to fit prose stops being scannable. */
+/* min-width: 0 so it can shrink below its own text inside .cell-trigger-value,
+   which is an inline-flex box -- the same reason td.cell-wide .cell-text needs
+   its own cap. Without it a long first note sets the column's width. */
+.note-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The quiet counter the folder cards use, for the same reason: it is a fact
+   about the cell, not a second piece of content in it. */
+.note-count {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 7px;
+}
+
+.note-add {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Wide enough to read a paragraph in, capped so the thread scrolls rather than
+   the popover growing past the window on a profile with forty notes. */
+.notes-pop .notes-panel {
+  max-height: 420px;
+}
+
+.notes-panel {
+  display: grid;
+  gap: 10px;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+}
+
+.notes-empty {
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 6px 2px;
+}
+
+/* The thread scrolls; the composer below it does not. Somebody reading back
+   through a long history must not have to scroll to find the box again. */
+.notes-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.note-entry {
+  display: grid;
+  gap: 4px;
+}
+
+.note-entry + .note-entry {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+
+.note-entry-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.note-author {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bot glyph is the whole of the agent/person distinction. A tone-coloured
+   badge was the alternative and it lost: the thread is already a column of
+   names, and giving half of them a coloured plate reads as two severities
+   rather than as two kinds of author. */
+.note-author > svg {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+.note-time {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* Pushed to the far end, and only present on your own notes. No hover reveal:
+   the thread is a short list inside a panel that was deliberately opened, not
+   fifty table rows, so there is no column of glyphs to keep quiet. */
+.note-entry-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.note-entry-actions .icon-button {
+  height: 24px;
+  min-height: 24px;
+  width: 24px;
+}
+
+/* pre-wrap: a note is written in a textarea, so the line breaks somebody put in
+   are part of what they wrote. */
+.note-body {
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.note-edit,
+.notes-composer {
+  display: grid;
+  gap: 8px;
+}
+
+.note-edit textarea,
+.notes-composer textarea {
+  font-size: 12.5px;
+  min-height: 0;
+  padding: 9px 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.notes-composer {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+}
+
+.note-edit-actions,
+.notes-composer-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Same reduction the failure panel's buttons take, and for the same reason: the
+   global 36px is a form control's height, and these sit inside a panel. */
+.note-btn {
+  font-size: 12.5px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
+.notes-count {
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.notes-count.over {
+  color: var(--danger);
+}
+
+/* ── Copy-on-hover ──────────────────────────────────────────────────────── */
+
+/* The glyph hangs out of the value's box entirely (left: 100%), so it is not
+   part of the column's measured content. The room it hangs into is reserved by
+   constant padding on the <td> -- constant, so it does not depend on hover.
+   Reserving a fixed gutter is fine; reserving one for something that is
+   invisible AND only exists for one row at a time was the bug. */
+.cell-copy {
+  align-items: center;
+  display: inline-flex;
+  max-width: 100%;
+  position: relative;
+}
+
+.cell-copy-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-copy-slot {
+  display: contents;
+}
+
+/* Two classes rather than one: .icon-button is declared ~700 lines further down
+   this file and has the same (0,1,0) specificity, so a single-class selector
+   here would lose on every property they share -- the bug .row-action's comment
+   documents. No .row-action, which is what paints the fill and the border: a
+   frame around a glyph inside a data cell reads as a second control in the
+   column. */
+.cell-copy .cell-copy-button {
+  height: 22px;
+  left: 100%;
+  margin-left: 4px;
+  min-height: 22px;
+  opacity: 0;
+  /* Not a 0-opacity click target sitting over the next column. */
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 0.12s var(--ease);
+  width: 22px;
+}
+
+tbody tr:hover .cell-copy .cell-copy-button,
+.cell-copy .cell-copy-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ── The column picker ──────────────────────────────────────────────────────
@@ -2406,14 +2941,65 @@ tbody tr:last-child td {
  * Inline layout keeps the cell a cell. The mark beside the name (a profile
  * avatar, a proxy's flag plate, a cookie glyph) is inline-flex already, so all
  * it needs is the gap the flex `gap` used to give it and a shared centre. */
+/* nowrap so the mark and the name stay on one line. Without it, a table wide
+   enough to overflow its scroll container squeezes every column to its minimum,
+   and this cell's minimum is reached by dropping the name onto a second line
+   underneath its own avatar. The name ellipsizes instead -- which is what the
+   cap below is for. */
 td.name-cell {
   font-weight: 750;
+  white-space: nowrap;
 }
 
 td.name-cell > .avatar,
 td.name-cell > .proxy-flag {
   margin-right: 12px;
   vertical-align: middle;
+}
+
+/* The cap goes on the inner span ONLY, never also on the cell.
+ *
+ * One long name used to set this column's width for all fifty rows, so the text
+ * is capped and clipped with the whole name in its title -- the same treatment
+ * cell-wide gives the email and start-url columns.
+ *
+ * Capping the <td> as well looks like belt and braces and is actually a bug:
+ * the avatar sits outside this span, so cell content is 20px of mark plus 12px
+ * of margin plus the span, and a 180px cell cannot hold a 180px span beside
+ * them. The inline content wraps, and the name drops onto a second line under
+ * its own avatar. The span's cap is the only one needed -- it is the only thing
+ * here that can grow without bound.
+ *
+ * Still not `display: flex` on the <td>, for the reason spelled out above. */
+td.name-cell .cell-name {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ── Shrink-to-fit columns ──────────────────────────────────────────────────
+ * table-layout: auto hands every unclaimed pixel to the columns that did not
+ * claim one. With only the checkbox, platform and actions cells pinned, a
+ * Status column of 90px chips was drawn 220px wide -- 130px of nothing after
+ * the chip. That, and not the chips themselves, is the "too much space after
+ * the value" this table had in almost every column.
+ *
+ * `width: 1%` + nowrap is the shrink-to-fit idiom td.checkbox-cell and
+ * td.actions-cell already use; this is that same idiom, named, for the columns
+ * whose content is one short fact. Deliberately a class on the cell rather than
+ * a field on TableColumn: a width in the registry would be serialised by
+ * describeColumns into the shape agents read through argus_table_columns, and
+ * that is the front edge of user-resizable columns rather than a spacing fix.
+ *
+ * Safe because `name` is locked and unpinned: there is always at least one
+ * column left to absorb the slack, so the table can never be pinned end to end
+ * and start ignoring `width: 100%`. */
+td.cell-fit {
+  width: 1%;
+  white-space: nowrap;
 }
 
 td.checkbox-cell {
@@ -2534,6 +3120,20 @@ td.platform-cell {
   white-space: nowrap;
 }
 
+/* The mark and its version. Only Windows has one to show -- 11 and 10 share the
+   flag because downstream they are the same preset and the same user agent, so
+   without the number the column drew the two identically. */
+.platform-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.platform-version {
+  font-size: 12px;
+  font-weight: 650;
+}
+
 /* The Profiles table's proxy columns -- two of them.
  *
  * The address and its check were briefly one cell, which put "which proxy is
@@ -2583,11 +3183,28 @@ td.cell-wide {
   max-width: 220px;
 }
 
+/* inline-block, not block: these values now sit inside a .cell-trigger, which
+   is an inline-flex box, and a block child of one still has to be able to
+   shrink below its content for the ellipsis to appear. */
 td.cell-wide .cell-text {
-  display: block;
+  display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* "Direct" and the other absent-value words a picker's trigger can show. Quiet,
+   because they are the state of a field rather than a value in it -- the same
+   distinction .cell-muted's em dash makes. */
+.cell-soft-text {
+  color: var(--ink-soft);
+}
+
+/* Room for the copy glyph that hangs out of the value's box. Constant, not
+   hover-dependent: see the .cell-copy rules above. */
+td.cell-copy-cell {
+  padding-right: 34px;
 }
 
 /* Eight characters is enough to tell two profiles apart by eye; the copy button
@@ -2684,24 +3301,133 @@ td.proxy-check-cell {
   min-width: 0;
 }
 
+/* ── The re-checking chip ───────────────────────────────────────────────────
+ * A healthy or unchecked chip in the Profiles table says what it knows, and
+ * says what it can do about it while the pointer is over THE CHIP.
+ *
+ * It used to swap on `tbody tr:hover`, on the theory that the row is the unit
+ * being acted on. In use that is wrong: pointing at a profile's name is not
+ * asking anything about its proxy, and having a column three across change its
+ * words because the pointer entered the row makes the table twitch wherever you
+ * put the cursor. The remedy belongs to the chip, so the chip is what has to be
+ * pointed at -- and hovering it is also the gesture that precedes clicking it.
+ *
+ * The two labels are stacked in one grid cell rather than swapped in and out,
+ * because the table is `table-layout: auto`: a chip whose content changes width
+ * on hover makes the browser recompute every column in the table, and the
+ * jitter lands on all fifty rows at once. Both labels are always laid out, the
+ * grid takes the width of the wider, and hover only changes which one is
+ * painted. "Reachable"/"709 ms" and "Re-check" are close enough in width that
+ * the reserved difference is a few pixels. Narrowing the trigger does not
+ * relax that -- the widths are still reserved on every row, so the column is
+ * the same width whether the pointer is in the table or not.
+ *
+ * .proxy-check is a <button> here, so it needs the same two resets .failed
+ * documents -- the global button rule would give it a min-height and a fill. */
+button.proxy-check-action {
+  cursor: pointer;
+  display: inline-grid;
+  min-height: 0;
+}
+
+.proxy-check-idle,
+.proxy-check-recheck {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  grid-area: 1 / 1;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.proxy-check-recheck,
+.proxy-check-action:hover .proxy-check-idle {
+  visibility: hidden;
+}
+
+.proxy-check-action:hover .proxy-check-recheck,
+.proxy-check-action:focus-visible .proxy-check-recheck {
+  visibility: visible;
+}
+
+.proxy-check-action:focus-visible .proxy-check-idle {
+  visibility: hidden;
+}
+
+/* ── The failure panel ──────────────────────────────────────────────────────
+ * A title, the message, the age, then the actions. The panel had none of the
+ * first three: it opened straight onto the error text, which meant the one
+ * thing every other popover in this app has -- an edge to start reading from --
+ * was the thing this one lacked, and it is the panel people open when something
+ * is wrong. */
+.proxy-fail-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
 .proxy-fail-message {
   color: var(--ink);
   font-size: 12.5px;
   line-height: 1.45;
-  /* A curl failure can run to a paragraph. The message scrolls rather than the
-     panel, so the copy button below it cannot be pushed out of reach. */
-  margin: 0 0 10px;
-  max-height: 180px;
+  margin: 0;
+  /* Clamped rather than scrolled. Three lines holds every failure the checker
+     actually produces; the scroll box this replaces made a one-line 407 look
+     like a log. .expanded below is the way out for the pathological case. */
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  display: -webkit-box;
+  overflow: hidden;
   /* Selectable, which is half the reason this stopped being a tooltip. curl
      errors are long single tokens, so they have to be allowed to break. */
   overflow-wrap: anywhere;
-  overflow-y: auto;
   user-select: text;
 }
 
+/* Asked for, and only then. The cap is what stops a genuinely enormous dump
+   from pushing the actions off the bottom of the viewport -- the message
+   scrolls, never the panel, so Copy and Re-check stay reachable. */
+.proxy-fail-message.expanded {
+  -webkit-line-clamp: none;
+  display: block;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* Shown only when the clamp actually bit -- the component measures rather than
+   guessing -- so it never appears under text that is already whole. */
+.proxy-fail-message + .link-button {
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.proxy-fail-meta {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 8px 0 0;
+}
+
+/* Copy at one end, the remedy at the other, under a rule. Flush-right and
+   6px apart, the two read as one segmented control -- which is what they
+   looked like and what they are not. */
 .proxy-fail-actions {
+  border-top: 1px solid var(--border-soft);
   display: flex;
-  justify-content: flex-end;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+/* The global button rule gives these the 36px --control-h a form field wants.
+   In a 320px popover that is a pair of slabs; --control-h-sm is the height the
+   chips and the pagination bar already use for the same reason. */
+.proxy-fail-btn {
+  font-size: 12.5px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
 }
 
 /* The flag inside the chip is the same bundled SVG the Name cell uses, sized down
@@ -6372,10 +7098,6 @@ textarea {
   grid-column: 1 / -1;
 }
 
-.form-section.wide {
-  grid-column: 1 / -1;
-}
-
 /* Sentence case at 650, matching .settings-row-label h4 -- the settings dialog
  * is the app's reference for what a form label looks like, and every other
  * dialog was still shouting in 900-weight uppercase at it. inline-flex so the
@@ -6695,27 +7417,19 @@ textarea {
   min-height: var(--control-h);
 }
 
-.form-section {
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 14px;
-}
-
-.fingerprint-card {
-  align-items: center;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-/* ── Fingerprint groups ─────────────────────────────────────────────────────
- * The fingerprint dialog's three blocks. Same surface recipe as .form-section
- * and .panel -- raised, one hairline, --radius, --shadow-xs -- rather than a
- * fourth card style; what makes them a group is the heading, not the box. Each
- * spans the host .profile-form grid so the three stack. */
-.fp-group {
+/* ── Form groups ────────────────────────────────────────────────────────────
+ * components/ui/FormGroup.tsx -- one titled block of a form. The fingerprint
+ * dialog's three, and the profile editor's six.
+ *
+ * Same surface recipe as .panel -- raised, one hairline, --radius, --shadow-xs
+ * -- rather than a card style of its own; what makes them a group is the
+ * heading, not the box. Each spans the host .profile-form grid so they stack.
+ *
+ * This replaced .form-section, which was the same card one level louder (an
+ * h3 at 15px) and is now gone. Two card styles in one dialog is what the
+ * profile editor had, and it read as two kinds of thing rather than as six
+ * sections of one form. */
+.form-group {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -6727,7 +7441,7 @@ textarea {
   padding: 16px;
 }
 
-.fp-group-head {
+.form-group-head {
   border-bottom: 1px solid var(--border-soft);
   display: grid;
   gap: 4px;
@@ -6735,16 +7449,23 @@ textarea {
   padding-bottom: 12px;
 }
 
-/* Deliberately quieter than .form-section h3: these head a block inside a
- * dialog that already has a title, so they are a level down, not a peer. */
-.fp-group-head h4 {
+/* 13px/800, not the 15px an h3 would be: these head a block inside a dialog
+ * that already carries a title, so they are a level down from it rather than
+ * a peer. That is the whole difference between this and the .form-section it
+ * replaced. */
+/* inline-flex so the optional InfoHint sits on the title's line rather than on
+   its baseline, the same arrangement `.field > span` uses for a field's own. */
+.form-group-head h4 {
+  align-items: center;
+  display: inline-flex;
   font-size: 13px;
   font-weight: 800;
+  gap: 6px;
   letter-spacing: 0;
   margin: 0;
 }
 
-.fp-group-head p {
+.form-group-head p {
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 500;
@@ -6754,8 +7475,37 @@ textarea {
 /* The two checkboxes at the end of Privacy & noise. Without this they sit on
  * the grid's baseline while the selects beside them are 36px tall, so a row
  * that mixes the two reads as misaligned. */
-.fp-group .check-field {
+.form-group .check-field {
   min-height: var(--control-h);
+}
+
+/* A summary on the left and the button that acts on it on the right -- the
+   Fingerprint section's whole body. This is what .fingerprint-card used to do
+   with a grid-template override on the card itself; as a row inside the group
+   it needs no override, because the group's own two-column grid is not what is
+   laying it out. */
+.form-group-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+}
+
+.form-group-value {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* For a section whose body is one wide thing rather than a field grid -- the
+   note thread. Without it the panel takes one of the group's two columns and
+   reads at half width beside a column of nothing. */
+.form-group-full {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 /* ── Popovers ───────────────────────────────────────────────────────────────
@@ -6771,6 +7521,14 @@ textarea {
   box-shadow: var(--shadow-md);
   padding: 10px;
   position: fixed;
+  /* A panel is laid out against the viewport but it is still a DOM child of
+     whatever opened it, so it inherits that ancestor's text layout. Several
+     table cells set `white-space: nowrap` to keep a chip on one line -- and a
+     panel opened from one of those inherited it, which turned every paragraph
+     inside into a single line running off the right edge. The proxy-failure
+     panel was doing exactly that from td.profile-proxy-status-cell. Nothing
+     that floats should take its wrapping from its anchor. */
+  white-space: normal;
   z-index: 90;
   animation: modal-in 0.12s var(--ease);
 }
@@ -7247,21 +8005,6 @@ textarea {
   text-transform: uppercase;
 }
 
-/* The card's head keeps the left column so "Edit fingerprint" can hold the
- * right one, and stacks its name over its summary line rather than running
- * them along a row. Needs .form-section in the selector to outrank
- * `.form-section > div:first-child` further down this file, which is equally
- * specific and would otherwise win on order and span the head across both
- * columns -- pushing the button onto a full-width row of its own. */
-.form-section.fingerprint-card > div:first-child {
-  display: block;
-  grid-column: auto;
-}
-
-.compact-section {
-  gap: 12px;
-}
-
 .file-row {
   align-items: center;
   display: grid;
@@ -7286,36 +8029,6 @@ textarea {
     max-height: none;
     position: static;
   }
-}
-
-.form-section h3 {
-  align-items: center;
-  display: flex;
-  font-size: 15px;
-  gap: 7px;
-  margin: 0 0 4px;
-}
-
-.form-section h3 svg {
-  color: var(--ink-faint);
-  flex: none;
-}
-
-.form-section p {
-  color: var(--ink-soft);
-  margin: 0;
-}
-
-.form-section > div:first-child {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-  grid-column: 1 / -1;
-  justify-content: space-between;
-}
-
-.form-section > div:first-child p {
-  flex: 1;
 }
 
 .color-row {

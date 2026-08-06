@@ -188,6 +188,38 @@ dialog::backdrop { background: rgb(31 31 31 / .35); }
 #edit-form textarea { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 .flags { display: flex; gap: 14px; }
 .flags label { align-items: center; display: flex; flex-direction: row; font-weight: 500; gap: 6px; }
+
+/* The scope picker in #save-as-dialog. A bordered group (not just three bare
+ * radios) so it reads as one decision, matching the visual weight of the
+ * name field above it. */
+#save-as-scope {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+}
+#save-as-scope legend {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  padding: 0 3px;
+  text-transform: uppercase;
+}
+#save-as-scope label {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  font-weight: 500;
+  gap: 7px;
+}
+/* A scope with nothing in it (e.g. no rows selected) is disabled rather than
+ * hidden -- the counts in its label are still informative context for why
+ * it's not pickable right now. */
+#save-as-scope label:has(input:disabled) { color: var(--ink-soft); opacity: .5; }
+
 .dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 
 .empty { color: var(--ink-soft); padding: 40px 0; text-align: center; }

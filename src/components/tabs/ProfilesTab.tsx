@@ -14,6 +14,7 @@ import {PaginationBar} from '../ui/PaginationBar';
 import {FolderSelect, StatusFilter, TagFilter} from '../ui/TableFilters';
 import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
 import {PROFILE_COLUMNS} from '../../tables/profileColumns';
+import {useProfileCellActions, useProfileCellOptions} from '../../tables/profileCellActions';
 import {sortColumnsFrom} from '../../tables/columns';
 import {useTableColumns} from '../../tables/ColumnLayouts';
 import {TRASH_FOLDER_ID} from '../../lib/trash';
@@ -28,13 +29,20 @@ import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ProfileColumnContext} from '../../tables/profileColumns';
 import type {PurgeRequest} from '../modals/ConfirmModals';
 import type {ShareRequest} from '../modals/ShareModal';
-import type {ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
+import type {ArgusCookie, ArgusFolder, ArgusProfile, ArgusProxy} from '../../types';
 
 export type ProfilesTabProps = {
   // Controlled by the shell: creating a folder from the dialog selects it here.
   folderId: string;
   onFolderId: (folderId: string) => void;
   onEditProfile: (profile: ArgusProfile) => void;
+  // The Browser and Screen cells are read-only -- a screen set on its own would
+  // contradict the platform preset that re-rolls it -- so they open the editor
+  // at the section they belong to instead of editing in place.
+  onEditFingerprint: (profile: ArgusProfile) => void;
+  // Which tab is showing and which cookie inspector is open are both App's,
+  // so the Cookie set cell hands its jump upwards.
+  onOpenCookieSet: (cookie: ArgusCookie) => void;
   onNewProfile: () => void;
   onNewFolder: () => void;
   // Was onRenameFolder. The dialog edits the icon and colour as well now.
@@ -57,6 +65,8 @@ export function ProfilesTab({
   folderId,
   onFolderId,
   onEditProfile,
+  onEditFingerprint,
+  onOpenCookieSet,
   onNewProfile,
   onNewFolder,
   onEditFolder,
@@ -97,14 +107,31 @@ export function ProfilesTab({
   const showAssignee = state.members.length > 1;
 
   // What the cells need beyond the profile itself. Rebuilt each render on
-  // purpose: every field on it is already state the tab re-renders for.
+  // purpose: every field on it is already state the tab re-renders for, and a
+  // memoised set of handlers would close over a stale `state` the moment
+  // anything is edited. The option lists inside it are memoised, because those
+  // are pure derivations. See tables/profileCellActions.ts.
+  const cellOptions = useProfileCellOptions(state, statusOptions);
+  const cellActions = useProfileCellActions({
+    // Clicking a folder points the whole table at it, which is the same thing
+    // the sidebar's folder list does -- so it resets the page for the same
+    // reason every other filter does.
+    filterFolder: (nextFolderId) => {
+      onFolderId(nextFolderId);
+      setPage(0);
+    },
+    openFingerprint: onEditFingerprint,
+    openCookieSet: onOpenCookieSet,
+  });
   const columnContext: ProfileColumnContext = {
     state,
     proxyFor: profiles.proxyFor,
     folderFor: profiles.folderFor,
     checkingProxyIds,
-    statusOptions,
-    onStatus: (profile, status) => void profiles.update(profile, {status}),
+    tagOptions,
+    userId: org.userId || '',
+    options: cellOptions,
+    actions: cellActions,
   };
   const {columns, isVisible, setVisible, reset} =
     useTableColumns('profiles', PROFILE_COLUMNS, {isTeam: showAssignee});
@@ -545,24 +572,10 @@ export function ProfilesTab({
                           >
                             Launch
                           </BusyButton>
-                          {/* Only for a profile that has a proxy: a direct one has
-                            * nothing to check, and a disabled button there would
-                            * suggest the check was unavailable rather than
-                            * inapplicable. */}
-                          {proxy && (
-                            <button
-                              aria-label={`Check proxy for ${profile.name}`}
-                              className="ghost icon-button row-action"
-                              disabled={checkingProxyIds.has(proxy.id)}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void proxies.checkOnce(proxy);
-                              }}
-                              title={`Check ${proxy.host}:${proxy.port} now`}
-                            >
-                              <ShieldCheck size={16} />
-                            </button>
-                          )}
+                          {/* The manual proxy re-check used to be a fifth button
+                            * here. It is now the Proxy check chip itself, which
+                            * is the thing it acts on -- and a row of five
+                            * controls was already one too many (see below). */}
                           {/* Bordered rather than bare: beside a filled Launch
                             * button, a naked glyph read as decoration on the
                             * row instead of as something to press. */}
@@ -577,12 +590,14 @@ export function ProfilesTab({
                           >
                             <Pencil size={16} />
                           </button>
-                          {/* Yes, this makes five controls on one row, which is
-                            * one more than it wants. The alternative was leaving
-                            * Share reachable only by ticking a checkbox first,
-                            * and a feature you cannot see is worse than a row
-                            * that is a little busy. If a sixth ever arrives,
-                            * that is the moment for an overflow menu. */}
+                          {/* Four controls, which is what this row wants. It was
+                            * five while the proxy re-check lived here; moving
+                            * that onto the Proxy check chip is what bought the
+                            * space back. Share stays a button rather than
+                            * something you reach by ticking a checkbox first,
+                            * because a feature you cannot see is worse than a
+                            * row that is a little busy. If a fifth arrives
+                            * again, that is the moment for an overflow menu. */}
                           <button
                             aria-label={`Share ${profile.name}`}
                             className="ghost icon-button row-action"

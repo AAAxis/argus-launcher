@@ -85,6 +85,10 @@ export type OrgInviteRow = {
   expires_at: string;
   created_at: string;
   accepted_at: string | null;
+  // Null until the website has managed to email this invitation at least once.
+  // The send route uses it as a 60-second floor; the Team tab uses it to decide
+  // whether the owner still has to deliver the link by hand.
+  last_emailed_at: string | null;
 };
 
 // An offer to take an item over. Read straight from the table with no RPC and
@@ -114,7 +118,6 @@ export type ProfileRow = {
   id: string;
   org_id: string;
   name: string;
-  notes: string | null;
   folder_id: string | null;
   proxy_id: string | null;
   cookie_set_id: string | null;
@@ -147,6 +150,44 @@ export type ProfileRow = {
   // Who is on the hook for it. Added 2026-08-06-handoffs.sql. Nullable on every
   // table that has it -- unclaimed is the default and the common case.
   assigned_to: string | null;
+};
+
+// One entry in a profile's note thread. Added 20260807000000_profile_notes.sql,
+// which also drops the dead scalar `profiles.notes` this replaces.
+export type ProfileNoteRow = {
+  id: string;
+  org_id: string;
+  // text, matching ProfileRow.id above.
+  profile_id: string;
+  body: string;
+  // 'user' | 'agent'. Kept as a plain string here for the same reason every
+  // other enumerated column is: the check constraint is what enforces it, and a
+  // narrower type here would only mean a cast at the boundary.
+  author_kind: string;
+  // The session the note was written THROUGH, which is not the same as who said
+  // it -- an API or MCP write carries the uid of whichever human had the
+  // launcher open. author_kind is what tells the two apart. The migration's
+  // comment has the full reasoning.
+  created_by: string | null;
+  // The API key's name, on agent rows only. Null for anything a person wrote.
+  author_label: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// The profile_note_summaries view: one row per profile that has any notes,
+// carrying the newest one and the count. What the table's Notes column reads,
+// so a page of 25 rows costs one query rather than 25.
+export type ProfileNoteSummaryRow = {
+  profile_id: string;
+  org_id: string;
+  note_count: number;
+  last_id: string;
+  last_body: string;
+  last_author_kind: string;
+  last_created_by: string | null;
+  last_author_label: string | null;
+  last_created_at: string;
 };
 
 export type ProxyRow = {

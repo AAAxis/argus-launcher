@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {liveSetName, resolveLiveSetAction} from './cookieSync';
+import {liveSetName, resolveLiveSetAction, sanitizeSetName} from './cookieSync';
 import type {ArgusCookie, ArgusProfile} from '../types';
 
 const set = (over: Partial<ArgusCookie>): ArgusCookie => ({
@@ -66,5 +66,52 @@ describe('resolveLiveSetAction', () => {
 describe('liveSetName', () => {
   it('is the exact convention the bridge and the tab share', () => {
     expect(liveSetName('P')).toBe('P (live)');
+  });
+});
+
+// `saveAs` on the cookie-sync push route: user-supplied DATA (a name), never
+// an authorization input. run-token.cjs only type-gates it before handing it
+// off; this is where "is this name usable" is actually decided, so both the
+// extension's own client-side trim/cap and the launcher's answer agree.
+describe('sanitizeSetName', () => {
+  it('trims surrounding whitespace', () => {
+    expect(sanitizeSetName('  amazon login  ')).toEqual({ok: true, name: 'amazon login'});
+  });
+
+  it('rejects empty input', () => {
+    expect(sanitizeSetName('')).toEqual({ok: false, error: 'Enter a name for this cookie set.'});
+  });
+
+  it('rejects input that is only whitespace', () => {
+    expect(sanitizeSetName('   ')).toEqual({ok: false, error: 'Enter a name for this cookie set.'});
+  });
+
+  it('caps length at 80 characters', () => {
+    const result = sanitizeSetName('x'.repeat(120));
+    expect(result).toEqual({ok: true, name: 'x'.repeat(80)});
+  });
+
+  it('rejects a name that is only whitespace once capped at 80', () => {
+    // 81 spaces: passes the initial trim (interior whitespace is not
+    // trimmed), gets capped to 80 spaces, and must still be refused rather
+    // than saved as a blank name.
+    expect(sanitizeSetName(`a${' '.repeat(80)}`.slice(1)))
+        .toEqual({ok: false, error: 'Enter a name for this cookie set.'});
+  });
+
+  it('strips control characters wherever they appear, not just at the ends', () => {
+    const withControls = String.fromCharCode(9) + 'amazon' + String.fromCharCode(0) +
+      'login' + String.fromCharCode(127);
+    expect(sanitizeSetName(withControls)).toEqual({ok: true, name: 'amazonlogin'});
+  });
+
+  it('rejects input that is only control characters', () => {
+    const onlyControls = String.fromCharCode(1) + String.fromCharCode(2) + String.fromCharCode(27);
+    expect(sanitizeSetName(onlyControls))
+        .toEqual({ok: false, error: 'Enter a name for this cookie set.'});
+  });
+
+  it('keeps unicode and punctuation intact', () => {
+    expect(sanitizeSetName('amazon.de — café 🍪')).toEqual({ok: true, name: 'amazon.de — café 🍪'});
   });
 });

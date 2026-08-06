@@ -187,6 +187,26 @@ button.ghost:hover { background: var(--hover); color: var(--ink); }
   stroke-width: 2;
 }
 
+/* ---- save-as: inline expanding name field ---------------------------------
+ * The button and the form occupy the same row and are never both visible --
+ * toggled via [hidden], same pattern as the export/clear menus below. */
+.save-as-wrap { display: grid; }
+.save-as-form { align-items: center; display: flex; gap: 6px; }
+.save-as-form input[type="text"] {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink);
+  flex: 1;
+  font-family: inherit;
+  font-size: 12.5px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+.save-as-form input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.save-as-actions { display: flex; flex: none; gap: 6px; }
+.save-as-actions button { padding: 9px 10px; }
+
 .row { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 .menu-wrap { position: relative; }
 .menu-wrap > button { width: 100%; }

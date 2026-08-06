@@ -49,3 +49,48 @@ export function resolveLiveSetAction(
   }
   return {kind: 'create', name};
 }
+
+// The library-save half of a cookie push (`saveAs` on
+// /v1/cookies/push-from-profile): a user-chosen name for a NEW set, not the
+// auto-managed live set above. `saveAs` arrives as request DATA over the
+// run-token route, not as an authorization input -- run-token.cjs only
+// type-gates it (string or absent) before handing it to
+// useAutomationBridge.ts, which calls this to decide whether it is usable
+// before ever calling addCookieSet. Kept pure and here (not inline in the
+// bridge) for the same reason resolveLiveSetAction is: it is the one place
+// this decision is made, so the extension's own trim/cap (defense in depth,
+// not the source of truth) and the launcher's can never quietly disagree.
+const SET_NAME_MAX_LENGTH = 80;
+
+// True for the C0 controls, DEL, and the C1 controls -- everything a cookie
+// set's name (a Postgres column and, via addCookieSet, part of a Storage file
+// name) has no business carrying. Written as a code-point filter rather than
+// a regex /[\x00-\x1f\x7f]/ so the source file never has to hold literal
+// control bytes for a linter or an editor to mangle.
+function isControlCodePoint(codePoint: number): boolean {
+  return (codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f);
+}
+
+export function sanitizeSetName(
+    raw: string): {ok: true; name: string} | {ok: false; error: string} {
+  // Stripped before trimming, not just at the ends -- a name is about to
+  // become a cookie_sets.name and a Storage file name, neither of which
+  // should carry control characters anywhere inside it.
+  const stripped = Array.from(raw)
+      .filter((character) => !isControlCodePoint(character.codePointAt(0) || 0))
+      .join('');
+  const trimmed = stripped.trim();
+  if (!trimmed) {
+    return {ok: false, error: 'Enter a name for this cookie set.'};
+  }
+  // Trimmed again after the cap: slicing mid-string can leave trailing
+  // whitespace at the new boundary, and a name of 81 spaces would otherwise
+  // cap down to a non-empty run of spaces instead of being refused.
+  const capped = trimmed.length > SET_NAME_MAX_LENGTH ?
+    trimmed.slice(0, SET_NAME_MAX_LENGTH).trim() :
+    trimmed;
+  if (!capped) {
+    return {ok: false, error: 'Enter a name for this cookie set.'};
+  }
+  return {ok: true, name: capped};
+}

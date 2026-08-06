@@ -1,6 +1,6 @@
 # What an AI agent can do through the Argus MCP server
 
-Scope: the 23 tools in `electron/mcp/tools.cjs`, the loopback automation API in
+Scope: the 25 tools in `electron/mcp/tools.cjs`, the loopback automation API in
 `electron/main.cjs` they call, and the renderer handlers in
 `src/hooks/useAutomationBridge.ts` that actually answer.
 
@@ -18,7 +18,9 @@ reported by the server: `1.0.55`.
 
 ## 1. The surface
 
-**[verified]** `tools/list` returns exactly 23 tools:
+**[verified]** `tools/list` returned exactly 23 tools at the time of the run
+below. It now returns 25: `argus_profile_notes` and `argus_add_profile_note`
+were added afterwards and are marked **[read]** in the table.
 
 | Tool | Backed by | Verified? |
 |---|---|---|
@@ -28,6 +30,8 @@ reported by the server: `1.0.55`.
 | `argus_launch_profile` | `POST /v1/profiles/launch-automation` | read only |
 | `argus_close_profile` | `POST /v1/profiles/close-automation` | read only |
 | `argus_update_profile` | `POST /v1/profiles/update` | read only |
+| `argus_profile_notes` | `POST /v1/profiles/notes` | read only |
+| `argus_add_profile_note` | `POST /v1/profiles/notes/add` | read only |
 | `argus_list_proxies` | `GET /v1/proxies` | verified |
 | `argus_assign_proxy` | `POST /v1/profiles/assign-proxy` | read only |
 | `argus_check_proxy` | `POST /v1/proxies/check` | verified |
@@ -46,10 +50,11 @@ reported by the server: `1.0.55`.
 | `argus_table_columns` | `GET /v1/tables/columns` | read only |
 | `argus_set_table_columns` | `POST /v1/tables/columns` | read only |
 
-Eighteen tools are thin wrappers over loopback HTTP routes; five need a running
+Twenty tools are thin wrappers over loopback HTTP routes; five need a running
 browser and speak CDP directly (`electron/mcp/cdp.cjs`).
 
-The seven automations tools and the two table-column tools are **generated**
+The seven automations tools, the two table-column tools and the two
+profile-notes tools are **generated**
 from `electron/api/routes.json` rather than written out, so their names,
 descriptions and input schemas cannot drift from the routes they call. `scripts/verify-api-routes.mjs` checks the rest
 of the table the same way. The nine profile/proxy wrappers above them are still
@@ -205,6 +210,15 @@ exist and work over HTTP but have **no MCP tool**:
 | `POST /v1/cookies/bulk-match` | match a cookies folder onto profiles |
 | `POST /v1/cookies/push-local` | write a cookie snapshot into a profile |
 | `POST /v1/monitoring/report` | write a monitoring result to Supabase |
+
+Editing and deleting a profile note have no route at all, let alone a tool, and
+that is a security boundary rather than a decision about scope. Every write on
+this bridge runs through the signed-in user's Supabase session, so RLS sees
+`created_by = auth.uid()` on that person's own notes and would allow an agent to
+rewrite them. The database can refuse an agent editing an *agent* note — the
+update policy requires `author_kind = 'user'` — but it cannot tell that a write
+claiming to be the user is not. Agents append to the backlog; they never rewrite
+it, and the absent routes are what enforces that.
 
 Note the header comment names `proxies/create` but not `proxies/update` or
 `proxies/delete`; all three are in fact omitted, which is consistent with the

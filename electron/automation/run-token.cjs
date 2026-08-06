@@ -286,6 +286,16 @@ function handleRecheckFromPage({req, res, tokens, sendJson, recheck}) {
 // Saves a running profile's live cookie jar into the launcher. The profile is
 // the token entry's own -- the payload names no profile, so a leaked token can
 // only ever write to the launch it was minted for.
+//
+// `saveAs`, when present, is the one optional field this route accepts: a
+// user-chosen name that turns this push into a library save (a new, named
+// set) instead of the default live-set sync. It is request DATA, not an
+// authorization input -- same as `cookies` -- so it gets the same treatment:
+// type-checked here (a string, or dropped), never trusted as anything more.
+// The actual sanitize-or-reject (trim, length cap, control-character strip)
+// happens once, in useAutomationBridge.ts via sanitizeSetName, which is also
+// where the set gets created -- so there is exactly one place that decides
+// what a valid name is, and it is not this file.
 function handleCookiePushFromPage({req, res, tokens, sendJson, pushCookies}) {
   handlePageRequest({
     req, res, tokens, sendJson,
@@ -293,7 +303,8 @@ function handleCookiePushFromPage({req, res, tokens, sendJson, pushCookies}) {
     maxBodyBytes: COOKIE_MAX_BODY_BYTES,
     work: async ({entry}, payload) => {
       const cookies = Array.isArray(payload.cookies) ? payload.cookies : [];
-      return await pushCookies(entry, cookies);
+      const saveAs = typeof payload.saveAs === 'string' ? payload.saveAs : undefined;
+      return await pushCookies(entry, cookies, saveAs);
     },
   });
 }

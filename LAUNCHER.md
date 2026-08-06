@@ -56,6 +56,7 @@ pool of profiles, proxies and cookies. Schema in `../docs/data-model.md`.
 | `errors.ts` | `describeDbError()` — turns `profile_limit_reached`, `seat_limit_reached` and the `*_id_fs_safe` CHECKs into sentences. |
 | `orgs.ts` | `listMyOrgs`, `getOrg`, `createOrg` (the `bootstrap_org` RPC), `updateBuiltInExtensions`, `currentOrgId` |
 | `profiles.ts` | `list`, `create`, `replace`, `save`, `update`, `softDelete`, `restore`, `purge`, `purgeExpired` |
+| `profileNotes.ts` | `list`, `summaries`, `add`, `edit`, `remove`. A profile's note thread. Only the `summaries` view rides in `CloudState`; the threads are read on demand with a limit, like `runs.ts`. `edit`/`remove` return null/false rather than throwing when RLS refuses — a note is only its author's to change. |
 | `proxies.ts` | `list`, `upsert`, `remove`, `recordCheck` |
 | `cookieSets.ts` | `list`, `loadPayload`, `create`, `update`, `savePayload`, `cachePayload`, `softDelete`, `restore`, `purge`, `purgeExpired`, `uploadCookieFile`, `downloadCookieFile`. `list` deliberately omits the `cookies` column — payloads are fetched one set at a time. |
 | `folders.ts`, `extensions.ts`, `bookmarks.ts`, `statuses.ts` | one table each |

@@ -34,6 +34,7 @@ export const defaultCloudState: CloudState = {
   connectors: [],
   notifications: [],
   members: [],
+  note_summaries: [],
 };
 
 // BUILT_IN_EXTENSIONS moved to data/extensionCatalog.ts, where it sits next to

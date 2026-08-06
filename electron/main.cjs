@@ -4327,9 +4327,9 @@ ipcMain.on('argus:cookie-sync-pull-result', (_event, {requestId, result, error})
 function cookiePushFromProfile(req, res) {
   handleCookiePushFromPage({
     req, res, tokens: runTokens, sendJson,
-    pushCookies: (entry, cookies) =>
+    pushCookies: (entry, cookies, saveAs) =>
       askRendererOnPageChannel('argus:cookie-sync-push-request',
-          {profileId: entry.profileId, cookies}),
+          {profileId: entry.profileId, cookies, saveAs}),
   });
 }
 
@@ -4482,8 +4482,21 @@ function startAutomationApiServer() {
         sendJson(res, 200, {status: true, steps: stepSchema});
         return;
       }
+      // The calling key's own identity, forwarded alongside its folder scope.
+      //
+      // Everything the renderer writes goes through the signed-in user's
+      // Supabase session, so auth.uid() is whoever has the launcher open --
+      // never the key holder. For most routes that does not matter: a profile
+      // renamed over the API is simply renamed. For anything that records WHO
+      // did something it matters entirely, because without this a note written
+      // by an agent is indistinguishable from one the user typed. This is the
+      // only channel through which that distinction can cross.
+      //
+      // Name and id only. The token is hashed and must not leave this process,
+      // and ownerUserId is not the author either -- it is who created the key.
+      const agent = {id: key.id, name: key.name};
       if (req.method === 'GET') {
-        askRenderer(res, tableRoute.channel, {allowedFolders: key.folderScope});
+        askRenderer(res, tableRoute.channel, {agent, allowedFolders: key.folderScope});
         return;
       }
       readJsonBody(req, res, (payload) => {
@@ -4492,7 +4505,9 @@ function startAutomationApiServer() {
           sendJson(res, 400, {status: false, msg: error});
           return;
         }
-        askRenderer(res, tableRoute.channel, {...forwarded, allowedFolders: key.folderScope});
+        askRenderer(res, tableRoute.channel, {
+          ...forwarded, agent, allowedFolders: key.folderScope,
+        });
       });
       return;
     }

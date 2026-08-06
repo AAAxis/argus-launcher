@@ -47,6 +47,30 @@ const PLATFORM_MARKS: Record<string, ({size}: {size?: number}) => React.ReactEle
   'iOS': AppleMark,
 };
 
+// The mark, and the version beside it for the one platform that stores one.
+//
+// Windows 11 and Windows 10 share the flag -- downstream they are the same
+// `windows` preset and the same Windows NT 10.0 user agent -- so with the mark
+// alone the Profiles table drew the two presets identically and the column
+// could not answer the question it was there for. The number is what tells
+// them apart, and it is read straight off fingerprint.os rather than derived.
+//
+// Nothing else carries a version. `osPresets` is exactly
+// ['Windows 11', 'Windows 10', 'macOS', 'Ubuntu', 'Android', 'iOS']: there is
+// no macOS 26 to show, no Ubuntu 24.04, and the frozen macOS user agent says
+// 10_15_7 for every profile. So those render the mark on its own rather than a
+// number this app would have had to invent -- which would be a claim about
+// what the browser reports, and a false one.
+export function PlatformLabel({os, size = 16}: {os?: string; size?: number}) {
+  const version = os?.startsWith('Windows ') ? os.slice('Windows '.length) : '';
+  return (
+    <span className="platform-label">
+      <PlatformIcon os={os} size={size} />
+      {version && <span className="platform-version">{version}</span>}
+    </span>
+  );
+}
+
 // An integration's brand mark, or its Lucide stand-in when there is no asset.
 // Shared by the integration cards, the connect dialog and the key list so all
 // three agree on how a given tool is drawn.

@@ -58,11 +58,13 @@ const server = createServer((req, res) => {
   if (req.url === '/cookie-push') {
     handleCookiePushFromPage({
       req, res, tokens, sendJson,
-      pushCookies: async (entry, cookies) => {
+      pushCookies: async (entry, cookies, saveAs) => {
         // `cookies` is kept, not just its length, so a chunk-boundary
         // corruption test can inspect the actual value that arrived.
-        pushed.push({profileId: entry.profileId, count: cookies.length, cookies});
-        return {saved: cookies.length};
+        // `saveAs` is kept too, so the type-gate below (a string survives, a
+        // non-string is dropped to undefined) can be asserted directly.
+        pushed.push({profileId: entry.profileId, count: cookies.length, cookies, saveAs});
+        return {saved: cookies.length, set: saveAs};
       },
     });
     return;
@@ -275,6 +277,33 @@ check('the TTL covers the re-check route as well',
   check('an expired token is refused on the cookie routes too, byte-identically to unknown',
       expiredCookiePush.status === 403 && expiredCookiePush.text === expiredCookieUnknown.text,
       expiredCookiePush.text);
+}
+
+// ---- saveAs: a library-save name is DATA, type-gated but never trusted ----
+// `saveAs` is the one field the push route added for the "save to Cookies
+// tab" feature. It carries no authority -- the profile still comes from the
+// token entry above, exactly as `cookies` always has -- so this only proves
+// the type gate: a string survives to `pushCookies` unchanged, anything else
+// (here, a number) is dropped to undefined rather than forwarded as-is. The
+// actual sanitize-or-reject of the string (trim/cap/strip) is renderer-side
+// (src/lib/cookieSync.ts's sanitizeSetName, unit-tested there), out of reach
+// of this Electron-free harness.
+{
+  const token = tokens.mint({profileId: 'prof-saveas', profileName: 'SA', cdpPort: null, automations: []});
+  const withName = await post({runToken: token, cookies: [{name: 'a'}], saveAs: 'amazon login'},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  check('a string saveAs is passed through to the work function unchanged',
+      withName.status === 200 && pushed.at(-1).saveAs === 'amazon login', JSON.stringify(pushed.at(-1)));
+
+  const withoutName = await post({runToken: token, cookies: [{name: 'a'}]},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  check('an absent saveAs stays undefined (the default live-sync path)',
+      withoutName.status === 200 && pushed.at(-1).saveAs === undefined, JSON.stringify(pushed.at(-1)));
+
+  const withNonString = await post({runToken: token, cookies: [{name: 'a'}], saveAs: 12345},
+      {'Content-Type': 'application/json'}, '/cookie-push');
+  check('a non-string saveAs is dropped to undefined rather than forwarded',
+      withNonString.status === 200 && pushed.at(-1).saveAs === undefined, JSON.stringify(pushed.at(-1)));
 }
 
 // ---- F3 regression: a non-object JSON body must not crash the process -----

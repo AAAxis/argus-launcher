@@ -477,7 +477,8 @@ export function App() {
         <ProfileModal
           draft={editors.profileDraft}
           onChange={editors.setProfileDraft}
-          onClose={() => editors.setProfileDraft(null)}
+          onClose={editors.closeProfileDraft}
+          openFingerprint={editors.profileDraftSection === 'fingerprint'}
           onNewStatus={() => editors.setStatusDraft({name: ''})}
           onPickCookies={() => editors.setCookiePickerOpen(true)}
           onCreateProxy={(seed) => editors.openProxyDraft(seed, 'profile')}
@@ -816,6 +817,16 @@ export function App() {
             folderId={profileFolderId}
             onFolderId={setProfileFolderId}
             onEditProfile={editors.editProfile}
+            onEditFingerprint={(profile) => editors.editProfile(profile, 'fingerprint')}
+            onOpenCookieSet={(cookie) => {
+              // The tab as well as the dialog: dismissing the inspector should
+              // leave you looking at the library the set lives in, not at the
+              // profiles table you came from. And its folder, or the table
+              // behind it would be filtered to somewhere the set is not.
+              setActiveTab('cookies');
+              setCookieFolderId(cookie.folder_id || '');
+              editors.setCookieSetOpen(cookie);
+            }}
             onNewProfile={editors.newProfile}
             onNewFolder={() => editors.setFolderDraft({
               kind: 'profile',

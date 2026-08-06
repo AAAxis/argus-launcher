@@ -21,6 +21,13 @@ export function useEditors() {
   const org = useOrg();
 
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
+  // Which part of the profile editor the caller wants open, when it is not the
+  // form itself. The same companion-state shape proxyDraftSource uses, and for
+  // the same reason: the dialog's own behaviour stays the dialog's, but how it
+  // was *opened* belongs to whoever opened it. The Profiles table's Browser and
+  // Screen cells are read-only and open the editor here instead.
+  const [profileDraftSection, setProfileDraftSection] =
+    useState<'fingerprint' | null>(null);
   const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
   const [proxyDraftSource, setProxyDraftSource] = useState<'profile' | null>(null);
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
@@ -51,10 +58,22 @@ export function useEditors() {
       setProfileDraft((current) => current ? {...current, ...patch} : current),
     // Seeded with the current user so the assignee picker opens on "You",
     // matching the column default the insert is about to apply.
-    newProfile: () => setProfileDraft(newProfileDraft(org.userId || '')),
-    editProfile: (profile: ArgusProfile) => {
+    newProfile: () => {
+      setProfileDraftSection(null);
+      setProfileDraft(newProfileDraft(org.userId || ''));
+    },
+    profileDraftSection,
+    // The section is an optional second argument rather than a second function,
+    // so `onEditProfile={editors.editProfile}` still passes straight through
+    // wherever a caller only wants the form.
+    editProfile: (profile: ArgusProfile, section: 'fingerprint' | null = null) => {
       setSelectedProfileId(profile.id);
+      setProfileDraftSection(section);
       setProfileDraft(draftFromProfile(profile));
+    },
+    closeProfileDraft: () => {
+      setProfileDraft(null);
+      setProfileDraftSection(null);
     },
 
     proxyDraft,
@@ -127,6 +146,7 @@ export function useEditors() {
 
     closeAll: () => {
       setProfileDraft(null);
+      setProfileDraftSection(null);
       setProxyDraft(null);
       setProxyDraftSource(null);
       setBookmarkDraft(null);

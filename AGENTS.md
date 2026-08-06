@@ -94,6 +94,31 @@ Get-CimInstance Win32_Process |
   shipping as Windows 11, the `Fingerprint` card on the main form sits directly under
   Proxy — not at the bottom of the form — and its summary line names the current platform,
   browser version, timezone and WebRTC mode. Keep it there.
+  **The Profiles table has three narrow exceptions, and the test they pass is the rule,
+  not a compromise: a fingerprint field may be set from the table only if setting it
+  leaves the identity coherent by itself.** `platform`, `fpTimezone` and `fpLanguage`
+  pass; `fpBrowser` and `fpScreen` do not.
+  - Timezone and Language are standalone fields with fixed preset lists
+    (`timezoneGroups`, `languagePresets`) — setting one changes that one and nothing else.
+  - Platform passes because it *carries* the consistency rather than breaking it:
+    `ProfileCellActions.setPlatform` applies `platformFingerprintPatch`, which runs the
+    same `fingerprintPatchForOs` the editor's `<PlatformPicker>` does and re-rolls the GPU,
+    CPU, screen, memory and media devices along with `os`. That patch names its fields
+    explicitly (`PLATFORM_FIELDS` / `PLATFORM_NUMBERS` in `profileCellActions.tsx`) rather
+    than running the preset through `fingerprintFromDraftPatch`, which fills the *whole*
+    fingerprint shape — spread over an existing one that would blank every field the preset
+    is silent about and reset `do_not_track` and `rotate_on_launch` to false on the way.
+  - Screen and Browser fail it: screen is re-rolled *by* the platform, so a resolution
+    chosen on its own is a claim the rest of the identity contradicts, and browser version
+    sits with it because the pair is what a checker cross-references. Those two cells are
+    `CellLink`s that open this dialog at its fingerprint section
+    (`editors.editProfile(profile, 'fingerprint')` → `ProfileModal`'s `openFingerprint`).
+
+  Do not widen this to a fourth field without the same argument. Every table-side
+  fingerprint write goes through `setFingerprint` or `setPlatform`
+  (`src/tables/profileCellActions.tsx`) — the only two places the existing fingerprint is
+  spread before the patch. `profilePatchToRow` replaces the whole object, so a cell that
+  built its own patch would blank the other twenty fields.
 - Only `windows`, `macos` and `linux` are fully implemented browser-side
   (`argus_ua.cc` `LookupPreset`). `Android` and `iOS` get a user-agent string but no
   UA-Client-Hints override, so they still report a desktop platform and `Sec-CH-UA-Mobile:
@@ -103,8 +128,23 @@ Get-CimInstance Win32_Process |
   start URL. It must not open Supabase login, `localhost`, `127.0.0.1`,
   `argus-launcher`, or `about:blank`.
 - Proxy checks are automatic background checks **in the launcher**. Do not add a manual
-  check button back to the Proxies tab. There are two exceptions, both surfaces the
+  check button back to the Proxies tab. There are three exceptions, all surfaces the
   background sweep cannot serve:
+  - The Profiles table's **Proxy check chip is itself the re-check** (`ProxyCheckCell`'s
+    `onRecheck`, passed only from `profileColumns.tsx`). This is not a new affordance:
+    that tab has had a manual check since it had a row-actions cell, as a `ShieldCheck`
+    button sitting fourth among five. Moving it onto the chip put it on the thing it acts
+    on and took the row back to four controls. A healthy or unchecked chip swaps its label
+    to `Re-check` **while the chip itself is hovered** — not while its row is, which is
+    what it used to do and is wrong: pointing at a profile's name is not a question about
+    its proxy, and a column three across changing its words because the pointer entered
+    the row makes the table twitch wherever you put the cursor. A failed one keeps saying
+    `Failed` and offers the re-check inside the panel that already carried the error text
+    and its Copy button, because the message is what anyone opens that chip for. Both
+    labels are laid out at once and only their `visibility` changes — the table is
+    `table-layout: auto`, so a chip that changed width on hover would re-lay-out every
+    column in the table. Narrowing the trigger does not relax that.
+    The Proxies tab itself still has no button, and must not grow one.
   - The generated browser start page has a Re-check button on its proxy panel: that page
     shows a country and a latency measured once at launch, a session outlives that by
     hours, and you cannot reach the launcher from inside an anonymous window — so it is
@@ -121,6 +161,72 @@ Get-CimInstance Win32_Process |
     per row, and routes a row already matched to a stored proxy through
     `testConnectionAndRecord` so that result lands exactly as the sweep would write it.
     A row whose proxy is not saved yet is only tested.
+- **A cell that can be edited is built from `components/ui/CellControls.tsx`, and nothing
+  in a table row may reserve width for something that is invisible.** `CellPicker`,
+  `CellCopy`, `CellLink` and `CellTextEdit` are the four shapes; all four sit on `Popover`,
+  the app's one floating layer, and all four render their rows through the shared
+  `FilterOption` (lifted out of `TableFilters.tsx` so the cell pickers and the toolbar
+  filters cannot become two widgets). The constraint they all exist to satisfy is that
+  every table here is `table-layout: auto`: a column's width is computed from its content,
+  so an affordance that appears or grows on hover makes the browser redistribute width
+  across the whole table and the jitter lands on all fifty rows at once. There are exactly
+  two legal ways to reveal something on hover — draw it always and change only its opacity
+  or visibility (the proxy-check label), or take it out of flow entirely
+  with `position: absolute` and reserve its gutter with constant padding on the `<td>`
+  (`.cell-copy-button` / `td.cell-copy-cell`). `opacity: 0` on an in-flow control is the
+  bug, not the pattern: that is what `.status-picker-edit` did, and it cost every status
+  chip in the table ~30px of permanent blank to its right. The pencil it hid is gone from
+  the table — the chip is the trigger now — and `StatusPicker` survives only for the
+  profile dialog, where the field is one row in a form rather than one cell in fifty.
+  **An editable cell shows no marker at rest — no caret, no border, no icon.** It is the
+  value, and it becomes a button under the pointer: `.cell-trigger` takes a `--hover` fill
+  at `--radius-xs` and a pointer cursor, bled 6px/8px past the text so the fill reaches
+  into the cell's own gutter. The fill is an absolutely positioned `::before`, **not**
+  `.th-sort`'s padding-plus-cancelling-negative-margin: a `<th>` is sized by every cell in
+  its column and can shed 12px, where a `width: 1%` data cell is sized by that element
+  alone, so padding out and margin back in left every value ellipsizing a few characters
+  early. Same look, different mechanism, and the reason is in the comment above
+  `.cell-trigger` in `styles.css`. A caret per cell was tried and reverted: eighteen of
+  them down a row is the same noise the pencils were.
+  The toolbar's filter pills (`.filter-trigger`) take the same treatment — flat at rest,
+  the same `--hover` plate under the pointer and while open, no chevron. They are in a
+  flex toolbar rather than a table cell, so they can use `.th-sort`'s literal padding and
+  margin. They were drawn as bordered `<select>`-alikes until three boxed controls sitting
+  above a table whose own headers carry no box read as heavier than the thing they filter.
+  `FolderSelect` is the exception and stays a `.ghost` button: it lives in the selection
+  toolbar among five other bordered buttons and is an action, not a filter.
+  Short columns get `cell-fit` (`width: 1%` + nowrap) on their `cellClassName`; `name` is
+  deliberately left unpinned so there is always something to absorb the table's slack.
+  Width is a class, never a field on `TableColumn` — the registry is serialised by
+  `describeColumns` into what agents read through `argus_table_columns`, and a width there
+  is the front edge of resizable columns rather than a spacing fix.
+- **A titled block of a form is `components/ui/FormGroup.tsx`, and there is only one card
+  style for it.** `.form-section` — the same card one level louder, with a 15px `h3` — is
+  gone; two card styles in one dialog read as two kinds of thing rather than as sections
+  of one form. `FormGroup` takes a `title`, a required one-line `hint`, and an optional
+  `info` for an `InfoHint` beside the title. The hint is required on purpose: a section
+  whose purpose cannot be said in a line has been drawn around the wrong fields.
+  `ProfileModal` is six of them — **Account, Proxy, Fingerprint, Cookies, Launch,
+  Notes** — and the order is the order the questions get asked. Fingerprint stays directly
+  after Proxy for the reason above: those two cells are the only way into the fingerprint
+  editor, so the platform it names has to be visible near the top. Notes renders only when
+  `draft.saved`; a note is a row keyed on a profile id and a profile being created has
+  none yet.
+- **A profile's notes are a thread, not a field.** `profiles.notes` was a scalar column
+  that nothing ever read or wrote, and both `tools.cjs` and `routes.json` carried comments
+  about an agent reporting success on a write that never happened; `20260807000000` drops
+  it. The real thing is `profile_notes`: one row per entry, with `author_kind`,
+  `created_by` and `author_label`. Only the summaries view rides in `CloudState` — threads
+  are unbounded and read on demand, the `runs.ts` split.
+  **The API and MCP can read and append, and cannot edit or delete — including their own.**
+  This is a boundary, not a scope decision. Every write on that bridge runs through the
+  signed-in user's Supabase session, so RLS sees `created_by = auth.uid()` on that
+  person's notes and would let an agent rewrite them; the database can refuse an agent
+  editing an *agent* note (`author_kind = 'user'` is in the update policy) but cannot tell
+  that a write claiming to be the user is not. Do not add the missing routes. The one
+  thing that does cross the IPC boundary for attribution is the calling key's
+  `{id, name}`, forwarded by the table-driven dispatch in `main.cjs`, and it is the only
+  reason an agent note is distinguishable from a person's.
 - **`assigned_to` is a label, not a permission, and it is never written by an ordinary
   save.** Every member of an org already sees, launches and edits every profile, proxy,
   cookie set and automation — `org_id` is the only scope on any of them, and the RLS
