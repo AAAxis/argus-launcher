@@ -58,6 +58,32 @@ export function describeDbError(error: unknown, fallback = 'Something went wrong
     return 'Your session expired. Sign in again.';
   }
 
+  // ---- workspaces (20260808000000_active_workspace.sql) ----
+  //
+  // Neither of these is a plan limit. They are not sold, upgrading does not
+  // raise them, and the sentences must not send anyone to the Plans tab the way
+  // profile_limit_reached and seat_limit_reached deliberately do.
+  //
+  // The owned test comes first because 'workspace_limit_reached' is a substring
+  // of 'owned_workspace_limit_reached' -- the other order would report the wrong
+  // cap for every failed Create.
+  if (raw.includes('owned_workspace_limit_reached')) {
+    return 'You already own three workspaces, which is the most one account can have. ' +
+      'Leave or hand over one before creating another.';
+  }
+  if (raw.includes('workspace_limit_reached')) {
+    return 'You\'re in ten workspaces, which is the most one account can be in. ' +
+      'Leave one before joining or creating another.';
+  }
+  // Raised by set_active_org and set_built_in_extensions. Reachable when someone
+  // is removed from a workspace while they have it open.
+  if (raw.includes('not_a_member')) {
+    return 'You\'re no longer in that workspace.';
+  }
+  if (raw.includes('invalid_org_type')) {
+    return 'Pick whether the workspace is for just you or for a business.';
+  }
+
   // ---- hand-offs (2026-08-06-handoffs.sql) ----
   if (raw.includes('cannot_share_with_yourself')) {
     return 'Pick a teammate — you can\'t share something with yourself.';

@@ -1,18 +1,21 @@
 // The persistent chrome: the sidebar rail, the topbar, and the corner toasts.
-import {Settings, X} from 'lucide-react';
+import {X} from 'lucide-react';
 import {InboxBell} from './InboxBell';
+import {WorkspaceSwitcher} from './WorkspaceSwitcher';
 import {tabs, visibleTabs} from '../data/tabs';
-import {accountLabel, initials} from '../lib/text';
 import {native} from '../native';
 import {useOrg} from '../org';
 import type {ReactNode} from 'react';
 import type {TabId} from '../data/tabs';
 import type {UpdateState} from '../native';
 
-export function Sidebar({activeTab, onTab, onSettings}: {
+export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorkspace, onLeaveWorkspace}: {
   activeTab: TabId;
   onTab: (tab: TabId) => void;
   onSettings: () => void;
+  onSignOut: () => void;
+  onCreateWorkspace: () => void;
+  onLeaveWorkspace: () => void;
 }) {
   const org = useOrg();
   // `org.ready ? … : undefined` rather than `org.org?.plan` alone: an unresolved
@@ -41,22 +44,15 @@ export function Sidebar({activeTab, onTab, onSettings}: {
           </button>
         ))}
       </nav>
-      <div className="account">
-        <button
-          className="account-row account-trigger"
-          onClick={onSettings}
-          title={`${org.email} -- open settings`}
-        >
-          {/* Initials off the same string the row is labelled with, so the
-              circle and the name agree. From the address they are whatever the
-              local part starts with, which is a fallback and reads as one. */}
-          {org.avatarUrl ?
-            <img alt="" className="account-avatar" referrerPolicy="no-referrer" src={org.avatarUrl} /> :
-            <span>{initials(org.displayName || org.email)}</span>}
-          <strong>{accountLabel(org.displayName, org.email)}</strong>
-          <Settings className="account-gear" size={15} strokeWidth={1.75} aria-hidden="true" />
-        </button>
-      </div>
+      {/* Was a row that opened Settings and showed who you were signed in as.
+          It is now the workspace switcher, and Settings is one entry inside it
+          -- see the header of WorkspaceSwitcher.tsx for why round that way. */}
+      <WorkspaceSwitcher
+        onCreate={onCreateWorkspace}
+        onLeave={onLeaveWorkspace}
+        onSettings={onSettings}
+        onSignOut={onSignOut}
+      />
     </aside>
   );
 }
@@ -67,7 +63,6 @@ export function Topbar({activeTab, actions, onViewShares, onOpenAutomationHistor
   onViewShares: () => void;
   onOpenAutomationHistory: (automationId: string) => void;
 }) {
-  const org = useOrg();
   return (
     <header className="topbar">
       {/* The title alone. There used to be a line under it -- "Argus Launcher
@@ -77,28 +72,18 @@ export function Topbar({activeTab, actions, onViewShares, onOpenAutomationHistor
           again. */}
       <h1>{tabs.find((tab) => tab.id === activeTab)?.label}</h1>
       <div className="actions">
-        {/* Left of the org switcher, and left of the tab's own actions: what
-            somebody has sent you is not an action on the current tab, and it
-            should not move when the tab changes. Renders nothing at all when
-            the inbox is empty, which is most of the time. */}
+        {/* Left of the tab's own actions: what somebody has sent you is not an
+            action on the current tab, and it should not move when the tab
+            changes. Renders nothing at all when the inbox is empty, which is
+            most of the time. */}
         <InboxBell
           onViewAll={onViewShares}
           onOpenAutomationHistory={onOpenAutomationHistory}
         />
-        {/* Only shown when the user is actually in more than one firm --
-            the common case is one org, chosen silently. */}
-        {org.orgs.length > 1 && (
-          <label className="field">
-            <span>Organization</span>
-            <select value={org.orgId || ''} onChange={(event) => org.setOrgId(event.target.value)}>
-              {org.orgs.map((membership) => (
-                <option key={membership.org.id} value={membership.org.id}>
-                  {membership.org.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+        {/* The org <select> that used to sit here has moved to the sidebar. It
+            only appeared once you were already in two workspaces, so the one
+            group who could not find it were the people who had just been
+            invited into their first. */}
         {actions}
       </div>
     </header>

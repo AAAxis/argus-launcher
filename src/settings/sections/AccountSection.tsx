@@ -1,9 +1,9 @@
 // Account: who is signed in, what they look like, and how to leave.
 //
 // Everything writable here belongs to the *user* (avatar, display name) except
-// the workspace name, which belongs to the org and is writable by any member --
-// RLS on organizations checks is_org_member. db.orgs.rename is called through
-// the caller's withDb wrapper, which reports a failure properly.
+// the workspace name, which belongs to the org and is the owner's to set --
+// organizations_update is is_org_owner as of 20260808000000. db.orgs.rename is
+// called through the caller's withDb wrapper, which reports a failure properly.
 import {useRef, useState} from 'react';
 import {Camera, LogOut, Trash2} from 'lucide-react';
 import * as account from '../../db/account';
@@ -211,18 +211,23 @@ export function AccountSection({onSignOut, onOpenSite, onMessage, onRenameOrg}: 
       </SettingsGroup>
 
       <SettingsGroup title="Workspace">
-        {/* Renaming is no longer owner-only: organizations_update is is_org_member
-            as of 2026-08-10, and the entitlement columns are held back by column
-            grants rather than by the role. So there is one description now
-            instead of a permission branch. */}
+        {/* Owner-only again, and this time the UI agrees with the database.
+            organizations_update was widened to is_org_member on 2026-08-10 and
+            narrowed back to is_org_owner by 20260808000000, because being in
+            somebody else's workspace is now ordinary rather than rare -- and
+            "a colleague can see the workspace" and "a colleague can rename it"
+            are different sentences. Offering the button to a member would be
+            offering a write RLS refuses. */}
         <SettingsRow
           label="Name"
-          description="Shared with everyone in this workspace."
+          description={org.isOwner ?
+            'Shared with everyone in this workspace.' :
+            'Shared with everyone in this workspace. Only its owner can change it.'}
         >
           {orgDraft === null ? (
             <>
               <SettingsValue>{org.org?.name || '—'}</SettingsValue>
-              {org.org && (
+              {org.org && org.isOwner && (
                 <button className="ghost" onClick={() => setOrgDraft(org.org?.name || '')} type="button">
                   Rename
                 </button>

@@ -67,6 +67,26 @@ export function accountLabel(displayName: string, email: string) {
   return name.length <= ACCOUNT_EMAIL_MAX ? name : `${name.slice(0, ACCOUNT_EMAIL_MAX - 1)}…`;
 }
 
+// What the workspace switcher calls a workspace.
+//
+// `name`, never `legal_name`. The two are separate columns on purpose (see
+// ArgusOrg in src/types.ts): `name` is what this workspace is called and its
+// owner may rename it to "Client accounts" whenever they like, while
+// `legal_name` is the company behind it. The switcher answers "where am I
+// working", which is the first of those.
+//
+// Capped by the same rule as accountLabel: the sidebar row's geometry is fixed
+// and the mark and chevron have to stay on it.
+export function workspaceName(name: string | null | undefined): string {
+  const trimmed = (name || '').trim();
+  if (!trimmed) {
+    return 'Workspace';
+  }
+  return trimmed.length <= ACCOUNT_EMAIL_MAX ?
+    trimmed :
+    `${trimmed.slice(0, ACCOUNT_EMAIL_MAX - 1)}…`;
+}
+
 export function escapeHtml(value: string) {
   return value
       .replace(/&/g, '&amp;')

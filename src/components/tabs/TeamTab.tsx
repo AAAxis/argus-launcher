@@ -28,6 +28,8 @@ import {EmptyState} from '../ui/EmptyState';
 import {Meter} from '../ui/Meter';
 import {Modal} from '../ui/Modal';
 import {InviteMemberModal} from '../modals/InviteMemberModal';
+import {LeaveTeamModal} from '../modals/LeaveTeamModal';
+import * as db from '../../db';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import {inviteUrl} from '../../workspace/useTeamActions';
@@ -413,6 +415,11 @@ export function TeamTab({view, onView, onShare, onOpenSite}: {
           onConfirm={() => team.leave(orgId, org.userId as string)}
           onLeft={() => {
             setLeaving(false);
+            // active_org() re-checks the membership, so the server falls back on
+            // its own the moment the row is gone. The local hint does not, and
+            // it wins on an offline start -- so clearing it is what stops a
+            // restart with no network resurrecting a workspace they just left.
+            db.orgs.setCurrentOrgId(null);
             void org.reload();
           }}
         />
@@ -744,52 +751,6 @@ function RemoveMemberModal({member, onClose, onConfirm}: {
         They'll lose access to this workspace immediately and their seat is freed.
         Everything they made stays — profiles, proxies, cookie sets and automations
         belong to the workspace, not to the person who created them.
-      </p>
-    </Modal>
-  );
-}
-
-function LeaveTeamModal({orgName, onClose, onConfirm, onLeft}: {
-  orgName: string;
-  onClose: () => void;
-  onConfirm: () => Promise<string | null>;
-  onLeft: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  return (
-    <Modal
-      className="small-modal"
-      onClose={onClose}
-      title={`Leave ${orgName}?`}
-      footer={
-        <>
-          {/* Rendered here rather than as a toast because the likely failure is
-              an explanation -- org_members_delete carries `role <> 'owner'`, so
-              an owner is told they cannot leave their own workspace -- and that
-              belongs next to the button that produced it. */}
-          {error && <p className="settings-error">{error}</p>}
-          <button className="ghost" onClick={onClose}>Cancel</button>
-          <button className="danger" disabled={busy} onClick={() => {
-            setBusy(true);
-            setError('');
-            void onConfirm().then((message) => {
-              setBusy(false);
-              if (message) {
-                setError(message);
-                return;
-              }
-              onLeft();
-            });
-          }}>
-            <LogOut size={16} /> Leave
-          </button>
-        </>
-      }
-    >
-      <p className="error-detail">
-        You'll lose access to this workspace's profiles, proxies and cookie sets. Nothing
-        is deleted, and its owner can invite you back.
       </p>
     </Modal>
   );

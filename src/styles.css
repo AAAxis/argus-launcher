@@ -1128,13 +1128,12 @@ nav button.active svg {
   padding-top: 10px;
 }
 
-/* Geometry copied from `nav button` on purpose: this is the last row of the
- * rail and was the only one shaped like a different control -- taller,
- * full-bleed, and with its hover explicitly cancelled.
+/* Three tracks: the workspace mark, the two lines of label, and the chevron.
  *
- * The third track is the settings gear. It is deliberately not a nested button:
- * the whole row already opens Settings, and a button inside a button is invalid
- * anyway. It is an affordance that appears on hover, not a second control. */
+ * The chevron is deliberately not a nested button -- the whole row opens the
+ * menu, and a button inside a button is invalid anyway. Unlike the gear it
+ * replaced it is always visible, because it is the only thing saying this row
+ * is a menu rather than a link. */
 .account-row {
   align-items: center;
   display: grid;
@@ -1159,20 +1158,102 @@ nav button.active svg {
   box-shadow: none;
 }
 
-.account-gear {
+/* ── Workspace switcher trigger ─────────────────────────────────────────────
+ * components/WorkspaceSwitcher.tsx.
+ *
+ * Same three tracks as .account-row -- mark, label, glyph -- but the middle one
+ * carries two lines now: the workspace on top, the person underneath. So this
+ * row is taller than the 32px nav buttons the account row was shaped to match,
+ * and deliberately: it is no longer one more item in the rail, it is the thing
+ * that says which company you are looking at. */
+.workspace-trigger {
+  min-height: 46px;
+  padding: 5px 10px;
+}
+
+.workspace-lines {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  text-align: left;
+}
+
+/* .account strong already carries the weight and the ellipsis; only the second
+ * line needs describing. */
+.workspace-lines small {
   color: var(--ink-faint);
-  opacity: 0;
-  transition: opacity 0.12s var(--ease);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Keyboard users get it too: the row is focusable, so focus has to reveal the
- * same affordance hover does. */
-.account-trigger:hover .account-gear,
-.account-trigger:focus-visible .account-gear {
-  opacity: 1;
+/* A rounded square, not the circle the account avatar used: this is a company
+ * mark, and a logo cropped to a circle loses its corners. Geometry only -- the
+ * two places it appears fill it differently, below. */
+.account .workspace-mark,
+.workspace-pop .workspace-mark {
+  align-items: center;
+  border-radius: 6px;
+  display: inline-flex;
+  flex: none;
+  font-size: 11px;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
 }
 
-.account span,
+/* Solid on the trigger. It is the one mark on screen at rest, at the foot of
+ * the rail, and it is what answers "whose data am I looking at" from across the
+ * room. */
+.account-trigger .workspace-mark {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Quiet in the list, and solid only for the workspace you are in -- the same
+ * rule the settings rail applies to its glyphs, and for the same reason its
+ * comment gives: three solid ink chips stacked in a 252px panel out-shout the
+ * names they belong to, which are the thing being chosen between. */
+.workspace-pop-list .workspace-mark {
+  background: var(--raised-soft);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+}
+
+.workspace-pop-item.active .workspace-mark {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+
+/* `contain`, not `cover`. A wordmark cropped to fill is unreadable, where the
+ * face the account avatar held is not. */
+.account img.workspace-mark,
+.workspace-pop img.workspace-mark {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  object-fit: contain;
+}
+
+.workspace-chevron {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+/* The name field the create flow adds above the two choice cards. Only spacing
+ * -- .field already carries the label weight and the 36px control. */
+.setup-name {
+  margin-bottom: 14px;
+}
+
+/* `.account span` used to be here too, for the sidebar's initials circle. It
+ * had to go: the workspace switcher replaced that circle, and its popover panel
+ * is a DOM child of .account -- so a selector matching every span under .account
+ * was painting a 24px accent disc behind every label, hint and workspace name in
+ * the menu. The plates that are left name themselves (.workspace-mark,
+ * .filter-pop-mark). */
 .avatar {
   align-items: center;
   border-radius: 999px;
@@ -1242,24 +1323,11 @@ nav button.active svg {
   gap: 8px;
 }
 
-.account span,
-.account-avatar {
-  height: 24px;
-  width: 24px;
-}
-
-.account span {
-  background: var(--accent);
-  font-size: 11px;
-}
-
-/* Provider profile picture, same circle as the initials fallback it replaces.
- * no-referrer on the element keeps Google's CDN from 403ing. */
-.account-avatar {
-  background: var(--paper);
-  border-radius: 999px;
-  object-fit: cover;
-}
+/* .account-avatar and .account-gear lived here for the sidebar row that opened
+ * Settings. That row is the workspace switcher now: the picture became
+ * .workspace-mark (a square -- it is a company, not a face) and the gear became
+ * a chevron, because the row opens a menu rather than one screen. Both classes
+ * were unreferenced after that and are not kept as decoration. */
 
 .account strong {
   font-size: 13px;
@@ -6822,6 +6890,18 @@ textarea {
   white-space: pre-wrap;
 }
 
+/* The same block, without the warning tint. .error-detail's red panel is the
+ * right frame for "this deletes things" and the wrong one for a dialog that is
+ * offering you something -- the workspace prompt was reading as an alert about
+ * a workspace you do not have yet. */
+.modal-detail {
+  background: var(--paper);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  padding: 12px 14px;
+}
+
 .checkbox-confirm {
   align-items: center;
   cursor: pointer;
@@ -7570,6 +7650,140 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   padding: 1px 5px;
+}
+
+/* ── Workspace switcher panel ───────────────────────────────────────────────
+ * components/WorkspaceSwitcher.tsx.
+ *
+ * Deliberately the settings dialog's rail, not the table pickers' .filter-pop-*
+ * rows. Those pickers answer "which value goes in this cell"; this one answers
+ * "which workspace am I in, and what do I want to do with my account", which is
+ * the same question the settings rail asks one screen deeper. So it borrows that
+ * vocabulary wholesale -- uppercase group headings, 34px transparent rows at
+ * 13px/650, faint glyphs that go solid when selected, --nav-active-bg for the
+ * current one, never the accent.
+ *
+ * The one departure: a workspace row is two lines, because the role and the plan
+ * are what tell two workspaces apart when both are called "gmail.com team". */
+.workspace-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 10px 8px;
+}
+
+.workspace-pop-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* .settings-rail-group h4, to the pixel. */
+.workspace-pop-group h4 {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+/* Capped rather than unbounded: ten workspaces is the account limit, and ten
+ * rows would otherwise run past the top of the window from a trigger pinned to
+ * the bottom of the rail. Popover leaves a scroll inside its own panel alone,
+ * so this scrolls without dismissing itself on the first wheel tick. */
+.workspace-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 246px;
+  overflow-y: auto;
+}
+
+/* .settings-rail button, plus the tick track. */
+.workspace-pop-item {
+  align-items: center;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  font-weight: 650;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.workspace-pop-item svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+.workspace-pop-item:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.workspace-pop-item:not(:disabled):hover svg {
+  color: var(--ink);
+}
+
+.workspace-pop-item.active {
+  background: var(--nav-active-bg);
+  color: var(--ink);
+}
+
+.workspace-pop-item.active svg {
+  color: var(--ink);
+}
+
+/* Taller than a rail row because it carries two: the name, and what your
+ * relationship to it is. */
+.workspace-pop-list .workspace-pop-item {
+  min-height: 44px;
+  padding: 5px 10px;
+}
+
+.workspace-pop-lines {
+  display: grid;
+  flex: 1;
+  gap: 0;
+  min-width: 0;
+  text-align: left;
+}
+
+.workspace-pop-lines strong {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pop-lines small {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pop-tick {
+  flex: none;
+  margin-left: auto;
+}
+
+/* The tick is the one glyph that stays accented when its row is selected --
+ * it is the answer to "which one am I in", not decoration on a label. */
+.workspace-pop-item.active .workspace-pop-tick {
+  color: var(--accent);
 }
 
 /* Sized to the 12px label it sits in rather than to .icon-button's 32px, which

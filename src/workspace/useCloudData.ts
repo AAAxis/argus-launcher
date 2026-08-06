@@ -6,7 +6,7 @@
 // re-reading everything -- the reads are per-table selects, not one blob, so a
 // full reload after every edit would be several round trips for one changed
 // column.
-import {useCallback, useState} from 'react';
+import {useCallback, useRef, useState} from 'react';
 import * as db from '../db';
 import {describeDbError} from '../db/errors';
 import {defaultCloudState} from '../data/statuses';
@@ -27,6 +27,23 @@ export type CloudData = ReturnType<typeof useCloudData>;
 export function useCloudData(orgId: string | null, toast: Toast) {
   const [state, setState] = useState<CloudState>(defaultCloudState);
   const [loading, setLoading] = useState(false);
+
+  // Which load is allowed to land. Bumped by every load() and by reset(), and
+  // re-checked at each point load() would touch something -- the same pattern,
+  // and for the same reason, as `generation` in src/org.tsx.
+  //
+  // Without it a switch from workspace A to B renders A's rows under B's name:
+  // WorkspaceProvider calls reset() and then load(B), but load(A) is still in
+  // flight and its unconditional setState at the end wins whenever A's reads
+  // finish second. That is not a cosmetic mislabel. selectedProfileId is seeded
+  // from this state, and a profile id is also a real directory name under
+  // E:\ArgysProfiles -- so the next launch would open one workspace's profile
+  // directory while the UI says you are in another.
+  //
+  // This was survivable while switching meant a <select> in the topbar that only
+  // appeared for people already in two orgs. It is not survivable now that the
+  // sidebar switcher puts it two clicks from every user.
+  const generation = useRef(0);
 
   // The same write as withDb, but handing the failure text back instead of
   // toasting it -- for callers that render the error themselves. A dialog
@@ -101,6 +118,10 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       options?: {quiet?: boolean},
   ): Promise<CloudState | null> => {
     const quiet = Boolean(options?.quiet);
+    const run = ++generation.current;
+    // True while this call is still the newest one. Checked before anything that
+    // escapes this function -- state, toasts and the self-healing writes.
+    const current = () => run === generation.current;
     if (!quiet) {
       setLoading(true);
     }
@@ -138,6 +159,12 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         // that writes none pays for an empty result.
         db.profileNotes.summaries(targetOrgId),
       ]);
+
+      // The workspace changed while these fourteen reads were in flight. Nothing
+      // below this line belongs to the org the user is now looking at.
+      if (!current()) {
+        return null;
+      }
 
       const failures: string[] = [];
       function take<T>(label: string, result: PromiseSettledResult<T>, fallback: T): T {
@@ -187,10 +214,9 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       // merely wrong: an empty `proxies` makes repairProxyAssignments read every
       // profile's assignment as dangling and rewrite the lot to direct.
       //
-      // The spreads keep whatever the failed tables already held. React applies
-      // queued updaters in order, so the `reset()` WorkspaceProvider fires
-      // before this load on an org switch has already landed in `current` --
-      // one org's rows cannot survive into another's view.
+      // The spreads keep whatever the failed tables already held -- of the org
+      // this load belongs to, which the generation check above has already
+      // established is still the active one.
       if (failures.length > 0) {
         setState((current) => ({
           ...current,
@@ -243,6 +269,15 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       // actually touched.
       const {state: repairedState, repaired} = repairProxyAssignments(loaded);
       const {state: migratedState, migrated} = migrateLegacyCookieImports(repairedState);
+
+      // Re-checked before the writes, not only before the render. Every pass
+      // below is addressed by org id, so a stale one could not corrupt the org
+      // it names -- but it would be a burst of writes and a self-healing toast
+      // for a workspace the user has already left, and the toast would name
+      // repairs they cannot see.
+      if (!current()) {
+        return null;
+      }
 
       // Both Trash sweeps run after migrateLegacyCookieImports, not before: a
       // set the migration just re-created would otherwise be eligible for the
@@ -305,6 +340,12 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         }
       }
 
+      // Last check: the self-healing writes above are awaited, so the workspace
+      // can still have changed since the one before them.
+      if (!current()) {
+        return null;
+      }
+
       setState(finalState);
       if (!quiet && (repaired > 0 || mergedBookmarks.changed || purged > 0 || migrated > 0 ||
           purgedCookies > 0)) {
@@ -318,17 +359,30 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       }
       return finalState;
     } catch (error) {
-      toast.setMessage(describeDbError(error, 'Could not load your data.'));
+      // Silent when superseded. The workspace the user is now looking at is
+      // loading fine, and "Could not load your data" over it would be a lie
+      // about the org they can see.
+      if (current()) {
+        toast.setMessage(describeDbError(error, 'Could not load your data.'));
+      }
       return null;
     } finally {
-      if (!quiet) {
+      // Only the newest load owns the spinner. A stale one clearing it would
+      // uncover an empty workspace while the real read is still running.
+      if (!quiet && current()) {
         setLoading(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const reset = useCallback(() => setState(defaultCloudState), []);
+  // Bumps the generation as well as clearing the rows. WorkspaceProvider calls
+  // this on every org change immediately before load(next), and without the bump
+  // an in-flight load(previous) would repopulate the state this just emptied.
+  const reset = useCallback(() => {
+    generation.current++;
+    setState(defaultCloudState);
+  }, []);
 
   return {orgId, state, setState, loading, withDb, withDbError, patch, load, reset};
 }

@@ -35,6 +35,8 @@ import {
 } from './components/modals/LibraryModals';
 import {ImportProfilesModal} from './components/modals/ImportProfilesModal';
 import {IntroModal} from './components/modals/IntroModal';
+import {LeaveTeamModal} from './components/modals/LeaveTeamModal';
+import {PersonalWorkspaceModal} from './components/modals/PersonalWorkspaceModal';
 import {PlanWelcomeModal} from './components/modals/PlanWelcomeModal';
 import {WorkspaceSetupModal} from './components/modals/WorkspaceSetupModal';
 import {ProfileModal} from './components/modals/ProfileModal';
@@ -68,6 +70,8 @@ import {useEditors} from './hooks/useEditors';
 import {useResourceStatus, useUpdater} from './hooks/useNativeState';
 import {useSignIn} from './hooks/useSignIn';
 import {native} from './native';
+import * as db from './db';
+import {describeDbError} from './db/errors';
 import {useOrg} from './org';
 import {supabase} from './supabase';
 import {useAsyncAction} from './useAsyncAction';
@@ -89,6 +93,11 @@ export function App() {
   const {run, isPending} = useAsyncAction();
 
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
+  // The two workspace dialogs the sidebar switcher opens. Held here with every
+  // other dialog rather than inside the switcher, so the switcher stays a menu
+  // and closing it does not unmount what it opened.
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [leavingWorkspace, setLeavingWorkspace] = useState(false);
   // Which folder each tab is filtered to. Held here rather than in the tabs
   // because creating a folder from the dialog switches the view to it.
   const [profileFolderId, setProfileFolderId] = useState('');
@@ -191,9 +200,49 @@ export function App() {
   // setupDone is local state rather than a re-read of the org: the row is
   // written before onDone fires, but org.org does not refresh until the next
   // resolve, and without this the dialog would reopen on the render in between.
+  // "Would you like a workspace of your own?", asked once per account.
+  //
+  // Ahead of all three of the dialogs below, and it has to be: it is the only
+  // one that can change which workspace is active, and every one of the others
+  // is *about* the active workspace. Asking "who is this workspace for" and then
+  // switching the workspace out from under the answer is worse than making the
+  // other question wait one launch.
+  //
+  // promptSupported is the "database does not have 20260808000000 yet" gate. A
+  // launcher build can meet an older schema, and account_state coming back
+  // unsupported has to mean "do not ask" rather than "never asked".
+  const [personalDone, setPersonalDone] = useState(false);
+  const [personalBusy, setPersonalBusy] = useState(false);
+  const personalDue = Boolean(org.email) && !startup.blocked && org.ready &&
+    org.promptSupported && org.orgs.length > 0 && !org.ownsAny &&
+    !org.personalPromptAt && !personalDone;
+
+  // Dismissed before the create dialog opens rather than after it finishes: a
+  // crash mid-create must not re-ask on the next launch, and the switcher is a
+  // second way in for anyone who changes their mind.
+  const answerPersonal = (thenCreate: boolean) => {
+    setPersonalBusy(true);
+    void db.orgs.dismissPersonalWorkspacePrompt()
+        .catch((caught) => toast.setMessage(describeDbError(caught, 'Could not save that.')))
+        .finally(() => {
+          setPersonalBusy(false);
+          setPersonalDone(true);
+          if (thenCreate) {
+            setCreatingWorkspace(true);
+          }
+        });
+  };
+
+  // "Who is this workspace for?", asked once per workspace.
+  //
+  // `org.isOwner` as well: it is a question about the company behind the
+  // workspace, and its answer overwrites legal_name, country and website. A
+  // member who joined an owner-who-never-onboarded's workspace was being asked
+  // to describe somebody else's business -- and since 20260808000000 narrowed
+  // organizations_update to is_org_owner, their answer would be refused anyway.
   const [setupDone, setSetupDone] = useState(false);
   const setupDue = Boolean(org.email) && !startup.blocked && org.ready && orgId &&
-    !org.org?.onboarded_at && !setupDone;
+    org.isOwner && !org.org?.onboarded_at && !setupDone && !personalDue;
 
   // Whether this workspace has changed onto a paid plan since this machine last
   // said so. Gated on org.ready as well as the startup screen, because `plan` is
@@ -214,7 +263,7 @@ export function App() {
   // first (see its own note below); the welcome is not lost, it opens on the
   // next launch because acknowledgePlan only runs when this one is dismissed.
   const planWelcomeDue = planChanged && isPlanKey(currentPlan) &&
-    !showsPlanPicker(currentPlan) && !setupDue;
+    !showsPlanPicker(currentPlan) && !setupDue && !personalDue;
 
   // The silent half. Recording Free is not bookkeeping: it is what gives a later
   // upgrade a number to count up from, so it has to land on the plan the user is
@@ -258,7 +307,7 @@ export function App() {
   // in an edge case. The walkthrough marks itself seen the moment it opens, so
   // stacking would not just look wrong -- it would spend the one showing it gets.
   const introReady = Boolean(org.email) && !startup.blocked && !data.loading &&
-    data.state.profiles.length === 0 && !planWelcomeDue && !setupDue;
+    data.state.profiles.length === 0 && !planWelcomeDue && !setupDue && !personalDue;
   useEffect(() => {
     if (introReady && !hasSeenProfileIntro()) {
       markProfileIntroSeen();
@@ -298,7 +347,14 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <Sidebar activeTab={activeTab} onTab={setActiveTab} onSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        activeTab={activeTab}
+        onCreateWorkspace={() => setCreatingWorkspace(true)}
+        onLeaveWorkspace={() => setLeavingWorkspace(true)}
+        onSettings={() => setSettingsOpen(true)}
+        onSignOut={() => void signOut()}
+        onTab={setActiveTab}
+      />
 
       <section className="content">
         <Topbar
@@ -383,6 +439,14 @@ export function App() {
         />
       )}
       {changelogOpen && <ChangelogModal updater={updater} onClose={() => setChangelogOpen(false)} />}
+      {personalDue && (
+        <PersonalWorkspaceModal
+          busy={personalBusy}
+          orgName={org.org?.name || 'this workspace'}
+          onCreate={() => answerPersonal(true)}
+          onDecline={() => answerPersonal(false)}
+        />
+      )}
       {setupDue && orgId && (
         <WorkspaceSetupModal
           orgId={orgId}
@@ -391,6 +455,37 @@ export function App() {
             setSetupDone(true);
             // Pull the row back so Settings and the Team tab show the business
             // name straight away rather than after the next focus refresh.
+            void org.reload();
+          }}
+        />
+      )}
+      {/* The same component in create mode. create_workspace has already made
+          the workspace active server-side by the time onDone fires, so the local
+          switch here is what stops the UI waiting a whole resolve to catch up.
+          reload() then brings the new membership into the switcher's list. */}
+      {creatingWorkspace && (
+        <WorkspaceSetupModal
+          mode="create"
+          orgId={null}
+          orgName=""
+          onCancel={() => setCreatingWorkspace(false)}
+          onDone={(newOrgId) => {
+            setCreatingWorkspace(false);
+            org.setOrgId(newOrgId);
+            void org.reload();
+          }}
+        />
+      )}
+      {leavingWorkspace && orgId && (
+        <LeaveTeamModal
+          orgName={org.org?.name || 'this workspace'}
+          onClose={() => setLeavingWorkspace(false)}
+          onConfirm={() => workspace.team.leave(orgId, org.userId as string)}
+          onLeft={() => {
+            setLeavingWorkspace(false);
+            // active_org() re-checks the membership and falls back on its own;
+            // the local hint does not, and would win on an offline start.
+            db.orgs.setCurrentOrgId(null);
             void org.reload();
           }}
         />

@@ -102,38 +102,59 @@ export async function createOrg(name?: string): Promise<string> {
   return data as string;
 }
 
-// Org-wide settings. RLS restricts UPDATE on organizations to is_org_member --
-// any member may edit the workspace's own details -- and the column grant is
-// what holds the line: only (name, built_in_extensions, org_type, legal_name,
-// country, website, logo_url, onboarded_at) are grantable. plan, the limits and
-// billing_status are service-role only, so no client can grant itself a higher
-// tier whatever its role.
-export async function rename(orgId: string, name: string): Promise<void> {
-  const client = requireClient();
-  const {error} = await client.from('organizations').update({name}).eq('id', orgId);
-  raise(error, 'orgs.rename');
-}
-
-// The payload is exactly one column because 0002 revoked UPDATE on
-// organizations and re-granted it per column -- a spread of the whole org row
-// would be rejected outright.
+// Org-wide settings. As of 20260808000000_active_workspace.sql, RLS restricts
+// UPDATE on organizations to is_org_owner -- the workspace's identity is the
+// owner's to set -- and the column grant still holds the second line: only
+// (name, built_in_extensions, org_type, legal_name, country, website, logo_url,
+// industry, onboarded_at) are grantable. plan, the limits and billing_status are
+// service-role only, so no client can grant itself a higher tier whatever its
+// role.
 //
-// The .select() is what turns a member's attempt into a visible failure. RLS
-// filters the row rather than erroring, so an unprivileged update comes back
-// as success-with-no-rows; asking for the row back makes that an error we can
-// report instead of a toggle that flips locally and reverts on next load.
-export async function updateBuiltInExtensions(
-    orgId: string, value: BuiltInExtensionToggles): Promise<void> {
+// The one column a member may still write is built_in_extensions, through the
+// RPC below -- a policy cannot be scoped to a column, so the exception had to
+// become a function.
+//
+// The .select('id') is the same guard updateProfile and the website's
+// saveOrgProfile carry, and it was the one writer here missing it: RLS filters
+// rows rather than erroring, so a rename from a non-owner returned
+// success-with-no-rows and the name reverted on the next load with nothing
+// reported. Callers should gate on isOwner as well -- this is what makes the
+// ungated case visible instead of silent.
+export async function rename(orgId: string, name: string): Promise<void> {
   const client = requireClient();
   const {data, error} = await client
       .from('organizations')
-      .update({built_in_extensions: value})
+      .update({name})
       .eq('id', orgId)
       .select('id');
-  raise(error, 'orgs.updateBuiltInExtensions');
+  raise(error, 'orgs.rename');
   if (!data || data.length === 0) {
-    throw new Error('Could not change the bundled extensions for this organization.');
+    throw new Error('Could not rename this workspace. Only its owner can.');
   }
+}
+
+// The one org-wide setting any member may change, and the only reason it needs
+// a function of its own.
+//
+// A bundled extension is a shared runtime setting rather than branding, and the
+// Extensions tab has let every member toggle one since it shipped. When
+// 20260808000000 narrowed organizations_update to is_org_owner it took this
+// along with it, because an RLS policy cannot be scoped to a column -- so the
+// exception moved into set_built_in_extensions, which checks is_org_member and
+// raises rather than filtering.
+//
+// Raising is the point. The direct UPDATE this replaces needed a .select('id')
+// to notice it had changed nothing, because RLS filters rows instead of
+// erroring; a toggle that flips locally and reverts on the next load is the
+// failure mode that guard existed for. The RPC has no such shape to get wrong.
+export async function updateBuiltInExtensions(
+    orgId: string, value: BuiltInExtensionToggles): Promise<void> {
+  const client = requireClient();
+  const {error} = await client.rpc('set_built_in_extensions', {
+    p_org: orgId,
+    p_value: value,
+  });
+  raise(error, 'orgs.updateBuiltInExtensions');
 }
 
 // Who the workspace belongs to. Written by the setup prompt on first run and by
@@ -177,7 +198,108 @@ export async function updateProfile(orgId: string, patch: OrgProfilePatch): Prom
   }
 }
 
-// The active org id, persisted so a restart lands where the user left off.
+// ── The active workspace ────────────────────────────────────────────────────
+//
+// Server-side, per user, since 20260808000000_active_workspace.sql. It has to
+// be: the website resolves the same question on every request, and a choice
+// kept only on this machine meant the launcher and the dashboard could sit in
+// different workspaces indefinitely. active_org() is the one definition of the
+// answer, shared by both apps and by bootstrap_org.
+
+// What the launcher needs about the account that is not a membership.
+//
+// `supported` rather than a throw. Builds ship to machines, and a launcher can
+// meet a database that has not had this migration applied yet -- PostgREST
+// answers an unknown function with PGRST202. That has to degrade to the old
+// behaviour (fall back to the local hint) rather than putting a signed-in user
+// on the startup loader, which is what an unhandled error here would do.
+export type AccountState = {
+  activeOrgId: string | null;
+  personalPromptAt: string | null;
+  supported: boolean;
+};
+
+const UNSUPPORTED: AccountState = {
+  activeOrgId: null, personalPromptAt: null, supported: false,
+};
+
+export async function accountState(): Promise<AccountState> {
+  const client = optionalClient();
+  if (!client) {
+    return UNSUPPORTED;
+  }
+  const {data, error} = await client.rpc('account_state');
+  if (error) {
+    if (looksMissing(error)) {
+      return UNSUPPORTED;
+    }
+    raise(error, 'account_state');
+  }
+  // Set-returning, so PostgREST hands back an array of one.
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    active_org_id: string | null;
+    personal_workspace_prompt_at: string | null;
+  } | undefined;
+  return {
+    activeOrgId: row?.active_org_id || null,
+    personalPromptAt: row?.personal_workspace_prompt_at || null,
+    supported: true,
+  };
+}
+
+// A function this build calls that the database does not have. Matched on both
+// the PostgREST code and the Postgres one because the same miss arrives
+// differently depending on whether the schema cache has been reloaded.
+function looksMissing(error: {code?: string; message?: string}): boolean {
+  return /PGRST202|42883|does not exist/i.test(`${error.code || ''} ${error.message || ''}`);
+}
+
+// Records the switch the user just made. Callers do not await this on the click
+// path -- see setOrgId in src/org.tsx -- because what can fail here is agreeing
+// with the website, not the switch itself.
+export async function setActiveOrg(orgId: string): Promise<void> {
+  const client = requireClient();
+  const {error} = await client.rpc('set_active_org', {p_org: orgId});
+  raise(error, 'set_active_org');
+}
+
+// The only path a client has to a SECOND organization, for the same reason
+// bootstrap_org is the only path to the first: `organizations` has no INSERT
+// policy and no INSERT grant.
+//
+// One statement creates the org, the owner membership and the active-org row,
+// so a failure part-way cannot leave a workspace nobody belongs to. The new
+// workspace starts on the free plan with its own billing -- entitlements are
+// bought per organization, and the create dialog says so.
+export async function createWorkspace(
+    name: string, orgType: OrgType | null): Promise<string> {
+  const client = requireClient();
+  const {data, error} = await client.rpc('create_workspace', {
+    p_name: name,
+    p_org_type: orgType,
+  });
+  raise(error, 'create_workspace');
+  if (!data) {
+    throw new Error('create_workspace returned no organization id');
+  }
+  return data as string;
+}
+
+// Stamped on either answer to "would you like a workspace of your own?" --
+// taking it or declining -- so the prompt is asked once and never again.
+export async function dismissPersonalWorkspacePrompt(): Promise<void> {
+  const client = requireClient();
+  const {error} = await client.rpc('dismiss_personal_workspace_prompt');
+  raise(error, 'dismiss_personal_workspace_prompt');
+}
+
+// The last workspace this machine saw, as an offline hint.
+//
+// No longer the source of truth -- active_org() is. This is what lets a cold
+// start with no network open where the user left off instead of falling back to
+// whatever the membership list happens to list first, and it is what carries a
+// switch made offline until the next resolve can push it. It loses to the
+// server whenever the server can be reached; see resolve() in src/org.tsx.
 const ACTIVE_ORG_KEY = 'argus.activeOrgId';
 
 export function currentOrgId(): string | null {
