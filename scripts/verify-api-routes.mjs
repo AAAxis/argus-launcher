@@ -112,6 +112,27 @@ check(
     'a PAGE_ROUTES entry leaked into electron/api/routes.json, the keyed route table');
 pass(`${PAGE_ROUTES.size} page routes are served and stay off the keyed table`);
 
+// A literal-string match only proves the pathname appears somewhere in
+// main.cjs, not that it is dispatched before the bearer-key gate -- which is
+// the actual invariant that makes these routes safe to reach from a
+// file:// document with no key at all. Comparing source offsets catches a
+// route that got moved below the gate as surely as one that was never wired
+// up. The anchor is the CALL site, not `function resolveAutomationKey(req) {`
+// -- that definition also contains the literal text `resolveAutomationKey(req)`
+// and sits above everything else in the file, which would make the offset
+// comparison pass unconditionally.
+const gateOffset = mainSource.indexOf('const key = resolveAutomationKey(req);');
+check(gateOffset !== -1,
+    'main.cjs no longer calls resolveAutomationKey(req) as expected -- update this check');
+for (const pathname of PAGE_ROUTES) {
+  const routeOffset = mainSource.indexOf(`pathname === '${pathname}'`);
+  check(routeOffset !== -1, `main.cjs does not compare pathname against ${pathname}`);
+  check(
+      routeOffset !== -1 && gateOffset !== -1 && routeOffset < gateOffset,
+      `${pathname} is dispatched at or after resolveAutomationKey(req) -- it must sit above the bearer gate`);
+}
+pass(`${PAGE_ROUTES.size} page routes are dispatched above the bearer gate`);
+
 // ── 3. Table-driven routes declare a channel preload will accept ─────────────
 const preloadSource = readFileSync(join(root, 'electron/preload.cjs'), 'utf8');
 check(

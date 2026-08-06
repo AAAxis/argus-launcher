@@ -4293,7 +4293,7 @@ function askRendererOnPageChannel(channel, payload) {
           new Error('Timed out waiting for Argus Launcher to answer'), {status: 504}));
     }, AUTOMATION_REQUEST_TIMEOUT_MS);
     pendingPageRequests.set(requestId, {resolve, reject, timeout});
-    mainWindow.webContents.send(channel, {requestId, ...payload});
+    mainWindow.webContents.send(channel, {...payload, requestId});
   });
 }
 

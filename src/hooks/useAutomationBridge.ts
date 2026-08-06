@@ -9,6 +9,8 @@ import {useEffect} from 'react';
 import type {DependencyList} from 'react';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
+import {cookieFileToBase64, cookiesFromJsonValue, toCookieJson} from '../lib/cookieFile';
+import {resolveLiveSetAction} from '../lib/cookieSync';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
 import {normalizeTags} from '../lib/tags';
@@ -99,7 +101,7 @@ function useApiChannel<Req extends {requestId: string}, Res>(
 export function useAutomationBridge(workspace: WorkspaceValue) {
   const {
     data, toast, automations: automationActions, profiles: profileActions,
-    proxies: proxyActions,
+    proxies: proxyActions, cookies: cookieActions,
   } = workspace;
   const state = data.state;
   const {withDb, patch, setState} = data;
@@ -156,6 +158,72 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           item.id === profile.id ? {...item, ...fields} : item));
         toast.setMessage(`Migrated ${cookies.length} local cookies for ${profile.name}`);
         return {matched: true, count: cookies.length};
+      },
+      cloud);
+
+  // The cookie-manager extension's live sync (run-token routes, not the keyed
+  // API). Pushes land as a VISIBLE library set named "«profile» (live)",
+  // assigned to the profile -- inspectable, exportable, re-assignable --
+  // unlike the legacy push-local above, which writes hidden per-profile
+  // fields and stays for external API callers.
+  useChannel(
+      native?.onCookieSyncPushRequest,
+      native?.sendCookieSyncPushResult,
+      async ({profileId, cookies: pushed}) => {
+        const profile = state.profiles.find(
+            (item) => item.id === profileId && !item.deleted_at);
+        if (!profile) {
+          throw new Error('This launch\'s profile no longer exists.');
+        }
+        const entries = cookiesFromJsonValue(pushed);
+        const action = resolveLiveSetAction(profile, state.cookies);
+        if (action.kind === 'update') {
+          if (!await cookieActions.saveEntries(action.set, entries)) {
+            throw new Error('Could not save the pushed cookies.');
+          }
+          return {saved: entries.length, set: action.set.name};
+        }
+        const created = await cookieActions.addCookieSet({
+          path: `live-sync:${profile.id}`,
+          name: `${action.name}.json`,
+          count: entries.length,
+          base64: cookieFileToBase64(toCookieJson(entries)),
+        });
+        if (!created) {
+          throw new Error('Could not create the live cookie set.');
+        }
+        if (!await cookieActions.assignToProfiles(created.id, [profile.id])) {
+          throw new Error('Could not assign the live cookie set.');
+        }
+        toast.setMessage(`Synced ${entries.length} cookies from ${profile.name}`);
+        return {saved: entries.length, set: created.name};
+      },
+      cloud);
+
+  // The reverse direction: "Load from Launcher" in the extension popup. Reads
+  // whatever set the profile is assigned right now, through the same
+  // cache-then-file path the inspector uses.
+  useChannel(
+      native?.onCookieSyncPullRequest,
+      native?.sendCookieSyncPullResult,
+      async ({profileId}) => {
+        const profile = state.profiles.find(
+            (item) => item.id === profileId && !item.deleted_at);
+        if (!profile) {
+          throw new Error('This launch\'s profile no longer exists.');
+        }
+        const assigned = profile.cookie_mode === 'saved' && profile.cookie_id ?
+          state.cookies.find(
+              (item) => item.id === profile.cookie_id && !item.deleted_at) :
+          null;
+        if (!assigned) {
+          return {cookies: [], set: null};
+        }
+        const rows = await cookieActions.loadEntries(assigned);
+        return {
+          cookies: rows.map(({id: _rowId, ...entry}) => entry),
+          set: assigned.name,
+        };
       },
       cloud);
 
