@@ -61,6 +61,58 @@ export async function assignFolder(
   raise(error, 'proxies.assignFolder');
 }
 
+// Renames one proxy. Narrow for the same reason assignFolder is: the name is
+// edited inline in the table, and a rename must not carry a stale copy of the
+// row over a check that landed meanwhile.
+export async function rename(orgId: string, id: string, name: string): Promise<void> {
+  const client = requireClient();
+  const {error} = await client
+      .from('proxies')
+      .update({name})
+      .eq('org_id', orgId)
+      .eq('id', id);
+  raise(error, 'proxies.rename');
+}
+
+// The connection fields a table cell can edit. Credentials take null to mean
+// "remove" -- PostgREST drops undefined rather than nulling it.
+export type ProxyConnectionPatch = {
+  type?: 'http' | 'socks5';
+  host?: string;
+  port?: number;
+  username?: string | null;
+  password?: string | null;
+};
+
+// Patches connection details and, in the same statement, clears all six last_*
+// columns: the stored check result describes the proxy as it was before the
+// edit, and a country left behind with no timestamp reads as a check that
+// passed. The background sweep re-checks the row exactly because these are
+// null.
+export async function updateConnection(
+    orgId: string, id: string, patch: ProxyConnectionPatch): Promise<void> {
+  const client = requireClient();
+  const fields: Record<string, unknown> = {
+    last_country: null,
+    last_country_code: null,
+    last_ip: null,
+    last_latency_ms: null,
+    last_checked_at: null,
+    last_error: null,
+  };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      fields[key] = value;
+    }
+  }
+  const {error} = await client
+      .from('proxies')
+      .update(fields)
+      .eq('org_id', orgId)
+      .eq('id', id);
+  raise(error, 'proxies.updateConnection');
+}
+
 // The result of a proxy check -- the background loop's only write. Kept
 // separate from upsert() so a check landing while someone edits the proxy's
 // credentials touches only the five check columns.

@@ -301,6 +301,69 @@ export function useProxyActions(
     return updated;
   }
 
+  // Renames one proxy from its table cell. A narrow write, never an upsert of
+  // the row: a check completing mid-edit must survive the rename. An emptied
+  // name falls back to host:port, the same fallback save() uses -- a proxy
+  // with no name at all has no line to render in the pickers that offer it.
+  async function rename(proxy: ArgusProxy, name: string): Promise<boolean> {
+    const next = name.trim() || defaultProxyName(proxy.host, proxy.port);
+    if (next === proxy.name) {
+      return true;
+    }
+    if (!await withDb((activeOrgId) => db.proxies.rename(activeOrgId, proxy.id, next))) {
+      return false;
+    }
+    patch.proxies((list) => list.map((item) =>
+      item.id === proxy.id ? {...item, name: next} : item));
+    return true;
+  }
+
+  // Patches connection fields from a table cell -- type, host, port,
+  // credentials. The db write clears the six last_* columns in the same
+  // statement (a changed connection invalidates the stored check), so the
+  // local patch clears them too and the row reads "Not checked" until the
+  // background sweep gets to it.
+  async function setConnection(
+      proxy: ArgusProxy, connectionPatch: db.proxies.ProxyConnectionPatch): Promise<boolean> {
+    const next = {
+      type: connectionPatch.type ?? proxy.type ?? 'http',
+      host: connectionPatch.host ?? proxy.host,
+      port: connectionPatch.port ?? proxy.port,
+      username: connectionPatch.username === undefined ?
+        proxy.username : connectionPatch.username || undefined,
+      password: connectionPatch.password === undefined ?
+        proxy.password : connectionPatch.password || undefined,
+    };
+    // The same predicate save() uses, credentials compared through ||'' so
+    // "absent" and "empty" are one value. An unchanged connection writes
+    // nothing -- clearing a valid check over a no-op edit would send the
+    // sweep after a proxy nothing happened to.
+    const unchanged =
+      (proxy.type || 'http') === next.type &&
+      proxy.host === next.host &&
+      proxy.port === next.port &&
+      (proxy.username || '') === (next.username || '') &&
+      (proxy.password || '') === (next.password || '');
+    if (unchanged) {
+      return true;
+    }
+    if (!await withDb((activeOrgId) =>
+      db.proxies.updateConnection(activeOrgId, proxy.id, connectionPatch))) {
+      return false;
+    }
+    patch.proxies((list) => list.map((item) => item.id === proxy.id ? {
+      ...item,
+      ...next,
+      country: undefined,
+      country_code: undefined,
+      egress_ip: undefined,
+      ping_ms: undefined,
+      checked_at: undefined,
+      check_error: undefined,
+    } : item));
+    return true;
+  }
+
   // Returns the failure text rather than toasting it: the only caller is the
   // proxy dialog, which renders it inline next to the fields. A toast for this
   // was worse than useless -- it rendered underneath the dialog's own scrim,
@@ -461,6 +524,6 @@ export function useProxyActions(
   return {
     recordCheck, runCheck, checkOnce, checkMany, setCredentials, resolveForLaunch,
     testConnection, testConnectionAndRecord,
-    save, create, update, remove, assignToFolder, importList, exportToCsv,
+    save, create, update, remove, rename, setConnection, assignToFolder, importList, exportToCsv,
   };
 }

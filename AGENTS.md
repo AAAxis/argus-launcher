@@ -128,23 +128,23 @@ Get-CimInstance Win32_Process |
   start URL. It must not open Supabase login, `localhost`, `127.0.0.1`,
   `argus-launcher`, or `about:blank`.
 - Proxy checks are automatic background checks **in the launcher**. Do not add a manual
-  check button back to the Proxies tab. There are three exceptions, all surfaces the
-  background sweep cannot serve:
-  - The Profiles table's **Proxy check chip is itself the re-check** (`ProxyCheckCell`'s
-    `onRecheck`, passed only from `profileColumns.tsx`). This is not a new affordance:
-    that tab has had a manual check since it had a row-actions cell, as a `ShieldCheck`
-    button sitting fourth among five. Moving it onto the chip put it on the thing it acts
-    on and took the row back to four controls. A healthy or unchecked chip swaps its label
-    to `Re-check` **while the chip itself is hovered** — not while its row is, which is
-    what it used to do and is wrong: pointing at a profile's name is not a question about
-    its proxy, and a column three across changing its words because the pointer entered
-    the row makes the table twitch wherever you put the cursor. A failed one keeps saying
-    `Failed` and offers the re-check inside the panel that already carried the error text
-    and its Copy button, because the message is what anyone opens that chip for. Both
-    labels are laid out at once and only their `visibility` changes — the table is
-    `table-layout: auto`, so a chip that changed width on hover would re-lay-out every
-    column in the table. Narrowing the trigger does not relax that.
-    The Proxies tab itself still has no button, and must not grow one.
+  check *button* back to the Proxies tab — the chip is the manual check now. The surfaces
+  the background sweep cannot serve, plus the chip itself:
+  - In the Profiles **and** Proxies tables the **Proxy check chip is itself the re-check**
+    (`ProxyCheckCell`'s `onRecheck`, passed from `profileColumns.tsx` and
+    `proxyColumns.tsx`). This is not a new affordance: both tabs had a manual check as a
+    `ShieldCheck` button among the row actions. Moving it onto the chip put it on the
+    thing it acts on and removed the row button (Profiles five → four controls, Proxies
+    four → three). A healthy or unchecked chip swaps its label to `Re-check` **while the
+    chip itself is hovered** — not while its row is, which is what it used to do and is
+    wrong: pointing at a profile's name is not a question about its proxy, and a column
+    three across changing its words because the pointer entered the row makes the table
+    twitch wherever you put the cursor. A failed one keeps saying `Failed` and offers the
+    re-check inside the panel that already carried the error text and its Copy button,
+    because the message is what anyone opens that chip for. Both labels are laid out at
+    once and only their `visibility` changes — the table is `table-layout: auto`, so a
+    chip that changed width on hover would re-lay-out every column in the table.
+    Narrowing the trigger does not relax that.
   - The generated browser start page has a Re-check button on its proxy panel: that page
     shows a country and a latency measured once at launch, a session outlives that by
     hours, and you cannot reach the launcher from inside an anonymous window — so it is
@@ -161,6 +161,16 @@ Get-CimInstance Win32_Process |
     per row, and routes a row already matched to a stored proxy through
     `testConnectionAndRecord` so that result lands exactly as the sweep would write it.
     A row whose proxy is not saved yet is only tested.
+- A proxy cell edit is a **narrow write, never `proxies.update`/`save`** — their
+  whole-row upsert races the background sweep (a check landing mid-edit is clobbered, or
+  clobbers). Renames go through `proxies.rename`; type, host:port and credential edits go
+  through `proxies.setConnection`, which clears the six `last_*` check columns **in the
+  same statement** — a stored country with no timestamp reads as a check that passed —
+  and the sweep re-checks the row because they are null. The Proxies table's
+  `username`/`password` columns are **visible by default on purpose** (they exist to be
+  edited in place; the ship-hidden convention for post-launch columns is deliberately
+  waived), and the password cell shows a fixed six-dot mask whatever the length — the
+  real value lives in the cell's editor and its Copy button.
 - **A cell that can be edited is built from `components/ui/CellControls.tsx`, and nothing
   in a table row may reserve width for something that is invisible.** `CellPicker`,
   `CellCopy`, `CellLink` and `CellTextEdit` are the four shapes; all four sit on `Popover`,

@@ -13,6 +13,7 @@ import {PaginationBar} from '../ui/PaginationBar';
 import {FolderSelect} from '../ui/TableFilters';
 import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
 import {PROXY_COLUMNS} from '../../tables/proxyColumns';
+import {useProxyCellActions, useProxyCellOptions} from '../../tables/proxyCellActions';
 import {sortColumnsFrom} from '../../tables/columns';
 import {useTableColumns} from '../../tables/ColumnLayouts';
 import {
@@ -89,7 +90,18 @@ export function ProxiesTab({
 
   const assigned = (proxy: ArgusProxy) => isProxyAssigned(proxy, state.profiles);
 
-  const columnContext: ProxyColumnContext = {state, checkingProxyIds};
+  // Rebuilt every render on purpose -- see tables/proxyCellActions.tsx: the
+  // actions close over state, and memoising them is how a cell writes through
+  // a stale snapshot.
+  const cellOptions = useProxyCellOptions(state);
+  const cellActions = useProxyCellActions();
+  const columnContext: ProxyColumnContext = {
+    state,
+    checkingProxyIds,
+    userId: org.userId || '',
+    options: cellOptions,
+    actions: cellActions,
+  };
   const {columns, isVisible, setVisible, reset} =
     useTableColumns('proxies', PROXY_COLUMNS, {isTeam: showAssignee});
 
@@ -363,16 +375,11 @@ export function ProxiesTab({
                   </td>
                   <ColumnCells columns={columns} context={columnContext} row={proxy} />
                   <td className="actions-cell">
+                    {/* No per-row Check button: the check chip re-checks on
+                      * click now, the same trade the Profiles row made when
+                      * its chip learned to -- the affordance lives on the
+                      * thing it acts on. */}
                     <div className="row-actions">
-                      <button
-                        aria-label={`Check ${label}`}
-                        className="ghost icon-button row-action"
-                        disabled={checkingProxyIds.has(proxy.id)}
-                        onClick={() => void proxies.checkOnce(proxy)}
-                        title={`Check ${label} now`}
-                      >
-                        <ShieldCheck size={16} />
-                      </button>
                       <button
                         aria-label={`Share ${label}`}
                         className="ghost icon-button row-action"

@@ -3544,8 +3544,12 @@ tr.row-checked {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+/* --control-h-sm, matching the .row-action squares beside it: a 36px Launch
+ * next to 32px Edit/Share/Delete read as two sizes of control in one group.
+ * Padding steps down with the height for the same reason. */
 .launch {
-  min-height: 36px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
 }
 
 /* The row-actions cell. The flex lives on an inner div, NOT on the td -- for

@@ -20,6 +20,7 @@ import {PaginationBar} from '../ui/PaginationBar';
 import {FolderSelect, TagFilter} from '../ui/TableFilters';
 import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
 import {COOKIE_COLUMNS} from '../../tables/cookieColumns';
+import {useCookieCellActions, useCookieCellOptions} from '../../tables/cookieCellActions';
 import {sortColumnsFrom} from '../../tables/columns';
 import {useTableColumns} from '../../tables/ColumnLayouts';
 import {TRASH_FOLDER_ID} from '../../lib/trash';
@@ -95,11 +96,18 @@ export function CookiesTab({
   // same flag inside the registry, which is where teamOnly lives now.
   const showAssignee = state.members.length > 1;
 
+  // Options memoised, actions rebuilt every render -- see
+  // tables/cookieCellActions.tsx.
+  const cellOptions = useCookieCellOptions(state);
+  const cellActions = useCookieCellActions();
   const columnContext: CookieColumnContext = {
     state,
     folderFor: cookies.folderFor,
     usage,
     profilesUsing: cookies.profilesUsing,
+    tagOptions: cookieTagOptions,
+    options: cellOptions,
+    actions: cellActions,
   };
   const {columns, isVisible, setVisible, reset} =
     useTableColumns('cookies', COOKIE_COLUMNS, {isTeam: showAssignee});

@@ -70,13 +70,13 @@ export function storedCheckState(proxy: ArgusProxy | null | undefined): ProxyChe
 // rather than read off the proxy so the import review table -- whose results are
 // dialog state and never written to a row -- can use the same chip with no date.
 //
-// `onRecheck` turns the chip into the way to check again. Only the Profiles
-// table passes it: the Proxies tab is swept in the background and must not grow
-// a manual button, the import review screen has its own Check-proxies control
-// for rows that are not saved yet, and the proxy editor is checking a draft.
-// The Profiles table already had a manual re-check -- a shield icon among the
-// row's five action buttons -- so this moves an affordance onto the thing it
-// acts on rather than adding one, and leaves the row with four controls.
+// `onRecheck` turns the chip into the way to check again. The Profiles and
+// Proxies tables pass it; the import review screen does not (it has its own
+// Check-proxies control for rows that are not saved yet), nor does the proxy
+// editor (it is checking a draft). Both tables had a manual re-check already
+// -- a shield icon among the row's action buttons -- so in each the chip
+// replaced the button rather than adding an affordance, and the row lost a
+// control (Profiles five to four, Proxies four to three).
 export function ProxyCheckCell({state, age, className = '', onRecheck}: {
   state: ProxyCheckState;
   age?: string;
