@@ -435,7 +435,14 @@ function downloadFile(filename, text, mime) {
 async function currentSiteDomain() {
   const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
   try {
-    return tab && tab.url ? new URL(tab.url).hostname : '';
+    if (!tab || !tab.url) return '';
+    const url = new URL(tab.url);
+    // Only http(s) tabs are "a site" with a cookie-bearing domain -- a
+    // chrome://, chrome-extension://, about:, or file: active tab (this
+    // popup's own extension page counts, since chrome.tabs.query can return
+    // it) has a hostname too, but showing that hostname read as "the site"
+    // in the popup instead surfaced this extension's own ID.
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.hostname : '';
   } catch {
     return '';
   }

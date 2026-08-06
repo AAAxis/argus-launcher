@@ -122,8 +122,24 @@ function render() {
       <td class="expiry"></td>
       <td class="flags-cell"></td>
       <td class="actions">
-        <button class="edit" type="button" title="Edit">✎</button>
-        <button class="remove" type="button" title="Delete">✕</button>
+        <span class="row-actions">
+          <button class="edit" type="button" title="Edit">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <button class="remove" type="button" title="Delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M19 6l-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </span>
       </td>`;
     const checkbox = row.querySelector('input[type="checkbox"]');
     checkbox.dataset.key = key;

@@ -29,7 +29,11 @@ body {
 main { display: grid; gap: 10px; padding: 14px; }
 
 header { align-items: center; display: flex; gap: 8px; }
-header .app-icon { border-radius: 5px; display: block; }
+/* Was a 32px PNG (dark helmet mark on a solid black square) forced down to
+ * 20px -- at that size it read as a broken-image smudge, not a logo. Swapped
+ * for an inline SVG cookie glyph (see popup.js's ICON_PATHS) in the same
+ * outline grammar as the rest of the UI's icons, colored via currentColor. */
+header .app-icon { display: flex; flex: none; }
 h1 { font-size: 15px; font-weight: 700; margin: 0; }
 .chip {
   background: var(--card);
@@ -107,7 +111,12 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
 /* ---- cookie counts -------------------------------------------------------- */
 .stats { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 .stat {
-  background: var(--card); border-radius: var(--radius); padding: 8px 10px;
+  /* min-width: 0 overrides the grid item default of min-width: auto --
+   * without it, a long unbroken string (e.g. an extension ID, or a genuinely
+   * long domain) sizes the track to its content instead of respecting 1fr,
+   * so the ellipsis rule below never gets to fire and the layout gets
+   * pushed wide instead. */
+  background: var(--card); border-radius: var(--radius); min-width: 0; padding: 8px 10px;
 }
 .stat-number { display: block; font-size: 17px; font-weight: 700; line-height: 1.2; }
 .stat small { color: var(--muted); display: block; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

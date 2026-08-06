@@ -7,7 +7,20 @@
 </head>
 <body>
   <header>
-    <img src="icons/icon-32.png" alt="" width="24" height="24">
+    <!-- Was a 32px PNG (dark helmet mark on a solid black square) forced
+         down to 24px -- at that size it read as a broken-image smudge, not
+         a logo. Swapped for an inline SVG cookie glyph in the same outline
+         grammar as the toolbar's add/import icons below, colored via
+         currentColor so it always matches the header text. -->
+    <svg class="app-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M8.5 8.5v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M16 15.5v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M12 12v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M11 17v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M7 14v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
     <h1>Cookie editor</h1>
     <span id="profile-chip" class="chip" hidden></span>
     <span id="summary" class="summary"></span>

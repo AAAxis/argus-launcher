@@ -58,6 +58,9 @@ const ICON_PATHS = {
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
   'upload-tray': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 8l5-5 5 5M12 3v12"/>',
+  cookie: '<path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>' +
+    '<path d="M8.5 8.5v.01"/><path d="M16 15.5v.01"/><path d="M12 12v.01"/>' +
+    '<path d="M11 17v.01"/><path d="M7 14v.01"/>',
 };
 
 function makeIcon(name, size) {
@@ -89,6 +92,11 @@ function setIcon(container, name, size) {
 for (const el of document.querySelectorAll('[data-icon]')) {
   setIcon(el, el.dataset.icon, 14);
 }
+
+// Header mark, sized up from the button-icon default (14px) so it reads as
+// a deliberate logo rather than another inline glyph -- rendered directly
+// instead of through the [data-icon] loop above for that reason.
+$('.app-icon').replaceChildren(makeIcon('cookie', 20));
 
 // ---- sync state -> plain-language card -------------------------------------
 // Priority order matters: a launcher that isn't reachable is worse news than
@@ -208,7 +216,12 @@ function renderSeed(seed) {
 
 function renderCounts(counts) {
   $('#total-count').textContent = String(counts.total);
-  $('#site-count').textContent = String(counts.site);
+  // No siteDomain means the active tab isn't a real http(s) site (an
+  // internal chrome:// / extension page) -- "0" there reads as "zero
+  // cookies on this site", which overstates what's known. An em-dash says
+  // the count does not apply, same idea as background.js's empty-domain
+  // contract for this state.
+  $('#site-count').textContent = counts.siteDomain ? String(counts.site) : '—';
   $('#site-label').textContent = counts.siteDomain || 'This site';
 }
 

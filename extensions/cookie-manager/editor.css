@@ -28,7 +28,7 @@ body {
 }
 
 header { align-items: center; display: flex; gap: 10px; margin-bottom: 16px; }
-header img { border-radius: 6px; display: block; }
+header .app-icon { display: block; flex: none; }
 h1 { font-size: 20px; font-weight: 700; margin: 0; }
 .chip {
   background: var(--card); border-radius: 999px; color: var(--muted);
@@ -105,7 +105,7 @@ thead th {
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: rgb(23 22 19 / .025); }
 th.check, td.check { padding-left: 12px; width: 32px; }
-th.actions, td.actions { text-align: right; width: 64px; }
+th.actions, td.actions { text-align: right; width: 76px; }
 
 td.value {
   color: var(--muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -128,9 +128,24 @@ tr.expired td.name { box-shadow: inset 3px 0 0 var(--red); }
 .flag-samesite { background: var(--card); color: var(--muted); }
 .flag-samesite-none { background: var(--amber-bg); color: var(--amber); }
 
-td.actions button { background: transparent; border: 0; color: var(--muted); font-size: 14px; padding: 4px 6px; }
-td.actions button:hover { color: var(--ink); }
-td.actions button.remove:hover { color: var(--red); }
+/* Row actions were two inline-block buttons in a 64px cell -- narrower than
+ * their combined width, so they wrapped onto separate lines instead of
+ * sitting side by side. Now an explicit flex row, vertically centered, and
+ * dimmed until the row is hovered/focused -- opacity (not visibility/display)
+ * so the buttons stay in tab order and a keyboard user tabbing into the row
+ * still lands on and reveals them via :focus-within. */
+.row-actions {
+  align-items: center; display: flex; gap: 2px; justify-content: flex-end;
+  opacity: 0; transition: opacity .12s ease;
+}
+tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .row-actions { transition: none; } }
+td.actions button {
+  align-items: center; background: transparent; border: 0; border-radius: 6px;
+  color: var(--muted); display: inline-flex; justify-content: center; padding: 6px;
+}
+td.actions button:hover { background: var(--card); color: var(--ink); }
+td.actions button.remove:hover { background: var(--red-bg); color: var(--red); }
 
 footer { align-items: center; display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 #page-info { color: var(--muted); font-size: 12px; margin-right: auto; }
