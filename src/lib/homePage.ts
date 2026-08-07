@@ -287,45 +287,43 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
 .brand{display:flex;justify-content:center;margin:0 0 14px;color:var(--ink)}
 .brand svg{height:40px;width:auto;display:block}
 
-/* ── Session pill ───────────────────────────────────────────────────────────
+/* ── Session warning ────────────────────────────────────────────────────────
+   Only rendered when proxyStatus.ok is false -- see the guard on the section
+   below. A healthy session says nothing here at all.
+
+   It used to be a permanent status card in this corner, and then a permanent
+   one-line pill. Both were the same mistake: a panel that is always on screen
+   saying "everything is fine" is a panel nobody reads by the third tab, which
+   is precisely when it needs to be able to say something is not. The full
+   readout -- exit, location, timezone, device -- lives in the side panel now,
+   which can hold it at a readable size, keep it fresh while the session runs,
+   and put the re-check button beside it.
+
    Pinned to the top-right corner rather than sharing a row with the profile
-   name. It is session status, not page content, and inside a 640px column a
-   long name and a proxy line were fighting over one row -- which is what the
-   old header's flex-wrap was papering over. Below 820px there is no corner to
-   spare, so it drops back into the flow above the title.
-
-   A one-line verdict, not a readout. The four labelled rows this used to carry
-   -- exit, location, timezone, device -- moved into the browser's side panel,
-   which can hold them at a readable size, keep them fresh while the session
-   runs, and put the re-check button next to them. What is left here is the one
-   question a start page should answer at a glance: is this session sane. */
-.session{position:fixed;top:16px;right:16px;z-index:10;display:flex;align-items:flex-start;gap:9px;width:min(330px,calc(100vw - 32px));padding:11px 12px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--raised);box-shadow:var(--shadow-xs)}
-/* flex-start, not center: a failing state puts two lines of sentence in here,
-   and centring pinned the dot and the link against the middle of that block
-   instead of against the title they belong to. The dot's offset is half the
-   title's leading, so it sits on the first line's optical centre. */
-.session-dot{flex:0 0 auto;width:9px;height:9px;margin-top:4px;border-radius:999px;background:var(--ink-faint)}
-.session[data-state=ok] .session-dot{background:var(--success)}
-.session[data-state=fail] .session-dot{background:var(--danger)}
+   name: inside a 640px column a long name and a proxy line were fighting over
+   one row. Below 820px there is no corner to spare, so it drops back into the
+   flow above the title. */
+.session{position:fixed;top:16px;right:16px;z-index:10;display:flex;align-items:flex-start;gap:9px;width:min(330px,calc(100vw - 32px));padding:11px 12px;border:1px solid var(--danger);border-radius:var(--radius-lg);background:var(--danger-bg);box-shadow:var(--shadow-xs)}
+/* flex-start, not center: this puts two lines of sentence in here, and centring
+   pinned the dot and the link against the middle of that block instead of
+   against the title they belong to. The dot's offset is half the title's
+   leading, so it sits on the first line's optical centre. */
+.session-dot{flex:0 0 auto;width:9px;height:9px;margin-top:4px;border-radius:999px;background:var(--danger)}
 .session-text{flex:1;min-width:0;display:grid;gap:2px}
-.session-text strong{font-size:13px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Wraps, up to two lines. A working session puts its exit, location and latency
-   here; a failing one puts what failed, or what to assign instead. Either way a
-   sentence clipped to one line loses the half that says why.
+.session-text strong{font-size:13px;font-weight:700;line-height:1.2;color:var(--danger);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Wraps, up to three lines: this is where what failed, or what to assign
+   instead, gets said, and a sentence clipped to one line loses the half that
+   says why.
 
-   The clamp is scoped to this one line rather than to every small in the
-   panel: the hint below is also a small, and clamping both cut the signpost off
-   mid-sentence -- "…are in the Argus panel —…" -- which is the one line here
-   that has to survive intact, since it is the only thing telling a new user
-   where the rest of this went. */
-.session-detail{font-size:12px;line-height:1.35;color:var(--ink-soft);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.session[data-state=fail] .session-detail{color:var(--danger)}
-/* Where the rest of it went. Quieter than the detail above it and separated by
-   a rule, so it reads as a signpost rather than as a third fact about the
-   proxy. Static text, not a control: a start page cannot open a side panel --
-   that needs a user gesture inside the extension -- and a button that looks
-   like it would is worse than a sentence saying where to click. */
-.session-hint{padding-top:8px;margin-top:1px;border-top:1px solid var(--border-soft);font-size:11px;line-height:1.35;color:var(--ink-faint)}
+   The clamp is scoped to this one line rather than to every small in the card:
+   the hint below is also a small, and clamping both cut it off mid-sentence. */
+.session-detail{font-size:12px;line-height:1.35;color:var(--danger);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* What to do about it. Separated by a rule and quieter than the sentence above,
+   so it reads as the next step rather than as a third fact about the proxy.
+   Static text, not a control: a start page cannot open a side panel -- that
+   needs a user gesture inside the extension -- and something that looks like a
+   button that would is worse than a line saying where to go. */
+.session-hint{padding-top:8px;margin-top:1px;border-top:1px solid var(--danger);font-size:11px;line-height:1.35;color:var(--ink-soft)}
 /* -4px pulls the 28px hit target back level with the 15.6px title line it sits
    beside, without shrinking the target itself. */
 .session-actions{flex:0 0 auto;display:flex;margin:-4px -4px 0 0}
@@ -376,17 +374,17 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
 </head>
 <body>
 <main>
-<section class="session" data-state="${proxyStatus.ok ? 'ok' : 'fail'}">
+${proxyStatus.ok ? '' : `<section class="session">
 <span class="session-dot"></span>
 <div class="session-text">
 <strong>${escapeHtml(proxyStatus.title)}</strong>
 <small class="session-detail">${escapeHtml(proxyStatus.detail)}</small>
-<small class="session-hint">Cookies and session checks live in the Argus panel, on the toolbar.</small>
+<small class="session-hint">Re-check it in the Argus panel, on the toolbar.</small>
 </div>
 <div class="session-actions">
 <a href="https://ip.me/" title="Check this session on ip.me" aria-label="Check this session on ip.me">${EXTERNAL_ICON}</a>
 </div>
-</section>
+</section>`}
 <div class="brand">${argusMark}</div>
 <h1>${safeName}</h1>
 <p class="sub">Anonymous Argys Browser session</p>
