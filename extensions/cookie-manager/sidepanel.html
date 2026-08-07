@@ -1,0 +1,190 @@
+<!doctype html>
+<!-- data-theme starts at "system" and sidepanel.js replaces it with the
+     launcher's own setting once argus-session.json has been read. The default
+     is not cosmetic: a window that was never launched from the launcher has no
+     setting to adopt, and with no attribute at all neither themed :root block
+     matches, so the panel painted light on a dark desktop. -->
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <title>Argus Panel</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <!-- Sticky, so the name of the profile you are looking at stays on screen
+       while the rest of the panel scrolls. In a browser running six anonymous
+       sessions at once that is the single most useful thing here. -->
+  <header class="panel-head">
+    <span class="head-mark" data-icon="shield" aria-hidden="true"></span>
+    <h1 id="profile-name">Argus Panel</h1>
+  </header>
+
+  <main>
+    <!-- ── Session ──────────────────────────────────────────────────────────
+         The identity check, first: whether this window's exit, clock and
+         claimed hardware agree with each other is the question the whole
+         product exists to answer. -->
+    <section class="section">
+      <div class="section-head">
+        <h2 class="eyebrow">Session</h2>
+        <div class="section-actions">
+          <button id="recheck" class="icon-button" type="button"
+              title="Re-check this proxy" aria-label="Re-check this proxy">
+            <span class="icon" data-icon="refresh"></span>
+          </button>
+          <a class="icon-button" href="https://ip.me/" target="_blank" rel="noreferrer"
+              title="Check this session on ip.me" aria-label="Check this session on ip.me">
+            <span class="icon" data-icon="externalLink"></span>
+          </a>
+        </div>
+      </div>
+
+      <div id="proxy-card" class="card">
+        <div class="card-row">
+          <span id="proxy-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="proxy-title">Reading session&hellip;</strong>
+            <span id="proxy-detail"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Four labels, four values, read down the left edge and compared
+           across. Populated by renderProxyFields() from the same
+           homeProxyStatus() output the launcher composed at launch, and
+           rebuilt wholesale from a re-check's answer. -->
+      <dl id="proxy-fields" class="fields" hidden></dl>
+    </section>
+
+    <!-- ── Cookies ───────────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="eyebrow">Cookies</h2>
+
+      <!-- Sync state is the headline: every reachable/token/rate-limit/internal
+           state the engine can persist gets its own copy here, driven by
+           classifySync(), not just the toolbar badge's reduced glyph set. -->
+      <div id="sync-card" class="card">
+        <div class="card-row">
+          <span id="sync-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="sync-title">Checking sync&hellip;</strong>
+            <span id="sync-detail"></span>
+          </div>
+          <label class="switch" title="Auto-sync to Launcher">
+            <input id="sync-toggle" type="checkbox" aria-label="Auto-sync to Launcher">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <button id="sync-now" class="ghost" type="button">
+          <span class="icon" data-icon="refresh"></span>
+          Save to Launcher now
+        </button>
+        <!-- Filled by renderSync() when sync is off, so a disabled control
+             always says why it is disabled and what would re-enable it. -->
+        <p id="sync-blocked" class="blocked-note" hidden></p>
+      </div>
+
+      <div id="seed-status" class="note-line">
+        <span id="seed-icon" class="mini-icon" aria-hidden="true"></span>
+        <span id="seed-text"></span>
+      </div>
+
+      <!-- The last manual file import, kept on screen rather than left to the
+           transient status bar. It names the file, because "Imported 7 of 7
+           cookies" on its own does not tell you *which* file landed -- the one
+           question you have after picking one. -->
+      <div id="import-result" class="note-line" hidden>
+        <span id="import-result-icon" class="mini-icon" aria-hidden="true"></span>
+        <span id="import-result-text"></span>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <span id="site-count" class="stat-number">0</span>
+          <small id="site-label">This site</small>
+        </div>
+        <div class="stat">
+          <span id="total-count" class="stat-number">0</span>
+          <small>Total cookies</small>
+        </div>
+      </div>
+
+      <!-- The three launcher actions are easy to confuse, so each says what it
+           moves and in which direction rather than relying on its verb. Ordered
+           browser-to-launcher, launcher-to-browser, browser-to-library. -->
+      <div class="action">
+        <button id="pull" type="button">
+          <span class="icon" data-icon="download"></span>
+          Load from Launcher
+        </button>
+        <small class="action-hint">Replaces this browser's cookies with the set assigned to this profile.</small>
+      </div>
+
+      <!-- A library save into the Cookies tab, distinct from the automatic
+           "(live)" sync above. window.prompt() is unreliable inside an
+           extension page, so this expands inline instead: the button hides and
+           a name field takes its place, prefilled and focused. -->
+      <div id="save-as-wrap" class="save-as-wrap">
+        <button id="save-as-toggle" type="button">
+          <span class="icon" data-icon="cookie"></span>
+          Save to Cookies tab&hellip;
+        </button>
+        <small id="save-as-hint" class="action-hint">Saves a named copy into the Launcher's Cookies library, kept until you delete it.</small>
+        <form id="save-as-form" class="save-as-form" hidden>
+          <label class="save-as-label" for="save-as-name">Name for this cookie set</label>
+          <input id="save-as-name" type="text" maxlength="80" autocomplete="off"
+              placeholder="e.g. Sophia Bennett 2026-08-07">
+          <div class="save-as-actions">
+            <button id="save-as-cancel" class="ghost" type="button">Cancel</button>
+            <button id="save-as-confirm" class="primary" type="submit">Save to library</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="row">
+        <div class="menu-wrap">
+          <button id="export-menu-button" type="button" aria-haspopup="true" aria-expanded="false">
+            <span class="icon" data-icon="upload"></span>
+            Export
+          </button>
+          <div id="export-menu" class="menu" hidden role="menu">
+            <button data-scope="all" data-format="json" type="button" role="menuitem">All cookies &middot; JSON</button>
+            <button data-scope="all" data-format="netscape" type="button" role="menuitem">All cookies &middot; Netscape</button>
+            <button data-scope="site" data-format="json" type="button" role="menuitem">Current site &middot; JSON</button>
+            <button data-scope="all" data-format="clipboard" type="button" role="menuitem">Copy JSON to clipboard</button>
+          </div>
+        </div>
+        <label id="import-label" class="import-label" for="import-file">
+          <span class="icon" data-icon="upload-tray"></span>
+          Import
+          <input id="import-file" type="file" accept=".json,.txt,.cookies,application/json,text/plain">
+        </label>
+      </div>
+
+      <button id="open-editor" class="primary" type="button">
+        <span class="icon" data-icon="edit"></span>
+        Open cookie editor
+      </button>
+    </section>
+
+    <!-- ── Automations ───────────────────────────────────────────────────────
+         Hidden outright when this launch has none: an empty section with a
+         heading reads as a feature that is broken rather than one that has
+         nothing to show. -->
+    <section id="automations-section" class="section" hidden>
+      <h2 class="eyebrow">Automations</h2>
+      <div id="automation-list" class="automation-list"></div>
+    </section>
+  </main>
+
+  <!-- Pinned to the bottom of the panel rather than sitting after the last
+       section. A popup was short enough that a trailing line was always in
+       view; this panel scrolls, and an acknowledgement you have to scroll to
+       find is one you will not see. -->
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <script src="cookie-format.js"></script>
+  <script src="icons.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

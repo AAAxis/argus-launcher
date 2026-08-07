@@ -3,7 +3,13 @@
 // (POST /v1/profiles/{id}/launch) driven by an agent. They used to build this
 // object separately, so a field added for one silently did nothing in the
 // other.
-import {anonymousHomeHtml, browserStartUrl, profileDataDir} from './homePage';
+import {
+  anonymousHomeHtml,
+  browserStartUrl,
+  canRecheckProxy,
+  homeProxyStatus,
+  profileDataDir,
+} from './homePage';
 import {assignedSet} from './cookieSync';
 import {buildRuntimeFingerprint, fingerprintSwitches} from './fingerprint';
 import {readSearchEngine} from './searchEngines';
@@ -27,6 +33,16 @@ export function buildLaunchPayload(
   // cannot disagree, which they could when this was keyed off `startPage`.
   const tileAutomations = startPageAutomations(state.automations, profile)
       .map((item) => ({id: item.id, name: item.name}));
+  // Composed once, spent twice: the start page's status pill and the browser
+  // side panel's Session card are both built from this object. Deriving it in
+  // each place instead is how one session ends up described two ways -- the
+  // panel calling a proxy active while the page it opened over calls it
+  // unverified.
+  const proxyStatus = homeProxyStatus(profile, proxy);
+  // The theme is read here rather than inside either surface, for the reason
+  // the homeHtml comment below gives: both consumers are pure functions of
+  // their arguments, and localStorage is only reachable from the renderer.
+  const theme = readStoredPreference();
   // A saved cookie-set (Cookies tab) takes priority over the legacy
   // pasted/uploaded cookie_import_* fields -- both resolve to the same
   // cookieImportUrl the launch payload consumes, just from a different source.
@@ -77,8 +93,8 @@ export function buildLaunchPayload(
     // automation API -- run in the renderer, so localStorage is available on
     // either path.
     homeHtml: anonymousHomeHtml(
-      profile, state.shared_bookmarks, proxy, readSearchEngine(),
-      readStoredPreference(), tileAutomations, startPage || null),
+      profile, state.shared_bookmarks, proxyStatus, readSearchEngine(),
+      theme, tileAutomations, startPage || null),
     cookieImportPath: savedMode ? null : (profile.cookie_import_path || null),
     cookieImportUrl: savedMode ?
       (savedCookie?.url || null) :
@@ -92,5 +108,16 @@ export function buildLaunchPayload(
     // because it costs a download), and that polarity lives in the registry.
     builtInExtensions: state.built_in_extensions,
     startPage: startPage || null,
+    // Only when this launch has a credential to spend. Without one the panel
+    // could paint a proxy card but neither re-check it nor run anything on it,
+    // and half a dashboard whose controls all refuse is worse than a panel that
+    // says plainly it was not launched from the launcher.
+    sessionPanel: startPage ? {
+      profile: {id: profile.id, name: profile.name},
+      theme,
+      proxy: proxyStatus,
+      recheckable: canRecheckProxy(profile, proxy),
+      automations: tileAutomations,
+    } : null,
   };
 }

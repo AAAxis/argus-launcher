@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && env -u ELECTRON_RUN_AS_NODE ARGUS_LAUNCHER_DEV=1 node scripts/start-macos-app.cjs\"",
     "icons": "env -u ELECTRON_RUN_AS_NODE electron scripts/build-icons.cjs",
+    "panel-icon": "env -u ELECTRON_RUN_AS_NODE electron scripts/build-panel-icon.cjs",
     "build": "vite build",
     "dist": "npm run build && electron-builder --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg --publish never",

@@ -9,6 +9,8 @@ import type {
 } from './types';
 import type {AutomationVars, RunLogEntry, RunTrigger} from './automations/types';
 import type {RuntimeConnector} from './data/connectors';
+import type {SessionField} from './lib/homePage';
+import type {ThemePreference} from './theme';
 
 export type ProxyConfig = {
   id?: string;
@@ -62,6 +64,33 @@ export type LaunchProfilePayload = {
   // (argus-launch.json). Null when minting failed; the extension then shows
   // sync as unavailable rather than broken.
   startPage?: {port: number; token: string} | null;
+  // Everything the browser's side panel shows about this session, resolved at
+  // launch: who this profile is, what its proxy is doing, and what it may run.
+  // built-in-extensions.cjs writes it beside the panel extension as
+  // argus-session.json; the panel reads that file for its first paint.
+  //
+  // The proxy block is homeProxyStatus() output verbatim, the same object the
+  // start page is built from, so the two surfaces cannot word one session two
+  // different ways. Null when the launch could not mint a run token — the same
+  // polarity as `startPage` above, and the panel's signal that this window was
+  // not launched from the launcher.
+  sessionPanel?: SessionPanelData | null;
+};
+
+// Passed unresolved on `theme` for the reason anonymousHomeHtml documents:
+// 'system' has to stay 'system' so prefers-color-scheme keeps deciding inside
+// the browser, a separate process on a machine whose appearance can change
+// while a session is open.
+export type SessionPanelData = {
+  // No colour: a profile's colour is six theme-dependent token triples
+  // (lib/profileColors.ts), and the panel would have to carry all thirty-six to
+  // paint a 10px swatch correctly in both themes. The panel is inside the window
+  // it describes, so the name is identification enough.
+  profile: {id: string; name: string};
+  theme: ThemePreference;
+  proxy: {ok: boolean; title: string; detail: string; fields?: SessionField[]};
+  recheckable: boolean;
+  automations: Array<{id: string; name: string}>;
 };
 
 export type CookieFileSelection = {

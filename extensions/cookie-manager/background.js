@@ -54,6 +54,25 @@ async function profileMeta() {
   }
 }
 
+// What the side panel paints before it has talked to anyone: this profile, the
+// theme to paint in, the proxy verdict as the launcher composed it, and the
+// automations this launch may run. Written per launch by built-in-extensions.cjs
+// from the renderer's own homeProxyStatus() output, so the panel and the start
+// page describe one session in one set of words.
+//
+// Absent for the same reason argus-launch.json is: the extension is running
+// outside a profile launch. The panel says so rather than inventing a session.
+async function sessionData() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('argus-session.json'));
+    if (!response.ok) return null;
+    const parsed = await response.json();
+    return parsed && parsed.proxy ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---- sync state --------------------------------------------------------------
 // Everything the badge and popup need lives here, not in module-scope
 // variables: a service worker can be evicted between any two lines, and the
@@ -476,6 +495,53 @@ async function saveAsSet(name, cookies) {
   }
 }
 
+// ---- side panel: proxy re-check and automation runs -------------------------
+// Both spend the same run token the cookie sync engine above spends, and both
+// go through fetchLauncher so a dead token, a throttle and a 5xx are classified
+// here exactly once. Neither reads or writes SYNC_STATE_KEY: like saveAsSet,
+// these are one-off actions the user is watching happen, and folding their
+// failures into lastError/lastErrorKind would paint the cookie badge red for
+// something that has nothing to do with cookies.
+//
+// The run token authorizes exactly these two things plus the two cookie routes.
+// Neither request carries anything the caller chose beyond an automation id the
+// launcher already handed this session -- no proxy, no steps, no profile.
+async function recheckProxy() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/proxies/recheck-from-page`,
+      {runToken: config.token});
+  if (!result.ok) {
+    return {ok: false, error: result.message};
+  }
+  return {
+    ok: true,
+    proxyOk: Boolean(result.body.proxyOk),
+    title: result.body.title || '',
+    detail: result.body.detail || '',
+    fields: Array.isArray(result.body.fields) ? result.body.fields : [],
+  };
+}
+
+async function runAutomation(automationId) {
+  if (!automationId) {
+    return {ok: false, error: 'No automation was named.'};
+  }
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/automations/run-from-page`,
+      {runToken: config.token, automationId});
+  // The launcher answers identically for every refusal, so there is nothing
+  // more specific to say than that it did not start.
+  return result.ok ? {ok: true} : {ok: false, error: result.message};
+}
+
 // ---- import / export -------------------------------------------------------
 function downloadFile(filename, text, mime) {
   const url = `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
@@ -559,8 +625,8 @@ async function importCookies(rawCookies) {
   return {count: imported, failed};
 }
 
-// ---- status for the popup --------------------------------------------------
-async function statusForPopup() {
+// ---- status for the side panel ----------------------------------------------
+async function statusForPanel() {
   const [meta, sync, seedState, all, siteDomain] = await Promise.all([
     profileMeta(),
     getSyncState(),
@@ -588,7 +654,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message && message.type) {
         case 'get-status':
-          sendResponse(await statusForPopup());
+          sendResponse(await statusForPanel());
+          return;
+        case 'get-session':
+          sendResponse({ok: true, session: await sessionData()});
+          return;
+        case 'recheck-proxy':
+          sendResponse(await recheckProxy());
+          return;
+        case 'run-automation':
+          sendResponse(await runAutomation(message.automationId));
           return;
         case 'sync-now':
           sendResponse(await pushToLauncher({manual: true}));
@@ -679,10 +754,30 @@ async function importSeedCookiesIfPresent() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() =>
-  void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (onInstalled)')));
-chrome.runtime.onStartup.addListener(() =>
-  void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (onStartup)')));
+// ---- side panel on toolbar click ---------------------------------------------
+// The action has no default_popup, so without this the toolbar button does
+// nothing at all. Registered on both lifecycle events for the reason
+// extensions/onlinesim-sms/background.js does: onInstalled fires once for a
+// freshly copied extension directory, onStartup on every later browser start,
+// and a worker evicted between them has to re-assert the behaviour.
+//
+// chrome.sidePanel.open() is not usable here instead: it requires a user
+// gesture, which is why the panel cannot be opened for the user at launch.
+function registerPanelBehavior() {
+  if (!chrome.sidePanel) return;
+  chrome.sidePanel.setPanelBehavior({openPanelOnActionClick: true})
+      .catch(reportUnhandled('registering side panel behavior'));
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  registerPanelBehavior();
+  void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (onInstalled)'));
+});
+chrome.runtime.onStartup.addListener(() => {
+  registerPanelBehavior();
+  void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (onStartup)'));
+});
+registerPanelBehavior();
 void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (initial)'));
 chrome.cookies.onChanged.addListener(() => schedulePush());
 void pushToLauncher().catch(reportUnhandled('initial push'));

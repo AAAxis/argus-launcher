@@ -72,9 +72,19 @@ export const BUILT_IN_EXTENSIONS: BuiltInExtension[] = [
   {
     key: 'cookie_manager',
     defaultEnabled: true,
-    name: 'Argus Cookie Manager',
-    tagline: 'Export the session a profile is signed into, or import a cookie file straight into it.',
-    note: 'Also seeds a profile with the cookie set assigned to it, once, on its first launch.',
+    // The key stays `cookie_manager` though the extension outgrew cookies: it
+    // is what electron/built-in-extensions.cjs, this card and the org's saved
+    // built_in_extensions state agree on, and renaming it would read as a
+    // missing key, fall back to defaultEnabled, and discard every org's saved
+    // preference.
+    name: 'Argus Panel',
+    tagline: 'The side panel in every profile window: proxy status, cookies and this launch’s automations.',
+    // Spells out what else goes away, because the name no longer does. Turning
+    // this off used to cost cookie tooling alone; it now also takes the proxy
+    // readout and the automation runner with it.
+    note: 'Switching this off removes the whole panel — the session’s exit, timezone and device ' +
+      'checks, cookie sync, and the automation runner. It also seeds a profile with the cookie set ' +
+      'assigned to it, once, on its first launch.',
     // Its icon is the Argus mark itself -- same winged helmet as
     // extensions/cookie-manager/icons/icon-128.png, reused from the copy the
     // sidebar already masks so there is one file to change if the mark does.

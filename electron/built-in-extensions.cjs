@@ -14,6 +14,7 @@
 // That keeps the table importable from vitest (see built-in-extensions.test.js,
 // which asserts these keys match the UI's BUILT_IN_EXTENSIONS) without pulling
 // an Electron app into the test process.
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -41,18 +42,61 @@ const BUILT_IN_EXTENSIONS = [
     key: 'cookie_manager',
     defaultEnabled: true,
     source: {kind: 'folder', dir: 'cookie-manager'},
-    placement: {kind: 'stable', name: 'ArgysCookieManager'},
-    // Merged export/import UI plus, when this profile has a cookie file
-    // assigned, the seed the extension's own background.js imports once on
-    // first run. Previously two separate extensions; one so each profile shows
-    // exactly one cookie extension that both seeds and manages.
+    // Renamed from 'ArgysCookieManager' when the popup became a side panel.
+    // Not cosmetic: Chrome caches an unpacked extension's service worker script
+    // body against its directory path, independently of the manifest (see the
+    // foxywall entry below for the CDP-confirmed details). A profile that had
+    // already launched the old extension could have kept running a background.js
+    // from before setPanelBehavior existed -- and with default_popup gone, a
+    // worker that never registers the panel leaves the toolbar button doing
+    // nothing at all. A new path is a new extension identity and therefore a
+    // guaranteed-fresh worker.
+    //
+    // An unpacked extension's ID is derived from its path, so this also resets
+    // chrome.storage.local once per existing profile: the seed-import watermark
+    // and the sync watermark. Both are self-healing -- re-importing the same
+    // seed cookies sets the same values again, and a reset sync watermark costs
+    // one extra push -- and it happens once, at this release.
+    placement: {kind: 'stable', name: 'ArgusPanel'},
+    // The pre-rename directory, removed on launch so it does not sit in every
+    // profile forever. Nothing loads it: it is not in --load-extension.
+    retired: ['ArgysCookieManager'],
+    // Given its own toolbar button rather than left inside the puzzle-piece
+    // menu. This one is not an accessory to a page -- it is how you open the
+    // session dashboard at all, and two clicks behind a menu is not a place a
+    // primary surface can live. See seedPinnedExtensions below for how, and why
+    // only a stable placement can ask for this.
+    pinned: true,
+    // The Argus Panel: the browser's side-panel dashboard. Cookie export/import
+    // and sync, the session's proxy readout, and this launch's automations,
+    // plus (when this profile has a cookie file assigned) the seed the
+    // extension's own background.js imports once on first run.
+    //
+    // The key stays `cookie_manager` though the extension is no longer only
+    // about cookies. It is the contract between this table, the card in
+    // src/data/extensionCatalog.ts and the org's saved built_in_extensions
+    // state -- renaming it would read as a missing key, fall back to
+    // defaultEnabled, and silently discard every org's saved preference.
     configure: async (payload, extensionDir, deps) => {
-      // Lets the popup show which profile it is attached to (Argys Browser
+      // Lets the panel show which profile it is attached to (Argys Browser
       // windows are otherwise unlabeled from the extension's point of view).
       fs.writeFileSync(path.join(extensionDir, 'profile-meta.json'), JSON.stringify({
         id: payload.id || '',
         name: payload.name || '',
       }, null, 2));
+      // Everything the panel paints before it has talked to anyone: the proxy
+      // verdict as homeProxyStatus composed it in the renderer, the theme to
+      // paint it in, and the automations this launch may run. Written only when
+      // the renderer supplied one, so the panel reads the file's absence as
+      // "this window was not launched from Argus Launcher" -- the same contract
+      // argus-launch.json already has for sync.
+      //
+      // No 0600 here, unlike argus-launch.json below: this file carries no
+      // credential. The run token stays in that one.
+      if (payload.sessionPanel) {
+        fs.writeFileSync(path.join(extensionDir, 'argus-session.json'),
+            JSON.stringify(payload.sessionPanel, null, 2));
+      }
       // The per-launch credential the sync engine spends against the loopback
       // API (see /v1/cookies/push-from-profile in main.cjs). Written only when
       // the launch minted a token, so background.js reads the file's absence
@@ -189,6 +233,9 @@ async function materializeBuiltIn(payload, entry, deps) {
   if (entry.placement.kind === 'per-launch') {
     pruneStaleCopies(payload.userDataDir, entry.placement.prefix);
   }
+  for (const name of entry.retired || []) {
+    fs.rmSync(path.join(payload.userDataDir, name), {recursive: true, force: true});
+  }
   const extensionDir = destinationFor(payload.userDataDir, entry);
   fs.rmSync(extensionDir, {recursive: true, force: true});
   deps.copyDirectoryContents(sourceDir, extensionDir);
@@ -212,12 +259,99 @@ async function materializeBuiltIn(payload, entry, deps) {
   return extensionDir;
 }
 
+// ---- toolbar pinning ---------------------------------------------------------
+// An unpacked extension has no key in its manifest, so Chromium derives its id
+// from where it sits on disk: SHA-256 of the absolute, symlink-resolved
+// directory path, first 16 bytes, hex, with 0-9a-f mapped onto a-p (a numeric
+// id would read as an IP address to some software). See
+// crx_file::id_util::GenerateIdForPath and UnpackedInstaller::Load in the
+// browser tree -- the path is passed through MakeAbsoluteFilePath first, which
+// is realpath(), hence realpathSync here.
+//
+// Reproduced rather than asked for because the browser cannot be asked: the id
+// has to be known *before* launch, to name the extension in a preference the
+// browser reads on startup.
+function unpackedExtensionId(extensionDir) {
+  const resolved = fs.realpathSync(extensionDir);
+  const digest = crypto.createHash('sha256').update(resolved, 'utf8').digest('hex');
+  return digest.slice(0, 32).replace(/[0-9a-f]/g,
+      (character) => String.fromCharCode(97 + parseInt(character, 16)));
+}
+
+// Pins every enabled built-in that asked for a toolbar button, by seeding
+// Chromium's own `extensions.pinned_extensions` list in the profile's
+// Preferences file before the browser opens it.
+//
+// That pref is a plain syncable list (ExtensionPrefs::RegisterProfilePrefs in
+// the browser tree) and is *not* one of the MAC-signed tracked preferences, so
+// writing it from out here is not something Chromium will detect and reset --
+// unlike extensions.settings next to it. The enterprise ExtensionSettings
+// policy has a `toolbar_pin: force_pinned` for the same job, but on macOS that
+// needs a managed-preferences plist and therefore an MDM or an admin, which is
+// not something an app can arrange for itself.
+//
+// Seeded once, not enforced: if the key already exists this leaves it alone, so
+// a user who unpins the button keeps it unpinned. force_pinned would take that
+// choice away, and this is a convenience, not a policy.
+//
+// Only stable placements are eligible. A per-launch directory gets a new path,
+// and therefore a new id, every single launch -- pinning those would append a
+// dead id to this list forever and never pin anything the user could see.
+function seedPinnedExtensions(payload, deps) {
+  const prefsPath = path.join(payload.userDataDir, 'Default', 'Preferences');
+  let prefs;
+  try {
+    prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+  } catch {
+    // No Preferences file yet (a profile's very first launch), or an unreadable
+    // one. Either way there is nothing to merge with and nothing to preserve.
+    prefs = {};
+  }
+  // Chromium's JsonPrefStore treats the dots in a registered pref name as
+  // nested object paths, so the on-disk shape is {"extensions":
+  // {"pinned_extensions": [...]}} rather than a flat dotted key. Same rule
+  // writeProfileProxyAssignment documents for argus.profile_data.
+  const extensions = prefs.extensions || {};
+  if (Array.isArray(extensions.pinned_extensions)) {
+    return [];
+  }
+  const ids = [];
+  for (const entry of BUILT_IN_EXTENSIONS) {
+    if (!entry.pinned || !builtInEnabled(payload.builtInExtensions, entry)) continue;
+    if (entry.placement?.kind !== 'stable') continue;
+    const dir = path.join(payload.userDataDir, entry.placement.name);
+    if (!deps.isLoadableExtensionDir(dir)) continue;
+    try {
+      ids.push(unpackedExtensionId(dir));
+    } catch (error) {
+      // A button that is one click further away is not worth failing a launch
+      // over, or even worth a warning louder than this.
+      console.warn(`Could not compute an extension id for "${entry.key}":`, error);
+    }
+  }
+  if (!ids.length) {
+    return [];
+  }
+  extensions.pinned_extensions = ids;
+  prefs.extensions = extensions;
+  fs.mkdirSync(path.dirname(prefsPath), {recursive: true});
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs));
+  return ids;
+}
+
 // Every enabled built-in's directory, in table order.
 async function materializeBuiltIns(payload, deps) {
   const enabled = BUILT_IN_EXTENSIONS.filter(
       (entry) => builtInEnabled(payload.builtInExtensions, entry));
   const paths = await Promise.all(
       enabled.map((entry) => materializeBuiltIn(payload, entry, deps)));
+  // After the copies land, never before: the id is derived from a directory
+  // that has to exist to be realpath()ed.
+  try {
+    seedPinnedExtensions(payload, deps);
+  } catch (error) {
+    console.error('Could not seed pinned extensions:', error);
+  }
   return paths.filter(Boolean);
 }
 
@@ -228,4 +362,6 @@ module.exports = {
   builtInEnabled,
   builtInExtension,
   materializeBuiltIns,
+  seedPinnedExtensions,
+  unpackedExtensionId,
 };
