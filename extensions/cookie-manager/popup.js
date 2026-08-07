@@ -56,8 +56,12 @@ const ICON_PATHS = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/>',
   edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  // Export: arrow leaving the tray, upward. Import: arrow landing in the tray,
+  // downward. These two were previously the same drawing -- the arrowhead was
+  // traversed right-to-left in one and left-to-right in the other, which is not
+  // a visible difference -- so Export and Import were indistinguishable.
   upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
-  'upload-tray': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 8l5-5 5 5M12 3v12"/>',
+  'upload-tray': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   cookie: '<path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>' +
     '<path d="M8.5 8.5v.01"/><path d="M16 15.5v.01"/><path d="M12 12v.01"/>' +
     '<path d="M11 17v.01"/><path d="M7 14v.01"/>',
@@ -185,6 +189,14 @@ function classifySync(sync) {
   };
 }
 
+// Why every launcher-backed control is off, in one sentence naming the fix.
+// A disabled button that does not say why reads as a broken button: three of
+// them greyed out at once, with the card above saying only "Sync unavailable",
+// left no way to tell a missing feature from a missing launcher.
+const SYNC_BLOCKED_REASON =
+  'Relaunch this profile from Argus Launcher to enable these. ' +
+  'They each need a credential the Launcher hands out at launch, and this window did not get one.';
+
 function renderSync(sync) {
   const state = classifySync(sync);
   $('#sync-card').className = `card tone-${state.tone}`;
@@ -202,6 +214,21 @@ function renderSync(sync) {
   // sync-now/pull it does not also need inSync/paused, since it is not the
   // automatic loop.
   $('#save-as-toggle').disabled = !sync.available;
+
+  const blocked = $('#sync-blocked');
+  blocked.textContent = sync.available ? '' : SYNC_BLOCKED_REASON;
+  blocked.hidden = Boolean(sync.available);
+  // Also on the controls themselves: the note sits in the card at the top, and
+  // the buttons it explains are most of a popup away.
+  const tip = sync.available ? '' : SYNC_BLOCKED_REASON;
+  for (const id of ['#sync-now', '#pull', '#save-as-toggle']) {
+    $(id).title = tip;
+  }
+  // The form can be left open across a refresh() that revokes sync; collapsing
+  // it keeps the popup from offering a Save that cannot succeed.
+  if (!sync.available) {
+    closeSaveAsForm();
+  }
 }
 
 function renderSeed(seed) {
@@ -217,6 +244,30 @@ function renderSeed(seed) {
     $('#seed-text').textContent = 'No seed cookies for this profile';
     container.className = 'seed-status';
   }
+}
+
+// The outcome of the last manual file import, named and kept on screen.
+//
+// Previously this only ever appeared as one line of transient text at the very
+// bottom of the popup ("Imported 7 of 7 cookies"), which never said which file
+// it came from and was gone the moment anything else set a status. Picking a
+// file and getting no durable acknowledgement that names it is the difference
+// between "it worked" and "did that do anything?".
+function renderImportResult(result) {
+  const container = $('#import-result');
+  if (!result) {
+    container.hidden = true;
+    return;
+  }
+  const {fileName, imported, total, failed} = result;
+  const ok = imported > 0 && !failed;
+  setIcon($('#import-result-icon'), ok ? 'checkCircle' : (imported ? 'alertTriangle' : 'xCircle'), 14);
+  const counted = `${imported} of ${total} cookie${total === 1 ? '' : 's'}`;
+  $('#import-result-text').textContent = failed ?
+    `Imported ${counted} from “${fileName}” — ${failed} rejected` :
+    `Imported ${counted} from “${fileName}”`;
+  container.className = `seed-status ${ok ? 'seeded' : 'failed'}`;
+  container.hidden = false;
 }
 
 function renderCounts(counts) {
@@ -236,6 +287,11 @@ function renderCounts(counts) {
 // more than one of those old by the time the button is clicked.
 let currentProfileName = '';
 
+// The last manual import this popup performed, or null. Survives refresh()
+// (which repaints everything) for as long as the popup is open; a popup is
+// dismissed the moment it loses focus, so there is nothing to persist beyond it.
+let lastImport = null;
+
 async function refresh() {
   const status = await send({type: 'get-status'});
   if (!status || !status.sync) {
@@ -246,6 +302,7 @@ async function refresh() {
     });
     renderSeed({imported: false});
     renderCounts({total: 0, site: 0, siteDomain: ''});
+    renderImportResult(lastImport);
     return;
   }
   const chip = $('#profile-chip');
@@ -259,6 +316,7 @@ async function refresh() {
   renderSync(status.sync);
   renderSeed(status.seed);
   renderCounts(status.counts);
+  renderImportResult(lastImport);
 }
 
 // Disables the button, swaps its icon for a spinner, and always restores
@@ -357,17 +415,28 @@ $('#save-as-form').addEventListener('keydown', (event) => {
 $('#save-as-form').addEventListener('submit', (event) => {
   event.preventDefault();
   void withBusy($('#save-as-confirm'), async () => {
-    const name = $('#save-as-name').value;
+    const name = $('#save-as-name').value.trim();
+    // Answered here rather than by a round trip, so the one failure the user
+    // can actually fix says so immediately and points at the field.
+    if (!name) {
+      setStatus('Enter a name for this cookie set first.', true);
+      $('#save-as-name').focus();
+      return;
+    }
     setStatus('Saving to Cookies tab…');
     const result = await send({type: 'save-as-set', name});
     if (result.ok) {
       setStatus(`Saved ${result.saved} cookies to "${result.set}"`);
       closeSaveAsForm();
     } else {
-      // Left open on failure (an empty/whitespace name, an unreachable
-      // launcher) so the user can fix the input and retry without re-opening
-      // the form and losing what they typed.
-      setStatus(result.error || 'Could not save to the Cookies tab', true);
+      // Left open on failure (an unreachable launcher, a jar the launcher did
+      // not recognize) so the user can retry without re-opening the form and
+      // losing what they typed. background.js's saveAsSet returns a specific
+      // reason for every failure it can produce; the fallback only covers a
+      // reply that somehow carried none, and still says what to try.
+      setStatus(result.error ||
+          'Could not save to the Cookies tab. Relaunch this profile from Argus Launcher and try again.',
+      true);
     }
   });
 });
@@ -428,10 +497,17 @@ $('#import-file').addEventListener('change', async (event) => {
       throw new Error(result.error);
     }
     const failed = result.failed || 0;
-    setStatus(`Imported ${result.count || 0} of ${cookies.length} cookies` + (failed ? ` — ${failed} failed` : ''),
-        failed > 0 && !result.count);
+    const imported = result.count || 0;
+    lastImport = {fileName: file.name, imported, total: cookies.length, failed};
+    setStatus(`Imported ${imported} of ${cookies.length} cookies` + (failed ? ` — ${failed} failed` : ''),
+        failed > 0 && !imported);
+    // refresh() repaints the whole popup, so the durable panel is rendered from
+    // lastImport inside it rather than here -- otherwise this would be undone
+    // one line later.
     await refresh();
   } catch (error) {
+    lastImport = {fileName: file.name, imported: 0, total: 0, failed: 0, error: true};
+    renderImportResult(null);
     setStatus(error instanceof Error ? error.message : String(error), true);
   } finally {
     event.target.value = '';

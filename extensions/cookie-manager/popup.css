@@ -134,8 +134,14 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
 .switch input:disabled + .slider { cursor: default; opacity: .5; }
 
 /* ---- seed-import status line -------------------------------------------- */
-.seed-status { align-items: center; color: var(--ink-soft); display: flex; font-size: 11.5px; gap: 6px; padding: 0 2px; }
+/* :not([hidden]) again -- #import-result starts hidden, and an unconditional
+ * `display: flex` kept it laid out as an empty row with min-height, leaving an
+ * unexplained gap in the middle of the popup. */
+.seed-status:not([hidden]) { align-items: center; color: var(--ink-soft); display: flex; font-size: 11.5px; gap: 6px; padding: 0 2px; }
 .seed-status.seeded { color: var(--status-active-ink); }
+/* A manual import that landed nothing, or landed only some of the file. Same
+ * row treatment as a successful one so the panel does not move about. */
+.seed-status.failed { color: var(--danger); }
 .mini-icon { color: inherit; flex: none; }
 .mini-icon svg { display: block; }
 
@@ -153,7 +159,13 @@ h1 { font-size: 15px; font-weight: 700; margin: 0; }
 .stat small { color: var(--ink-soft); display: block; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- buttons -------------------------------------------------------------- */
-button, .import-label {
+/* :not([hidden]) for the same reason .menu below carries it -- an unconditional
+ * `display` here is an author style and beats the UA stylesheet's
+ * `[hidden] { display: none }`. Without it #save-as-toggle stayed on screen
+ * underneath its own expanded form, so the popup showed a "Save to Cookies
+ * tab…" button and an unexplained name field with its own Save button at the
+ * same time, which read as two competing save actions. */
+button:not([hidden]), .import-label {
   align-items: center;
   background: var(--raised);
   border: 1px solid var(--border);
@@ -190,8 +202,10 @@ button.ghost:hover { background: var(--hover); color: var(--ink); }
 /* ---- save-as: inline expanding name field ---------------------------------
  * The button and the form occupy the same row and are never both visible --
  * toggled via [hidden], same pattern as the export/clear menus below. */
-.save-as-wrap { display: grid; }
-.save-as-form { align-items: center; display: flex; gap: 6px; }
+.save-as-wrap { display: grid; gap: 6px; }
+/* Same [hidden] pitfall as the button rule above: unscoped, this form rendered
+ * on every popup open, before anything had asked for it. */
+.save-as-form:not([hidden]) { display: grid; gap: 6px; }
 .save-as-form input[type="text"] {
   background: var(--raised);
   border: 1px solid var(--border);
@@ -204,8 +218,37 @@ button.ghost:hover { background: var(--hover); color: var(--ink); }
   padding: 9px 10px;
 }
 .save-as-form input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.save-as-actions { display: flex; flex: none; gap: 6px; }
-.save-as-actions button { padding: 9px 10px; }
+/* The actions sit on their own row under a full-width input rather than beside
+ * it. Squeezed onto one row in a 336px popup the two buttons had barely room
+ * for their labels, which is what made "Save" look like it had lost its
+ * padding -- the padding was there, the available width was not. */
+.save-as-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.save-as-actions button { padding: 9px 14px; }
+.save-as-label {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+/* One line under a launcher-backed button saying what it moves and where.
+ * These three actions all read as "save" otherwise, and nothing on screen
+ * distinguished the automatic (live) push from a named library snapshot. */
+.action { display: grid; gap: 4px; }
+.action-hint {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* Why a disabled control is disabled, in the card that owns the state. */
+.blocked-note {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  line-height: 1.35;
+  margin: 0;
+}
 
 .row { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 .menu-wrap { position: relative; }
