@@ -7,7 +7,8 @@
 // reading: who the browser claims to be, what machine it claims to run on, and
 // what it does to the APIs that would otherwise fingerprint it uniquely.
 import {
-  Cpu, Fingerprint, Gauge, Globe, Languages, MapPin, Monitor, ShieldCheck, Smartphone, Video,
+  AlertTriangle, Cpu, Fingerprint, Gauge, Globe, Languages, MapPin, Monitor, ShieldCheck,
+  Smartphone, Video,
 } from 'lucide-react';
 import {
   browserVersionPresets,
@@ -31,10 +32,21 @@ import {PlatformPicker} from '../ui/PlatformPicker';
 import {withFingerprintOs} from '../../drafts';
 import chromeLogo from '../../assets/platform/chrome.svg';
 import type {ProfileDraft} from '../../drafts';
+import type {TimezoneMismatch} from '../../lib/proxyGeo';
 
-export function FingerprintFields({draft, onChange}: {
+export function FingerprintFields({draft, onChange, requestTimezone, timezoneWarning}: {
   draft: ProfileDraft;
   onChange: (next: ProfileDraft) => void;
+  // Lets the owner intercept a timezone change it may want to confirm first --
+  // see TimezoneOverrideModal. Optional so the form stays usable on its own;
+  // without it the select writes straight through, as it always did.
+  requestTimezone?: (value: string) => void;
+  // A standing mismatch between the chosen zone and the assigned proxy. The
+  // confirmation dialog only fires when the *timezone* changes, so this is what
+  // catches the other direction: swapping the proxy under a zone that was
+  // coherent when it was picked, which changes nothing on this form and would
+  // otherwise be invisible until a detection site pointed it out.
+  timezoneWarning?: TimezoneMismatch | null;
 }) {
   const set = (patch: Partial<ProfileDraft>) => onChange({...draft, ...patch});
   const isMobile = draft.fingerprint_os === 'Android' || draft.fingerprint_os === 'iOS';
@@ -86,7 +98,9 @@ export function FingerprintFields({draft, onChange}: {
         <Field label="Timezone" icon={<Globe size={14} />}>
           <select
             value={draft.fingerprint_timezone}
-            onChange={(event) => set({fingerprint_timezone: event.target.value})}
+            onChange={(event) => requestTimezone ?
+              requestTimezone(event.target.value) :
+              set({fingerprint_timezone: event.target.value})}
           >
             <option value={AUTO_FROM_PROXY}>{AUTO_FROM_PROXY}</option>
             {timezoneGroups.map((group) => (
@@ -103,6 +117,15 @@ export function FingerprintFields({draft, onChange}: {
               <option value={draft.fingerprint_timezone}>{draft.fingerprint_timezone}</option>
             )}
           </select>
+          {timezoneWarning && (
+            <p className="field-warning">
+              <AlertTriangle size={13} />
+              <span>
+                The proxy exits in {timezoneWarning.proxyLabel} ({timezoneWarning.expected}).
+                Sites compare this against the IP they see.
+              </span>
+            </p>
+          )}
         </Field>
         <Field label="Geolocation" icon={<MapPin size={14} />}>
           <select

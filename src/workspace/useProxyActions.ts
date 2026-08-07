@@ -31,6 +31,11 @@ export function useProxyActions(
     return withDb((activeOrgId) => db.proxies.recordCheck(activeOrgId, proxy.id, {
       country: proxy.country,
       country_code: proxy.country_code,
+      timezone: proxy.timezone,
+      city: proxy.city,
+      region: proxy.region,
+      latitude: proxy.latitude,
+      longitude: proxy.longitude,
       egress_ip: proxy.egress_ip,
       ping_ms: proxy.ping_ms,
       checked_at: proxy.checked_at,
@@ -50,6 +55,11 @@ export function useProxyActions(
       ...proxy,
       country: result.country,
       country_code: result.countryCode,
+      timezone: result.timezone,
+      city: result.city,
+      region: result.region,
+      latitude: result.latitude,
+      longitude: result.longitude,
       egress_ip: result.ip,
       ping_ms: result.pingMs,
       checked_at: new Date().toISOString(),
@@ -138,7 +148,13 @@ export function useProxyActions(
           `Proxy for ${profile.name} is invalid. Fix host and port before launch.`);
       return 'blocked';
     }
-    if (assigned.checked_at && !assigned.check_error) {
+    // The timezone is part of "checked", not a bonus: a row recorded before the
+    // geolocation columns existed, or by a provider that answered without a
+    // zone, looks perfectly healthy here and would launch with the profile
+    // falling back to a country-wide guess. One extra round-trip the first time
+    // such a row is launched is cheaper than a mismatched timezone, and once the
+    // check lands the zone is stored and this short-circuits again.
+    if (assigned.checked_at && !assigned.check_error && assigned.timezone) {
       return assigned;
     }
     if (!native?.checkProxy) {
@@ -286,6 +302,11 @@ export function useProxyActions(
         password: password || undefined,
         country: undefined,
         country_code: undefined,
+        timezone: undefined,
+        city: undefined,
+        region: undefined,
+        latitude: undefined,
+        longitude: undefined,
         egress_ip: undefined,
         ping_ms: undefined,
         checked_at: undefined,
@@ -356,6 +377,11 @@ export function useProxyActions(
       ...next,
       country: undefined,
       country_code: undefined,
+      timezone: undefined,
+      city: undefined,
+      region: undefined,
+      latitude: undefined,
+      longitude: undefined,
       egress_ip: undefined,
       ping_ms: undefined,
       checked_at: undefined,

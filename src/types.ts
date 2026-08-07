@@ -190,6 +190,14 @@ export type ArgusProxy = {
   folder_id?: string | null;
   country?: string;
   country_code?: string;
+  // The exit location the last check measured, from the same lookup that fills
+  // country. `timezone` is what resolveTimezone prefers over the country default
+  // -- a US proxy is only ever Eastern by coincidence.
+  timezone?: string;
+  city?: string;
+  region?: string;
+  latitude?: number;
+  longitude?: number;
   egress_ip?: string;
   ping_ms?: number;
   checked_at?: string;

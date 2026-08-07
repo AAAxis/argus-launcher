@@ -143,17 +143,24 @@ export function fingerprintSwitches(profile: ArgusProfile) {
     return '';
   }
   const switches = [];
-  if (fingerprint.os) {
-    switches.push(`--argys-fingerprint-os=${fingerprint.os}`);
-  }
   if (fingerprint.user_agent) {
     switches.push(`--user-agent=${fingerprint.user_agent}`);
   }
-  if (fingerprint.language) {
+  // The AUTO_FROM_PROXY sentinel is a UI label, not a locale. Emitting it gave
+  // the browser a literal `--lang=Auto from proxy`, and because main.cjs skips
+  // its own proxy-derived --lang whenever one is already present, the garbage
+  // switch also suppressed the correct one. Same guard buildRuntimeFingerprint
+  // already applies to explicitLanguages below.
+  if (fingerprint.language && fingerprint.language !== AUTO_FROM_PROXY) {
     switches.push(`--lang=${fingerprint.language.split(',')[0]}`);
   }
+  // Chromium's --window-size takes "w,h"; the stored screen string is "WxH",
+  // so passing it through verbatim was silently ignored.
   if (fingerprint.screen && fingerprint.screen !== 'Auto') {
-    switches.push(`--window-size=${fingerprint.screen}`);
+    const size = fingerprint.screen.match(/^\s*(\d+)\s*[×x]\s*(\d+)/);
+    if (size) {
+      switches.push(`--window-size=${size[1]},${size[2]}`);
+    }
   }
   return switches.join('\n');
 }

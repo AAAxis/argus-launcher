@@ -207,6 +207,15 @@ export type ProxyRow = {
   created_at: string;
   last_country_code: string | null;
   last_error: string | null;
+  // Where the last check saw this proxy exit, at city granularity. The timezone
+  // is the load-bearing one: it decides what every launched profile reports, and
+  // resolving it from last_country_code alone put every US proxy in New York.
+  // See 20260809000000_proxy_ip_geolocation.sql.
+  last_timezone: string | null;
+  last_city: string | null;
+  last_region: string | null;
+  last_latitude: number | null;
+  last_longitude: number | null;
   assigned_to: string | null;
 };
 

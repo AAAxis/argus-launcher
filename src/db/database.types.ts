@@ -904,9 +904,14 @@ export type Database = {
           last_checked_at: string | null
           last_country: string | null
           last_country_code: string | null
+          last_city: string | null
           last_error: string | null
           last_ip: string | null
           last_latency_ms: number | null
+          last_latitude: number | null
+          last_longitude: number | null
+          last_region: string | null
+          last_timezone: string | null
           name: string | null
           org_id: string
           password: string | null
@@ -923,9 +928,14 @@ export type Database = {
           last_checked_at?: string | null
           last_country?: string | null
           last_country_code?: string | null
+          last_city?: string | null
           last_error?: string | null
           last_ip?: string | null
           last_latency_ms?: number | null
+          last_latitude?: number | null
+          last_longitude?: number | null
+          last_region?: string | null
+          last_timezone?: string | null
           name?: string | null
           org_id: string
           password?: string | null
@@ -942,9 +952,14 @@ export type Database = {
           last_checked_at?: string | null
           last_country?: string | null
           last_country_code?: string | null
+          last_city?: string | null
           last_error?: string | null
           last_ip?: string | null
           last_latency_ms?: number | null
+          last_latitude?: number | null
+          last_longitude?: number | null
+          last_region?: string | null
+          last_timezone?: string | null
           name?: string | null
           org_id?: string
           password?: string | null

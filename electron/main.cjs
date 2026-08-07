@@ -168,71 +168,14 @@ app.setAboutPanelOptions({
   website: 'https://www.linkedin.com/in/dmitry-polskoy-a46103177/',
 });
 
-// Mirrors chrome/browser/argus/argus_fingerprint.cc's kDefaults table so a
-// proxy's country resolves to the same timezone/language/geo the in-app
-// fingerprint system would pick. Keyed by lowercase ISO-3166-1 alpha-2 code.
-const COUNTRY_DEFAULTS = {
-  us: {timezone: 'America/New_York', language: 'en-US', latitude: 40.7128, longitude: -74.0060},
-  ca: {timezone: 'America/Toronto', language: 'en-CA', latitude: 43.6532, longitude: -79.3832},
-  gb: {timezone: 'Europe/London', language: 'en-GB', latitude: 51.5074, longitude: -0.1278},
-  ie: {timezone: 'Europe/Dublin', language: 'en-IE', latitude: 53.3498, longitude: -6.2603},
-  au: {timezone: 'Australia/Sydney', language: 'en-AU', latitude: -33.8688, longitude: 151.2093},
-  nz: {timezone: 'Pacific/Auckland', language: 'en-NZ', latitude: -36.8485, longitude: 174.7633},
-  es: {timezone: 'Europe/Madrid', language: 'es-ES', latitude: 40.4168, longitude: -3.7038},
-  mx: {timezone: 'America/Mexico_City', language: 'es-MX', latitude: 19.4326, longitude: -99.1332},
-  ar: {timezone: 'America/Argentina/Buenos_Aires', language: 'es-AR', latitude: -34.6037, longitude: -58.3816},
-  co: {timezone: 'America/Bogota', language: 'es-CO', latitude: 4.7110, longitude: -74.0721},
-  br: {timezone: 'America/Sao_Paulo', language: 'pt-BR', latitude: -23.5558, longitude: -46.6396},
-  pt: {timezone: 'Europe/Lisbon', language: 'pt-PT', latitude: 38.7223, longitude: -9.1393},
-  fr: {timezone: 'Europe/Paris', language: 'fr-FR', latitude: 48.8566, longitude: 2.3522},
-  de: {timezone: 'Europe/Berlin', language: 'de-DE', latitude: 52.5200, longitude: 13.4050},
-  at: {timezone: 'Europe/Vienna', language: 'de-AT', latitude: 48.2082, longitude: 16.3738},
-  ch: {timezone: 'Europe/Zurich', language: 'de-CH', latitude: 47.3769, longitude: 8.5417},
-  nl: {timezone: 'Europe/Amsterdam', language: 'nl-NL', latitude: 52.3676, longitude: 4.9041},
-  be: {timezone: 'Europe/Brussels', language: 'nl-BE', latitude: 50.8503, longitude: 4.3517},
-  it: {timezone: 'Europe/Rome', language: 'it-IT', latitude: 41.9028, longitude: 12.4964},
-  pl: {timezone: 'Europe/Warsaw', language: 'pl-PL', latitude: 52.2297, longitude: 21.0122},
-  cz: {timezone: 'Europe/Prague', language: 'cs-CZ', latitude: 50.0755, longitude: 14.4378},
-  se: {timezone: 'Europe/Stockholm', language: 'sv-SE', latitude: 59.3293, longitude: 18.0686},
-  no: {timezone: 'Europe/Oslo', language: 'nb-NO', latitude: 59.9139, longitude: 10.7522},
-  dk: {timezone: 'Europe/Copenhagen', language: 'da-DK', latitude: 55.6761, longitude: 12.5683},
-  fi: {timezone: 'Europe/Helsinki', language: 'fi-FI', latitude: 60.1699, longitude: 24.9384},
-  ru: {timezone: 'Europe/Moscow', language: 'ru-RU', latitude: 55.7558, longitude: 37.6173},
-  ua: {timezone: 'Europe/Kyiv', language: 'uk-UA', latitude: 50.4501, longitude: 30.5234},
-  tr: {timezone: 'Europe/Istanbul', language: 'tr-TR', latitude: 41.0082, longitude: 28.9784},
-  il: {timezone: 'Asia/Jerusalem', language: 'he-IL', latitude: 31.7683, longitude: 35.2137},
-  ae: {timezone: 'Asia/Dubai', language: 'ar-AE', latitude: 25.2048, longitude: 55.2708},
-  in: {timezone: 'Asia/Kolkata', language: 'en-IN', latitude: 28.6139, longitude: 77.2090},
-  sg: {timezone: 'Asia/Singapore', language: 'en-SG', latitude: 1.3521, longitude: 103.8198},
-  jp: {timezone: 'Asia/Tokyo', language: 'ja-JP', latitude: 35.6762, longitude: 139.6503},
-  kr: {timezone: 'Asia/Seoul', language: 'ko-KR', latitude: 37.5665, longitude: 126.9780},
-  hk: {timezone: 'Asia/Hong_Kong', language: 'zh-HK', latitude: 22.3193, longitude: 114.1694},
-  tw: {timezone: 'Asia/Taipei', language: 'zh-TW', latitude: 25.0330, longitude: 121.5654},
-  th: {timezone: 'Asia/Bangkok', language: 'th-TH', latitude: 13.7563, longitude: 100.5018},
-  vn: {timezone: 'Asia/Ho_Chi_Minh', language: 'vi-VN', latitude: 10.8231, longitude: 106.6297},
-  id: {timezone: 'Asia/Jakarta', language: 'id-ID', latitude: -6.2088, longitude: 106.8456},
-  ph: {timezone: 'Asia/Manila', language: 'en-PH', latitude: 14.5995, longitude: 120.9842},
-  za: {timezone: 'Africa/Johannesburg', language: 'en-ZA', latitude: -26.2041, longitude: 28.0473},
-};
-
-// Resolves a profile's effective timezone: an explicit non-"Auto" preset wins,
-// otherwise it's derived from the assigned proxy's country so the reported
-// timezone always matches the proxy's apparent location.
-function resolveTimezone(fingerprintTimezone, proxy) {
-  if (fingerprintTimezone && fingerprintTimezone !== 'Auto from proxy') {
-    return fingerprintTimezone;
-  }
-  const code = (proxy?.country_code || '').toLowerCase();
-  return COUNTRY_DEFAULTS[code]?.timezone || null;
-}
-
-function resolveLanguage(fingerprintLanguage, proxy) {
-  if (fingerprintLanguage && fingerprintLanguage !== 'Auto from proxy') {
-    return fingerprintLanguage;
-  }
-  const code = (proxy?.country_code || '').toLowerCase();
-  return COUNTRY_DEFAULTS[code]?.language || null;
-}
+// Where a proxy is, and what a profile behind it should therefore report. Split
+// into its own module so it is reachable from vitest -- see electron/proxy-geo.cjs.
+const {
+  COUNTRY_DEFAULTS,
+  parseProxyGeo,
+  resolveLanguage,
+  resolveTimezone,
+} = require('./proxy-geo.cjs');
 
 // The launcher's own icon, for the current theme, as a PNG.
 //
@@ -1599,12 +1542,12 @@ function base64UrlEncode(text) {
 
 // Fills in whatever the renderer left unresolved on the runtime fingerprint
 // (timezone/languages when the profile is set to derive them from the proxy,
-// and lat/long for "manual" geolocation) using the same COUNTRY_DEFAULTS
-// table and resolveTimezone/resolveLanguage helpers already used for the TZ
-// env var and --lang switch below, so proxy-country resolution lives in
-// exactly one place. Returns the base64url-encoded JSON for
-// --argus-fingerprint-json, or '' if there is no fingerprint to send.
-function resolveRuntimeFingerprintArg(fingerprint, proxy, timezone, language) {
+// and lat/long for "manual" geolocation) from electron/proxy-geo.cjs, the same
+// module behind the TZ env var and --lang switch below, so a proxy's location
+// is interpreted in exactly one place. `geo` is the launch-time proxy check's
+// own reading and outranks the stored columns. Returns the base64url-encoded
+// JSON for --argus-fingerprint-json, or '' if there is no fingerprint to send.
+function resolveRuntimeFingerprintArg(fingerprint, proxy, timezone, language, geo) {
   if (!fingerprint) {
     return '';
   }
@@ -1618,9 +1561,17 @@ function resolveRuntimeFingerprintArg(fingerprint, proxy, timezone, language) {
   }
   if (resolved.geolocation_mode === 'manual' &&
       (resolved.latitude == null || resolved.longitude == null)) {
-    const code = (proxy?.country_code || '').toLowerCase();
+    // The proxy's own measured coordinates first, for the same reason the
+    // timezone prefers them: the country default is a capital city, so a Denver
+    // proxy claimed to be standing in Manhattan.
+    const measuredLat = geo?.latitude ?? proxy?.latitude;
+    const measuredLon = geo?.longitude ?? proxy?.longitude;
+    const code = (geo?.countryCode || proxy?.country_code || '').toLowerCase();
     const defaults = COUNTRY_DEFAULTS[code];
-    if (defaults) {
+    if (Number.isFinite(measuredLat) && Number.isFinite(measuredLon)) {
+      resolved.latitude = measuredLat;
+      resolved.longitude = measuredLon;
+    } else if (defaults) {
       resolved.latitude = defaults.latitude;
       resolved.longitude = defaults.longitude;
     }
@@ -1768,7 +1719,10 @@ function checkProxyEndpoint(proxy, endpoint) {
         const country = data.country_name || data.countryName || data.country;
         const countryCode = data.country_code || data.countryCode ||
           (typeof data.country === 'string' && data.country.length === 2 ? data.country : undefined);
-        resolve({ok: true, endpoint, ip: data.ip || data.query, country, countryCode, pingMs});
+        resolve({
+          ok: true, endpoint, ip: data.ip || data.query, country, countryCode, pingMs,
+          ...parseProxyGeo(data),
+        });
       } catch {
         resolve({ok: false, endpoint, reason: 'lookup', error: `Invalid response from ${endpoint}`});
       }
@@ -1790,9 +1744,24 @@ async function checkProxy(proxy) {
     'http://ip-api.com/json/',
   ];
   const results = await Promise.all(endpoints.map((endpoint) => checkProxyEndpoint(proxy, endpoint)));
-  const success = results.find((result) => result.ok);
+  // Prefer a success that actually carries a timezone over a merely faster one:
+  // the timezone decides what the profile reports to every site it visits, and a
+  // provider that omits it would push us back to the country-granularity guess.
+  const succeeded = results.filter((result) => result.ok);
+  const success = succeeded.find((result) => result.timezone) || succeeded[0];
   if (success) {
-    return {ok: true, ip: success.ip, country: success.country, countryCode: success.countryCode, pingMs: success.pingMs};
+    return {
+      ok: true,
+      ip: success.ip,
+      country: success.country,
+      countryCode: success.countryCode,
+      pingMs: success.pingMs,
+      timezone: success.timezone,
+      city: success.city,
+      region: success.region,
+      latitude: success.latitude,
+      longitude: success.longitude,
+    };
   }
   // All three attempts go through the same proxy, so joining their errors used
   // to print the same sentence three times over ("connection to proxy closed ·
@@ -2214,6 +2183,11 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   // in that verification round-trip silently ate an otherwise-working proxy.
   // A profile in Free Proxy mode has no assigned proxy to check here; that
   // extension owns and reports its own connection state instead.
+  // Also the freshest reading of where this proxy actually egresses. The stored
+  // columns can be stale or cleared (a credential edit nulls them), and the
+  // timezone below is only as trustworthy as the IP it was measured from, so the
+  // launch uses what this check just saw rather than the database's copy.
+  let proxyGeo = null;
   if (payload.proxy?.host && payload.proxy.port && !payload.useFreeProxy) {
     const proxyCheck = await checkProxy(payload.proxy);
     if (!proxyCheck.ok) {
@@ -2224,6 +2198,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
           'Argus Launcher and try again.',
       };
     }
+    proxyGeo = proxyCheck;
   }
   const extensionPaths = [...(payload.extensionPaths || [])].filter(Boolean);
   // Team-shared extensions (see SharedExtension in src/types.ts): each is a
@@ -2264,10 +2239,22 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   const switches = launchSafeSwitches(payload.commandLineSwitches);
   const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
   const explicitLanguage = payload.runtimeFingerprint?.languages?.[0] || null;
-  const timezone = resolveTimezone(explicitTimezone, payload.proxy);
-  const language = resolveLanguage(explicitLanguage, payload.proxy);
+  const timezone = resolveTimezone(explicitTimezone, payload.proxy, proxyGeo);
+  const language = resolveLanguage(explicitLanguage, payload.proxy, proxyGeo);
+  // A profile behind a proxy with no resolvable timezone used to launch anyway,
+  // silently skipping the TZ export -- so it reported the *host* machine's zone
+  // while egressing from another continent, which is a louder contradiction than
+  // any wrong-but-plausible zone would have been. Fail closed instead.
+  // Direct-connection profiles are exempt: with no proxy, the host zone is honest.
+  if (!timezone && proxyGeo) {
+    return {
+      ok: false,
+      error: `Could not determine a timezone for proxy ${payload.proxy.host}:${payload.proxy.port}. ` +
+        'Re-check the proxy, or set an explicit timezone on this profile, before launching.',
+    };
+  }
   const fingerprintArg = resolveRuntimeFingerprintArg(
-      payload.runtimeFingerprint, payload.proxy, timezone, language);
+      payload.runtimeFingerprint, payload.proxy, timezone, language, proxyGeo);
   // The renderer's fingerprintSwitches() already emits --lang when the user set
   // an explicit fingerprint language; only fall back to the proxy-derived one
   // here so we don't send a conflicting duplicate.

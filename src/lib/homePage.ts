@@ -25,7 +25,9 @@
 // scripts, and a base64 data: URI of the same paths would be larger still.
 import argusMark from '../assets/argus-mark.svg?raw';
 import {bookmarkInitial, faviconCache, normalizeBookmarkUrl} from './bookmarks';
+import {AUTO_FROM_PROXY} from './fingerprintPresets';
 import {FONT_STACK, MONO_STACK, paletteCss} from './palette';
+import {expectedTimezoneFor, proxyLocationLabel, timezoneMismatch} from './proxyGeo';
 import {escapeHtml} from './text';
 import type {SearchEngine} from './searchEngines';
 import type {ThemePreference} from '../theme';
@@ -108,14 +110,32 @@ export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null)
     };
   }
   const egressIp = proxy.egress_ip && proxy.egress_ip !== proxy.host ? proxy.egress_ip : '';
-  const location = [proxy.country || proxy.country_code, egressIp]
+  // What a coherence check actually needs, on one line: where the traffic comes
+  // out, what clock the profile will claim, and what machine it will claim to be.
+  // Those three are the pair-wise comparisons detection sites run -- timezone
+  // against IP location, and platform against user agent -- so showing them
+  // together turns "why was I flagged" into something readable at a glance
+  // instead of a trip to an external checker.
+  const location = [proxyLocationLabel(proxy), egressIp]
       .filter(Boolean)
       .join(' · ');
-  const latency = typeof proxy.ping_ms === 'number' ? ` · ${proxy.ping_ms}ms` : '';
+  const latency = typeof proxy.ping_ms === 'number' ? `${proxy.ping_ms}ms` : '';
+  const chosenTimezone = profile.fingerprint?.timezone;
+  const effectiveTimezone =
+    chosenTimezone && chosenTimezone !== AUTO_FROM_PROXY ?
+      chosenTimezone :
+      expectedTimezoneFor(proxy);
+  const mismatch = timezoneMismatch(chosenTimezone, proxy);
+  const timezone = effectiveTimezone ?
+    `${effectiveTimezone}${mismatch ? ` — does not match proxy (${mismatch.expected})` : ''}` :
+    '';
+  const machine = [profile.fingerprint?.os, profile.fingerprint?.screen]
+      .filter(Boolean)
+      .join(' · ');
   return {
     ok: true,
     title: 'Anti-detect proxy active',
-    detail: `${proxyLabel}${location ? ` · ${location}` : ''}${latency}`,
+    detail: [proxyLabel, location, latency, timezone, machine].filter(Boolean).join(' · '),
   };
 }
 

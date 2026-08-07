@@ -85,6 +85,14 @@ export type ProxyCheckResult = {
   ip?: string;
   country?: string;
   countryCode?: string;
+  // Where the geolocation lookup placed the egress IP. `timezone` is validated
+  // against ICU in the main process before it gets here, so an absent one means
+  // "no provider gave a usable zone" rather than "not looked up".
+  timezone?: string;
+  city?: string;
+  region?: string;
+  latitude?: number;
+  longitude?: number;
   pingMs?: number;
   reason?: ProxyFailureReason;
   error?: string;

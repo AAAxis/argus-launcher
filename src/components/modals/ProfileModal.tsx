@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useRef, useState} from 'react';
 import {
   Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
   Tag, Terminal, Trash2, UserCheck, UserRound, UserRoundCog, Workflow,
@@ -17,10 +17,12 @@ import {RotateButton} from '../ui/RotateButton';
 import {StatusPicker} from '../ui/StatusChip';
 import {TagInput} from '../ui/TagInput';
 import {FingerprintDatalists, FingerprintFields} from './FingerprintFields';
+import {TimezoneOverrideModal} from './ConfirmModals';
 import {ProfileSummary} from './ProfileSummary';
 import {randomFingerprintPatch} from '../../lib/fingerprintPresets';
 import {normalizeBookmarkUrl} from '../../lib/bookmarks';
 import {proxyOptionLabel, parseProxyLink} from '../../lib/proxies';
+import {timezoneMismatch} from '../../lib/proxyGeo';
 import {MAX_PROFILE_TAGS} from '../../lib/tags';
 import {profileFromDraft, tagsFromDraft} from '../../drafts';
 import {useAsyncAction} from '../../useAsyncAction';
@@ -28,6 +30,7 @@ import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {SummaryTarget} from './ProfileSummary';
 import type {ProfileDraft, ProxyDraft} from '../../drafts';
+import type {TimezoneOverrideRequest} from './ConfirmModals';
 
 // Stable ids so the Summary panel's per-group Edit actions can put the caret in
 // the field they describe. The proxy field already needed one for its datalist.
@@ -76,6 +79,36 @@ export function ProfileModal({
 
   const set = (patch: Partial<ProfileDraft>) => onChange({...draft, ...patch});
   const rotate = () => set(randomFingerprintPatch(draft.fingerprint_os));
+
+  // A timezone that contradicts the proxy is confirmed once, then remembered for
+  // as long as this dialog is open, so re-picking a zone the user already stood
+  // behind does not ask again. Keyed by zone and proxy together: change either
+  // and the old consent no longer describes the situation it was given for.
+  const acknowledgedTimezones = useRef(new Set<string>());
+  const [pendingTimezone, setPendingTimezone] = useState<TimezoneOverrideRequest | null>(null);
+
+  function assignedProxy() {
+    return state.proxies.find((item) => item.id === draft.proxy_id) || null;
+  }
+
+  function requestTimezone(value: string) {
+    const mismatch = timezoneMismatch(value, assignedProxy());
+    const key = `${value}|${draft.proxy_id}`;
+    if (!mismatch || acknowledgedTimezones.current.has(key)) {
+      set({fingerprint_timezone: value});
+      return;
+    }
+    setPendingTimezone(mismatch);
+  }
+
+  function confirmTimezone() {
+    if (!pendingTimezone) {
+      return;
+    }
+    acknowledgedTimezones.current.add(`${pendingTimezone.chosen}|${draft.proxy_id}`);
+    set({fingerprint_timezone: pendingTimezone.chosen});
+    setPendingTimezone(null);
+  }
 
   function proxyFieldValue() {
     if (proxyPickerFocused || draft.proxy_search) {
@@ -662,9 +695,21 @@ export function ProfileModal({
           }
         >
           <div className="profile-form">
-            <FingerprintFields draft={draft} onChange={onChange} />
+            <FingerprintFields
+              draft={draft}
+              onChange={onChange}
+              requestTimezone={requestTimezone}
+              timezoneWarning={timezoneMismatch(draft.fingerprint_timezone, assignedProxy())}
+            />
           </div>
         </Modal>
+      )}
+      {pendingTimezone && (
+        <TimezoneOverrideModal
+          request={pendingTimezone}
+          onCancel={() => setPendingTimezone(null)}
+          onConfirm={confirmTimezone}
+        />
       )}
     </>
   );

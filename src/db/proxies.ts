@@ -5,7 +5,8 @@ import type {ProxyRow} from './rows';
 
 const COLUMNS =
   'id,org_id,name,type,host,port,username,password,folder_id,last_checked_at,last_ip,' +
-  'last_country,last_latency_ms,created_at,last_country_code,last_error,assigned_to';
+  'last_country,last_latency_ms,created_at,last_country_code,last_error,assigned_to,' +
+  'last_timezone,last_city,last_region,last_latitude,last_longitude';
 
 export async function list(orgId: string): Promise<ArgusProxy[]> {
   const client = optionalClient();
@@ -84,11 +85,13 @@ export type ProxyConnectionPatch = {
   password?: string | null;
 };
 
-// Patches connection details and, in the same statement, clears all six last_*
-// columns: the stored check result describes the proxy as it was before the
+// Patches connection details and, in the same statement, clears every last_*
+// column: the stored check result describes the proxy as it was before the
 // edit, and a country left behind with no timestamp reads as a check that
 // passed. The background sweep re-checks the row exactly because these are
-// null.
+// null. The geolocation columns clear with the rest -- a new host or credential
+// set can mean a new exit country, and a stale timezone is worse than none,
+// since it is what every launched profile would report to the sites it visits.
 export async function updateConnection(
     orgId: string, id: string, patch: ProxyConnectionPatch): Promise<void> {
   const client = requireClient();
@@ -99,6 +102,11 @@ export async function updateConnection(
     last_latency_ms: null,
     last_checked_at: null,
     last_error: null,
+    last_timezone: null,
+    last_city: null,
+    last_region: null,
+    last_latitude: null,
+    last_longitude: null,
   };
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) {
@@ -119,6 +127,11 @@ export async function updateConnection(
 export type ProxyCheckResult = {
   country?: string;
   country_code?: string;
+  timezone?: string;
+  city?: string;
+  region?: string;
+  latitude?: number;
+  longitude?: number;
   egress_ip?: string;
   ping_ms?: number;
   checked_at?: string;
@@ -133,6 +146,11 @@ export async function recordCheck(
       .update({
         last_country: result.country ?? null,
         last_country_code: result.country_code ?? null,
+        last_timezone: result.timezone ?? null,
+        last_city: result.city ?? null,
+        last_region: result.region ?? null,
+        last_latitude: result.latitude ?? null,
+        last_longitude: result.longitude ?? null,
         last_ip: result.egress_ip ?? null,
         last_latency_ms: result.ping_ms ?? null,
         last_checked_at: result.checked_at ?? null,

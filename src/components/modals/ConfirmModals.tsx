@@ -1,13 +1,14 @@
 // The three dialogs that exist to make a destructive action deliberate, plus
 // the one that reports a failure the user has to read.
 import {useState} from 'react';
-import {Trash2} from 'lucide-react';
+import {AlertTriangle, Trash2} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {Modal} from '../ui/Modal';
 import {TRASH_RETENTION_DAYS} from '../../lib/trash';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ErrorDialog} from '../../hooks/useToast';
+import type {TimezoneMismatch} from '../../lib/proxyGeo';
 
 export type ProfileDeleteRequest = {
   profileIds: string[];
@@ -375,6 +376,62 @@ export function ErrorModal({dialog, onClose}: {dialog: ErrorDialog; onClose: () 
       }
     >
       <p className="error-detail">{dialog.detail}</p>
+    </Modal>
+  );
+}
+
+export type TimezoneOverrideRequest = TimezoneMismatch;
+
+// Raised when someone points a profile's timezone somewhere its proxy is not.
+//
+// Not a destructive action, so why gate it like one: this is the single
+// strongest signal an anti-fraud system gets for free. It needs no fingerprinting
+// and no history -- the browser volunteers its zone, the IP says where it is, and
+// the two either agree or they do not. A profile that fails it is flagged before
+// it has done anything, and the person who set it usually did not realise they
+// had. Making it deliberate is the whole point; the checkbox is there so the
+// confirmation cannot be clicked through on reflex.
+export function TimezoneOverrideModal({request, onCancel, onConfirm}: {
+  request: TimezoneOverrideRequest;
+  // Dismissed: the timezone reverts to what it was, since the draft is only
+  // written on confirm.
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [acknowledged, setAcknowledged] = useState(false);
+  const {chosen, expected, proxyLabel} = request;
+
+  return (
+    <Modal
+      className="small-modal"
+      nested
+      onClose={onCancel}
+      title="This timezone does not match the proxy"
+      footer={
+        <>
+          <button className="ghost" onClick={onCancel}>Use {expected}</button>
+          <button className="danger" disabled={!acknowledged} onClick={onConfirm}>
+            <AlertTriangle size={16} /> Keep {chosen}
+          </button>
+        </>
+      }
+    >
+      <p className="error-detail">
+        This profile&rsquo;s proxy exits in {proxyLabel}, which is {expected}, but the
+        profile will report {chosen}. Sites compare the timezone the browser reports
+        against the location of the IP address they see, and a mismatch between the two
+        is one of the strongest signals used to flag a profile as automated. Instagram,
+        Facebook and Google all check it.
+      </p>
+      <label className="checkbox-confirm">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(event) => setAcknowledged(event.target.checked)}
+        />
+        <span>I understand this profile may be flagged because its timezone will not
+          match its IP address.</span>
+      </label>
     </Modal>
   );
 }

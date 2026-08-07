@@ -6902,6 +6902,27 @@ textarea {
   padding: 12px 14px;
 }
 
+/* A standing risk sitting under the control that caused it, rather than a
+ * dialog. Used by the fingerprint editor's timezone field when the chosen zone
+ * contradicts the assigned proxy: the confirmation dialog covers the moment the
+ * zone is picked, and this covers the state persisting afterwards. --danger
+ * rather than a warning token because there is no warning token, and this is a
+ * real detection risk rather than a style note. */
+.field-warning {
+  align-items: flex-start;
+  color: var(--danger);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 1.4;
+  margin: 6px 0 0;
+}
+
+.field-warning svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
 .checkbox-confirm {
   align-items: center;
   cursor: pointer;

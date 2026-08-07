@@ -190,7 +190,13 @@ export function newProfileDraft(selfId = ''): ProfileDraft {
     fingerprint_memory_gb: defaultWindowsFingerprintPattern.fingerprint_memory_gb,
     fingerprint_media_devices: mediaDevicePresets[0],
     fingerprint_do_not_track: false,
-    fingerprint_rotate: true,
+    // Off by default. Rotating the seed re-rolls canvas, WebGL, audio and client
+    // rects on every launch, so a profile carrying a logged-in session presents a
+    // different device each time it opens -- which is precisely the shape of a
+    // stolen cookie, and gets the session challenged rather than protected. A
+    // stable per-profile seed is the safer default; rotation stays available for
+    // profiles that are not holding a session.
+    fingerprint_rotate: false,
   };
 }
 

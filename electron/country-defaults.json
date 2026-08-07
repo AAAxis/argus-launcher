@@ -1,0 +1,248 @@
+{
+  "us": {
+    "timezone": "America/New_York",
+    "language": "en-US",
+    "latitude": 40.7128,
+    "longitude": -74.006
+  },
+  "ca": {
+    "timezone": "America/Toronto",
+    "language": "en-CA",
+    "latitude": 43.6532,
+    "longitude": -79.3832
+  },
+  "gb": {
+    "timezone": "Europe/London",
+    "language": "en-GB",
+    "latitude": 51.5074,
+    "longitude": -0.1278
+  },
+  "ie": {
+    "timezone": "Europe/Dublin",
+    "language": "en-IE",
+    "latitude": 53.3498,
+    "longitude": -6.2603
+  },
+  "au": {
+    "timezone": "Australia/Sydney",
+    "language": "en-AU",
+    "latitude": -33.8688,
+    "longitude": 151.2093
+  },
+  "nz": {
+    "timezone": "Pacific/Auckland",
+    "language": "en-NZ",
+    "latitude": -36.8485,
+    "longitude": 174.7633
+  },
+  "es": {
+    "timezone": "Europe/Madrid",
+    "language": "es-ES",
+    "latitude": 40.4168,
+    "longitude": -3.7038
+  },
+  "mx": {
+    "timezone": "America/Mexico_City",
+    "language": "es-MX",
+    "latitude": 19.4326,
+    "longitude": -99.1332
+  },
+  "ar": {
+    "timezone": "America/Argentina/Buenos_Aires",
+    "language": "es-AR",
+    "latitude": -34.6037,
+    "longitude": -58.3816
+  },
+  "co": {
+    "timezone": "America/Bogota",
+    "language": "es-CO",
+    "latitude": 4.711,
+    "longitude": -74.0721
+  },
+  "br": {
+    "timezone": "America/Sao_Paulo",
+    "language": "pt-BR",
+    "latitude": -23.5558,
+    "longitude": -46.6396
+  },
+  "pt": {
+    "timezone": "Europe/Lisbon",
+    "language": "pt-PT",
+    "latitude": 38.7223,
+    "longitude": -9.1393
+  },
+  "fr": {
+    "timezone": "Europe/Paris",
+    "language": "fr-FR",
+    "latitude": 48.8566,
+    "longitude": 2.3522
+  },
+  "de": {
+    "timezone": "Europe/Berlin",
+    "language": "de-DE",
+    "latitude": 52.52,
+    "longitude": 13.405
+  },
+  "at": {
+    "timezone": "Europe/Vienna",
+    "language": "de-AT",
+    "latitude": 48.2082,
+    "longitude": 16.3738
+  },
+  "ch": {
+    "timezone": "Europe/Zurich",
+    "language": "de-CH",
+    "latitude": 47.3769,
+    "longitude": 8.5417
+  },
+  "nl": {
+    "timezone": "Europe/Amsterdam",
+    "language": "nl-NL",
+    "latitude": 52.3676,
+    "longitude": 4.9041
+  },
+  "be": {
+    "timezone": "Europe/Brussels",
+    "language": "nl-BE",
+    "latitude": 50.8503,
+    "longitude": 4.3517
+  },
+  "it": {
+    "timezone": "Europe/Rome",
+    "language": "it-IT",
+    "latitude": 41.9028,
+    "longitude": 12.4964
+  },
+  "pl": {
+    "timezone": "Europe/Warsaw",
+    "language": "pl-PL",
+    "latitude": 52.2297,
+    "longitude": 21.0122
+  },
+  "cz": {
+    "timezone": "Europe/Prague",
+    "language": "cs-CZ",
+    "latitude": 50.0755,
+    "longitude": 14.4378
+  },
+  "se": {
+    "timezone": "Europe/Stockholm",
+    "language": "sv-SE",
+    "latitude": 59.3293,
+    "longitude": 18.0686
+  },
+  "no": {
+    "timezone": "Europe/Oslo",
+    "language": "nb-NO",
+    "latitude": 59.9139,
+    "longitude": 10.7522
+  },
+  "dk": {
+    "timezone": "Europe/Copenhagen",
+    "language": "da-DK",
+    "latitude": 55.6761,
+    "longitude": 12.5683
+  },
+  "fi": {
+    "timezone": "Europe/Helsinki",
+    "language": "fi-FI",
+    "latitude": 60.1699,
+    "longitude": 24.9384
+  },
+  "ru": {
+    "timezone": "Europe/Moscow",
+    "language": "ru-RU",
+    "latitude": 55.7558,
+    "longitude": 37.6173
+  },
+  "ua": {
+    "timezone": "Europe/Kyiv",
+    "language": "uk-UA",
+    "latitude": 50.4501,
+    "longitude": 30.5234
+  },
+  "tr": {
+    "timezone": "Europe/Istanbul",
+    "language": "tr-TR",
+    "latitude": 41.0082,
+    "longitude": 28.9784
+  },
+  "il": {
+    "timezone": "Asia/Jerusalem",
+    "language": "he-IL",
+    "latitude": 31.7683,
+    "longitude": 35.2137
+  },
+  "ae": {
+    "timezone": "Asia/Dubai",
+    "language": "ar-AE",
+    "latitude": 25.2048,
+    "longitude": 55.2708
+  },
+  "in": {
+    "timezone": "Asia/Kolkata",
+    "language": "en-IN",
+    "latitude": 28.6139,
+    "longitude": 77.209
+  },
+  "sg": {
+    "timezone": "Asia/Singapore",
+    "language": "en-SG",
+    "latitude": 1.3521,
+    "longitude": 103.8198
+  },
+  "jp": {
+    "timezone": "Asia/Tokyo",
+    "language": "ja-JP",
+    "latitude": 35.6762,
+    "longitude": 139.6503
+  },
+  "kr": {
+    "timezone": "Asia/Seoul",
+    "language": "ko-KR",
+    "latitude": 37.5665,
+    "longitude": 126.978
+  },
+  "hk": {
+    "timezone": "Asia/Hong_Kong",
+    "language": "zh-HK",
+    "latitude": 22.3193,
+    "longitude": 114.1694
+  },
+  "tw": {
+    "timezone": "Asia/Taipei",
+    "language": "zh-TW",
+    "latitude": 25.033,
+    "longitude": 121.5654
+  },
+  "th": {
+    "timezone": "Asia/Bangkok",
+    "language": "th-TH",
+    "latitude": 13.7563,
+    "longitude": 100.5018
+  },
+  "vn": {
+    "timezone": "Asia/Ho_Chi_Minh",
+    "language": "vi-VN",
+    "latitude": 10.8231,
+    "longitude": 106.6297
+  },
+  "id": {
+    "timezone": "Asia/Jakarta",
+    "language": "id-ID",
+    "latitude": -6.2088,
+    "longitude": 106.8456
+  },
+  "ph": {
+    "timezone": "Asia/Manila",
+    "language": "en-PH",
+    "latitude": 14.5995,
+    "longitude": 120.9842
+  },
+  "za": {
+    "timezone": "Africa/Johannesburg",
+    "language": "en-ZA",
+    "latitude": -26.2041,
+    "longitude": 28.0473
+  }
+}
