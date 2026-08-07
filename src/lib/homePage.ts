@@ -72,11 +72,32 @@ export function browserStartUrl(profile: ArgusProfile) {
   return startUrl;
 }
 
+// One labelled row in the session panel. `note` is the quiet trailing value on
+// the right of a row -- the exit's latency, or the timezone's verdict -- and
+// `noteTone` colours it, since "matches exit" and "≠ America/Chicago" are the
+// same slot carrying opposite news.
+export type SessionField = {
+  label: string;
+  value: string;
+  mono?: boolean;
+  note?: string;
+  noteTone?: 'ok' | 'bad';
+};
+
 // The one place the proxy panel's wording is decided. The re-check endpoint
 // answers by re-running this against the fresh result rather than composing its
 // own sentences, so the panel cannot say one thing at launch and a differently
 // worded version of the same thing a click later.
-export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null) {
+//
+// A failing state returns `detail` and no fields: there is one sentence to say
+// and nothing to tabulate. A working one returns `fields`, because then there
+// are four facts whose *agreement* is the whole point.
+export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null): {
+  ok: boolean;
+  title: string;
+  detail: string;
+  fields?: SessionField[];
+} {
   const mode = profile.proxy_mode || 'assigned';
   if (mode !== 'assigned') {
     return {
@@ -110,33 +131,66 @@ export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null)
     };
   }
   const egressIp = proxy.egress_ip && proxy.egress_ip !== proxy.host ? proxy.egress_ip : '';
-  // What a coherence check actually needs, on one line: where the traffic comes
-  // out, what clock the profile will claim, and what machine it will claim to be.
-  // Those three are the pair-wise comparisons detection sites run -- timezone
-  // against IP location, and platform against user agent -- so showing them
-  // together turns "why was I flagged" into something readable at a glance
-  // instead of a trip to an external checker.
-  const location = [proxyLocationLabel(proxy), egressIp]
-      .filter(Boolean)
-      .join(' · ');
-  const latency = typeof proxy.ping_ms === 'number' ? `${proxy.ping_ms}ms` : '';
+  // What a coherence check actually needs: where the traffic comes out, what
+  // clock the profile claims, and what machine it claims to be. Those are the
+  // pair-wise comparisons detection sites run -- timezone against IP location,
+  // platform against user agent -- so the panel shows them as labelled rows a
+  // person can compare, rather than the single dot-separated run of values this
+  // replaces. That line was also clipped to one ellipsised row by the panel's
+  // own CSS, so the last two facts were never actually visible.
+  const latency = typeof proxy.ping_ms === 'number' ? `${proxy.ping_ms} ms` : '';
   const chosenTimezone = profile.fingerprint?.timezone;
   const effectiveTimezone =
     chosenTimezone && chosenTimezone !== AUTO_FROM_PROXY ?
       chosenTimezone :
       expectedTimezoneFor(proxy);
   const mismatch = timezoneMismatch(chosenTimezone, proxy);
-  const timezone = effectiveTimezone ?
-    `${effectiveTimezone}${mismatch ? ` — does not match proxy (${mismatch.expected})` : ''}` :
-    '';
   const machine = [profile.fingerprint?.os, profile.fingerprint?.screen]
       .filter(Boolean)
       .join(' · ');
+  const fields: SessionField[] = [
+    {label: 'Exit', value: egressIp || proxyLabel, mono: true, note: latency},
+    {label: 'Location', value: proxyLocationLabel(proxy) || 'Unknown'},
+    // The one row that carries a verdict rather than a value. Timezone against
+    // IP location is the cheapest check any site can run and the one this
+    // profile is most likely to fail, so the panel answers it outright instead
+    // of printing two zones and leaving the comparison to the reader.
+    {
+      label: 'Timezone',
+      value: effectiveTimezone || 'Not set',
+      mono: true,
+      note: mismatch ? `≠ ${mismatch.expected}` : (effectiveTimezone ? 'matches exit' : ''),
+      noteTone: mismatch ? 'bad' : 'ok',
+    },
+    {label: 'Device', value: machine || 'Default'},
+  ];
   return {
     ok: true,
     title: 'Anti-detect proxy active',
-    detail: [proxyLabel, location, latency, timezone, machine].filter(Boolean).join(' · '),
+    // Kept as the one-line form for anything that reads a status without
+    // rendering rows -- the panel itself renders `fields`.
+    detail: [proxyLabel, proxyLocationLabel(proxy), latency].filter(Boolean).join(' · '),
+    fields,
   };
+}
+
+// The field rows, as markup. Every value here comes from a proxy row or a
+// profile's fingerprint -- both user-supplied -- so all four parts go through
+// escapeHtml. Shared with the re-check path below, which rebuilds the same rows
+// client-side from the same objects.
+export function sessionFieldsHtml(fields: SessionField[] | undefined): string {
+  return (fields || []).map((field) => {
+    // No data-tone unless the field asked for one: a latency is a neutral
+    // trailing value, and toning it would paint every session's ping green.
+    const tone = field.noteTone ? ` data-tone="${field.noteTone}"` : '';
+    const note = field.note ?
+      `<span class="session-note"${tone}>${escapeHtml(field.note)}</span>` :
+      '';
+    return `<div class="session-field${field.mono ? ' mono' : ''}">` +
+      `<dt>${escapeHtml(field.label)}</dt>` +
+      `<dd><span class="v" title="${escapeHtml(field.value)}">${escapeHtml(field.value)}</span>${note}</dd>` +
+      '</div>';
+  }).join('');
 }
 
 // Whether this profile can be re-checked at all. Direct and free-proxy modes
@@ -255,8 +309,13 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
    long name and a proxy line were fighting over one row -- which is what the
    old header's flex-wrap was papering over. Below 820px there is no corner to
    spare, so it drops back into the flow above the title. */
-.session{position:fixed;top:16px;right:16px;z-index:10;display:flex;align-items:center;gap:10px;max-width:min(360px,calc(100vw - 32px));padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--raised);box-shadow:var(--shadow-xs)}
-.session-dot{flex:0 0 auto;width:9px;height:9px;border-radius:999px;background:var(--ink-faint)}
+.session{position:fixed;top:16px;right:16px;z-index:10;display:grid;gap:10px;width:min(320px,calc(100vw - 32px));padding:12px 13px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--raised);box-shadow:var(--shadow-xs)}
+/* flex-start, not center: a failing state puts two or three lines of sentence
+   in here, and centring pinned the dot and the actions against the middle of
+   that block instead of against the title they belong to. The dot's offset is
+   half the title's leading, so it sits on the first line's optical centre. */
+.session-head{display:flex;align-items:flex-start;gap:9px;min-width:0}
+.session-dot{flex:0 0 auto;width:9px;height:9px;margin-top:4px;border-radius:999px;background:var(--ink-faint)}
 .session[data-state=ok] .session-dot{background:var(--success)}
 .session[data-state=fail] .session-dot{background:var(--danger)}
 /* A slow pulse rather than a spinner: the check is a curl round-trip that
@@ -271,17 +330,42 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
    one line loses the half that says why. */
 .session-text small{font-size:12px;line-height:1.35;color:var(--ink-soft);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .session[data-state=fail] .session-text small{color:var(--danger)}
-/* The working state is the exception: an address, a country and a number, which
-   you compare against something else rather than read, and which fit on one
-   line. Monospace so the digits line up between one session and the next. */
-.session[data-state=ok] .session-text small{font-family:${MONO_STACK};display:block;text-overflow:ellipsis;white-space:nowrap}
-.session-actions{flex:0 0 auto;display:flex;gap:2px;margin-left:2px}
+/* The working state has no sentence -- it has .session-fields instead. Hiding
+   the summary rather than restyling it: this used to be where the whole working
+   state lived, clipped to one ellipsised line, so the last facts on it were
+   never actually readable. */
+.session[data-state=ok] .session-text small{display:none}
+
+/* The readout. A definition list because that is what it is: four labels, four
+   values, read down the left edge and compared across. Labels are the app's
+   own eyebrow (11/700/+0.06em upper, --ink-faint in styles.css); values sit at
+   12px so a long city or zone still fits the 320px card without clipping. */
+.session-fields:not([hidden]){display:grid;gap:7px;margin:0;padding-top:10px;border-top:1px solid var(--border-soft)}
+.session-field{display:grid;grid-template-columns:64px minmax(0,1fr);align-items:baseline;gap:10px}
+.session-field dt{font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-faint);line-height:1.5}
+.session-field dd{margin:0;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 8px;font-size:12px;line-height:1.35;color:var(--ink)}
+.session-field .v{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-field.mono .v{font-family:${MONO_STACK}}
+/* The trailing note. Quiet by default (a latency), and the one place this panel
+   raises its voice: a timezone that disagrees with the exit is the cheapest
+   check a site can run against this session, so it is the only thing here
+   allowed to be --danger. */
+.session-note{flex:0 0 auto;font-size:11px;color:var(--ink-faint);white-space:nowrap}
+.session-note[data-tone=ok]{color:var(--success)}
+/* The mismatch takes its own line rather than sharing one with the value it
+   contradicts. Inline, the two zone names competed for the same 200px and the
+   value lost -- "America/N…" next to "≠ America/Los_Angeles" hides the very
+   thing the reader is being asked to compare it against. */
+.session-note[data-tone=bad]{flex:0 0 100%;color:var(--danger);font-weight:700;white-space:normal}
+/* -4px pulls the 28px hit targets back level with the 15.6px title line they
+   sit beside, without shrinking the targets themselves. */
+.session-actions{flex:0 0 auto;display:flex;gap:2px;margin:-4px -4px 0 auto}
 .session-actions button,.session-actions a{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--ink-soft);cursor:pointer;text-decoration:none}
 .session-actions button:hover,.session-actions a:hover{background:var(--hover);color:var(--ink)}
 .session-actions button:disabled{cursor:default;opacity:.45}
 .session-actions button:disabled:hover{background:transparent;color:var(--ink-soft)}
 @media (max-width:820px){
-  .session{position:static;max-width:100%;margin-bottom:20px}
+  .session{position:static;width:100%;margin-bottom:20px}
   body{padding-top:32px}
 }
 
@@ -326,12 +410,15 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
 <body>
 <main>
 <section class="session" id="session" data-state="${proxyStatus.ok ? 'ok' : 'fail'}">
+<div class="session-head">
 <span class="session-dot"></span>
 <div class="session-text"><strong id="session-title">${escapeHtml(proxyStatus.title)}</strong><small id="session-detail">${escapeHtml(proxyStatus.detail)}</small></div>
 <div class="session-actions">
 ${recheckable ? `<button type="button" id="recheck" title="Re-check this proxy" aria-label="Re-check this proxy">${RECHECK_ICON}</button>` : ''}
 <a href="https://ip.me/" title="Check this session on ip.me" aria-label="Check this session on ip.me">${EXTERNAL_ICON}</a>
 </div>
+</div>
+<dl class="session-fields" id="session-fields"${proxyStatus.fields?.length ? '' : ' hidden'}>${sessionFieldsHtml(proxyStatus.fields)}</dl>
 </section>
 <div class="brand">${argusMark}</div>
 <h1>${safeName}</h1>
@@ -407,6 +494,38 @@ ${run ? `(function () {
     var panel = document.getElementById('session');
     var title = document.getElementById('session-title');
     var detail = document.getElementById('session-detail');
+    var fieldsEl = document.getElementById('session-fields');
+    /* Rebuilt from the re-check's own fields rather than left in place: a
+       re-check that moves the exit moves the location, the timezone and the
+       verdict with it, and rows still describing the previous answer are worse
+       than no rows. textContent per cell, never innerHTML -- these values are a
+       proxy row and a fingerprint, and this page has no framework escaping them. */
+    function renderFields(fields) {
+      while (fieldsEl.firstChild) { fieldsEl.removeChild(fieldsEl.firstChild); }
+      fieldsEl.hidden = !fields || !fields.length;
+      (fields || []).forEach(function (field) {
+        var row = document.createElement('div');
+        row.className = 'session-field' + (field.mono ? ' mono' : '');
+        var dt = document.createElement('dt');
+        dt.textContent = field.label;
+        var dd = document.createElement('dd');
+        var v = document.createElement('span');
+        v.className = 'v';
+        v.textContent = field.value;
+        v.title = field.value;
+        dd.appendChild(v);
+        if (field.note) {
+          var note = document.createElement('span');
+          note.className = 'session-note';
+          if (field.noteTone) { note.setAttribute('data-tone', field.noteTone); }
+          note.textContent = field.note;
+          dd.appendChild(note);
+        }
+        row.appendChild(dt);
+        row.appendChild(dd);
+        fieldsEl.appendChild(row);
+      });
+    }
     recheck.addEventListener('click', function () {
       if (panel.dataset.state === 'checking') { return; }
       var previous = panel.dataset.state;
@@ -423,17 +542,20 @@ ${run ? `(function () {
             panel.dataset.state = previous;
             title.textContent = 'Could not re-check';
             detail.textContent = 'The launcher refused or could not answer this check.';
+            renderFields(null);
             return;
           }
           panel.dataset.state = result.body.proxyOk ? 'ok' : 'fail';
           title.textContent = result.body.title;
           detail.textContent = result.body.detail;
+          renderFields(result.body.fields);
         })
         .catch(function () {
           recheck.disabled = false;
           panel.dataset.state = previous;
           title.textContent = 'Could not re-check';
           detail.textContent = 'Argus Launcher is not reachable from this session.';
+          renderFields(null);
         });
     });
   }

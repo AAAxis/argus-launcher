@@ -422,7 +422,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           // with the current status rather than an error: "no proxy assigned"
           // is exactly what the panel should now say.
           const status = homeProxyStatus(profile, proxy);
-          return {proxyOk: status.ok, title: status.title, detail: status.detail};
+          return {proxyOk: status.ok, title: status.title, detail: status.detail, fields: status.fields};
         }
         // Failures are recorded too, the same way the background sweep records
         // them -- a proxy that has stopped working should say so on its card as
@@ -430,7 +430,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         const checked = await proxyActions.runCheck(proxy);
         await proxyActions.recordCheck(checked);
         const status = homeProxyStatus(profile, checked);
-        return {proxyOk: status.ok, title: status.title, detail: status.detail};
+        return {proxyOk: status.ok, title: status.title, detail: status.detail, fields: status.fields};
       },
       cloud);
 

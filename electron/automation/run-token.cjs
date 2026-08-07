@@ -270,8 +270,11 @@ function handleRunFromPage({req, res, tokens, sendJson, startRun}) {
 }
 
 // Re-checks this launch's assigned proxy. `recheck` returns the panel's next
-// {proxyOk, title, detail} -- composed by homeProxyStatus in the renderer, the
-// same function that wrote the wording the page launched with.
+// {proxyOk, title, detail, fields} -- composed by homeProxyStatus in the
+// renderer, the same function that wrote the wording the page launched with.
+// `fields` is the labelled readout (exit, location, timezone, device); the page
+// rebuilds those rows from it, since a re-check that moves the exit moves every
+// row under it.
 function handleRecheckFromPage({req, res, tokens, sendJson, recheck}) {
   handlePageRequest({
     req,
