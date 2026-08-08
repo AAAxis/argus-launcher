@@ -39,17 +39,19 @@ function setStatus(text, isError) {
   $('#status').className = isError ? 'status error' : 'status';
 }
 
-function relativeTime(at) {
-  if (!at) return '';
-  const minutes = Math.round((Date.now() - at) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  return hours < 24 ? `${hours} h ago` : new Date(at).toLocaleDateString();
-}
+// Both live in sync-status.js so the branch ordering below can be tested; see
+// that file's header for why it is a separate script.
+const {classifySync, relativeTime} = ArgusSyncStatus;
 
 ArgusIcons.hydrate(document, 14);
 $('.head-mark').replaceChildren(ArgusIcons.make('shield', 18));
+
+// The tab strip. Created before any render function runs -- renderSync and
+// renderProxy publish their tone to it, and renderAutomations decides whether
+// its tab exists at all, so it has to be here rather than beside the first
+// paint at the bottom of this file. See tabs.js for why the tone is passed in
+// rather than computed there.
+const tabs = ArgusTabs.create({strip: $('[role="tablist"]')});
 
 // ── Session ────────────────────────────────────────────────────────────────────
 // The launch snapshot: profile, theme, proxy verdict, automations. Null when the
@@ -115,6 +117,8 @@ function renderProxy(status) {
   const flagged = (status.fields || []).some((field) => field.noteTone === 'bad');
   const tone = !status.ok ? 'bad' : (flagged ? 'warn' : 'ok');
   $('#proxy-card').className = `card tone-${tone}`;
+  // The same verdict on the tab, because behind a tab this card is invisible.
+  tabs.setTone('session', tone);
   $('#proxy-icon').replaceChildren(
       ArgusIcons.make(tone === 'ok' ? 'checkCircle' : 'alertTriangle', 16));
   $('#proxy-icon').classList.remove('spin');
@@ -132,6 +136,9 @@ function renderProxy(status) {
 // proxy" would be a claim about the session rather than about this window.
 function renderProxyUnavailable() {
   $('#proxy-card').className = 'card';
+  // Mirrors the bare className above: no session to report on is an absence of
+  // signal, not a fault, so the tab stays unmarked.
+  tabs.setTone('session', 'off');
   $('#proxy-icon').replaceChildren(ArgusIcons.make('circle', 16));
   $('#proxy-icon').classList.remove('spin');
   $('#proxy-title').textContent = 'No session details';
@@ -182,10 +189,11 @@ $('#recheck').addEventListener('click', () => {
 // is a list with extra steps. Built from the launch snapshot, so the panel can
 // only ever offer what this launch was actually given.
 function renderAutomations(automations) {
-  const section = $('#automations-section');
   const list = $('#automation-list');
   list.replaceChildren();
-  section.hidden = !automations || !automations.length;
+  // The tab, not the section: hiding the control and hiding what it reveals are
+  // one act now, and tabs.js does both. A launch with none shows two tabs.
+  tabs.setAvailable('automations', Boolean(automations && automations.length));
   for (const automation of automations || []) {
     const row = document.createElement('button');
     row.type = 'button';
@@ -233,91 +241,6 @@ $('#automation-list').addEventListener('click', (event) => {
   })();
 });
 
-// ── Cookie sync state -> plain-language card ────────────────────────────────────
-// Priority order matters: a launcher that isn't reachable is worse news than
-// "paused", which is worse news than "pending", which is worse news than "in
-// sync". lastErrorKind is checked before paused/pushPending/inSync so a real
-// unresolved failure never gets hidden behind a stale-looking green/amber
-// state -- the badge can stay green while lastErrorKind is 'internal' because
-// the badge only paints a handful of transport-level kinds, and this panel has
-// room to say what actually happened for every kind background.js can persist.
-function classifySync(sync) {
-  if (!sync.available) {
-    return {
-      tone: 'off', icon: 'circle', title: 'Sync unavailable',
-      detail: 'This window was not launched from Argus Launcher, so cookies are not being synced.',
-    };
-  }
-  if (!sync.reachable || sync.lastErrorKind === 'network') {
-    return {
-      tone: 'bad', icon: 'alertTriangle', title: 'Launcher not reachable',
-      detail: sync.lastError || 'Argus Launcher did not answer. Cookies stay local until it is back.',
-    };
-  }
-  if (sync.lastErrorKind === 'refused') {
-    // The bug this whole feature exists to make visible -- keep it unmistakable
-    // and say what to do about it, not just that it failed.
-    return {
-      tone: 'bad', icon: 'xCircle', title: 'Launcher rejected the request',
-      detail: 'This profile’s session with the Launcher looks stale or invalid. ' +
-          'Relaunch the profile from Argus Launcher to renew it.',
-    };
-  }
-  if (sync.lastErrorKind === 'rate-limited') {
-    return {
-      tone: 'warn', icon: 'clock', title: 'Rate limited',
-      detail: 'Argus Launcher is throttling requests right now. Sync will retry automatically.',
-    };
-  }
-  if (sync.lastErrorKind === 'internal') {
-    return {
-      tone: 'bad', icon: 'alertOctagon', title: 'Sync error',
-      detail: sync.lastError || 'Something went wrong inside the sync engine.',
-    };
-  }
-  if (sync.lastErrorKind === 'saved-none') {
-    return {
-      tone: 'bad', icon: 'alertTriangle', title: 'Nothing was saved',
-      detail: sync.lastError || 'Argus Launcher did not recognize any of the pushed cookies.',
-    };
-  }
-  if (sync.lastErrorKind === 'import-failed') {
-    return {
-      tone: 'bad', icon: 'alertTriangle', title: 'Pull failed',
-      detail: sync.lastError || 'None of the cookies from Argus Launcher could be applied here.',
-    };
-  }
-  if (sync.lastErrorKind === 'server-error') {
-    return {
-      tone: 'bad', icon: 'alertTriangle', title: 'Launcher error',
-      detail: sync.lastError || 'Argus Launcher answered with an error.',
-    };
-  }
-  if (sync.paused) {
-    return {
-      tone: 'warn', icon: 'pause', title: 'Sync paused',
-      detail: 'Cookies stay local until you resume or use "Save to Launcher now".',
-    };
-  }
-  if (sync.pushPending) {
-    return {
-      tone: 'warn', icon: 'loader', spin: true, title: 'Push pending',
-      detail: 'Waiting to push recent cookie changes to Argus Launcher…',
-    };
-  }
-  if (sync.inSync) {
-    const bits = [`${sync.pushedCount} cookie${sync.pushedCount === 1 ? '' : 's'}`];
-    if (sync.lastSet) bits.push(`saved to “${sync.lastSet}”`);
-    const when = relativeTime(sync.pushedAt);
-    if (when) bits.push(when);
-    return {tone: 'ok', icon: 'checkCircle', title: 'In sync with Launcher', detail: bits.join(' · ')};
-  }
-  return {
-    tone: 'off', icon: 'circle', title: 'Not yet synced',
-    detail: 'Cookies have not been sent to Argus Launcher yet.',
-  };
-}
-
 // Why every launcher-backed control is off, in one sentence naming the fix. A
 // disabled button that does not say why reads as a broken button: three of them
 // greyed out at once, with the card above saying only "Sync unavailable", left
@@ -329,6 +252,8 @@ const SYNC_BLOCKED_REASON =
 function renderSync(sync) {
   const state = classifySync(sync);
   $('#sync-card').className = `card tone-${state.tone}`;
+  // classifySync is the sole author of this tone, and now of this tab's dot too.
+  tabs.setTone('cookies', state.tone);
   const icon = $('#sync-icon');
   icon.replaceChildren(ArgusIcons.make(state.icon, 16));
   icon.classList.toggle('spin', Boolean(state.spin));
@@ -451,7 +376,7 @@ async function loadSession() {
   document.documentElement.dataset.theme = session.theme || 'system';
   if (session.profile && session.profile.name) {
     $('#profile-name').textContent = session.profile.name;
-    document.title = `${session.profile.name} — Argus Panel`;
+    document.title = `${session.profile.name} — Argus Helper`;
   }
   renderProxy(session.proxy);
   // Direct and free-proxy profiles have no assigned proxy to re-test, so the
@@ -462,6 +387,24 @@ async function loadSession() {
   }
   renderAutomations(session.automations);
 }
+
+// ── Toolbar icon ────────────────────────────────────────────────────────────────
+// The action icon is a bitmap Chrome will not re-tint, so background.js keeps
+// two inks and picks one. Before the panel is ever opened it can only go on the
+// appearance the launcher resolved at launch; this is the better answer, because
+// prefers-color-scheme here is this browser's own, evaluated by the engine that
+// paints the toolbar.
+//
+// Reported on open and on every flip, so an OS appearance change mid-session
+// does not leave the button inked for the theme before it. Fire-and-forget: a
+// worker that was evicted mid-send costs a mismatched icon until the next open,
+// which is not worth surfacing to the user.
+function reportToolbarTheme(dark) {
+  void send({type: 'toolbar-theme', dark});
+}
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+reportToolbarTheme(darkQuery.matches);
+darkQuery.addEventListener('change', (event) => reportToolbarTheme(event.matches));
 
 // ── Staying honest while open ───────────────────────────────────────────────────
 // The panel outlives every event that used to justify a re-read. These three
@@ -551,7 +494,123 @@ $('#pull').addEventListener('click', () => withBusy($('#pull'), async () => {
     setStatus(`Loaded ${result.count} cookies from "${setName}"`);
   }
   await refresh();
+  // The "not in this browser yet" marks are now stale by definition -- a pull
+  // is exactly the thing that changes them.
+  if (launcherListLoaded) void loadLauncherList();
 }));
+
+// ---- what the launcher holds, read-only ----------------------------------------
+// The counterpart to "Load from Launcher": that button replaces the whole jar,
+// and this is the only way to see what it would replace it with before pressing
+// it.
+//
+// Deliberately not part of refresh(). It costs a launcher round trip and the
+// answer only changes when someone edits the set in the Cookies tab, so it is
+// fetched when opened and re-fetched after a pull -- not on every cookie change
+// in the browser, which would be several requests a second on a busy page.
+let launcherListLoaded = false;
+
+function launcherListRow(cookie, presentDomains) {
+  const row = document.createElement('div');
+  row.className = 'lc-row';
+
+  const name = document.createElement('span');
+  name.className = 'lc-name';
+  name.textContent = cookie.name;
+  name.title = `${cookie.name} · ${cookie.path || '/'}`;
+
+  const domain = document.createElement('span');
+  domain.className = 'lc-domain';
+  domain.textContent = cookie.domain;
+  domain.title = cookie.domain;
+  // Whether this site already has cookies in THIS browser. The useful thing a
+  // list can add over a count: it turns "Load from Launcher" from a leap into a
+  // decision, because the sites about to be overwritten are the ones marked
+  // here.
+  if (!presentDomains.has(cookie.domain.replace(/^\./, ''))) {
+    domain.dataset.state = 'absent';
+    domain.title = `${cookie.domain} — not in this browser yet`;
+  }
+
+  const expiry = document.createElement('span');
+  expiry.className = 'lc-expiry';
+  // A session cookie is a different thing from one expiring at the epoch, and
+  // the panel says which rather than printing 1970.
+  expiry.textContent = cookie.expires ?
+    new Date(cookie.expires * 1000).toLocaleDateString() :
+    'session';
+
+  row.append(domain, name, expiry);
+  return row;
+}
+
+function renderLauncherList(result, jarDomains) {
+  const list = $('#launcher-list');
+  list.replaceChildren();
+  if (!result.ok) {
+    const note = document.createElement('p');
+    note.className = 'lc-note';
+    note.textContent = result.error || 'Could not read this profile’s cookies from the Launcher.';
+    list.appendChild(note);
+    return;
+  }
+  if (!result.set) {
+    const note = document.createElement('p');
+    note.className = 'lc-note';
+    // An ordinary state, not a failure: say what is true and what would change
+    // it, the same way SYNC_BLOCKED_REASON does.
+    note.textContent =
+        'No cookie set is assigned to this profile. Assign one from the Cookies tab in ' +
+        'Argus Launcher, or use "Save to Cookies tab…" above to create one from this session.';
+    list.appendChild(note);
+    return;
+  }
+
+  const head = document.createElement('p');
+  head.className = 'lc-head';
+  head.textContent =
+      `“${result.set}” · ${result.count} cookie${result.count === 1 ? '' : 's'}`;
+  list.appendChild(head);
+
+  // Sorted by domain so the same site's cookies sit together; the list is read
+  // to answer "which sites", not "which cookie".
+  const sorted = [...result.cookies].sort((a, b) =>
+    (a.domain || '').localeCompare(b.domain || '') || (a.name || '').localeCompare(b.name || ''));
+  for (const cookie of sorted) {
+    list.appendChild(launcherListRow(cookie, jarDomains));
+  }
+}
+
+async function loadLauncherList() {
+  const list = $('#launcher-list');
+  list.replaceChildren();
+  const loading = document.createElement('p');
+  loading.className = 'lc-note';
+  loading.textContent = 'Reading from Launcher…';
+  list.appendChild(loading);
+
+  const [result, jar] = await Promise.all([
+    send({type: 'list-launcher-cookies'}),
+    // The live jar, for the "not in this browser yet" marks. Read here rather
+    // than taken from the counts already on screen because those are numbers,
+    // and this needs the domains.
+    chrome.cookies.getAll({}).catch(() => []),
+  ]);
+  const jarDomains = new Set(jar.map((cookie) => String(cookie.domain || '').replace(/^\./, '')));
+  renderLauncherList(result, jarDomains);
+  launcherListLoaded = result.ok;
+}
+
+$('#launcher-list-toggle').addEventListener('click', () => {
+  const button = $('#launcher-list-toggle');
+  const list = $('#launcher-list');
+  const open = button.getAttribute('aria-expanded') === 'true';
+  button.setAttribute('aria-expanded', open ? 'false' : 'true');
+  list.hidden = open;
+  if (!open && !launcherListLoaded) {
+    void loadLauncherList();
+  }
+});
 
 // ---- save-as: inline expanding name field --------------------------------------
 function defaultSaveAsName() {

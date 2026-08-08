@@ -7,62 +7,59 @@
 <html lang="en" data-theme="system">
 <head>
   <meta charset="utf-8">
-  <title>Argus Panel</title>
+  <title>Argus Helper</title>
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
-  <!-- Sticky, so the name of the profile you are looking at stays on screen
-       while the rest of the panel scrolls. In a browser running six anonymous
-       sessions at once that is the single most useful thing here. -->
+  <!-- The one sticky row, and it is now the navigation. The shield stays because
+       it is the only thing on screen that says which product this is -- and
+       because sidepanel.js reaches for `.head-mark` unguarded at load. The
+       profile name moved down into the scroll area, where it belongs to all
+       three tabs rather than to whichever one is showing. -->
   <header class="panel-head">
     <span class="head-mark" data-icon="shield" aria-hidden="true"></span>
-    <h1 id="profile-name">Argus Panel</h1>
+    <div class="tabs" role="tablist" aria-label="Argus Panel sections">
+      <!-- Cookies first and selected: it is the tab with the controls people
+           came for. Session and Automations are read, not driven, and a tab one
+           click away is not below the fold. -->
+      <button id="tab-cookies" class="tab" type="button" role="tab" data-tab="cookies"
+          aria-selected="true" aria-controls="cookies-section" tabindex="0">
+        <span class="tab-label">Cookies</span>
+      </button>
+      <button id="tab-session" class="tab" type="button" role="tab" data-tab="session"
+          aria-selected="false" aria-controls="session-section" tabindex="-1">
+        <span class="tab-label">Session</span>
+      </button>
+      <!-- Hidden until the launch snapshot says this profile has any, by
+           renderAutomations via tabs.setAvailable(). Same reasoning the section
+           it controls used to carry alone: an empty Automations tab reads as a
+           feature that is broken rather than one that has nothing to show. -->
+      <button id="tab-automations" class="tab" type="button" role="tab" data-tab="automations"
+          aria-selected="false" aria-controls="automations-section" tabindex="-1" hidden>
+        <span class="tab-label">Automations</span>
+      </button>
+    </div>
   </header>
 
   <main>
-    <!-- ── Session ──────────────────────────────────────────────────────────
-         The identity check, first: whether this window's exit, clock and
-         claimed hardware agree with each other is the question the whole
-         product exists to answer. -->
-    <section class="section">
-      <div class="section-head">
-        <h2 class="eyebrow">Session</h2>
-        <div class="section-actions">
-          <button id="recheck" class="icon-button" type="button"
-              title="Re-check this proxy" aria-label="Re-check this proxy">
-            <span class="icon" data-icon="refresh"></span>
-          </button>
-          <a class="icon-button" href="https://ip.me/" target="_blank" rel="noreferrer"
-              title="Check this session on ip.me" aria-label="Check this session on ip.me">
-            <span class="icon" data-icon="externalLink"></span>
-          </a>
-        </div>
-      </div>
+    <!-- Not inside any one panel, and not sticky. Which profile this window is
+         belongs to every tab, and it is worth the first line of the scroll
+         rather than a permanent second row above three already-narrow tabs. -->
+    <h1 id="profile-name">Argus Helper</h1>
 
-      <div id="proxy-card" class="card">
-        <div class="card-row">
-          <span id="proxy-icon" class="status-icon" aria-hidden="true"></span>
-          <div class="card-text">
-            <strong id="proxy-title">Reading session&hellip;</strong>
-            <span id="proxy-detail"></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Four labels, four values, read down the left edge and compared
-           across. Populated by renderProxyFields() from the same
-           homeProxyStatus() output the launcher composed at launch, and
-           rebuilt wholesale from a re-check's answer. -->
-      <dl id="proxy-fields" class="fields" hidden></dl>
-    </section>
-
-    <!-- ── Cookies ───────────────────────────────────────────────────────── -->
-    <section class="section">
-      <h2 class="eyebrow">Cookies</h2>
+    <!-- ── Cookies ───────────────────────────────────────────────────────────
+         No eyebrow heading on any panel below: the selected tab is the heading,
+         and each panel takes its accessible name from that tab. No tabindex
+         either -- every panel here contains focusable controls, so the APG's
+         escape hatch for empty panels would only add a dead tab stop. -->
+    <section id="cookies-section" class="section" role="tabpanel"
+        aria-labelledby="tab-cookies">
 
       <!-- Sync state is the headline: every reachable/token/rate-limit/internal
            state the engine can persist gets its own copy here, driven by
-           classifySync(), not just the toolbar badge's reduced glyph set. -->
+           classifySync(), not just the toolbar badge's reduced glyph set. That
+           same tone now also drives this tab's dot, so a sync that dies while
+           you are reading another tab still says so. -->
       <div id="sync-card" class="card">
         <div class="card-row">
           <span id="sync-icon" class="status-icon" aria-hidden="true"></span>
@@ -120,6 +117,19 @@
         <small class="action-hint">Replaces this browser's cookies with the set assigned to this profile.</small>
       </div>
 
+      <!-- Look before you leap. The button above replaces the whole jar, and
+           until this existed the only way to find out what it would replace it
+           WITH was to press it. Collapsed by default: it is an answer to a
+           question, not something to read every time the panel opens. -->
+      <div class="disclosure">
+        <button id="launcher-list-toggle" type="button" aria-expanded="false"
+            aria-controls="launcher-list">
+          <span class="icon" data-icon="chevronRight"></span>
+          <span id="launcher-list-summary">What the Launcher has for this profile</span>
+        </button>
+        <div id="launcher-list" class="launcher-list" hidden></div>
+      </div>
+
       <!-- A library save into the Cookies tab, distinct from the automatic
            "(live)" sync above. window.prompt() is unreliable inside an
            extension page, so this expands inline instead: the button hides and
@@ -167,12 +177,50 @@
       </button>
     </section>
 
+    <!-- ── Session ──────────────────────────────────────────────────────────
+         The identity check: whether this window's exit, clock and claimed
+         hardware agree with each other is the question the whole product exists
+         to answer. It is one click away rather than first, and its tab carries a
+         dot when the answer is no. -->
+    <section id="session-section" class="section" role="tabpanel"
+        aria-labelledby="tab-session" hidden>
+      <!-- The eyebrow is gone but the row it shared with these two controls is
+           not: with no heading to sit beside, they right-align on their own. -->
+      <div class="section-head">
+        <div class="section-actions">
+          <button id="recheck" class="icon-button" type="button"
+              title="Re-check this proxy" aria-label="Re-check this proxy">
+            <span class="icon" data-icon="refresh"></span>
+          </button>
+          <a class="icon-button" href="https://ip.me/" target="_blank" rel="noreferrer"
+              title="Check this session on ip.me" aria-label="Check this session on ip.me">
+            <span class="icon" data-icon="externalLink"></span>
+          </a>
+        </div>
+      </div>
+
+      <div id="proxy-card" class="card">
+        <div class="card-row">
+          <span id="proxy-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="proxy-title">Reading session&hellip;</strong>
+            <span id="proxy-detail"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Four labels, four values, read down the left edge and compared
+           across. Populated by renderProxyFields() from the same
+           homeProxyStatus() output the launcher composed at launch, and
+           rebuilt wholesale from a re-check's answer. -->
+      <dl id="proxy-fields" class="fields" hidden></dl>
+    </section>
+
     <!-- ── Automations ───────────────────────────────────────────────────────
-         Hidden outright when this launch has none: an empty section with a
-         heading reads as a feature that is broken rather than one that has
-         nothing to show. -->
-    <section id="automations-section" class="section" hidden>
-      <h2 class="eyebrow">Automations</h2>
+         Its tab is hidden outright when this launch has none, so the panel
+         behind it is never reachable and needs no empty state of its own. -->
+    <section id="automations-section" class="section" role="tabpanel"
+        aria-labelledby="tab-automations" hidden>
       <div id="automation-list" class="automation-list"></div>
     </section>
   </main>
@@ -180,11 +228,14 @@
   <!-- Pinned to the bottom of the panel rather than sitting after the last
        section. A popup was short enough that a trailing line was always in
        view; this panel scrolls, and an acknowledgement you have to scroll to
-       find is one you will not see. -->
+       find is one you will not see. Global to all three tabs: it reports what
+       your last action did, and that is not a property of the tab you are on. -->
   <p id="status" class="status" role="status" aria-live="polite"></p>
 
   <script src="cookie-format.js"></script>
+  <script src="sync-status.js"></script>
   <script src="icons.js"></script>
+  <script src="tabs.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

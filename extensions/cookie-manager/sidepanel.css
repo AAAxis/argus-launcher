@@ -135,32 +135,112 @@
 /* No fixed width, unlike the popup this replaces: a side panel is resizable and
  * the user decides. 320px is Chrome's floor, and everything below is laid out
  * to survive it. No bottom padding to reserve: the status bar is sticky rather
- * than fixed, so it carries its own space when it has anything to say. */
+ * than fixed, so it carries its own space when it has anything to say.
+ *
+ * A flex column pinned to the viewport, so that sticky status bar has something
+ * to be at the foot OF. Three stacked sections always overflowed and the bar
+ * always sat at the bottom by accident; one tab panel at a time does not --
+ * Automations alone is barely 120px against a full-height side panel -- and an
+ * acknowledgement floating in the middle of empty space is the bug this closes.
+ * Sticky still works: body is a flex container, not a scroll container, so the
+ * viewport is still what both bars stick to. */
 body {
   background: var(--paper);
   color: var(--ink);
+  display: flex;
+  flex-direction: column;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 0;
+  min-height: 100vh;
   min-width: 320px;
 }
 
-/* ---- header ---------------------------------------------------------------- */
-/* Sticky rather than scrolling away: which profile this window is is the one
- * fact worth keeping on screen the whole time. Opaque background is load-
- * bearing -- content scrolls under it. */
+/* ---- tab strip ----------------------------------------------------------------
+ * The sticky row IS the navigation now. Opaque background is load-bearing --
+ * content scrolls under it -- and the bottom border doubles as the rail the
+ * selected tab's underline sits on. */
 .panel-head {
-  align-items: center;
+  align-items: stretch;
   background: var(--paper);
   border-bottom: 1px solid var(--border-soft);
   display: flex;
-  gap: 9px;
-  padding: 12px 14px;
+  gap: 6px;
+  padding: 0 12px;
   position: sticky;
   top: 0;
   z-index: 20;
 }
-.head-mark { color: var(--ink-soft); display: flex; flex: none; }
+.head-mark { align-items: center; color: var(--ink-soft); display: flex; flex: none; }
 .head-mark svg { display: block; }
+
+.tabs { display: flex; flex: 1; gap: 2px; min-width: 0; }
+
+/* Written element+class AND scoped under .tabs, so this is (0,2,1) against the
+ * base `button:not([hidden])`'s (0,1,1) and wins wherever in the file it lands
+ * -- unlike button.ghost and button.primary, which win on source order alone
+ * and would have forced this block below the button section to be correct.
+ *
+ * No `display` here on purpose: that base rule already supplies flex AND keeps
+ * the UA's [hidden]{display:none} winning, which is the whole mechanism that
+ * hides the Automations tab on a launch that has none. Declaring display here
+ * would paint it. */
+.tabs button.tab {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink-soft);
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 9px 10px;
+}
+/* The label needs a real element to truncate inside: the status dot is a
+ * ::after and therefore a flex item of the tab, and text-overflow cannot apply
+ * to an anonymous flex item. At 320px all three labels fit with room to spare;
+ * this is insurance against a future font or a fourth tab, not a plan. */
+.tabs button.tab .tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tabs button.tab:hover { background: none; color: var(--ink); }
+/* An inset shadow rather than a border or a second pseudo-element: ::after is
+ * spoken for by the status dot, and a border would shift the label 2px on
+ * selection. */
+.tabs button.tab[aria-selected="true"] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--ink);
+}
+/* Inset, unlike every other control here: the tab is flush with the header's
+ * bottom border, and an outset ring is clipped by it. */
+.tabs button.tab:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Only a problem gets a mark -- see tabs.js's MARKED. The tones come straight
+ * off the card inside the panel, so a dot and the card it reports on are
+ * guaranteed the same colour in both themes. */
+.tabs button.tab[data-tone="bad"]::after,
+.tabs button.tab[data-tone="warn"]::after {
+  border-radius: 999px;
+  content: "";
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+.tabs button.tab[data-tone="bad"]::after { background: var(--danger); }
+.tabs button.tab[data-tone="warn"]::after { background: var(--status-warmup-ink); }
+
+/* ---- profile line -------------------------------------------------------------
+ * Scrolls away with the content, and belongs to all three tabs rather than to
+ * whichever one is showing. It was sticky when it shared a row with the mark; a
+ * second permanent row above three already-narrow tabs is not worth the vertical
+ * space in a 320px panel. */
 h1 {
   font-size: 14px;
   font-weight: 700;
@@ -172,38 +252,34 @@ h1 {
   white-space: nowrap;
 }
 
-/* ---- sections -------------------------------------------------------------- */
-main { display: grid; padding: 14px; }
-/* :not([hidden]) is load-bearing, not decoration -- an unconditional
+/* ---- sections --------------------------------------------------------------
+ * Two grid rows at most: the shared profile line, and whichever panel is
+ * selected. `gap` replaces the margin the old .section + .section rule used to
+ * contribute, and it is correct by construction here -- a hidden panel is
+ * display:none and is not a grid item at all, so no gap is reserved for it. */
+/* align-content is load-bearing next to `flex: 1 0 auto`, not tidying. main now
+ * grows to fill the viewport so the status bar has a foot to sit at, and a grid
+ * that is taller than its rows stretches them to fit by default -- which pushed
+ * the profile line and the panel apart by a third of the panel on the shorter
+ * tabs. `start` packs them at the top and lets the slack fall at the bottom,
+ * where it belongs. */
+main { align-content: start; display: grid; flex: 1 0 auto; gap: 10px; padding: 14px; }
+/* :not([hidden]) is MORE load-bearing than it was, not less: it is now the whole
+ * mechanism behind tabs.js setting `panel.hidden`. An unconditional
  * `display: grid` is an author style and beats the UA stylesheet's
- * `[hidden] { display: none }`. Without it the Automations section rendered its
- * heading and its separator rule on every launch that had no automations,
- * which reads as a broken feature rather than an absent one. */
+ * `[hidden] { display: none }`, which would leave all three panels stacked on
+ * screen at once. */
 .section:not([hidden]) { display: grid; gap: 9px; }
-/* The rule and the space between sections, in one place, and only between two
- * that are actually on screen -- `+` skips a hidden sibling but would still
- * have drawn its border. A section owns nothing above itself, so adding a
- * fourth (the agent) needs no other change. */
-.section:not([hidden]) + .section:not([hidden]) {
-  border-top: 1px solid var(--border-soft);
-  margin-top: 16px;
-  padding-top: 16px;
-}
-/* The app's own eyebrow: 10/700/+0.06em upper in --ink-faint, matching the
- * labels in the launcher's own panels. */
-.eyebrow {
-  color: var(--ink-faint);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  margin: 0;
-  text-transform: uppercase;
-}
-/* A heading with controls on its line. -5px pulls the 26px hit targets back
- * level with the 15px eyebrow they sit beside, without shrinking the targets. */
-.section-head { align-items: center; display: flex; gap: 8px; }
-.section-head .eyebrow { flex: 1; min-width: 0; }
-.section-actions { display: flex; flex: none; gap: 2px; margin: -5px -5px -5px 0; }
+/* Deliberately no `.section + .section` separator: exactly one panel is ever
+ * visible, so a rule between two visible siblings could never match. It lived
+ * here until tabs replaced the stack. */
+
+/* Controls with no heading beside them any more -- the selected tab is the
+ * heading -- so they right-align on their own row. The old -5px pulled 26px hit
+ * targets level with a 15px eyebrow; with nothing to level against, it only
+ * needs to close the gap to the profile line above. */
+.section-head { align-items: center; display: flex; justify-content: flex-end; }
+.section-actions { display: flex; flex: none; gap: 2px; margin: -2px -5px 0 0; }
 
 /* ---- status card ------------------------------------------------------------
  * Shared by the session's proxy verdict and the cookie sync state. One
@@ -378,9 +454,9 @@ button.ghost { background: transparent; border-color: transparent; color: var(--
 button.ghost:hover { background: var(--hover); color: var(--ink); }
 button.ghost:disabled:hover { background: transparent; }
 
-/* A bare glyph: the re-check and ip.me controls beside the Session heading.
- * 26px is the smallest square that still reads as a target beside a 10px
- * eyebrow without crowding it. */
+/* A bare glyph: the re-check and ip.me controls at the top of the Session tab.
+ * 26px is the smallest square that still reads as a target at this weight
+ * without crowding the line it shares. */
 button.icon-button, a.icon-button {
   align-items: center;
   background: transparent;
@@ -524,3 +600,83 @@ button.automation[data-state="failed"] {
 }
 .status:empty { display: none; }
 .status.error { color: var(--danger); font-weight: 600; }
+
+/* ── What the Launcher has, read-only ─────────────────────────────────────────
+ *
+ * A disclosure, not a card. It answers a question ("what will Load from
+ * Launcher replace my cookies with?") rather than reporting a state, so it
+ * stays shut until asked and does not compete with the sync card above it. */
+.disclosure { display: grid; gap: 6px; }
+.disclosure > button {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 6px;
+  padding: 2px 0;
+  text-align: left;
+  width: 100%;
+}
+.disclosure > button:hover { color: var(--ink); }
+/* One glyph that turns, rather than two that swap: a rotating chevron reads as
+ * the same control in two states. */
+.disclosure > button .icon { flex: none; transition: transform .12s ease; }
+.disclosure > button[aria-expanded="true"] .icon { transform: rotate(90deg); }
+
+.launcher-list:not([hidden]) {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: grid;
+  /* Capped and scrollable: a real profile's set runs to hundreds of rows, and
+   * an unbounded list would push every control below it off the panel. */
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.lc-head {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  padding: 6px 8px;
+}
+.lc-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 8px;
+}
+/* Three columns: which site, which cookie, when it dies. The domain gets the
+ * space because it is what the list is read for. */
+.lc-row {
+  align-items: baseline;
+  border-radius: 5px;
+  display: grid;
+  font-size: 11px;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  padding: 4px 8px;
+}
+.lc-row:hover { background: var(--surface); }
+.lc-domain, .lc-name, .lc-expiry {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-domain { color: var(--ink); font-weight: 600; }
+/* A site the saved set covers that this browser has nothing for yet, so a load
+ * would add it rather than replace it. Dimmed rather than coloured: it is a
+ * distinction, not a warning. */
+.lc-domain[data-state="absent"] { color: var(--ink-soft); font-weight: 400; }
+/* Same stack as .field.mono above; this file has no --mono token and spelling
+ * it out is what the rest of the stylesheet already does. */
+.lc-name {
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.lc-expiry { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
