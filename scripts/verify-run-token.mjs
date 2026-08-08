@@ -18,6 +18,7 @@ import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   createRunTokens, handleRecheckFromPage, handleRunFromPage,
+  handleOpenInLauncherFromPage,
   handleCookiePushFromPage, handleCookiePullFromPage, COOKIE_MAX_BODY_BYTES,
 } = require('../electron/automation/run-token.cjs');
 
@@ -38,10 +39,23 @@ let clockOffset = 0;
 const tokens = createRunTokens({now: () => Date.now() + clockOffset});
 
 let started = 0;
-// Both page routes on one server, told apart by path exactly as main.cjs does.
+// Every page route on one server, told apart by path exactly as main.cjs does.
 const rechecked = [];
 const pushed = [];
+const opened = [];
 const server = createServer((req, res) => {
+  if (req.url === '/open') {
+    handleOpenInLauncherFromPage({
+      req,
+      res,
+      tokens,
+      sendJson,
+      open: (entry, automation) => {
+        opened.push({profileId: entry.profileId, automationId: automation.id});
+      },
+    });
+    return;
+  }
   if (req.url === '/recheck') {
     handleRecheckFromPage({
       req,
@@ -157,6 +171,44 @@ check('a body carrying its own steps cannot inject them',
     'steps in the body are ignored; the workflow is looked up by id');
 check('non-JSON content type refused (blocks a cross-origin form POST)',
     formPost.status === 403);
+
+// ── The open-in-launcher route ───────────────────────────────────────────────
+// Same credential, third power: raise the launcher window with one of this
+// launch's own automations showing. It is authorized by the SAME check the run
+// route uses, so the properties that matter are that it cannot be aimed at a
+// workflow this launch does not offer, and that refusing is indistinguishable
+// from holding a token that was never valid -- otherwise it becomes a way to
+// enumerate an org's automations from a page that should know nothing.
+//
+// Its own token, so these four requests do not eat the run token's
+// 10-per-minute budget and change what the checks above measure.
+const openToken = tokens.mint({
+  profileId: 'p-open',
+  profileName: 'Opener',
+  cdpPort: null,
+  automations: [{id: 'a1', name: 'Mine', steps: []}],
+});
+const postOpen = (body, headers) =>
+  post(body, headers || {'Content-Type': 'application/json'}, '/open');
+
+const openOk = await postOpen({runToken: openToken, automationId: 'a1'});
+check('a valid token opens one of its own automations in the launcher',
+    openOk.status === 200 && opened.length === 1, openOk.text);
+check('the profile comes off the token, not the request',
+    opened[0]?.profileId === 'p-open' && opened[0]?.automationId === 'a1',
+    JSON.stringify(opened[0]));
+
+const openForeign = await postOpen({runToken: openToken, automationId: 'someone-elses'});
+check('a workflow this launch does not offer cannot be opened',
+    openForeign.status === 403 && opened.length === 1, openForeign.text);
+check('and it refuses byte-identically to an unknown token (not an enumeration oracle)',
+    openForeign.status === unknown.status && openForeign.text === unknown.text,
+    openForeign.text);
+
+const openForm = await postOpen({runToken: openToken, automationId: 'a1'},
+    {'Content-Type': 'application/x-www-form-urlencoded'});
+check('non-JSON content type refused on the open route too',
+    openForm.status === 403 && opened.length === 1);
 
 // ── The re-check route ───────────────────────────────────────────────────────
 // Same credential, second power: re-check the profile's assigned proxy. It has
@@ -397,6 +449,50 @@ check('the previous launch\'s token stops working',
 lifetime.dropForProfile('p1');
 check('dropForProfile clears it (called when the session is killed)',
     lifetime.size() === 0);
+
+// Org scoping. The entry carries the workspace the launch was composed under so
+// the renderer can resolve the profile against the org it belongs to rather
+// than whichever one is active when the request lands. The security-relevant
+// half is the second check: a caller must never be able to name its own org.
+const scoped = createRunTokens();
+const scopedToken = scoped.mint({profileId: 'p9', orgId: 'org-alpha', automations: []});
+check('the minted entry carries the workspace it was launched from',
+    scoped.authorizeCookieSync({runToken: scopedToken}).entry.orgId === 'org-alpha');
+check('an orgId in the request body is ignored; the entry\'s own org wins',
+    scoped.authorizeCookieSync({runToken: scopedToken, orgId: 'org-attacker'})
+        .entry.orgId === 'org-alpha');
+const legacy = createRunTokens();
+const legacyToken = legacy.mint({profileId: 'p10', automations: []});
+check('a token minted without an org normalizes to empty, not undefined',
+    legacy.authorizeCookieSync({runToken: legacyToken}).entry.orgId === '');
+
+// Persistence. A browser window outlives the launcher process, so quitting it
+// used to invalidate every open session -- the window kept running and its next
+// push got the same 403 a forged token gets.
+let saved = null;
+const writing = createRunTokens({save: (entries) => { saved = entries; }});
+const survivor = writing.mint({profileId: 'p11', orgId: 'org-beta', automations: []});
+check('minting writes the store through', Array.isArray(saved) && saved.length === 1);
+const restored = createRunTokens({load: () => saved});
+check('a token minted before a restart still authorizes after one',
+    restored.authorizeCookieSync({runToken: survivor}).ok === true);
+check('and it still knows its workspace',
+    restored.authorizeCookieSync({runToken: survivor}).entry.orgId === 'org-beta');
+
+// Restoring must not resurrect what the TTL already killed.
+const stale = [['dead-token', {profileId: 'p12', orgId: '', automations: [], expiresAt: 1}]];
+const pruningLoad = createRunTokens({load: () => stale});
+check('an expired entry in the store is dropped on load, not restored',
+    pruningLoad.size() === 0);
+
+// A store that cannot be read must not take the API down with it.
+const brokenLoad = createRunTokens({load: () => { throw new Error('unreadable'); }});
+check('an unreadable store degrades to an empty one rather than throwing',
+    brokenLoad.size() === 0);
+const brokenSave = createRunTokens({save: () => { throw new Error('read-only disk'); }});
+const stillMinted = brokenSave.mint({profileId: 'p13', automations: []});
+check('a failing write still returns a usable token for this session',
+    brokenSave.authorizeCookieSync({runToken: stillMinted}).ok === true);
 
 server.close();
 console.log(`\n${results.filter(Boolean).length}/${results.length} checks passed`);

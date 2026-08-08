@@ -6,6 +6,7 @@
 import {useEffect, useState} from 'react';
 import {Download, Upload} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
+import {CookieSetLabel} from '../ui/CookieSetLabel';
 import {Modal} from '../ui/Modal';
 import {proxyImportExampleList} from '../../data/importTemplate';
 import {parseBookmarkFile} from '../../lib/bookmarkImport';
@@ -98,7 +99,7 @@ export function CookiePickerModal({search, onSearch, selectedId, onSelect, onClo
               className={selectedId === cookie.id ? 'cookie-picker-row active' : 'cookie-picker-row'}
               onClick={() => onSelect(cookie)}
             >
-              <span>{cookie.name}</span>
+              <CookieSetLabel cookie={cookie} folders={data.state.cookie_folders} />
               {/* The folder, because two sets called "cookies.txt" are only
                 * telling apart by where they were filed. */}
               <small>

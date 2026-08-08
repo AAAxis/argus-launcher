@@ -10,7 +10,7 @@ import {ColumnsButton} from '../ui/ColumnsButton';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
-import {FolderSelect} from '../ui/TableFilters';
+import {FolderSelect, StatusFilter} from '../ui/TableFilters';
 import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
 import {PROXY_COLUMNS} from '../../tables/proxyColumns';
 import {useProxyCellActions, useProxyCellOptions} from '../../tables/proxyCellActions';
@@ -24,6 +24,7 @@ import {profileColorStyle} from '../../lib/profileColors';
 import {initials} from '../../lib/text';
 import {SITE_URL} from '../../lib/auth';
 import {PROXY_PROVIDERS, providerPath} from '../../data/proxyProviders';
+import {defaultProxyStatus} from '../../data/statuses';
 import {native} from '../../native';
 import {useOrg} from '../../org';
 import {useSelection} from '../../hooks/useSelection';
@@ -67,7 +68,7 @@ export function ProxiesTab({
   onRequestDelete,
   onShare,
 }: ProxiesTabProps) {
-  const {data, toast, library, proxies, checkingProxyIds} = useWorkspace();
+  const {data, toast, library, proxies, checkingProxyIds, proxyStatusOptions} = useWorkspace();
   const org = useOrg();
   const state = data.state;
   const selection = useSelection<ArgusProxy>();
@@ -79,6 +80,11 @@ export function ProxiesTab({
   // column just fixed happened in the first place.
   const [mineOnly, setMineOnly] = useState(false);
   const [search, setSearch] = useState('');
+  // '' for "All statuses". The user's own mark, not the check result -- the
+  // dropdown beside it filters by whether a profile holds the proxy, and the
+  // check state has no filter at all because sorting the Check column answers
+  // that question better.
+  const [statusFilter, setStatusFilter] = useState('');
   // Gates the "Assigned to me" filter chip. The Assigned *column* is gated by
   // the same flag inside the registry, which is where teamOnly lives now.
   const showAssignee = state.members.length > 1;
@@ -93,7 +99,7 @@ export function ProxiesTab({
   // Rebuilt every render on purpose -- see tables/proxyCellActions.tsx: the
   // actions close over state, and memoising them is how a cell writes through
   // a stale snapshot.
-  const cellOptions = useProxyCellOptions(state);
+  const cellOptions = useProxyCellOptions(state, proxyStatusOptions);
   const cellActions = useProxyCellActions();
   const columnContext: ProxyColumnContext = {
     state,
@@ -123,9 +129,9 @@ export function ProxiesTab({
     setVisible(columnId, visible);
   }
 
-  const filtered = Boolean(search.trim() || assignedFilter || mineOnly);
+  const filtered = Boolean(search.trim() || assignedFilter || statusFilter || mineOnly);
   const visible = sorting.sort(
-      visibleProxies(state.proxies, {folderId, search, assignedFilter, assigned})
+      visibleProxies(state.proxies, {folderId, search, statusFilter, assignedFilter, assigned})
           .filter((proxy) => !mineOnly || proxy.assigned_to === org.userId));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
@@ -188,6 +194,11 @@ export function ProxiesTab({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search proxies by name, host, or country"
+        />
+        <StatusFilter
+          onChange={setStatusFilter}
+          options={proxyStatusOptions}
+          value={statusFilter}
         />
         <select
           value={assignedFilter}
@@ -382,7 +393,7 @@ export function ProxiesTab({
                     <div className="row-actions">
                       <button
                         aria-label={`Share ${label}`}
-                        className="ghost icon-button row-action"
+                        className="icon-button row-action"
                         onClick={() => onShare({kind: 'proxy', ids: [proxy.id]})}
                         title="Share with another workspace"
                       >
@@ -390,7 +401,7 @@ export function ProxiesTab({
                       </button>
                       <button
                         aria-label={`Edit ${label}`}
-                        className="ghost icon-button row-action"
+                        className="icon-button row-action"
                         onClick={() => onEditProxy(proxy)}
                         title={`Edit ${label}`}
                       >
@@ -398,7 +409,7 @@ export function ProxiesTab({
                       </button>
                       <button
                         aria-label={`Delete ${label}`}
-                        className="ghost icon-button row-action row-action-danger"
+                        className="icon-button row-action row-action-danger"
                         onClick={() => onRequestDelete([proxy.id], label)}
                         title={`Delete ${label}`}
                       >
@@ -419,7 +430,7 @@ export function ProxiesTab({
                     icon={<SearchX size={22} />}
                     title={filtered ? 'Nothing matches those filters' : 'This folder is empty'}
                     body={filtered ?
-                      'Try a different search term, or set the assignment filter back to All proxies.' :
+                      'Try a different search term, or clear the status and assignment filters.' :
                       'Proxies you move into this folder will show up here.'}
                   >
                     {!filtered && (
@@ -604,18 +615,26 @@ function ProviderStrip({onDismiss}: {onDismiss: () => void}) {
 // those left -- the same order the Profiles tab filters in.
 function visibleProxies(
     allProxies: ArgusProxy[],
-    {folderId, search, assignedFilter, assigned}: {
+    {folderId, search, statusFilter, assignedFilter, assigned}: {
       folderId: string;
       search: string;
+      statusFilter: string;
       assignedFilter: '' | 'assigned' | 'unassigned';
       assigned: (proxy: ArgusProxy) => boolean;
     }) {
   const inFolder = folderId ?
     allProxies.filter((proxy) => proxy.folder_id === folderId) :
     allProxies;
-  const byAssignment = assignedFilter ?
-    inFolder.filter((proxy) => assigned(proxy) === (assignedFilter === 'assigned')) :
+  // Case-insensitive against the same fallback the cell renders, so filtering
+  // by Ready finds the proxies that have never been marked at all -- the same
+  // compare visibleProfiles makes.
+  const byStatus = statusFilter ?
+    inFolder.filter((proxy) =>
+      (proxy.status || defaultProxyStatus).toLowerCase() === statusFilter.toLowerCase()) :
     inFolder;
+  const byAssignment = assignedFilter ?
+    byStatus.filter((proxy) => assigned(proxy) === (assignedFilter === 'assigned')) :
+    byStatus;
   const query = search.trim().toLowerCase();
   if (!query) {
     return byAssignment;

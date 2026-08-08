@@ -31,6 +31,40 @@ function fingerprintPresetFor(os?: string): string | undefined {
   return undefined;
 }
 
+// Sec-CH-UA-Platform-Version for the chosen OS.
+//
+// This is the field that decides Windows 10 vs Windows 11, and it is carried
+// separately from `preset` because the two are the same preset in every other
+// respect: Microsoft froze the User-Agent string at "Windows NT 10.0" for both,
+// so the UA is identical and this hint is the ONLY difference. Both Windows
+// choices collapse to preset 'windows' above, and until this existed every
+// Windows profile reported platform version 10.0.0 -- so a profile the user
+// built as "Windows 11" was read as Windows 10 by anything looking at UA-CH,
+// which is exactly what deviceinfo.me shows.
+//
+// The numbers are Chromium's own mapping (see GetPlatformVersion in
+// components/embedder_support/user_agent_utils.cc): Windows 11 reports 13.0.0
+// or higher, Windows 10 reports 10.0.0 or lower. 15.0.0 corresponds to a
+// current Windows 11 build; 10.0.0 to Windows 10 22H2.
+//
+// Returning undefined (mobile, or an unknown OS) leaves the browser on the
+// preset's default, which is the honest answer when we have nothing to add.
+function platformVersionFor(os?: string): string | undefined {
+  if (os === 'Windows 11') {
+    return '15.0.0';
+  }
+  if (os === 'Windows 10') {
+    return '10.0.0';
+  }
+  if (os === 'macOS') {
+    // Matches the "Macintosh; Intel Mac OS X 10_15_7" the preset sends: since
+    // macOS 11, Chrome freezes the UA string at 10_15_7 and reports the real
+    // version only here, the same split Windows has.
+    return '15.0.0';
+  }
+  return undefined;
+}
+
 function fingerprintPlatformFor(preset?: string, os?: string): string | undefined {
   if (os === 'Android') {
     return 'Linux armv8l';
@@ -194,6 +228,7 @@ export function buildRuntimeFingerprint(profile: ArgusProfile): RuntimeFingerpri
     platform: fingerprintPlatformFor(preset, fingerprint.os),
     ua_string: fingerprint.user_agent || userAgentForFingerprint(fingerprint.os, fingerprint.browser_version),
     preset,
+    platform_version: platformVersionFor(fingerprint.os),
     seed,
     touch_points: isMobile ? 5 : 0,
     sensor_mode: isMobile ? 'idle-realistic' : 'off',

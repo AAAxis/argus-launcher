@@ -23,7 +23,7 @@ export type ProfileActions = ReturnType<typeof useProfileActions>;
 export function useProfileActions(
     {data, toast, selectedProfileId, setSelectedProfileId, beginProxyCheck, endProxyCheck}: WorkspaceCore,
     proxies: ProxyActions) {
-  const {state, setState, withDb, patch} = data;
+  const {state, setState, withDb, withDbError, patch} = data;
 
   function proxyFor(profile: ArgusProfile) {
     return matchedProxyForProfile(profile, state.proxies);
@@ -60,6 +60,20 @@ export function useProfileActions(
       [...list, profile]);
     setSelectedProfileId(profile.id);
     return true;
+  }
+
+  // The API's create path. Hands the failure text back instead of toasting it,
+  // because the caller turns it into a 400 the agent can read. A plain INSERT
+  // with no exists probe -- this is the only path that should be able to raise
+  // profile_limit_reached, and it must never fall back to save()'s upsertish
+  // behaviour (see db/profiles.ts).
+  async function create(profile: ArgusProfile): Promise<string | null> {
+    const error = await withDbError((activeOrgId) => db.profiles.create(activeOrgId, profile));
+    if (error) {
+      return error;
+    }
+    patch.profiles((list) => [...list, profile]);
+    return null;
   }
 
   // Puts a picture in Storage and hands back its URL. Deliberately not withDb:
@@ -237,7 +251,7 @@ export function useProfileActions(
       // authorizes exactly that and nothing else -- authorize() looks every
       // requested id up in the list, and an empty list matches none.
       const runToken = await native.mintRunToken?.(
-          target.id, target.name, cdpPort ?? null, tiles) || '';
+          target.id, target.name, data.orgId || '', cdpPort ?? null, tiles) || '';
       // The port comes from the running server rather than a second copy of the
       // constant: AUTOMATION_API_PORT lives in main.cjs, and a hardcoded 39219
       // here would be one more place to get wrong if it ever moves.
@@ -415,6 +429,7 @@ export function useProfileActions(
     folderFor,
     update,
     save,
+    create,
     uploadAvatar,
     exclusiveProxyIdsFor,
     softDelete,

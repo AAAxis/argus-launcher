@@ -360,7 +360,9 @@ export function ProfilesTab({
           </button>
         )}
         {/* Last, and pushed to the far end by its own margin: everything to its
-          * left narrows the rows, this one decides what a row shows. */}
+          * left narrows the rows, this one decides what a row shows. (Refresh
+          * briefly sat here too; it lives in the .topbar with Import and Add
+          * profile now -- it acts on the workspace, not on this table.) */}
         <ColumnsButton
           registry={PROFILE_COLUMNS}
           context={{isTeam: showAssignee}}
@@ -576,12 +578,17 @@ export function ProfilesTab({
                             * here. It is now the Proxy check chip itself, which
                             * is the thing it acts on -- and a row of five
                             * controls was already one too many (see below). */}
-                          {/* Bordered rather than bare: beside a filled Launch
-                            * button, a naked glyph read as decoration on the
-                            * row instead of as something to press. */}
+                          {/* Bare, with the affordance moved into the hover
+                            * plate -- see .row-action in styles.css. This was
+                            * bordered on the argument that a naked glyph beside
+                            * a filled Launch reads as decoration; what settled
+                            * it the other way is that the argument cost three
+                            * outlines in every row of a twenty-five row table,
+                            * and Launch is the only one of the four you came to
+                            * the row for. */}
                           <button
                             aria-label={`Edit ${profile.name}`}
-                            className="ghost icon-button row-action"
+                            className="icon-button row-action"
                             onClick={(event) => {
                               event.stopPropagation();
                               onEditProfile(profile);
@@ -600,7 +607,7 @@ export function ProfilesTab({
                             * again, that is the moment for an overflow menu. */}
                           <button
                             aria-label={`Share ${profile.name}`}
-                            className="ghost icon-button row-action"
+                            className="icon-button row-action"
                             onClick={(event) => {
                               event.stopPropagation();
                               onShare({kind: 'profile', ids: [profile.id]});
@@ -611,7 +618,7 @@ export function ProfilesTab({
                           </button>
                           <button
                             aria-label={`Delete ${profile.name}`}
-                            className="ghost icon-button row-action row-action-danger"
+                            className="icon-button row-action row-action-danger"
                             onClick={(event) => {
                               event.stopPropagation();
                               onRequestDelete([profile.id], profile.name);

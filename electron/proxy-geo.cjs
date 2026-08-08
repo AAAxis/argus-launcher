@@ -71,7 +71,28 @@ function parseProxyGeo(data) {
     region: data.region || data.regionName || data.region_name || undefined,
     latitude,
     longitude,
+    ...parseProxyNetwork(data),
   };
+}
+
+// The exit network, and whether it is a datacenter -- the attribute the
+// fingerprint work of 2026-08-07 identified as the real blocker (a residential
+// browser behind a hosting IP is still flagged). Only ip-api.com returns these
+// on the free tier, and only when checkProxyEndpoint asks for the fields; the
+// other two providers omit them, so every value here is optional and absent
+// means "this provider didn't say", never "not a datacenter".
+//
+//   asn      ip-api's `as`, verbatim ("AS62240 Clouvider Limited")
+//   isp      ip-api's `isp`, the carrier name
+//   hosting  ip-api's boolean hosting/datacenter flag; left undefined (not
+//            false) when the field is missing, so a provider that never
+//            reported it cannot masquerade as a clean "not hosting" verdict
+function parseProxyNetwork(data) {
+  const asn = typeof data.as === 'string' && data.as.trim() ? data.as.trim() : undefined;
+  const isp = typeof data.isp === 'string' && data.isp.trim() ? data.isp.trim() :
+    (typeof data.org === 'string' && data.org.trim() ? data.org.trim() : undefined);
+  const hosting = typeof data.hosting === 'boolean' ? data.hosting : undefined;
+  return {asn, isp, hosting};
 }
 
 // Resolves a profile's effective timezone, most specific source first: an
@@ -114,6 +135,7 @@ module.exports = {
   COUNTRY_DEFAULTS,
   isValidTimeZone,
   parseProxyGeo,
+  parseProxyNetwork,
   resolveLanguage,
   resolveTimezone,
 };

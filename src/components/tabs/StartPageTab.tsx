@@ -13,9 +13,14 @@
 // The bookmarks and the automations are org-shared Supabase rows; only the
 // search engine choice is per-machine (see lib/searchEngines.ts).
 import {useState} from 'react';
-import {Bookmark, ChevronDown, Pencil, Play, Plus, Search, X} from 'lucide-react';
+import {
+  Activity, Bookmark, ChevronDown, Cookie, Globe, Info, Monitor, Pencil, Play, Plus,
+  RefreshCw, Search, Shield, Workflow, X,
+} from 'lucide-react';
+import type {LucideIcon} from 'lucide-react';
 import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {Popover} from '../ui/Popover';
+import {StatusChip} from '../ui/StatusChip';
 import {normalizeBookmarkUrl} from '../../lib/bookmarks';
 import {
   SEARCH_ENGINES,
@@ -64,20 +69,113 @@ export function StartPageTab({onEditBookmark, onAddBookmark}: {
           </span>
         </section>
       )}
-      <div className="start-grid">
-        {bookmarks.map((bookmark) => (
-          <BookmarkTile
-            bookmark={bookmark}
-            key={`${bookmark.title}-${bookmark.url}`}
-            onEdit={() => onEditBookmark(bookmark)}
-          />
-        ))}
-        <button className="start-tile start-tile-add" onClick={onAddBookmark}>
-          <span className="start-tile-icon"><Plus size={20} /></span>
-          <span className="start-tile-label">Add</span>
-        </button>
-      </div>
+      <section className="start-section">
+        <SectionLabel
+          mark={Bookmark}
+          note="Shared across the workspace. Added here, and they appear on every profile's start page."
+          title="Bookmarks"
+        />
+        <div className="start-grid">
+          {bookmarks.map((bookmark) => (
+            <BookmarkTile
+              bookmark={bookmark}
+              key={`${bookmark.title}-${bookmark.url}`}
+              onEdit={() => onEditBookmark(bookmark)}
+            />
+          ))}
+          <button className="start-tile start-tile-add" onClick={onAddBookmark}>
+            <span className="start-tile-icon"><Plus size={20} /></span>
+            <span className="start-tile-label">Add</span>
+          </button>
+        </div>
+      </section>
       <AutomationSection />
+      <SessionPreview />
+    </section>
+  );
+}
+
+// A section's heading, its optional mark, and the rounded (i) carrying its one
+// explanatory sentence.
+//
+// The sentence used to be a standing paragraph under the Automations heading.
+// It explains a thing you learn once and then never need again, so on a tab you
+// aim at rather than read it was permanently in the way -- and the generated
+// browser page had no room for it at all, which is the second reason it moved:
+// the two surfaces can now carry the same heading and the same sentence.
+//
+// The sentence used to sit in title= and be drawn by the browser, which on the
+// generated page never drew it at all -- the cursor turned to help and nothing
+// followed. Both surfaces now draw their own bubble off data-tip (.start-label-info
+// here, .label-info in lib/homePage.ts), which is a rule this app can be held to
+// rather than a courtesy it has to hope for. A <button> rather than a <span> so
+// it is reachable without a mouse.
+//
+// Every heading carries a mark, so the three blocks are told apart by shape
+// before they are read. Only Automations used to have one and it was the Argus
+// mark -- the brand mark from the top of this tab repeating itself about the
+// wrong noun. They are lucide's Bookmark, Workflow and Shield now: Workflow is
+// what the sidebar rail gives the Automations tab (data/tabs.ts), Shield is
+// what the browser side panel wears in its header, and the same three are
+// inlined in lib/homePage.ts so both surfaces label a section identically.
+function SectionLabel({title, note, mark: Mark}: {
+  title: string;
+  note: string;
+  mark: LucideIcon;
+}) {
+  return (
+    <h2 className="start-section-label">
+      <Mark aria-hidden="true" size={16} />
+      {title}
+      <button aria-label={note} className="start-label-info" data-tip={note} type="button">
+        <Info size={14} />
+      </button>
+    </h2>
+  );
+}
+
+// The session card, as it appears on a profile's browser start page.
+//
+// A preview with fixed sample values, and it says so: this tab has no profile
+// and no session, so every number here would otherwise be phantom data. It is
+// here because this tab is where you decide what the start page carries, and
+// deciding that without being able to see the block that takes up its bottom
+// third is deciding blind.
+//
+// The four rows, their icons and their order are the same four homePage.ts
+// emits. Changing one means changing both.
+function SessionPreview() {
+  return (
+    <section className="start-section">
+      <SectionLabel
+        mark={Shield}
+        note="Every profile's start page shows its own live session here: the proxy it is coming out of, the profile's status and platform, and the cookie set it launched with."
+        title="Session"
+      />
+      <div className="start-card start-session-card">
+        <div className="start-session-head">
+          <span className="start-session-tag">Preview</span>
+          <span className="pill-static"><RefreshCw size={13} />Re-check</span>
+        </div>
+        <dl className="start-session-fields">
+          <div className="start-field wide">
+            <dt><Globe size={15} />Proxy</dt>
+            <dd>142.252.99.144:64455 · Los Angeles, California, US · 1126 ms</dd>
+          </div>
+          <div className="start-field">
+            <dt><Activity size={15} />Status</dt>
+            <dd><StatusChip status="Ban" /></dd>
+          </div>
+          <div className="start-field">
+            <dt><Monitor size={15} />Platform</dt>
+            <dd>Windows 11</dd>
+          </div>
+          <div className="start-field wide">
+            <dt><Cookie size={15} />Cookies</dt>
+            <dd>Lisa Martinez (live).json</dd>
+          </div>
+        </dl>
+      </div>
     </section>
   );
 }
@@ -106,15 +204,16 @@ function AutomationSection() {
   }
 
   return (
-    <section className="start-automations">
-      <h2 className="start-section-label">Automations</h2>
-      <p className="start-section-note">
-        Pinned workflows appear on every profile's browser start page and run
-        from there in that profile's session.
-      </p>
-      <div className="start-grid">
+    <section className="start-section">
+      <SectionLabel
+        mark={Workflow}
+        note={"Pinned workflows appear on every profile's browser start page " +
+          "and run from there in that profile's session."}
+        title="Automations"
+      />
+      <div className="start-card-grid">
         {pinned.map((automation) => (
-          <AutomationTile
+          <AutomationCard
             automation={automation}
             key={automation.id}
             onUnpin={() => void automationActions.setPinned(automation, false)}
@@ -129,11 +228,11 @@ function AutomationSection() {
           panelClassName="engine-menu"
           trigger={
             <>
-              <span className="start-tile-icon"><Plus size={20} /></span>
-              <span className="start-tile-label">Pin</span>
+              <span className="start-card-icon"><Plus size={17} /></span>
+              <span className="start-card-text"><strong>Pin</strong></span>
             </>
           }
-          triggerClassName="start-tile start-tile-add"
+          triggerClassName="start-card start-card-add"
           width={220}
         >
           {(close) => unpinned.map((automation) => (
@@ -154,28 +253,46 @@ function AutomationSection() {
   );
 }
 
-function AutomationTile({automation, onUnpin}: {
+// A card, matching the generated page's automation cards rather than the
+// bookmark tiles beside them: a shortcut takes you somewhere and a workflow
+// does something to a profile, and at tile size there was no room to say which
+// workflow this is or what it costs to press.
+//
+// It carries the card's shape and none of its controls. The browser's card has
+// a Run button and an open-in-launcher button; neither has any meaning here --
+// a run needs a profile and a session, which this tab has neither of, and the
+// launcher is already open. The X is the only thing on it you can press, and
+// that one is a real button.
+function AutomationCard({automation, onUnpin}: {
   automation: ArgusAutomation;
   onUnpin: () => void;
 }) {
   const label = automation.name || 'Automation';
+  // The description if there is one, else the length -- the same fallback the
+  // generated page uses, so a workflow with no description reads identically on
+  // both surfaces.
+  const steps = automation.steps?.length || 0;
+  const sub = automation.description?.trim() || `${steps} step${steps === 1 ? '' : 's'}`;
   return (
-    <div className="start-tile">
-      {/* A div, not a button: this tile is a preview of something the browser
-        * runs, and there is no session here to run it in. Making it look
-        * pressable would promise an action this tab cannot perform. */}
-      <div className="start-tile-open start-tile-static" title={label}>
-        <span className="start-tile-icon"><Play size={18} /></span>
-        <span className="start-tile-label">{label}</span>
+    <div className="start-card">
+      <span className="start-card-icon"><Play size={17} /></span>
+      <div className="start-card-text">
+        <strong title={label}>{label}</strong>
+        <small title={sub}>{sub}</small>
       </div>
-      <button
-        aria-label={`Remove ${label} from start pages`}
-        className="icon-button start-tile-edit"
-        onClick={onUnpin}
-        title="Remove from start pages"
-      >
-        <X size={13} />
-      </button>
+      {/* The card's third slot. On the browser's card this holds Run and
+        * open-in-launcher; here it holds the one control that has any meaning,
+        * and only while the card is hovered or focused. */}
+      <div className="start-card-actions">
+        <button
+          aria-label={`Remove ${label} from start pages`}
+          className="icon-button start-card-unpin"
+          onClick={onUnpin}
+          title="Remove from start pages"
+        >
+          <X size={13} />
+        </button>
+      </div>
     </div>
   );
 }

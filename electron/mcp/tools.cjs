@@ -7,10 +7,16 @@
 //    through /v1/profiles/cdp, so a restarted launcher, a restarted agent and a
 //    restarted MCP process are all non-events.
 // 2. Only what an agent has a real reason to do. Every tool listed here costs
-//    context in *every* session for these users, so the destructive and
-//    bulk-import routes (profiles/delete, update-fingerprint, proxies/create,
-//    cookies/*, monitoring/report) are deliberately not exposed. They can be
-//    added behind an explicit opt-in if anyone asks.
+//    context in *every* session for these users, so the bulk-import routes
+//    (proxies/create, cookies/*, monitoring/report) stay HTTP-only.
+//
+//    profiles/create, update-fingerprint and profiles/delete WERE in that set
+//    and are now exposed, at the owner's explicit request -- profile creation
+//    and editing was the largest "the app can, the agent cannot" gap. Delete is
+//    soft-only here (argus_delete_profile never sends permanent: true); a purge
+//    stays in the app. When the toolPacks model from the 2026-08-05 design
+//    lands, update-fingerprint and delete belong in its default-off
+//    `destructive` pack.
 
 const cdp = require('./cdp.cjs');
 const {routes: apiRoutes} = require('../api/routes.json');
@@ -119,12 +125,22 @@ const TOOLS = [
       profileId: args.profileId,
     })),
   },
+  // argus_create_profile is generated from the /v1/profiles/create route in
+  // routes.json (it carries a `channel`, so the generator builds its schema from
+  // the route's `fields`). It must NOT be hand-written here too -- a second
+  // definition of the same name shadows the generated one in BY_NAME and the
+  // verify script fails on the duplicate. Fingerprint and delete are the reverse
+  // case: their routes have no channel, so they ARE hand-written below.
   {
     name: 'argus_update_profile',
     // `notes` used to be advertised here and silently did nothing -- the route's
     // field whitelist has no such column, so an agent could report success on a
     // write that never happened.
-    description: 'Change a profile\'s name, status, tags, colour, avatar or folder.',
+    description:
+      'Change a profile\'s name, status, tags, colour, avatar, folder, proxy mode, ' +
+      'start URL or launch automation. Assigning a specific proxy is a separate ' +
+      'call (argus_assign_proxy); setting proxyMode to direct or free_proxy here ' +
+      'clears whatever proxy the profile was on.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -139,6 +155,15 @@ const TOOLS = [
             'built-in site logos (brand:instagram, brand:facebook, brand:x, brand:tiktok, ' +
             '…), or "" to go back to the initials. Uploaded pictures are set in the app.'},
         folderId: {type: 'string'},
+        proxyMode: {type: 'string',
+          description: 'assigned, direct or free_proxy. assigned requires the profile ' +
+            'to already have a proxy (use argus_assign_proxy to set one); direct and ' +
+            'free_proxy clear it.'},
+        startUrl: {type: 'string',
+          description: 'URL the profile opens on launch. "" to clear.'},
+        automationId: {type: 'string',
+          description: 'Automation to run on every launch (argus_list_automations). ' +
+            '"" to detach.'},
       },
       required: ['profileId'],
     },
@@ -149,13 +174,98 @@ const TOOLS = [
     // dropped here rather than relied on being rejected downstream.
     run: async ({api, args}) => {
       const patch = {profileId: args.profileId};
-      for (const field of ['name', 'status', 'tags', 'color', 'avatar', 'folderId']) {
+      for (const field of ['name', 'status', 'tags', 'color', 'avatar', 'folderId',
+        'proxyMode', 'startUrl', 'automationId']) {
         if (args[field] !== undefined) {
           patch[field] = args[field];
         }
       }
       return text(await api.post('/v1/profiles/update', patch));
     },
+  },
+  {
+    name: 'argus_update_fingerprint',
+    description:
+      'Change parts of a profile\'s fingerprint. The fields you send are merged into ' +
+      'the stored fingerprint; anything you omit keeps its value. Read the current ' +
+      'one with argus_get_profile first. Changing the device identity of a profile ' +
+      'that is holding a logged-in session looks exactly like a stolen cookie and ' +
+      'can get the session challenged -- prefer a new profile for a new identity.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profileId: {type: 'string'},
+        fingerprint: {
+          type: 'object',
+          description: 'The fingerprint fields to change. Any subset of these.',
+          properties: {
+            os: {type: 'string',
+              description: 'Windows 11, Windows 10, macOS, Ubuntu, Android or iOS.'},
+            browser_version: {type: 'string'},
+            user_agent: {type: 'string'},
+            language: {type: 'string'},
+            timezone: {type: 'string'},
+            geolocation: {type: 'string'},
+            webrtc: {type: 'string', description: 'Proxy only, Disabled, Real or Custom.'},
+            canvas: {type: 'string', description: 'Real, Noise or Block.'},
+            webgl: {type: 'string', description: 'Real, Noise or Block.'},
+            webgpu: {type: 'string', description: 'Real or Block.'},
+            client_rects: {type: 'string', description: 'Real, Noise or Block.'},
+            audio: {type: 'string', description: 'Real, Noise or Block.'},
+            webgl_vendor: {type: 'string'},
+            webgl_renderer: {type: 'string'},
+            screen: {type: 'string', description: 'Auto, or a size like 1920x1080.'},
+            cpu_model: {type: 'string'},
+            cpu_cores: {type: 'number'},
+            memory_gb: {type: 'number'},
+            media_devices: {type: 'string'},
+            do_not_track: {type: 'boolean'},
+            rotate_on_launch: {type: 'boolean',
+              description: 'Re-roll the noise seeds on every launch. Unsafe for a ' +
+                'profile that is holding a session.'},
+          },
+        },
+      },
+      required: ['profileId', 'fingerprint'],
+    },
+    // The renderer merges whatever keys arrive into the stored JSON, so the
+    // enumerated whitelist here is the layer that stops a guessed key landing in
+    // the fingerprint. Kept in step with ArgusProfile['fingerprint'] in types.ts.
+    run: async ({api, args}) => {
+      const FP_KEYS = ['os', 'browser_version', 'user_agent', 'language', 'timezone',
+        'geolocation', 'webrtc', 'canvas', 'webgl', 'webgpu', 'client_rects', 'audio',
+        'webgl_vendor', 'webgl_renderer', 'screen', 'cpu_model', 'cpu_cores', 'memory_gb',
+        'media_devices', 'do_not_track', 'rotate_on_launch'];
+      const fingerprint = {};
+      const sent = args.fingerprint || {};
+      for (const key of FP_KEYS) {
+        if (sent[key] !== undefined) {
+          fingerprint[key] = sent[key];
+        }
+      }
+      return text(await api.post('/v1/profiles/update-fingerprint', {
+        profileId: args.profileId,
+        fingerprint,
+      }));
+    },
+  },
+  {
+    name: 'argus_delete_profile',
+    description:
+      'Move a profile to Trash, where the app can restore it. This does not remove ' +
+      'the profile\'s on-disk browser data. Permanent deletion is only available in ' +
+      'the app, not over this tool.',
+    inputSchema: {
+      type: 'object',
+      properties: {profileId: {type: 'string'}},
+      required: ['profileId'],
+    },
+    // Soft delete only. The route accepts `permanent: true`, but this tool never
+    // sends it -- an irreversible, no-Trash purge is not something an agent
+    // should be able to do from a one-line call.
+    run: async ({api, args}) => text(await api.post('/v1/profiles/delete', {
+      profileId: args.profileId,
+    })),
   },
   {
     name: 'argus_list_proxies',

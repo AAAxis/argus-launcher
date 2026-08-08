@@ -25,11 +25,12 @@ import type {ArgusOrg} from '../types';
 // the window, and at this width against this rail it always takes the fallback.
 const PANEL_WIDTH = 252;
 
-export function WorkspaceSwitcher({onSettings, onSignOut, onCreate, onLeave}: {
+export function WorkspaceSwitcher({onSettings, onSignOut, onCreate, onLeave, collapsed}: {
   onSettings: () => void;
   onSignOut: () => void;
   onCreate: () => void;
   onLeave: () => void;
+  collapsed: boolean;
 }) {
   const org = useOrg();
   const name = workspaceName(org.org?.name);
@@ -38,9 +39,23 @@ export function WorkspaceSwitcher({onSettings, onSignOut, onCreate, onLeave}: {
       <Popover
         label={`${name} — switch workspace`}
         panelClassName="workspace-pop"
-        triggerClassName="account-row account-trigger workspace-trigger"
+        triggerClassName={collapsed ?
+          'account-row account-trigger workspace-trigger is-collapsed' :
+          'account-row account-trigger workspace-trigger'}
         width={PANEL_WIDTH}
-        trigger={
+        // Collapsed, the mark stands alone: the name and the email are the two
+        // things a 64px rail has no room for, and the mark is the one that
+        // answers "whose data am I looking at" without them. The chevron goes
+        // too -- a lone chip at the foot of an icon rail is already read as
+        // something to press, and at 40px wide it and the mark cannot both fit
+        // without shrinking the mark to nothing.
+        //
+        // Nothing about the panel changes. Popover right-aligns and falls back
+        // to left when that would run off the window, so from this rail it takes
+        // the fallback and opens outward unaided.
+        trigger={collapsed ? (
+          <WorkspaceMark org={org.org} name={name} />
+        ) : (
           <>
             <WorkspaceMark org={org.org} name={name} />
             <span className="workspace-lines">
@@ -53,7 +68,7 @@ export function WorkspaceSwitcher({onSettings, onSignOut, onCreate, onLeave}: {
             <ChevronsUpDown className="workspace-chevron" size={14} strokeWidth={1.75}
               aria-hidden="true" />
           </>
-        }
+        )}
       >
         {(close) => (
           <>

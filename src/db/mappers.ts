@@ -322,6 +322,7 @@ export function rowToProxy(row: ProxyRow): ArgusProxy {
   return {
     id: row.id,
     name: row.name || '',
+    status: undef(row.status),
     type: undef(row.type) as ArgusProxy['type'],
     host: row.host || '',
     port: row.port || 0,
@@ -348,6 +349,7 @@ export function proxyToRow(orgId: string, proxy: ArgusProxy): Insert<ProxyRow> {
     id: proxy.id,
     org_id: orgId,
     name: proxy.name || null,
+    status: proxy.status ?? null,
     type: proxy.type ?? null,
     host: proxy.host || null,
     port: proxy.port || null,
@@ -393,6 +395,8 @@ export function rowToCookie(row: CookieSetRow): ArgusCookie {
     name: row.name || '',
     url: row.source_url || '',
     count: row.count,
+    status: undef(row.status),
+    color: undef(row.color),
     folder_id: row.folder_id,
     tags: row.tags ?? [],
     created_at: undef(row.created_at),
@@ -417,6 +421,12 @@ export function cookieToRow(orgId: string, cookie: ArgusCookie): Insert<CookieSe
     name: cookie.name || null,
     source_url: cookie.url || null,
     count: cookie.count ?? null,
+    // Carried rather than dropped so `duplicate` -- which spreads the whole set
+    // and inserts it -- keeps the mark the user put on the original. A genuinely
+    // new set has neither field set, so both land as null and it starts
+    // unmarked.
+    status: cookie.status ?? null,
+    color: cookie.color ?? null,
     folder_id: cookie.folder_id ?? null,
     tags: cookie.tags ?? [],
     updated_at: new Date().toISOString(),
@@ -442,6 +452,12 @@ export function cookiePatchToRow(patch: Partial<ArgusCookie>): Partial<CookieSet
   }
   if ('tags' in patch) {
     row.tags = patch.tags ?? [];
+  }
+  if ('status' in patch) {
+    row.status = patch.status ?? null;
+  }
+  if ('color' in patch) {
+    row.color = patch.color ?? null;
   }
   if ('deleted_at' in patch) {
     row.deleted_at = patch.deleted_at ?? null;

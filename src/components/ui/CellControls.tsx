@@ -1,9 +1,9 @@
 // How a table cell becomes a control.
 //
-// One file for four components because they all answer one question, and split
-// across four they would drift on the three things that actually matter here:
-// the trigger's geometry, how a hover-revealed affordance is hidden, and who
-// swallows the row's click.
+// One file for all of them because they answer one question, and split apart
+// they would drift on the three things that actually matter here: the trigger's
+// geometry, how a hover-revealed affordance is hidden, and who swallows the
+// row's click.
 //
 // The shape all of these replace was "a value, and a pencil beside it". That
 // had two faults, and only one of them was visible. The visible one: fifty
@@ -27,6 +27,7 @@
 // solved there and must not be re-solved per cell.
 import {useState} from 'react';
 import {Search, Tag} from 'lucide-react';
+import {ColorPicker} from './ColorPicker';
 import {CopyButton} from './CopyButton';
 import {FilterOption} from './FilterOption';
 import {Popover} from './Popover';
@@ -253,6 +254,46 @@ export function CellTags({label, tags, options, onChange}: {
         value={tags}
       />
     </Popover>
+  );
+}
+
+// ── The mark that is a colour ────────────────────────────────────────────────
+
+// A row's own colour, changed from the glyph that wears it.
+//
+// The glyph IS the trigger, for the reason the status chip is: a mark you press
+// to change the mark needs no pencil beside it. What is different here is that
+// this one lives inside a Name cell that has no `stopRowClick` -- the name text
+// beside it must still select the row -- so the swallow is local to the swatch,
+// the same split CellCopy makes for its copy button.
+//
+// The panel holds the ColorPicker the profile dialog uses rather than a list of
+// options, because a colour is not a menu: six presets and an "anything else"
+// pipette do not become rows without losing the one thing they communicate.
+export function CellColor({label, value, onChange, children}: {
+  label: string;
+  // The stored value: a PROFILE_COLORS key, a #rrggbb, or empty for "unset",
+  // which the picker draws as nothing selected.
+  value: string;
+  onChange: (color: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <span className="cell-color" onClick={(event) => event.stopPropagation()}>
+      <Popover
+        label={label}
+        panelClassName="cell-color-pop"
+        trigger={children}
+        triggerClassName="cell-color-trigger"
+        // Seven 28px swatches and six 8px gaps is 244, plus this panel's 12px
+        // padding either side. Anything narrower wraps the pipette onto a line
+        // of its own, which reads as a second group rather than as the seventh
+        // choice.
+        width={268}
+      >
+        <ColorPicker label={label} onChange={onChange} value={value} />
+      </Popover>
+    </span>
   );
 }
 

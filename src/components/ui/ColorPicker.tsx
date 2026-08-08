@@ -10,14 +10,18 @@ import {
   customHexFor, isCustomHex, PROFILE_COLORS, profileColorStyle, resolveProfileColor,
 } from '../../lib/profileColors';
 
-export function ColorPicker({value, onChange}: {
+export function ColorPicker({value, onChange, label = 'Profile colour'}: {
   value: string;
   onChange: (color: string) => void;
+  // What the radiogroup is called. Defaulted rather than required because the
+  // profile dialog was the only caller for a long time; the cookie-set cell
+  // names itself, since "Profile colour" on a cookie-set is simply wrong.
+  label?: string;
 }) {
   const custom = isCustomHex(value) && !resolveProfileColor(value);
 
   return (
-    <div className="color-row" role="radiogroup" aria-label="Profile colour">
+    <div className="color-row" role="radiogroup" aria-label={label}>
       {PROFILE_COLORS.map((color) => {
         const active = resolveProfileColor(value) === color.key;
         return (

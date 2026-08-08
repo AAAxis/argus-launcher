@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {fingerprintSwitches} from './fingerprint';
+import {buildRuntimeFingerprint, fingerprintSwitches} from './fingerprint';
 import type {ArgusProfile} from '../types';
 
 function profile(fingerprint: ArgusProfile['fingerprint']): ArgusProfile {
@@ -50,5 +50,42 @@ describe('fingerprintSwitches', () => {
 
   it('is empty for a profile with no fingerprint', () => {
     expect(fingerprintSwitches({id: 'p1', name: 'Test'} as ArgusProfile)).toBe('');
+  });
+});
+
+// The Windows 11 / Windows 10 split, which is invisible everywhere except this
+// one client hint.
+//
+// The bug, seen on a live profile: the editor said "Windows 11" and
+// deviceinfo.me said "Windows 10 version 10.0". Both Windows choices collapse
+// to preset 'windows' (correctly -- they share a UA string, because Microsoft
+// froze it at "Windows NT 10.0"), and the browser then hardcoded
+// Sec-CH-UA-Platform-Version to "10.0.0" for the preset. So every Windows
+// profile, whatever the user picked, reported Windows 10 to anything reading
+// UA-CH.
+describe('buildRuntimeFingerprint platform_version', () => {
+  const fp = (os: string) => buildRuntimeFingerprint(profile({os}) as ArgusProfile);
+
+  it('separates Windows 11 from Windows 10 on the one field that can', () => {
+    // Chromium's own mapping: Windows 11 is >= 13, Windows 10 is <= 10.
+    expect(fp('Windows 11').platform_version).toBe('15.0.0');
+    expect(fp('Windows 10').platform_version).toBe('10.0.0');
+  });
+
+  it('still sends both as the same preset and the same UA string', () => {
+    // If these ever diverge the spoof is broken in the other direction: a real
+    // Windows 11 Chrome sends the Windows 10 UA string too, and "fixing" the UA
+    // to say NT 11.0 would be a tell of its own.
+    expect(fp('Windows 11').preset).toBe('windows');
+    expect(fp('Windows 10').preset).toBe('windows');
+    expect(fp('Windows 11').ua_string).toBe(fp('Windows 10').ua_string);
+    expect(fp('Windows 11').ua_string).toContain('Windows NT 10.0');
+  });
+
+  it('leaves the browser on its preset default where we know nothing extra', () => {
+    // Mobile presets have no desktop platform version to claim, and inventing
+    // one would be worse than the browser's own default.
+    expect(fp('Android').platform_version).toBeUndefined();
+    expect(fp('iOS').platform_version).toBeUndefined();
   });
 });

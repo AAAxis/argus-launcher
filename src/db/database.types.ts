@@ -263,6 +263,7 @@ export type Database = {
       cookie_sets: {
         Row: {
           assigned_to: string | null
+          color: string | null
           cookies: Json
           count: number | null
           created_at: string
@@ -272,11 +273,13 @@ export type Database = {
           name: string | null
           org_id: string
           source_url: string | null
+          status: string | null
           tags: string[]
           updated_at: string
         }
         Insert: {
           assigned_to?: string | null
+          color?: string | null
           cookies?: Json
           count?: number | null
           created_at?: string
@@ -286,11 +289,13 @@ export type Database = {
           name?: string | null
           org_id: string
           source_url?: string | null
+          status?: string | null
           tags?: string[]
           updated_at?: string
         }
         Update: {
           assigned_to?: string | null
+          color?: string | null
           cookies?: Json
           count?: number | null
           created_at?: string
@@ -300,6 +305,7 @@ export type Database = {
           name?: string | null
           org_id?: string
           source_url?: string | null
+          status?: string | null
           tags?: string[]
           updated_at?: string
         }
@@ -916,6 +922,7 @@ export type Database = {
           org_id: string
           password: string | null
           port: number | null
+          status: string | null
           type: string | null
           username: string | null
         }
@@ -940,6 +947,7 @@ export type Database = {
           org_id: string
           password?: string | null
           port?: number | null
+          status?: string | null
           type?: string | null
           username?: string | null
         }
@@ -964,6 +972,7 @@ export type Database = {
           org_id?: string
           password?: string | null
           port?: number | null
+          status?: string | null
           type?: string | null
           username?: string | null
         }

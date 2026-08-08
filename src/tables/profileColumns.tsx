@@ -13,6 +13,7 @@
 import {StickyNote} from 'lucide-react';
 import {Assignee} from '../components/ui/Assignee';
 import {CellCopy, CellLink, CellPicker, CellTags, CellTextEdit} from '../components/ui/CellControls';
+import {CookieSetLabel} from '../components/ui/CookieSetLabel';
 import {CopyButton} from '../components/ui/CopyButton';
 import {FolderLabel} from '../components/ui/FolderLabel';
 import {NotesPanel} from '../components/ui/NotesPanel';
@@ -592,7 +593,13 @@ export const PROFILE_COLUMNS: ProfileColumn[] = [
           onPick={(cookieId) => context.actions.setCookieSet(profile, cookieId)}
           options={context.options.cookieSets}
           searchPlaceholder="Search cookie sets…"
-          trigger={cookieSetName(profile, context) || none()}
+          // The set wears its mark here too, so "which cookies is this profile
+          // on" is answerable by colour across a page of profiles rather than
+          // by reading fifty file names. A pasted file has no mark to wear --
+          // it is not a row in the library -- so it stays plain text.
+          trigger={attached ?
+            <CookieSetLabel cookie={attached} folders={context.state.cookie_folders} /> :
+            cookieSetName(profile, context) || none()}
           value={attached?.id || ''}
           width={280}
         />

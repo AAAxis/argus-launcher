@@ -1,25 +1,33 @@
-// Per-launch credentials for the generated start page, and the two endpoints
-// they open.
+// Per-launch credentials for the generated start page, and the endpoints they
+// open.
 //
 // The start page (ArgysHome/home.html) is a file:// document with no key and no
-// way to be given one, but it offers a launch's automations as tiles and shows
+// way to be given one, but it offers a launch's automations as cards and shows
 // whether the profile's proxy is working. This is how it asks for one of those
-// automations to be run, and for that proxy to be re-checked.
+// automations to be run or opened in the launcher, and for that proxy to be
+// re-checked.
 //
 // The token's safety comes from being NARROW, not from being secret. It
-// authorizes exactly two things:
+// authorizes exactly three things:
 //
 //   1. run one of THIS launch's listed automations, against THIS profile, on
 //      THIS port;
-//   2. re-check THIS profile's assigned proxy.
+//   2. re-check THIS profile's assigned proxy;
+//   3. bring the launcher window to the front with one of those same
+//      automations open.
+//
+// The third is the narrowest of them and is checked the same way the first is:
+// it names an automation this launch already offers, and its entire effect is
+// that a window the user already owns comes forward showing something they
+// could have navigated to themselves.
 //
 // It cannot create, edit or delete anything, cannot read another run, cannot
 // mint keys, cannot supply its own steps -- the run request carries an id and
 // the workflow is looked up here -- and cannot supply its own proxy: the
 // re-check request carries nothing at all, and the proxy is resolved from the
 // profile on the entry. Worst case for a leaked token is someone re-running a
-// workflow the user pinned, or re-testing one proxy, in a window the user
-// already has open.
+// workflow the user pinned, re-testing one proxy, or raising a window, in a
+// session the user already has open.
 //
 // A token is minted on EVERY launch, including one with nothing pinned and
 // nothing attached -- the proxy panel needs it. Those launches have no
@@ -46,29 +54,75 @@ const MAX_BODY_BYTES = 4096;
 const COOKIE_RATE = {perTokenPerMin: 12, globalPerMin: 120};
 const COOKIE_MAX_BODY_BYTES = 10 * 1024 * 1024;
 
-function createRunTokens({now = () => Date.now()} = {}) {
+// `load` and `save` are how the map outlives this process. They are injected
+// rather than done here for the same reason `now` is: this file must stay
+// requireable from a test with no Electron and no disk. main.cjs supplies a
+// pair backed by a 0600 file in userData -- 0600 because these entries ARE the
+// credentials, not a cache of them.
+//
+// Persisting at all is a fix, not an optimization. The map used to be memory
+// only, so quitting the launcher invalidated every open profile window's
+// session instantly: the browser kept running, its next cookie push got the
+// same 403 a forged token gets, and the panel told the user their session was
+// "stale or invalid" when nothing about it was. A token is valid until it
+// expires or its profile relaunches, and neither of those is "the launcher
+// restarted".
+function createRunTokens({now = () => Date.now(), load = null, save = null} = {}) {
   const tokens = new Map();
   const hits = [];
   const cookieHits = [];
 
+  // Rate-limiter state is deliberately NOT restored. Those buckets exist to
+  // stop this process being hammered, and a process that just started has not
+  // been hammered yet.
+  if (load) {
+    try {
+      for (const [token, entry] of load() || []) {
+        if (entry && typeof token === 'string' && entry.expiresAt > now()) {
+          tokens.set(token, entry);
+        }
+      }
+    } catch (error) {
+      // A corrupt or unreadable store costs every open window its session --
+      // bad, but recoverable by relaunching, and far better than refusing to
+      // start the API at all.
+      console.warn('Argus: could not restore run tokens', error);
+    }
+  }
+
+  function persist() {
+    if (!save) return;
+    try {
+      save([...tokens.entries()]);
+    } catch (error) {
+      console.warn('Argus: could not persist run tokens', error);
+    }
+  }
+
   function prune() {
     const at = now();
+    let dropped = false;
     for (const [token, entry] of tokens) {
       if (entry.expiresAt <= at) {
         tokens.delete(token);
+        dropped = true;
       }
     }
+    return dropped;
   }
 
   function dropForProfile(profileId) {
+    let dropped = false;
     for (const [token, entry] of tokens) {
       if (entry.profileId === profileId) {
         tokens.delete(token);
+        dropped = true;
       }
     }
+    return dropped;
   }
 
-  function mint({profileId, profileName, cdpPort, automations}) {
+  function mint({profileId, profileName, orgId, cdpPort, automations}) {
     prune();
     // One live token per profile: relaunching must not leave the previous
     // launch's token working against a window that is gone.
@@ -77,12 +131,24 @@ function createRunTokens({now = () => Date.now()} = {}) {
     tokens.set(token, {
       profileId,
       profileName: profileName || '',
+      // Which workspace this launch was composed under. It is carried so the
+      // renderer can resolve the profile against the org it actually belongs
+      // to instead of whichever one happens to be active when the request
+      // lands -- switching workspace with a profile window open used to break
+      // that window's cookie sync until it was relaunched.
+      //
+      // It is NOT an authorization input, and must never be read off a request
+      // body: it is stamped here, at mint time, from what the launcher already
+      // knew. A caller that could name its own org would be choosing which
+      // workspace to read, which is exactly what this token may not do.
+      orgId: typeof orgId === 'string' ? orgId : '',
       // Null on a launch with nothing to run. Normalized here so every entry
       // holds the same shape and the run path has one thing to test.
       cdpPort: typeof cdpPort === 'number' ? cdpPort : null,
       automations: Array.isArray(automations) ? automations : [],
       expiresAt: now() + TTL_MS,
     });
+    persist();
     return token;
   }
 
@@ -176,14 +242,26 @@ function createRunTokens({now = () => Date.now()} = {}) {
     return {ok: true, entry};
   }
 
+  // The mutating members persist; the read paths do not, even though prune()
+  // inside them can delete. An expired entry that survives in the file is
+  // re-pruned on the next load (and is refused in the meantime by the same
+  // prune the authorizers already run), so writing the file on every request
+  // would buy nothing and put a disk write on the hot path.
   return {
     authorize,
     authorizeCookieSync,
     authorizeRecheck,
-    clear: () => tokens.clear(),
-    dropForProfile,
+    clear: () => {
+      tokens.clear();
+      persist();
+    },
+    dropForProfile: (profileId) => {
+      if (dropForProfile(profileId)) persist();
+    },
     mint,
-    prune,
+    prune: () => {
+      if (prune()) persist();
+    },
     size: () => tokens.size,
   };
 }
@@ -269,6 +347,32 @@ function handleRunFromPage({req, res, tokens, sendJson, startRun}) {
   });
 }
 
+// Raises the launcher window with one of this launch's automations open.
+//
+// Same authorization as the run route, deliberately: naming an automation this
+// launch does not offer is refused identically to holding a token that was
+// never valid, so this cannot be used to probe which workflows an org has.
+//
+// `open` does not wait for the launcher's renderer to acknowledge anything.
+// The window is raised by the main process either way, and the caller is a
+// start page whose only feedback for success is a different window arriving in
+// front of it -- making it wait on a renderer round trip (the way the re-check
+// route has to, because it has an answer to return) would buy nothing but a
+// timeout to handle.
+function handleOpenInLauncherFromPage({req, res, tokens, sendJson, open}) {
+  handlePageRequest({
+    req,
+    res,
+    tokens,
+    sendJson,
+    authorizeWith: 'authorize',
+    work: ({entry, automation}) => {
+      open(entry, automation);
+      return {};
+    },
+  });
+}
+
 // Re-checks this launch's assigned proxy. `recheck` returns the panel's next
 // {proxyOk, title, detail, fields} -- composed by homeProxyStatus in the
 // renderer, the same function that wrote the wording the page launched with.
@@ -323,6 +427,30 @@ function handleCookiePullFromPage({req, res, tokens, sendJson, pullCookies}) {
   });
 }
 
+// Read-only: what the launcher holds for this profile, WITHOUT applying it.
+//
+// The pull route above answers the same question but the panel can only ask it
+// by taking the answer -- it imports the set into the live jar. So a user who
+// wanted to know what "Load from Launcher" was about to do had to do it and
+// find out, on a button whose own hint says it replaces this browser's cookies.
+// This is the look-before-you-leap half.
+//
+// Deliberately the pull route's twin in every other respect: the request body
+// is `{runToken}` and nothing else -- no profile id, no set id, no filter. The
+// profile comes off the entry. That is the property that makes these routes
+// safe to expose to a keyless document, and a new one must not be the first to
+// break it.
+//
+// The default body cap applies rather than the 10 MB cookie one: this request
+// carries a token and no payload. Only pushes need the large cap.
+function handleCookieListFromPage({req, res, tokens, sendJson, listCookies}) {
+  handlePageRequest({
+    req, res, tokens, sendJson,
+    authorizeWith: 'authorizeCookieSync',
+    work: async ({entry}) => await listCookies(entry),
+  });
+}
+
 module.exports = {
   COOKIE_MAX_BODY_BYTES,
   COOKIE_RATE,
@@ -330,8 +458,10 @@ module.exports = {
   RATE,
   TTL_MS,
   createRunTokens,
+  handleCookieListFromPage,
   handleCookiePullFromPage,
   handleCookiePushFromPage,
+  handleOpenInLauncherFromPage,
   handleRecheckFromPage,
   handleRunFromPage,
 };

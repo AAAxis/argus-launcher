@@ -3,7 +3,7 @@
 // is what let them be split out of the old single-component App at all.
 import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
-import {baseProfileStatuses} from '../data/statuses';
+import {baseCookieStatuses, baseProfileStatuses, baseProxyStatuses} from '../data/statuses';
 import {tagsInUse} from '../lib/tags';
 import {statusList} from '../lib/text';
 import {useToast} from '../hooks/useToast';
@@ -67,6 +67,11 @@ export type WorkspaceValue = {
   // already using -- so a status that only exists on an imported row still
   // shows up in the dropdowns instead of silently resetting to Ready.
   statusOptions: string[];
+  // The same, for the two other tables that carry a status. Separate lists
+  // rather than one shared one because the built-in halves differ per table
+  // (a proxy is never in Warmup); the custom halves are identical.
+  proxyStatusOptions: string[];
+  cookieStatusOptions: string[];
   // Every tag the org's profiles actually carry, most used first and the user's
   // own words ahead of the catalogued brands. The picker offers the user half,
   // the table's filter offers all of it -- neither needs to walk the profiles
@@ -80,6 +85,10 @@ export type WorkspaceValue = {
   // set and "instagram" on a profile render identically.
   cookieTagOptions: TagUsage[];
   reload: () => void;
+  // The whole workspace, on demand: what the window-focus refresh pulls, minus
+  // its throttle. Awaitable so a Refresh button can spin its icon for exactly
+  // as long as the fetch takes rather than guessing at a duration.
+  refresh: () => Promise<void>;
 };
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -184,30 +193,28 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     void native?.catchUpBuiltInExtensions?.(builtInToggles);
   }, [orgId, builtInToggles]);
 
-  // A second worker's changes only reach this machine when we ask for them.
-  // Window focus is the cheapest honest trigger: it is exactly the moment the
-  // user comes back to the launcher, and eight small selects are far less
-  // traffic than a poll. Throttled so alt-tabbing does not hammer the API.
+  // When the workspace was last pulled, so the focus listener below can throttle
+  // itself. A manual refresh stamps it too: pressing Refresh and then alt-tabbing
+  // back should not fetch the same eight tables twice in a second.
   const lastRefreshRef = useRef(0);
-  useEffect(() => {
-    if (!orgId) {
-      return;
-    }
-    const refresh = () => {
-      if (document.visibilityState === 'hidden') {
-        return;
-      }
-      const now = Date.now();
-      if (now - lastRefreshRef.current < 10000) {
-        return;
-      }
-      lastRefreshRef.current = now;
-      void load(orgId, {quiet: true});
-      // Rides the same trigger rather than adding a poll of its own. There is
-      // no realtime anywhere in this app, so something a colleague hands you
-      // while the launcher is in the background surfaces when you come back to
-      // it -- which is the only moment you could act on it anyway.
-      void loadHandoffs(orgId);
+
+  // Everything a "somebody else may have changed something" pull covers, in one
+  // place, so the focus trigger and the toolbar's Refresh button can never drift
+  // into fetching different sets.
+  //
+  // Quiet on purpose: `load` without it swaps the whole tab for the full-screen
+  // LoadingState, which is right for the first load of a workspace and wrong for
+  // a re-read of one already on screen. Callers that want a visible wait show it
+  // on the control that started it.
+  const refreshAll = useCallback(async (targetOrgId: string) => {
+    lastRefreshRef.current = Date.now();
+    await Promise.all([
+      load(targetOrgId, {quiet: true}),
+      // No poll of its own. There is no realtime anywhere in this app, so
+      // something a colleague hands you while the launcher is in the background
+      // surfaces when you come back to it -- which is the only moment you could
+      // act on it anyway.
+      loadHandoffs(targetOrgId),
       // The organizations row itself, which nothing else here reloads.
       //
       // `load` fetches the workspace -- profiles, proxies, cookies, automations
@@ -218,15 +225,34 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
       // window, and this is what turns that focus into the new plan, the new
       // limits and the welcome screen. An admin comp grant and a colleague
       // upgrading the workspace arrive the same way.
-      void reloadOrg({quiet: true});
+      reloadOrg({quiet: true}),
+    ]);
+  }, [load, loadHandoffs, reloadOrg]);
+
+  // A second worker's changes only reach this machine when we ask for them.
+  // Window focus is the cheapest honest trigger: it is exactly the moment the
+  // user comes back to the launcher, and eight small selects are far less
+  // traffic than a poll. Throttled so alt-tabbing does not hammer the API.
+  useEffect(() => {
+    if (!orgId) {
+      return;
+    }
+    const onFocus = () => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      if (Date.now() - lastRefreshRef.current < 10000) {
+        return;
+      }
+      void refreshAll(orgId);
     };
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
     return () => {
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [orgId, load, loadHandoffs, reloadOrg]);
+  }, [orgId, refreshAll]);
 
   // Hand-offs are org-scoped, so unlike the workspace load this follows the org
   // switcher: what a colleague passed you in one workspace is not pending in
@@ -237,13 +263,34 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     }
   }, [orgId, loadHandoffs]);
 
-  const {custom_statuses: customStatuses, profiles: profileRows, cookies: cookieRows} = data.state;
+  const {
+    custom_statuses: customStatuses, profiles: profileRows, cookies: cookieRows,
+    proxies: proxyRows,
+  } = data.state;
+  // Three lists, one per table that carries a status: the table's own built-ins,
+  // then the org's custom labels (shared by all three -- see data/statuses.ts),
+  // then whatever the rows themselves already say, so a label deleted from the
+  // library still appears in the picker of a row that kept it.
   const statusOptions = useMemo(
       () => statusList(
           baseProfileStatuses,
           customStatuses,
           profileRows.map((profile) => profile.status)),
       [customStatuses, profileRows],
+  );
+  const proxyStatusOptions = useMemo(
+      () => statusList(
+          baseProxyStatuses,
+          customStatuses,
+          proxyRows.map((proxy) => proxy.status)),
+      [customStatuses, proxyRows],
+  );
+  const cookieStatusOptions = useMemo(
+      () => statusList(
+          baseCookieStatuses,
+          customStatuses,
+          cookieRows.map((cookie) => cookie.status)),
+      [customStatuses, cookieRows],
   );
   const tagOptions = useMemo(() => tagsInUse(profileRows), [profileRows]);
   const cookieTagOptions = useMemo(() => tagsInUse(cookieRows), [cookieRows]);
@@ -270,6 +317,8 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     beginProxyCheck,
     endProxyCheck,
     statusOptions,
+    proxyStatusOptions,
+    cookieStatusOptions,
     tagOptions,
     cookieTagOptions,
     reload: () => {
@@ -277,6 +326,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
         void load(orgId, {quiet: true});
       }
     },
+    refresh: () => (orgId ? refreshAll(orgId) : Promise.resolve()),
   };
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

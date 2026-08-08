@@ -49,12 +49,18 @@ const FIXTURES = {
         ok: true,
         title: 'Anti-detect proxy active',
         detail: '142.252.99.144:64455 · Los Angeles, California, US · 1131 ms',
+        // The common case, and the one the wording used to get wrong: a
+        // profile on "Auto from proxy". The zone was DERIVED from this exit, so
+        // the row states where it came from in the neutral tone. It does not
+        // say "matches exit" -- that would be the panel agreeing with itself
+        // and calling it a check.
         fields: [
           {label: 'Exit', value: '142.252.99.144', mono: true, note: '1131 ms'},
-          {label: 'Location', value: 'Los Angeles, California, US'},
+          {label: 'Location', value: 'Los Angeles, California, US',
+            note: 'checked 4 min ago'},
           {label: 'Timezone', value: 'America/Los_Angeles', mono: true,
-            note: 'matches exit', noteTone: 'ok'},
-          {label: 'Device', value: 'Windows 11 · 1920x1200'},
+            note: 'from exit IP'},
+          {label: 'Device', value: 'Windows 11 · 1920x1080'},
         ],
       },
       recheckable: true,
@@ -73,6 +79,25 @@ const FIXTURES = {
       seed: {imported: true, seededAt: 0, seededCount: 64},
       counts: {total: 148, site: 12, siteDomain: 'instagram.com'},
     },
+    // What the launcher holds, plus the live jar it is diffed against. The
+    // interesting row is reddit.com: present in the saved set, absent from the
+    // jar, so the list marks it as something a load would ADD rather than
+    // replace.
+    launcherCookies: {
+      ok: true,
+      set: 'Sophia Bennett 2026-08-07',
+      count: 4,
+      cookies: [
+        {domain: '.instagram.com', name: 'sessionid', path: '/', expires: 1798761600},
+        {domain: '.instagram.com', name: 'csrftoken', path: '/', expires: null},
+        {domain: '.google.com', name: 'SID', path: '/', expires: 1806537600},
+        {domain: '.reddit.com', name: 'reddit_session', path: '/', expires: 1814486400},
+      ],
+    },
+    jar: [
+      {domain: '.instagram.com', name: 'sessionid'},
+      {domain: '.google.com', name: 'SID'},
+    ],
   },
 
   // A healthy proxy carrying a detectable session. The card must go amber
@@ -85,9 +110,13 @@ const FIXTURES = {
         ok: true,
         title: 'Anti-detect proxy active',
         detail: '91.208.14.22:41000 · Frankfurt, Hesse, DE · 88 ms',
+        // The one case where "matches exit" would be earned is its opposite:
+        // the zone was chosen by hand, so comparing it to the exit is a real
+        // check -- and here it fails. Note also a stale reading, which the
+        // Location row now says out loud.
         fields: [
           {label: 'Exit', value: '91.208.14.22', mono: true, note: '88 ms'},
-          {label: 'Location', value: 'Frankfurt, Hesse, DE'},
+          {label: 'Location', value: 'Frankfurt, Hesse, DE', note: 'checked 6 d ago'},
           {label: 'Timezone', value: 'America/New_York', mono: true,
             note: '≠ Europe/Berlin', noteTone: 'bad'},
           {label: 'Device', value: 'macOS 15 · 2560x1440'},
@@ -182,11 +211,14 @@ window.chrome = {
     sendMessage: async (message) => {
       if (message.type === 'get-session') return {ok: true, session: fixture.session};
       if (message.type === 'get-status') return fixture.status;
+      if (message.type === 'list-launcher-cookies') return fixture.launcherCookies;
       return {ok: true};
     },
   },
   storage: {onChanged: noop},
-  cookies: {onChanged: noop, getAll: async () => []},
+  // The live jar, which the launcher-cookie list diffs against to mark sites
+  // this browser does not have yet.
+  cookies: {onChanged: noop, getAll: async () => fixture.jar || []},
   tabs: {onActivated: noop, onUpdated: noop, create() {}},
 };
 
@@ -194,7 +226,13 @@ window.chrome = {
 fetch('sidepanel.html').then((response) => response.text()).then((html) => {
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   document.body.innerHTML = parsed.body.innerHTML;
-  for (const source of ['cookie-format.js', 'icons.js', 'sidepanel.js']) {
+  // Taken from the markup rather than listed here. This was a hardcoded array,
+  // and adding sync-status.js to sidepanel.html left the preview loading a
+  // sidepanel.js whose first statement destructures a global that no longer
+  // existed -- a blank panel that said nothing about why. The order matters and
+  // the document already states it.
+  const sources = [...parsed.querySelectorAll('script[src]')].map((tag) => tag.getAttribute('src'));
+  for (const source of sources) {
     const element = document.createElement('script');
     element.src = source;
     element.async = false;

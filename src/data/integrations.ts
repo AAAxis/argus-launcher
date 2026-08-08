@@ -201,7 +201,8 @@ export function findIntegration(id: string | null | undefined): Integration | un
 // electron/mcp/tools.cjs by hand -- nothing compiles electron/, so they cannot
 // share a module.
 export const MCP_TOOL_SUMMARY = [
-  'List, read and update profiles',
+  'Create, read, update and trash profiles',
+  'Set a profile\'s proxy mode and fingerprint',
   'Launch and close a profile session',
   'Navigate, read page text and screenshot',
   'List and assign proxies',

@@ -362,9 +362,15 @@ type ArgusNative = {
   // port on those, and the token is minted anyway so the page can still
   // re-check its proxy. An empty `automations` list matches no id, so such a
   // token can run nothing.
+  //
+  // `orgId` is the workspace the launch was composed under, stamped onto the
+  // token so the cookie routes can resolve this profile against the org it
+  // belongs to rather than whichever one is active when the request arrives.
+  // It is never accepted from a request body -- see run-token.cjs's mint().
   mintRunToken?(
     profileId: string,
     profileName: string,
+    orgId: string,
     cdpPort: number | null,
     automations: Array<{id: string; name: string; steps: unknown[]}>,
   ): Promise<string>;
@@ -501,9 +507,15 @@ type ArgusNative = {
     result?: {matched: boolean; count: number},
     error?: string,
   ): void;
+  // `orgId` is the workspace the run token was minted under, forwarded off the
+  // token entry by main.cjs. Empty for a token minted before it was carried, so
+  // the handler treats absence as "the active workspace" and behaves as before.
   onCookieSyncPushRequest?(
     callback: (
-      payload: {requestId: string; profileId: string; cookies: unknown[]; saveAs?: string},
+      payload: {
+        requestId: string; profileId: string; orgId?: string;
+        cookies: unknown[]; saveAs?: string;
+      },
     ) => void,
   ): () => void;
   sendCookieSyncPushResult?(
@@ -512,8 +524,26 @@ type ArgusNative = {
     error?: string,
   ): void;
   onCookieSyncPullRequest?(
-    callback: (payload: {requestId: string; profileId: string}) => void,
+    callback: (payload: {requestId: string; profileId: string; orgId?: string}) => void,
   ): () => void;
+  // Read-only inspection: what the launcher holds for this profile, without
+  // applying it. Metadata only -- see the handler for why `value` is not here.
+  onCookieListRequest?(
+    callback: (payload: {requestId: string; profileId: string; orgId?: string}) => void,
+  ): () => void;
+  sendCookieListResult?(
+    requestId: string,
+    result?: {
+      set: string | null;
+      count: number;
+      cookies: Array<{
+        domain: string; name: string; path: string;
+        secure: boolean; httpOnly: boolean; sameSite: string;
+        expires: number | null;
+      }>;
+    },
+    error?: string,
+  ): void;
   sendCookieSyncPullResult?(
     requestId: string,
     result?: {cookies: unknown[]; set: string | null},
@@ -607,19 +637,23 @@ type ArgusNative = {
     error?: string,
   ): void;
   // POST /v1/profiles/update: partial field patch
-  // (name/tags/status/color/avatar/folder_id/email/password). `avatar` is
-  // narrowed to `brand:<slug>` or '' in main.cjs -- the https-URL half of the
-  // field is the editor's only, so a key cannot make the launcher fetch a
-  // picture from a host of the caller's choosing.
-  // Proxy has its own endpoint (assign-proxy, above) and fingerprint has its
-  // own endpoint (update-fingerprint, below) since both need extra handling
-  // beyond a plain field overwrite.
+  // (name/tags/status/color/avatar/folder_id/email/password, plus
+  // proxy_mode/start_url/automation_id). `avatar` is narrowed to `brand:<slug>`
+  // or '' in main.cjs -- the https-URL half of the field is the editor's only,
+  // so a key cannot make the launcher fetch a picture from a host of the
+  // caller's choosing. proxy_mode/start_url/automation_id are the fields whose
+  // value-dependent checks (a proxy must exist before 'assigned'; an automation
+  // id must resolve) the renderer does, because main.cjs owns no data.
+  // Bare proxy_id assignment stays with assign-proxy, which resolves against
+  // the library, and fingerprint has its own endpoint (update-fingerprint,
+  // below) since it merges a nested object.
   onUpdateProfileRequest?(
     callback: (payload: {
       requestId: string;
       profileId: string;
       fields: Partial<Pick<ArgusProfile,
-        'name' | 'tags' | 'status' | 'color' | 'avatar' | 'folder_id' | 'email' | 'password'>>;
+        'name' | 'tags' | 'status' | 'color' | 'avatar' | 'folder_id' | 'email' | 'password' |
+        'proxy_mode' | 'proxy_id' | 'start_url' | 'automation_id'>>;
       // null grants every folder; an array is the allow-list this key may
       // write to. Both ends of a folder move are checked against it.
       allowedFolders: string[] | null;
@@ -748,6 +782,16 @@ type ArgusNative = {
     result?: {proxyOk: boolean; title: string; detail: string},
     error?: string,
   ): void;
+  // POST /v1/automations/open-in-launcher: a launch's start page asking for one
+  // of its own automations to be opened here. One-way -- main has already
+  // raised the window, so there is nothing to answer and nothing the page could
+  // show if this never arrived.
+  //
+  // `automationId` came off the run token's entry check, not off the request
+  // body, so it names a workflow this launch was already offering.
+  onOpenAutomationRequest?(
+    callback: (payload: {automationId: string; profileId: string}) => void,
+  ): () => void;
 };
 
 declare global {

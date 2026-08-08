@@ -1,5 +1,5 @@
 // The persistent chrome: the sidebar rail, the topbar, and the corner toasts.
-import {X} from 'lucide-react';
+import {PanelLeftClose, PanelLeftOpen, X} from 'lucide-react';
 import {InboxBell} from './InboxBell';
 import {WorkspaceSwitcher} from './WorkspaceSwitcher';
 import {tabs, visibleTabs} from '../data/tabs';
@@ -9,13 +9,16 @@ import type {ReactNode} from 'react';
 import type {TabId} from '../data/tabs';
 import type {UpdateState} from '../native';
 
-export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorkspace, onLeaveWorkspace}: {
+export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorkspace, onLeaveWorkspace,
+  collapsed, onToggleCollapsed}: {
   activeTab: TabId;
   onTab: (tab: TabId) => void;
   onSettings: () => void;
   onSignOut: () => void;
   onCreateWorkspace: () => void;
   onLeaveWorkspace: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   const org = useOrg();
   // `org.ready ? … : undefined` rather than `org.org?.plan` alone: an unresolved
@@ -27,20 +30,60 @@ export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorksp
     <aside className="sidebar">
       {/* The mark alone -- the window title already says "Argus Launcher", so
           the wordmark was saying it twice. Alpha-masked PNG, tinted by the
-          stylesheet so it inverts cleanly in dark mode. */}
+          stylesheet so it inverts cleanly in dark mode.
+
+          Collapsed, the mark and the toggle are the same 40px button: a 64px
+          rail has room for exactly one thing at the top, and spending it on a
+          chevron rather than the mark would trade the app's identity for a
+          control needed once. The mark swaps for the glyph on hover or keyboard
+          focus -- see .rail-toggle in styles.css; the swap is CSS so it cannot
+          get out of step with :hover, and the mark is aria-hidden there because
+          the button already says what it does. */}
       <div className="brand">
-        <span className="brand-mark" role="img" aria-label="Argus" />
+        {collapsed ? (
+          <button
+            aria-expanded={false}
+            aria-label="Expand sidebar"
+            className="rail-toggle is-brand"
+            onClick={onToggleCollapsed}
+            title="Expand sidebar"
+            type="button"
+          >
+            <span aria-hidden="true" className="brand-mark" />
+            <PanelLeftOpen className="rail-toggle-glyph" size={18} strokeWidth={1.75} />
+          </button>
+        ) : (
+          <>
+            <span className="brand-mark" role="img" aria-label="Argus" />
+            <button
+              aria-expanded={true}
+              aria-label="Collapse sidebar"
+              className="rail-toggle"
+              onClick={onToggleCollapsed}
+              title="Collapse sidebar"
+              type="button"
+            >
+              <PanelLeftClose size={18} strokeWidth={1.75} />
+            </button>
+          </>
+        )}
       </div>
       <nav>
         {rail.map((tab) => (
           <button
             aria-current={activeTab === tab.id ? 'page' : undefined}
+            // Unconditional, not `collapsed && …`: .nav-label is hidden with
+            // display: none, which takes the label out of the accessibility tree
+            // along with it. The title is conditional because a tooltip
+            // repeating a label you can already read is noise.
+            aria-label={tab.label}
             className={activeTab === tab.id ? 'active' : ''}
             key={tab.id}
             onClick={() => onTab(tab.id)}
+            title={collapsed ? tab.label : undefined}
           >
             <tab.icon size={16} strokeWidth={1.75} />
-            {tab.label}
+            <span className="nav-label">{tab.label}</span>
           </button>
         ))}
       </nav>
@@ -48,6 +91,7 @@ export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorksp
           It is now the workspace switcher, and Settings is one entry inside it
           -- see the header of WorkspaceSwitcher.tsx for why round that way. */}
       <WorkspaceSwitcher
+        collapsed={collapsed}
         onCreate={onCreateWorkspace}
         onLeave={onLeaveWorkspace}
         onSettings={onSettings}

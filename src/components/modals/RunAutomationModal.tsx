@@ -306,7 +306,7 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
                 {value && 'proxy' in value && block === 'failed' && (
                   <button
                     aria-label={`Fix the proxy for ${profile.name}`}
-                    className="ghost icon-button row-action"
+                    className="icon-button row-action"
                     onClick={(event) => {
                       event.preventDefault();
                       onFixProxy(value.proxy);

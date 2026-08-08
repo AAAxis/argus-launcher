@@ -1,4 +1,5 @@
 import * as db from '../db';
+import {defaultProxyStatus} from '../data/statuses';
 import {mapWithConcurrency} from '../lib/concurrency';
 import {toCsv} from '../lib/csv';
 import {defaultProxyName, matchedProxyForProfile} from '../lib/proxies';
@@ -339,6 +340,23 @@ export function useProxyActions(
     return true;
   }
 
+  // Marks one proxy from its table cell. Narrow, for the reason rename above is
+  // narrow. This is the user's own judgement about the proxy and is deliberately
+  // never written by the checker: a proxy that fails a check says so in its
+  // check cell, and having the sweep also flip the label to "Dead" would erase
+  // whatever the user had put there.
+  async function setStatus(proxy: ArgusProxy, status: string): Promise<boolean> {
+    if (status === (proxy.status || defaultProxyStatus)) {
+      return true;
+    }
+    if (!await withDb((activeOrgId) => db.proxies.setStatus(activeOrgId, proxy.id, status))) {
+      return false;
+    }
+    patch.proxies((list) => list.map((item) =>
+      item.id === proxy.id ? {...item, status} : item));
+    return true;
+  }
+
   // Patches connection fields from a table cell -- type, host, port,
   // credentials. The db write clears the six last_* columns in the same
   // statement (a changed connection invalidates the stored check), so the
@@ -530,16 +548,27 @@ export function useProxyActions(
       return;
     }
     const header = [
-      'name', 'type', 'host', 'port', 'username', 'password', 'country', 'country_code', 'folder',
+      'name', 'status', 'type', 'host', 'port', 'username', 'password', 'country', 'country_code',
+      'folder',
     ];
     const csv = toCsv(header, list, (proxy) => {
       const row = proxy as unknown as Record<string, unknown>;
-      // `folder` is the only column that is not a field on the proxy -- the row
-      // holds a folder id, and an id in an exported spreadsheet is noise.
+      // `folder` is not a field on the proxy -- the row holds a folder id, and
+      // an id in an exported spreadsheet is noise. `status` is a field, but an
+      // unset one has to export as the label the table draws rather than as a
+      // blank, or a sheet sorted by status would file every unmarked proxy
+      // under nothing while the app files it under Ready.
       const folderName = state.proxy_folders.find((folder) =>
         folder.id === proxy.folder_id)?.name || '';
-      return Object.fromEntries(header.map((key) =>
-        [key, key === 'folder' ? folderName : String(row[key] ?? '')]));
+      return Object.fromEntries(header.map((key) => {
+        if (key === 'folder') {
+          return [key, folderName];
+        }
+        if (key === 'status') {
+          return [key, proxy.status || defaultProxyStatus];
+        }
+        return [key, String(row[key] ?? '')];
+      }));
     });
     const savedPath = await native.saveTextFile(`argys-proxies-${Date.now()}.csv`, csv);
     if (savedPath) {
@@ -550,6 +579,7 @@ export function useProxyActions(
   return {
     recordCheck, runCheck, checkOnce, checkMany, setCredentials, resolveForLaunch,
     testConnection, testConnectionAndRecord,
-    save, create, update, remove, rename, setConnection, assignToFolder, importList, exportToCsv,
+    save, create, update, remove, rename, setStatus, setConnection, assignToFolder, importList,
+    exportToCsv,
   };
 }

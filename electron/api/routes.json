@@ -90,12 +90,47 @@
     },
     {
       "method": "POST",
+      "path": "/v1/profiles/create",
+      "group": "Profiles",
+      "label": "Create a profile",
+      "scope": "any",
+      "channel": "argus:create-profile-request",
+      "mcp": "argus_create_profile",
+      "mcpDescription": "Create a browser profile. Only name is required; everything else gets the same defaults the app's own New Profile dialog uses -- status Ready, a random colour, a stable Windows 11 fingerprint, no proxy. proxyMode 'assigned' needs proxyId to name a proxy from the library (argus_list_proxies); omit both to create a direct-connection profile. Returns the created profile. Its id is permanent: it doubles as the on-disk browser-data directory name.",
+      "body": "{ \"name\": \"warmup-01\", \"proxyId\": \"<id>\", \"tags\": [\"warmup\"] }",
+      "fields": [
+        {"key": "name", "type": "string", "required": true,
+         "description": "The profile's display name."},
+        {"key": "folderId", "type": "string",
+         "description": "Folder to file it in. Omit for the root. Folder ids appear on argus_get_profile output."},
+        {"key": "status", "type": "string",
+         "description": "Workflow status label. Defaults to Ready."},
+        {"key": "tags", "type": "tags",
+         "description": "Free-text labels, at most 5. Extras are dropped."},
+        {"key": "color", "type": "string",
+         "description": "A preset name like blue or violet, or a #rrggbb hex. Defaults to a random preset."},
+        {"key": "avatar", "type": "string",
+         "description": "\"brand:<slug>\" for a built-in site logo (brand:instagram, brand:facebook, ...). Omit for initials."},
+        {"key": "proxyMode", "type": "string",
+         "description": "assigned, direct or free_proxy. Defaults to assigned when proxyId is given, direct otherwise."},
+        {"key": "proxyId", "type": "string",
+         "description": "A proxy from the library (argus_list_proxies). Implies proxyMode assigned."},
+        {"key": "startUrl", "type": "string",
+         "description": "URL the profile opens on launch."},
+        {"key": "fingerprintOs", "type": "string",
+         "description": "Windows 11, Windows 10, macOS, Ubuntu, Android or iOS. Defaults to Windows 11."},
+        {"key": "randomizeFingerprint", "type": "boolean",
+         "description": "Pick a random realistic device identity for that OS instead of the stable default."}
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/v1/profiles/update",
       "mcp": "argus_update_profile",
       "group": "Profiles",
-      "label": "Update name, status, tags, colour, avatar or folder",
+      "label": "Update name, status, tags, colour, avatar, folder, proxy mode, start URL or launch automation",
       "scope": "any",
-      "body": "{ \"profileId\": \"<id>\", \"status\": \"Ready\", \"tags\": [\"warmup\"], \"avatar\": \"brand:instagram\" }"
+      "body": "{ \"profileId\": \"<id>\", \"status\": \"Ready\", \"proxyMode\": \"direct\", \"startUrl\": \"https://example.com\" }"
     },
     {
       "method": "POST",
@@ -170,18 +205,20 @@
     {
       "method": "POST",
       "path": "/v1/profiles/delete",
+      "mcp": "argus_delete_profile",
       "group": "Profiles",
-      "label": "Move a profile to Trash (permanent: true to purge)",
+      "label": "Move a profile to Trash (permanent: true to purge; the tool only soft-deletes)",
       "scope": "any",
       "body": "{ \"profileId\": \"<id>\", \"permanent\": false }"
     },
     {
       "method": "POST",
       "path": "/v1/profiles/update-fingerprint",
+      "mcp": "argus_update_fingerprint",
       "group": "Profiles",
       "label": "Re-roll or override a profile's fingerprint",
       "scope": "any",
-      "body": "{ \"profileId\": \"<id>\" }"
+      "body": "{ \"profileId\": \"<id>\", \"fingerprint\": { \"canvas\": \"Noise\" } }"
     },
     {
       "method": "GET",

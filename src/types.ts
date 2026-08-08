@@ -17,6 +17,11 @@ export type RuntimeFingerprint = {
   platform?: string;
   ua_string?: string;
   preset?: string;
+  // Sec-CH-UA-Platform-Version. Separate from `preset` because Windows 10 and
+  // Windows 11 collapse to the same preset and the same UA string, and this
+  // hint is the only thing that distinguishes them. See platformVersionFor()
+  // in lib/fingerprint.ts and Fingerprint::platform_version browser-side.
+  platform_version?: string;
   seed: number;
   webrtc_mode?: string;
   canvas_mode?: string;
@@ -33,12 +38,20 @@ export type RuntimeFingerprint = {
   longitude?: number;
   cpu_cores?: number;
   memory_gb?: number;
-  // Real, engine-level (not JS-shimmed) mobile signals -- see the matching
-  // Fingerprint::touch_points/sensor_mode/battery_* fields in
-  // chrome/browser/argus/argus_fingerprint.h for what each one actually
-  // does browser-side. Derived automatically from platform in
-  // buildRuntimeFingerprint() below, same as webrtc_mode/canvas_mode etc --
-  // not user-editable fields of their own.
+  // Mobile signals, derived from the platform in buildRuntimeFingerprint()
+  // rather than edited directly, same as webrtc_mode/canvas_mode.
+  //
+  // NOT CONSUMED BY THE BROWSER TODAY. This comment used to claim there were
+  // "matching Fingerprint::touch_points/sensor_mode/battery_* fields" in
+  // chrome/browser/argus/argus_fingerprint.h; there are not, and FromDict has
+  // never read these keys, so everything below is serialized into the launch
+  // payload and silently dropped on arrival. navigator.maxTouchPoints is
+  // therefore unspoofed -- an "Android" profile reports 0, which no real phone
+  // does.
+  //
+  // Kept rather than deleted because the mobile presets need them and the
+  // browser-side half is queued; they are inert until it lands. Anyone
+  // debugging why a touch spoof "does nothing" should start here.
   touch_points?: number;
   sensor_mode?: string;
   battery_spoof?: boolean;
@@ -180,6 +193,12 @@ export type ArgusFolder = {
 export type ArgusProxy = {
   id: string;
   name: string;
+  // A label the user marks this proxy with, free text exactly as
+  // ArgusProfile.status is. Undefined means the first of baseProxyStatuses --
+  // there is no stored default, the same way an unset profile status reads as
+  // 'Ready'. The built-in labels differ from the profile ones (a proxy has no
+  // Warmup); custom labels are shared across both. See src/data/statuses.ts.
+  status?: string;
   type?: 'http' | 'socks5';
   host: string;
   port: number;
@@ -228,6 +247,15 @@ export type ArgusCookie = {
   name: string;
   url: string;
   count?: number | null;
+  // A label the user marks this set with. Same contract as ArgusProxy.status
+  // above; undefined reads as the first of baseCookieStatuses.
+  status?: string;
+  // A PROFILE_COLORS key or a custom #rrggbb, read through profileColorStyle()
+  // exactly like ArgusProfile.color -- and set from the same ColorPicker.
+  // Tints the set's icon in the Name cell. Undefined keeps the behaviour that
+  // preceded this field: the icon takes the colour of its folder, which left
+  // two sets in one folder looking identical.
+  color?: string;
   // The cookie-kind folder this set is filed under, or null for
   // "All cookie-sets". Same shape and same ON DELETE SET NULL as
   // ArgusProfile.folder_id.

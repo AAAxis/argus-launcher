@@ -20,15 +20,19 @@
 // this is the only place the artwork lands inside a document that has ids of
 // its own (#search, #suggest). See src/assets/README.md before swapping it.
 //
-// It costs ~20 KB in every generated home.html. Worth paying: the file is
-// rewritten on each launch and already carries the whole palette and two
-// scripts, and a base64 data: URI of the same paths would be larger still.
+// It is inlined once, as the page's own header above the search box, and costs
+// ~20 KB in every generated home.html. Worth paying: the file is written to
+// disk on each launch, never fetched, and already carries the whole palette and
+// two scripts. It used to be inlined a second time beside the Automations
+// label, for double the cost; that label now carries a workflow glyph, which is
+// what the heading is actually about.
 import argusMark from '../assets/argus-mark.svg?raw';
 import {bookmarkInitial, faviconCache, normalizeBookmarkUrl} from './bookmarks';
 import {AUTO_FROM_PROXY} from './fingerprintPresets';
 import {FONT_STACK, MONO_STACK, paletteCss} from './palette';
 import {expectedTimezoneFor, proxyLocationLabel, timezoneMismatch} from './proxyGeo';
 import {escapeHtml} from './text';
+import {defaultProfileStatus, statusToneClass} from '../data/statuses';
 import type {SearchEngine} from './searchEngines';
 import type {ThemePreference} from '../theme';
 import type {ArgusProfile, ArgusProxy, SharedBookmark} from '../types';
@@ -72,10 +76,27 @@ export function browserStartUrl(profile: ArgusProfile) {
   return startUrl;
 }
 
+// How old the reading behind the Location row is, phrased the way a person
+// would. Undated readings return '' rather than "unknown age", which would
+// take a whole row's trailing slot to say nothing.
+function checkAgeNote(checkedAt?: string | null): string {
+  if (!checkedAt) return '';
+  const at = Date.parse(checkedAt);
+  if (!Number.isFinite(at)) return '';
+  const minutes = Math.round((Date.now() - at) / 60000);
+  if (minutes < 2) return 'just checked';
+  if (minutes < 60) return `checked ${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `checked ${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return `checked ${days} d ago`;
+}
+
 // One labelled row in the session panel. `note` is the quiet trailing value on
-// the right of a row -- the exit's latency, or the timezone's verdict -- and
-// `noteTone` colours it, since "matches exit" and "≠ America/Chicago" are the
-// same slot carrying opposite news.
+// the right of a row -- the exit's latency, the age of the reading, or the
+// timezone's verdict -- and `noteTone` colours it, since "matches exit" and
+// "≠ America/Chicago" are the same slot carrying opposite news. A note with no
+// tone is neutral, which is what a fact rather than a verdict should be.
 export type SessionField = {
   label: string;
   value: string;
@@ -143,27 +164,56 @@ export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null)
   // own CSS, so the last two facts were never actually visible.
   const latency = typeof proxy.ping_ms === 'number' ? `${proxy.ping_ms} ms` : '';
   const chosenTimezone = profile.fingerprint?.timezone;
-  const effectiveTimezone =
-    chosenTimezone && chosenTimezone !== AUTO_FROM_PROXY ?
-      chosenTimezone :
-      expectedTimezoneFor(proxy);
+  const isAuto = !chosenTimezone || chosenTimezone === AUTO_FROM_PROXY;
+  const effectiveTimezone = isAuto ? expectedTimezoneFor(proxy) : chosenTimezone;
   const mismatch = timezoneMismatch(chosenTimezone, proxy);
   const machine = [profile.fingerprint?.os, profile.fingerprint?.screen]
       .filter(Boolean)
       .join(' · ');
+
+  // The timezone row's trailing note. It used to read "matches exit" whenever
+  // there was no mismatch, which sounds like a verification and was not one:
+  // timezoneMismatch() returns null for an AUTO_FROM_PROXY profile without
+  // comparing anything, and AUTO_FROM_PROXY is the default. So the row printed
+  // a green "matches exit" for essentially every profile, derived the timezone
+  // from the proxy row, and then congratulated itself for agreeing with the row
+  // it had just read. It could not fail.
+  //
+  // Three honest states instead, and only one of them is a claim:
+  //
+  //   - an explicitly chosen zone that disagrees with the exit -- a real
+  //     comparison, and the one thing here allowed to be `bad`;
+  //   - an explicitly chosen zone that agrees -- also a real comparison, and
+  //     the only place "matches exit" is earned;
+  //   - a zone derived from the exit -- says where it came from, in the neutral
+  //     tone, because "this equals itself" is not news.
+  //
+  // Plus the state that was invisible before: auto with nothing to derive from,
+  // which is a profile about to report the HOST machine's zone and is the most
+  // actionable thing this panel can say.
+  const timezoneNote = (() => {
+    if (mismatch) return {note: `≠ ${mismatch.expected}`, noteTone: 'bad' as const};
+    if (!isAuto) return {note: effectiveTimezone ? 'matches exit' : '', noteTone: 'ok' as const};
+    if (effectiveTimezone) return {note: 'from exit IP'};
+    return {note: 'not resolved — re-check', noteTone: 'bad' as const};
+  })();
+
   const fields: SessionField[] = [
     {label: 'Exit', value: egressIp || proxyLabel, mono: true, note: latency},
-    {label: 'Location', value: proxyLocationLabel(proxy) || 'Unknown'},
-    // The one row that carries a verdict rather than a value. Timezone against
-    // IP location is the cheapest check any site can run and the one this
-    // profile is most likely to fail, so the panel answers it outright instead
-    // of printing two zones and leaving the comparison to the reader.
+    {
+      label: 'Location',
+      value: proxyLocationLabel(proxy) || 'Unknown',
+      // When this reading was taken. The row is composed at launch from the
+      // stored columns of whatever check ran last, which can be days old and
+      // from a different exit if the proxy rotates -- and the panel gave no
+      // way to tell a reading from a minute ago from one from last week.
+      note: checkAgeNote(proxy.checked_at),
+    },
     {
       label: 'Timezone',
       value: effectiveTimezone || 'Not set',
       mono: true,
-      note: mismatch ? `≠ ${mismatch.expected}` : (effectiveTimezone ? 'matches exit' : ''),
-      noteTone: mismatch ? 'bad' : 'ok',
+      ...timezoneNote,
     },
     {label: 'Device', value: machine || 'Default'},
   ];
@@ -188,13 +238,114 @@ export function canRecheckProxy(profile: ArgusProfile, proxy: ArgusProxy | null)
 const SEARCH_ICON =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>';
 
-// Lucide's ExternalLink and Play, inlined. The document has no icon font and no
-// network it should depend on, and both are drawn with currentColor so each
-// takes the colour of whatever state it sits in.
+// Lucide's ExternalLink, Play, RefreshCw, Info and Workflow, inlined. The
+// document has no icon font and no network it should depend on, and all of them
+// are drawn with currentColor so each takes the colour of whatever state it sits
+// in.
 const EXTERNAL_ICON =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"></path><path d="M20 4l-9 9"></path><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>';
 const RUN_ICON =
   '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.2v13.6l11.5-6.8z"></path></svg>';
+const REFRESH_ICON =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>';
+const INFO_ICON =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>';
+// One per section heading, so the three blocks are told apart by shape before
+// they are read -- the same job rowIcon does inside the session card, at the
+// same weight.
+//
+// Workflow is the icon the launcher's sidebar rail already gives the Automations
+// tab (src/data/tabs.ts); Shield is the mark the browser side panel wears in its
+// header, and the panel is the surface that shows this same session in full.
+// Neither collides with the four rowIcon glyphs inside the card below.
+//
+// All three copied path-for-path from node_modules/lucide-react/dist/esm/icons
+// rather than redrawn, so the rail and the headings cannot drift into two
+// different marks.
+const WORKFLOW_ICON =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>';
+const BOOKMARK_ICON =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg>';
+const SHIELD_ICON =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg>';
+
+// A section's one explanatory sentence, and the (i) that opens it. The same two
+// sentences the launcher's Start page tab writes on the same two headings
+// (SectionLabel in components/tabs/StartPageTab.tsx) -- these are one page in
+// two places, and a note reworded on one surface alone is how the pair starts
+// reading as two screens.
+//
+// The sentence lands in data-tip, which the stylesheet above pulls into the
+// bubble through content:attr(). Escaped because it becomes an attribute value;
+// both of these carry apostrophes.
+const BOOKMARKS_NOTE =
+  "Shared across the workspace. Added in the launcher's Start page tab, and " +
+  "they appear on every profile's start page.";
+const AUTOMATIONS_NOTE =
+  "Pinned workflows appear on every profile's browser start page and run from " +
+  "there in that profile's session.";
+
+function labelInfo(note: string) {
+  const safe = escapeHtml(note);
+  return `<button type="button" class="label-info" data-tip="${safe}" aria-label="${safe}">${INFO_ICON}</button>`;
+}
+
+// One per session-card row, so the four facts are scannable by shape before
+// they are read. Lucide's Globe, Activity, Monitor and Cookie, at the same
+// 15px and the same stroke, drawn in --ink-faint beside their label.
+//
+// The launcher's Start page tab renders the same four as lucide-react
+// components at the same size (StartPageTab.tsx). Two copies of one set, for
+// the reason every icon in this file exists twice: a file:// document has no
+// icon font and no module graph, so the paths have to travel inside it.
+const ROW_ICONS: Record<string, string> = {
+  proxy: '<circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path>',
+  status: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>',
+  platform: '<rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path>',
+  cookies: '<path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path><path d="M8.5 8.5v.01"></path><path d="M16 15.5v.01"></path><path d="M12 12v.01"></path><path d="M11 17v.01"></path><path d="M7 14v.01"></path>',
+};
+
+function rowIcon(name: keyof typeof ROW_ICONS | string) {
+  return `<svg class="field-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ROW_ICONS[name]}</svg>`;
+}
+
+// One automation as the start page needs it: enough to fill a card, and
+// nothing more. Deliberately NOT the ArgusAutomation row -- `steps` carries
+// selectors, urls and typed values, and this object is serialized into a
+// file:// document that goes on to visit arbitrary sites. The count is the one
+// thing about the steps the page is allowed to know.
+export type PageAutomation = {
+  id: string;
+  name: string;
+  description?: string | null;
+  stepCount?: number;
+};
+
+// Everything about *this launch*, as opposed to the profile and the bookmarks,
+// which are just rows. Grouped rather than added to the positional list: these
+// four arrive together from buildLaunchPayload, they are all "what this window
+// may do", and a ninth positional argument is how the eighth gets passed in
+// the seventh's place.
+export type HomeLaunch = {
+  // What this launch may run from its own start page. Empty (the default)
+  // means no cards, which is what a launch with nothing attached and nothing
+  // pinned gets.
+  automations?: PageAutomation[];
+  // This launch's page credential and the port to spend it on. Null means the
+  // page can neither run an automation, nor open one in the launcher, nor
+  // re-check its proxy -- it is a read-only document, exactly as it was before
+  // any of those existed.
+  run?: {port: number; token: string} | null;
+  // The cookie set this launch seeded the browser with, as the launch payload
+  // named it. Null renders "None". Passed in rather than resolved here because
+  // the resolution needs the org's cookie rows, and a second lookup is how the
+  // card ends up naming a set the browser did not actually get.
+  cookieSetName?: string | null;
+  // Whether the proxy can be re-checked at all -- canRecheckProxy(). False
+  // hides the button rather than disabling it: there is no proxy behind it to
+  // test, so it is not a control that is temporarily unavailable.
+  recheckable?: boolean;
+};
 
 
 export function anonymousHomeHtml(
@@ -209,14 +360,9 @@ export function anonymousHomeHtml(
     // which is a separate process on a machine whose appearance can change
     // while a session is open.
     theme: ThemePreference = 'system',
-    // What this launch may run from its own start page. Comes from
-    // buildLaunchPayload; empty (the default) means no tiles, which is what a
-    // launch with nothing attached and nothing pinned gets.
-    automations: Array<{id: string; name: string}> = [],
-    // This launch's page credential and the port to spend it on. Null means the
-    // page can neither run an automation nor re-check its proxy -- it is a
-    // read-only document, exactly as it was before either existed.
-    run: {port: number; token: string} | null = null) {
+    // Everything about this particular launch. See HomeLaunch.
+    launch: HomeLaunch = {}) {
+  const {automations = [], run = null, cookieSetName = null, recheckable = false} = launch;
   const safeName = escapeHtml(profile.name || 'Profile');
   const bookmarkItems = bookmarks
       .map((bookmark) => {
@@ -240,16 +386,54 @@ export function anonymousHomeHtml(
         return `<a class="bookmark" href="${safeUrl}" title="${safeUrl}">${mark}<strong>${title}</strong></a>`;
       })
       .join('');
-  // Same .grid/.bookmark/.mark boxes the bookmarks use, so a tile is the same
-  // size and shape as its neighbours -- these are buttons rather than links
-  // because they post back instead of navigating. data-state drives the tint;
-  // the id is an opaque handle the launcher already knows.
-  const automationTiles = run ? automations
+  // Cards rather than tiles, and deliberately not the .bookmark box: a shortcut
+  // takes you somewhere and a workflow does something to this profile, so the
+  // two must not be the same object at the same size. Each card is about two
+  // bookmarks wide and carries what you need to decide whether to press it --
+  // what it is called, what it does, how long it is -- plus its own two
+  // controls. data-state drives the tint; the id is an opaque handle the
+  // launcher already knows.
+  //
+  // The card leads with the Run button. It used to lead with a decorative
+  // .auto-mark carrying the same play glyph as the real Run button in the far
+  // corner, which is two identical triangles on one card where only the far one
+  // did anything -- so the obvious thing to press was the one that did nothing.
+  // There is one triangle now and it is the button.
+  //
+  // The whole card is not clickable. There are two different actions on it, and
+  // a card that runs when you click anywhere but the corner is a card that runs
+  // when you meant to press the corner.
+  const automationCards = run ? automations
       .map((automation) => {
         const name = escapeHtml(automation.name || 'Automation');
-        return `<button type="button" class="bookmark automation" data-id="${escapeHtml(automation.id)}" data-state="idle" title="Run ${name}"><span class="mark">${RUN_ICON}</span><strong>${name}</strong></button>`;
+        // The description if there is one, else the length -- which is the only
+        // other honest thing this page knows about a workflow. A card with a
+        // blank second line reads as a card that failed to load.
+        const steps = automation.stepCount || 0;
+        const sub = automation.description?.trim() ?
+          escapeHtml(automation.description.trim()) :
+          `${steps} step${steps === 1 ? '' : 's'}`;
+        return `<article class="auto-card" data-id="${escapeHtml(automation.id)}" data-state="idle">
+<button type="button" class="auto-run" title="Run ${name} in this session" aria-label="Run ${name} in this session">${RUN_ICON}</button>
+<div class="auto-text"><strong title="${name}">${name}</strong><small title="${sub}">${sub}</small></div>
+<div class="auto-actions">
+<button type="button" class="auto-open icon-button" title="Open ${name} in Argus Launcher" aria-label="Open ${name} in Argus Launcher">${EXTERNAL_ICON}</button>
+</div>
+</article>`;
       })
       .join('') : '';
+  // ── The session card's four facts ──────────────────────────────────────────
+  // Three of them are already on `profile`; only the cookie set had to be
+  // passed in, because naming it needs the org's cookie rows. None of them is
+  // re-derived from anything: the status is the stored one, the platform is the
+  // fingerprint's own string, and the proxy sentence is homeProxyStatus's.
+  const statusLabel = profile.status || defaultProfileStatus;
+  const statusChip =
+    `<span class="chip ${statusToneClass(statusLabel)}"><i></i>${escapeHtml(statusLabel)}</span>`;
+  const platform = escapeHtml(profile.fingerprint?.os || 'Default');
+  const cookieLabel = cookieSetName?.trim() ?
+    escapeHtml(cookieSetName.trim()) :
+    '<span class="muted">None</span>';
   return `<!doctype html>
 <html data-theme="${escapeHtml(theme)}">
 <head>
@@ -283,56 +467,82 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
    rather than to the profile, so it is the one that should not sit in the
    column's text rhythm. Keep the two surfaces in step: this mark and that one
    are the same mark in the same place, and moving one alone is what makes the
-   pair read as two different screens. */
-.brand{display:flex;justify-content:center;margin:0 0 14px;color:var(--ink)}
-.brand svg{height:40px;width:auto;display:block}
+   pair read as two different screens.
 
-/* ── Session warning ────────────────────────────────────────────────────────
-   Only rendered when proxyStatus.ok is false -- see the guard on the section
-   below. A healthy session says nothing here at all.
+   The negative top margin lifts it clear of the block it heads rather than
+   shrinking the gap under it: at 56px the mark is the first thing the eye
+   lands on, and it wants air below it, not above. */
+.brand{display:flex;justify-content:center;margin:-16px 0 30px;color:var(--ink)}
+.brand svg{height:72px;width:auto;display:block}
 
-   It used to be a permanent status card in this corner, and then a permanent
-   one-line pill. Both were the same mistake: a panel that is always on screen
-   saying "everything is fine" is a panel nobody reads by the third tab, which
-   is precisely when it needs to be able to say something is not. The full
-   readout -- exit, location, timezone, device -- lives in the side panel now,
-   which can hold it at a readable size, keep it fresh while the session runs,
-   and put the re-check button beside it.
+/* ── Session card ───────────────────────────────────────────────────────────
+   What this window actually is: which proxy it is coming out of, what the
+   profile is marked as, what machine it claims to be, and which cookie set
+   seeded it. Four facts, always on screen, the full width of the column.
 
-   Pinned to the top-right corner rather than sharing a row with the profile
-   name: inside a 640px column a long name and a proxy line were fighting over
-   one row. Below 820px there is no corner to spare, so it drops back into the
-   flow above the title. */
-.session{position:fixed;top:16px;right:16px;z-index:10;display:flex;align-items:flex-start;gap:9px;width:min(330px,calc(100vw - 32px));padding:11px 12px;border:1px solid var(--danger);border-radius:var(--radius-lg);background:var(--danger-bg);box-shadow:var(--shadow-xs)}
-/* flex-start, not center: this puts two lines of sentence in here, and centring
-   pinned the dot and the link against the middle of that block instead of
-   against the title they belong to. The dot's offset is half the title's
-   leading, so it sits on the first line's optical centre. */
-.session-dot{flex:0 0 auto;width:9px;height:9px;margin-top:4px;border-radius:999px;background:var(--danger)}
-.session-text{flex:1;min-width:0;display:grid;gap:2px}
-.session-text strong{font-size:13px;font-weight:700;line-height:1.2;color:var(--danger);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Wraps, up to three lines: this is where what failed, or what to assign
+   This replaces a card that was pinned to the top-right corner and only
+   appeared when the proxy was failing. That was the right call while the page
+   had nothing to say the side panel could not say better -- but a corner card
+   is the wrong shape for four labelled facts, and the panel is behind a
+   toolbar button, which is one click more than a fact you want at a glance
+   deserves. The full exit/location/timezone/device readout still lives in the
+   panel: that one changes while the session runs, and this one does not.
+
+   The card carries a tone rather than appearing and disappearing. A healthy
+   session is the neutral card; a failing proxy tints the whole thing and puts
+   its sentence where the proxy line was, so there is exactly one place to look
+   either way.
+
+   Its heading sits above it rather than inside it, the way Bookmarks and
+   Automations do -- so the page reads as three labelled blocks and not as two
+   blocks and a card that names itself. 10px, matching .auto-grid: the 26px that
+   separates one section from the last is on .section-label now. */
+.session{margin-top:10px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--raised);box-shadow:var(--shadow-xs);transition:border-color .12s var(--ease),background .12s var(--ease)}
+.session[data-tone=bad]{border-color:var(--danger);background:var(--danger-bg)}
+/* A two-column grid of labelled rows, the same dt/dd shape the side panel's
+   Session card uses. Proxy spans both columns because its value is a sentence
+   and the other three are a word each. */
+.session-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;margin:0}
+/* center, not baseline: every label now leads with a 15px glyph, and a
+   baseline row hangs the icon off the text's baseline instead of centring it
+   on the cap height. */
+.field{display:flex;align-items:center;gap:10px;min-width:0}
+.field.wide{grid-column:1 / -1;align-items:flex-start}
+/* A fixed label column, so the four values line up as a column rather than
+   starting wherever their own label happened to end. */
+.field dt{flex:0 0 88px;display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--ink-faint)}
+.field-icon{flex:0 0 auto}
+/* The wide row's value wraps to two lines, so its label has to sit on the
+   first of them rather than in the middle of the block. */
+.field.wide dt{padding-top:1px}
+.field dd{flex:1;min-width:0;margin:0;font-size:13px;line-height:1.35;color:var(--ink)}
+/* Wraps, up to two lines: this is where what failed, or what to assign
    instead, gets said, and a sentence clipped to one line loses the half that
-   says why.
+   says why. */
+.field dd.sentence{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.session[data-tone=bad] .field dd.sentence{color:var(--danger)}
+.session[data-tone=bad] .field dd.sentence strong{display:block;font-weight:700}
+.muted{color:var(--ink-faint)}
+/* The profiles table's status chip, rebuilt from the same tokens rather than
+   re-decided here: statusToneClass() picks the class in both places, so a
+   status that reads amber in the table cannot read grey in the browser. */
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px 2px 7px;border:1px solid var(--status-neutral-border);border-radius:999px;background:var(--status-neutral-bg);color:var(--status-neutral-ink);font-size:12px;font-weight:700;line-height:1.5}
+.chip i{width:6px;height:6px;border-radius:999px;background:currentColor}
+.chip.status-active{background:var(--status-active-bg);border-color:var(--status-active-border);color:var(--status-active-ink)}
+.chip.status-warmup{background:var(--status-warmup-bg);border-color:var(--status-warmup-border);color:var(--status-warmup-ink)}
+.chip.status-ban{background:var(--status-ban-bg);border-color:var(--status-ban-border);color:var(--status-ban-ink)}
+.chip.status-review{background:var(--status-review-bg);border-color:var(--status-review-border);color:var(--status-review-ink)}
 
-   The clamp is scoped to this one line rather than to every small in the card:
-   the hint below is also a small, and clamping both cut it off mid-sentence. */
-.session-detail{font-size:12px;line-height:1.35;color:var(--danger);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-/* What to do about it. Separated by a rule and quieter than the sentence above,
-   so it reads as the next step rather than as a third fact about the proxy.
-   Static text, not a control: a start page cannot open a side panel -- that
-   needs a user gesture inside the extension -- and something that looks like a
-   button that would is worse than a line saying where to go. */
-.session-hint{padding-top:8px;margin-top:1px;border-top:1px solid var(--danger);font-size:11px;line-height:1.35;color:var(--ink-soft)}
-/* -4px pulls the 28px hit target back level with the 15.6px title line it sits
-   beside, without shrinking the target itself. */
-.session-actions{flex:0 0 auto;display:flex;margin:-4px -4px 0 0}
-.session-actions a{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border-radius:var(--radius-sm);background:transparent;color:var(--ink-soft);text-decoration:none}
-.session-actions a:hover{background:var(--hover);color:var(--ink)}
-@media (max-width:820px){
-  .session{position:static;width:100%;margin-bottom:20px}
-  body{padding-top:32px}
-}
+/* ── Buttons ────────────────────────────────────────────────────────────────
+   Two shapes, shared by the session card and the automation cards: a labelled
+   pill and a bare icon target. Colour-only transitions on the app's one curve;
+   nothing moves on hover. */
+.icon-button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--ink-soft);text-decoration:none;cursor:pointer;transition:background .12s var(--ease),color .12s var(--ease)}
+.icon-button:hover{background:var(--hover);color:var(--ink)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--border);border-radius:999px;background:var(--paper);color:var(--ink-soft);font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:background .12s var(--ease),color .12s var(--ease),border-color .12s var(--ease)}
+.pill:hover{background:var(--hover);color:var(--ink)}
+.pill[disabled]{cursor:progress;opacity:0.6}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* ── Search ─────────────────────────────────────────────────────────────────
    The suggestion list is positioned against .search-wrap, so it stays put while
@@ -348,43 +558,123 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
 .suggest div{padding:8px 12px;border-radius:var(--radius-sm);font-size:14px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .suggest div.on{background:var(--hover)}
 
-/* ── Tiles ──────────────────────────────────────────────────────────────────
-   Five to a row, matching the launcher's Start page tile grid. */
-.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:28px}
+/* ── Bookmark tiles ─────────────────────────────────────────────────────────
+   Five to a row, matching the launcher's Start page tile grid. 10px under its
+   heading, the same as .auto-grid and .session: the 26px that separates one
+   section from the last belongs to .section-label, and this used to carry 28px
+   of its own on top of it -- which read as the tiles drifting away from the
+   word that names them once the other two sections got headings of their
+   own. */
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px}
 /* No card, no border: a shortcut is a target, and forty tiles of chrome read as
    noise. Hover paints a soft plate instead. */
-.bookmark{display:grid;justify-items:center;gap:8px;padding:14px 8px 12px;border-radius:var(--radius);text-decoration:none;color:inherit;background:transparent}
+.bookmark{display:grid;justify-items:center;gap:8px;padding:12px 8px 10px;border-radius:var(--radius);text-decoration:none;color:inherit;background:transparent;transition:background .12s var(--ease)}
 .bookmark:hover{background:var(--hover)}
-.section-label{margin:26px 0 0;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft)}
-.section-label + .grid{margin-top:10px}
-/* Tiles are <button>, so they need the anchor's typography back, and a state
-   tint that says what happened without a toast this page has no room for. */
-.bookmark.automation{border:0;font:inherit;cursor:pointer;background:transparent;text-align:center}
-.bookmark.automation[data-state=running]{background:var(--hover);cursor:progress}
-.bookmark.automation[data-state=running] .mark{color:var(--ink)}
-.bookmark.automation[data-state=done] .mark{border-color:var(--status-active-border);background:var(--status-active-bg);color:var(--status-active-ink)}
-.bookmark.automation[data-state=failed] .mark{border-color:var(--danger);background:var(--danger-bg);color:var(--danger)}
-.mark{width:46px;height:46px;border-radius:var(--radius);background:var(--raised);border:1px solid var(--border);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
-.bookmark .favicon{width:26px;height:26px;border-radius:var(--radius-xs);object-fit:contain}
+/* The site's own logo is the tile -- no plate behind it, no border around it.
+   The frame it used to sit in was a second rectangle inside a rectangle that
+   already appears on hover, and it shrank the one part of the tile a person
+   actually recognises. Losing it buys 14px of logo.
+
+   The box stays a fixed square so a favicon and a monogram produce identically
+   sized tiles, which is the whole reason it exists. */
+.mark{width:56px;height:56px;border-radius:var(--radius);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800}
+.bookmark .favicon{width:40px;height:40px;border-radius:var(--radius-sm);object-fit:contain}
 /* 700, the app's own weight for a label: at 12px on a tile the browser's
    default bold on <strong> made a row of five titles look like five headings. */
 .bookmark strong{max-width:100%;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .empty{margin-top:28px;color:var(--ink-soft);font-size:13px}
+
+/* ── Section labels ─────────────────────────────────────────────────────────
+   The mark rides the Automations label: the workflow glyph the launcher's
+   sidebar rail gives its Automations tab, so the heading here and the tab there
+   are recognisably the same thing.
+
+   It used to be the Argus helmet, at 18px, which was the header mark from 30px
+   above saying the same sentence twice -- and saying it about the wrong noun. A
+   heading's mark should name what is under it, not who drew the window.
+
+   The trailing .section-actions slot pushes to the right edge, so a section can
+   carry its own controls on the label row rather than inside the block it
+   heads. Only Session uses it. */
+.section-label{display:flex;align-items:center;gap:8px;margin:26px 0 0;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft)}
+.label-mark{display:flex;color:var(--ink-soft)}
+/* -4px on the right pulls the 26px hit targets back level with the label they
+   sit beside, without shrinking the targets themselves. The two type resets
+   are because a label is uppercase and letter-spaced and a button on it is
+   neither -- .pill inherits the font on purpose, which is what carries them in.
+   min-height keeps the row at the hit targets' own size whether the re-check
+   button is there or not, so a session that cannot be re-checked does not sit
+   at a different height from one that can. */
+.section-actions{margin-left:auto;margin-right:-4px;display:flex;align-items:center;gap:4px;min-height:26px;letter-spacing:0;text-transform:none}
+/* The rounded (i) that carries a section's one explanatory sentence, and the
+   bubble it opens on hover or keyboard focus.
+
+   The sentence used to live in title= and be drawn by the browser. On this page
+   it never appeared: the cursor turned to help and nothing followed, on a
+   document the browser loads from file:// inside a fork whose chrome we do not
+   control. So the page draws its own -- a rule this page can be held to, and
+   one a screenshot can prove. A <button> rather than a <span> so it is
+   reachable without a mouse; aria-label carries the same sentence for anyone
+   who cannot see the bubble.
+
+   Anchored to the (i)'s left edge rather than centred on it: the Bookmarks
+   label sits at the left edge of a 640px column, and a centred 260px bubble
+   there hangs off the page. */
+.label-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:999px;background:none;font:inherit;color:var(--ink-faint);cursor:help;transition:color .12s var(--ease)}
+.label-info:hover{color:var(--ink)}
+.label-info::after{content:attr(data-tip);position:absolute;top:calc(100% + 7px);left:-7px;z-index:10;width:max-content;max-width:260px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--raised);box-shadow:var(--shadow-md);color:var(--ink);font-size:12px;font-weight:400;line-height:1.4;letter-spacing:0;text-transform:none;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s var(--ease)}
+.label-info:hover::after,.label-info:focus-visible::after{opacity:1}
+
+/* ── Automation cards ───────────────────────────────────────────────────────
+   Roughly two bookmark tiles wide, two to a row. A shortcut takes you
+   somewhere and a workflow does something to this profile, so they are not the
+   same object at the same size -- these were identical tiles under a different
+   heading, which said the two were the same kind of thing and left no room for
+   what a workflow is or what it costs to press.
+
+   data-state says what happened without a toast this page has no room for; it
+   tints the border and the mark and reverts on its own.
+
+   One row: Run, text, controls. The same three-slot card the launcher's Start
+   page tab draws (.start-card in styles.css), so a workflow is one object with
+   one shape wherever it appears -- the two used to differ by a whole second
+   row, which made the browser's card the taller cousin of the launcher's
+   rather than the same card. The launcher's first slot is the same box holding
+   the same glyph, inert (there is nothing to run there); this one is the
+   button. */
+.auto-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}
+.auto-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--raised);transition:border-color .12s var(--ease)}
+.auto-card[data-state=running]{border-color:var(--accent)}
+.auto-card[data-state=done]{border-color:var(--status-active-border)}
+.auto-card[data-state=failed]{border-color:var(--danger)}
+/* The card's first slot and its only run control: the 40px plate that used to
+   be decoration, now the button. It keeps the plate's shape rather than the
+   30px accent circle that used to sit in the far corner -- at two cards to a
+   row this is the biggest target on the card, and the state tint it already
+   carried is what says how the run went. */
+.auto-run{width:40px;height:40px;padding:0;border:0;border-radius:var(--radius);background:var(--paper);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .12s var(--ease),color .12s var(--ease)}
+.auto-run:hover{background:var(--hover);color:var(--ink)}
+.auto-card[data-state=done] .auto-run{background:var(--status-active-bg);color:var(--status-active-ink)}
+.auto-card[data-state=failed] .auto-run{background:var(--danger-bg);color:var(--danger)}
+.auto-card[data-state=running] .auto-run{cursor:progress;opacity:0.6}
+/* min-width:0 because a grid item defaults to min-width:auto, and without it a
+   long unbreakable name widens its own column and skews the row. */
+.auto-text{min-width:0;display:grid;gap:2px}
+.auto-text strong{font-size:13px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auto-text small{font-size:12px;line-height:1.35;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The third slot: open-in-launcher, and nothing else. Run used to sit here too,
+   as a 30px accent circle beside it -- which put a second play triangle on a
+   card that already led with one, three pixels of gap apart from the control
+   that opens a different window. Both controls name themselves in title and
+   aria-label.
+
+   Quotes, not backticks, in these comments: this CSS lives inside a template
+   literal, and a backtick here closes the string. */
+.auto-actions{flex:0 0 auto;display:flex;align-items:center;gap:2px}
 </style>
 </head>
 <body>
 <main>
-${proxyStatus.ok ? '' : `<section class="session">
-<span class="session-dot"></span>
-<div class="session-text">
-<strong>${escapeHtml(proxyStatus.title)}</strong>
-<small class="session-detail">${escapeHtml(proxyStatus.detail)}</small>
-<small class="session-hint">Re-check it in the Argus panel, on the toolbar.</small>
-</div>
-<div class="session-actions">
-<a href="https://ip.me/" title="Check this session on ip.me" aria-label="Check this session on ip.me">${EXTERNAL_ICON}</a>
-</div>
-</section>`}
 <div class="brand">${argusMark}</div>
 <h1>${safeName}</h1>
 <p class="sub">Anonymous Argys Browser session</p>
@@ -395,20 +685,35 @@ ${proxyStatus.ok ? '' : `<section class="session">
 </form>
 <div class="suggest" id="suggest" hidden></div>
 </div>
-${bookmarkItems ? `<section class="grid">${bookmarkItems}</section>` : '<p class="empty">No shared bookmarks yet.</p>'}
-${automationTiles ? `<h2 class="section-label">Automations</h2><section class="grid automations">${automationTiles}</section>` : ''}
+${bookmarkItems ? `<h2 class="section-label"><span class="label-mark">${BOOKMARK_ICON}</span>Bookmarks${labelInfo(BOOKMARKS_NOTE)}</h2>
+<section class="grid">${bookmarkItems}</section>` : '<p class="empty">No shared bookmarks yet.</p>'}
+${automationCards ? `<h2 class="section-label"><span class="label-mark">${WORKFLOW_ICON}</span>Automations${labelInfo(AUTOMATIONS_NOTE)}</h2>
+<section class="auto-grid">${automationCards}</section>` : ''}
+<h2 class="section-label"><span class="label-mark">${SHIELD_ICON}</span>Session<span class="section-actions">${run && recheckable ?
+  `<button type="button" class="pill" id="recheck">${REFRESH_ICON}<span id="recheck-label">Re-check</span></button>` :
+  ''}<a class="icon-button" href="https://ip.me/" title="Check this session on ip.me" aria-label="Check this session on ip.me">${EXTERNAL_ICON}</a></span></h2>
+<section class="session" id="session" data-tone="${proxyStatus.ok ? 'ok' : 'bad'}">
+<dl class="session-fields">
+<div class="field wide"><dt>${rowIcon('proxy')}Proxy</dt><dd class="sentence" id="proxy-line">${proxyStatus.ok ?
+  escapeHtml(proxyStatus.detail) :
+  `<strong>${escapeHtml(proxyStatus.title)}</strong>${escapeHtml(proxyStatus.detail)}`}</dd></div>
+<div class="field"><dt>${rowIcon('status')}Status</dt><dd>${statusChip}</dd></div>
+<div class="field"><dt>${rowIcon('platform')}Platform</dt><dd>${platform}</dd></div>
+<div class="field wide"><dt>${rowIcon('cookies')}Cookies</dt><dd>${cookieLabel}</dd></div>
+</dl>
+</section>
 </main>
 <script>
-/* The page's one call back to the launcher. Same constraint as the search
-   logic below: this document is written to disk and loaded from file://, so the
+/* The page's calls back to the launcher. Same constraint as the search logic
+   below: this document is written to disk and loaded from file://, so the
    behaviour has to travel inside it.
 
-   RUN.token authorizes exactly two things -- run one of the automations listed
-   above against this profile, and re-check this profile's assigned proxy. Only
-   the first is spent here; the side panel spends the second. It cannot create,
-   edit or delete anything, cannot read another run, cannot mint keys and cannot
-   supply its own steps or its own proxy: the request carries nothing but an id
-   the launcher already knows.
+   RUN.token authorizes exactly three things -- run one of the automations
+   listed above against this profile, open one of those same automations in the
+   launcher window, and re-check this profile's assigned proxy. It cannot
+   create, edit or delete anything, cannot read another run, cannot mint keys
+   and cannot supply its own steps or its own proxy: every request carries
+   nothing but an id the launcher already knows.
 
    It is a plain constant on purpose: not in the URL, not in localStorage, not
    in a <meta> tag. Those are the three places a later navigation to a hostile
@@ -418,9 +723,9 @@ ${automationTiles ? `<h2 class="section-label">Automations</h2><section class="g
 ${run ? `(function () {
   var RUN = ${JSON.stringify(run)};
 
-  /* Required by the launcher on both routes: a cross-origin <form> POST cannot
-     set this header, so a hostile page has to send a preflight that is never
-     answered. */
+  /* Required by the launcher on every one of these routes: a cross-origin
+     <form> POST cannot set this header, so a hostile page has to send a
+     preflight that is never answered. */
   function post(path, body) {
     return fetch('http://127.0.0.1:' + RUN.port + path, {
       method: 'POST',
@@ -431,24 +736,87 @@ ${run ? `(function () {
     });
   }
 
-  var tiles = document.querySelectorAll('.bookmark.automation');
-  Array.prototype.forEach.call(tiles, function (tile) {
-    tile.addEventListener('click', function () {
-      if (tile.dataset.state === 'running') { return; }
-      tile.dataset.state = 'running';
-      post('/v1/automations/run-from-page', {runToken: RUN.token, automationId: tile.dataset.id})
+  /* The card's state, and the timer that clears it. Held per card so two cards
+     settling at different times cannot cancel each other's revert. */
+  function settle(card, state) {
+    card.dataset.state = state;
+    if (card.revertTimer) { clearTimeout(card.revertTimer); }
+    card.revertTimer = setTimeout(function () {
+      card.revertTimer = 0;
+      card.dataset.state = 'idle';
+    }, 4000);
+  }
+
+  var cards = document.querySelectorAll('.auto-card');
+  Array.prototype.forEach.call(cards, function (card) {
+    card.querySelector('.auto-run').addEventListener('click', function () {
+      if (card.dataset.state === 'running') { return; }
+      if (card.revertTimer) { clearTimeout(card.revertTimer); card.revertTimer = 0; }
+      card.dataset.state = 'running';
+      post('/v1/automations/run-from-page', {runToken: RUN.token, automationId: card.dataset.id})
         .then(function (result) {
           /* The launcher answers identically for every refusal, so there is
              nothing more specific to say here than that it did not start. */
-          tile.dataset.state = result.ok && result.body.status ? 'done' : 'failed';
-          setTimeout(function () { tile.dataset.state = 'idle'; }, 4000);
+          settle(card, result.ok && result.body.status ? 'done' : 'failed');
         })
-        .catch(function () {
-          tile.dataset.state = 'failed';
-          setTimeout(function () { tile.dataset.state = 'idle'; }, 4000);
-        });
+        .catch(function () { settle(card, 'failed'); });
+    });
+
+    /* Raises the launcher window with this workflow open, for when the answer
+       to "what does this actually do" is a thing only the editor can show. It
+       changes nothing here, so the card keeps its state either way -- and a
+       failure is silent because the only visible consequence of success is a
+       different window coming to the front, which the user is about to notice
+       or not regardless of what this card says. */
+    card.querySelector('.auto-open').addEventListener('click', function () {
+      post('/v1/automations/open-in-launcher',
+          {runToken: RUN.token, automationId: card.dataset.id})
+        .catch(function () {});
     });
   });
+
+  /* Re-checking the proxy. The launcher answers with the same
+     {title, detail} homeProxyStatus composed at launch, re-run against the
+     fresh result -- so this repaints the line the page opened with rather than
+     wording a second opinion of its own. The four-row exit/location/timezone/
+     device readout that comes back with it is the side panel's to draw; this
+     card shows the sentence. */
+  var recheck = document.getElementById('recheck');
+  if (recheck) {
+    var label = document.getElementById('recheck-label');
+    var line = document.getElementById('proxy-line');
+    var sessionCard = document.getElementById('session');
+    recheck.addEventListener('click', function () {
+      if (recheck.disabled) { return; }
+      recheck.disabled = true;
+      label.textContent = 'Checking';
+      post('/v1/proxies/recheck-from-page', {runToken: RUN.token})
+        .then(function (result) {
+          if (!result.ok || !result.body.status) {
+            throw new Error('refused');
+          }
+          sessionCard.dataset.tone = result.body.proxyOk ? 'ok' : 'bad';
+          line.textContent = '';
+          if (!result.body.proxyOk) {
+            var title = document.createElement('strong');
+            title.textContent = result.body.title || '';
+            line.appendChild(title);
+          }
+          line.appendChild(document.createTextNode(result.body.detail || ''));
+        })
+        .catch(function () {
+          /* Deliberately not painted as a failing proxy: the check did not
+             finish, which is not the same as the proxy being dead, and saying
+             so would be the page inventing a verdict. */
+          sessionCard.dataset.tone = 'bad';
+          line.textContent = 'The check did not complete. Try again from the Argus panel.';
+        })
+        .then(function () {
+          recheck.disabled = false;
+          label.textContent = 'Re-check';
+        });
+    });
+  }
 }());` : ''}
 /* A copy of looksLikeUrl/resolveQuery from lib/searchEngines.ts, not an import.
    This document is written to disk and loaded from file:// -- it has no module

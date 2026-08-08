@@ -1,23 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Argus Panel",
-  "version": "3.0.0",
+  "name": "Argus Helper",
+  "version": "3.1.0",
   "description": "Session dashboard for Argus Browser profiles: proxy status, cookies and automations.",
   "permissions": ["cookies", "downloads", "sidePanel", "storage", "tabs", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
   "icons": {
-    "16": "icons/icon-16.png",
-    "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
+    "16": "icons/on-light/icon-16.png",
+    "32": "icons/on-light/icon-32.png",
+    "48": "icons/on-light/icon-48.png",
+    "128": "icons/on-light/icon-128.png"
   },
   "action": {
-    "default_title": "Argus Panel",
+    "default_title": "Argus Helper",
     "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png",
-      "128": "icons/icon-128.png"
+      "16": "icons/on-light/icon-16.png",
+      "32": "icons/on-light/icon-32.png",
+      "48": "icons/on-light/icon-48.png",
+      "128": "icons/on-light/icon-128.png"
     }
   },
   "side_panel": {

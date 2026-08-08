@@ -15,6 +15,8 @@ import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {assigneeName} from '../lib/assignees';
 import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
 import {normalizeTags} from '../lib/tags';
+import {newProfileDraft, profileFromDraft, withFingerprintOs} from '../drafts';
+import {osPresets, randomFingerprintPatch} from '../lib/fingerprintPresets';
 import {comparable} from '../lib/text';
 import {matchedProxyForProfile, repairProxyAssignments} from '../lib/proxies';
 import {startPageAutomations} from '../lib/startPageAutomations';
@@ -163,6 +165,44 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       },
       cloud);
 
+  // Resolves the profile a run token was minted for, against the workspace it
+  // was minted UNDER rather than whichever one happens to be active now.
+  //
+  // The bug this fixes: `state` is useCloudData(activeOrgId), so a user who
+  // switched workspace while a profile window was still open broke that
+  // window's cookie sync -- the profile was simply not in `state.profiles` any
+  // more, the handler threw "This launch's profile no longer exists", and the
+  // panel reported a launcher error for a profile that was fine. Now that
+  // orgId rides on the token entry, a cross-workspace launch reads its own org
+  // directly. RLS permits it: the cookie_sets and profiles policies are
+  // is_org_member(org_id), so the signed-in user is authorized for that org or
+  // gets nothing back.
+  //
+  // Nothing read here is written into `state`. That is the whole discipline of
+  // this function: rendering another workspace's rows under the current
+  // workspace's name is the failure useCloudData's `generation` guard already
+  // exists to prevent, and profile ids are real directory names, so a mixed
+  // cache has consequences on disk and not only on screen.
+  async function resolveLaunchProfile(profileId: string, tokenOrgId?: string) {
+    const activeOrgId = data.orgId || '';
+    const sameWorkspace = !tokenOrgId || tokenOrgId === activeOrgId;
+    const profile = sameWorkspace ?
+      state.profiles.find((item) => item.id === profileId && !item.deleted_at) :
+      (await db.profiles.list(tokenOrgId))
+          .find((item) => item.id === profileId && !item.deleted_at);
+    if (!profile) {
+      throw new Error('This launch\'s profile no longer exists.');
+    }
+    return {
+      profile,
+      // Only fetched when we are off the active workspace; the common path
+      // stays exactly as cheap as it was.
+      cookies: sameWorkspace ? state.cookies : await db.cookieSets.list(tokenOrgId),
+      orgId: sameWorkspace ? activeOrgId : tokenOrgId,
+      sameWorkspace,
+    };
+  }
+
   // The cookie-manager extension's live sync (run-token routes, not the keyed
   // API). Pushes land as a VISIBLE library set named "«profile» (live)",
   // assigned to the profile -- inspectable, exportable, re-assignable --
@@ -171,11 +211,27 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onCookieSyncPushRequest,
       native?.sendCookieSyncPushResult,
-      async ({profileId, cookies: pushed, saveAs}) => {
-        const profile = state.profiles.find(
-            (item) => item.id === profileId && !item.deleted_at);
-        if (!profile) {
-          throw new Error('This launch\'s profile no longer exists.');
+      async ({profileId, cookies: pushed, saveAs, orgId}) => {
+        const {profile, cookies, sameWorkspace} =
+          await resolveLaunchProfile(profileId, orgId);
+        // Reads can cross workspaces; writes deliberately cannot.
+        //
+        // Every write below goes through cookieActions, which is bound to the
+        // ACTIVE workspace by withDb. Letting a push from another workspace's
+        // profile through would create the set in the wrong org and assign it
+        // to a profile id that does not exist there -- silent corruption, in a
+        // workspace the user is not even looking at. Parameterizing the whole
+        // cookie-action layer by org is the real fix and is not a change to
+        // make in passing.
+        //
+        // So: refuse, with its own status so the panel can say which of the
+        // two situations this is. 409 rather than 403, because nothing is
+        // wrong with the token -- it is the workspace that moved.
+        if (!sameWorkspace) {
+          throw Object.assign(
+              new Error('This profile belongs to another workspace. Switch back to it ' +
+                  'in Argus Launcher to resume syncing, or relaunch the profile here.'),
+              {status: 409});
         }
         const entries = cookiesFromJsonValue(pushed);
 
@@ -226,7 +282,11 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           return {saved: entries.length, set: created.name};
         }
 
-        const action = resolveLiveSetAction(profile, state.cookies);
+        // `cookies` rather than state.cookies: same list on the only path that
+        // reaches here (the cross-workspace push was refused above), but taking
+        // it from the resolver keeps the two readers of this profile's sets
+        // from drifting if that ever changes.
+        const action = resolveLiveSetAction(profile, cookies);
         // A non-array payload.cookies coerces to [] before this handler ever
         // sees it (run-token.cjs), and cookiesFromJsonValue drops every entry
         // it cannot normalize -- so an empty `entries` is far more likely to
@@ -281,13 +341,9 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   useChannel(
       native?.onCookieSyncPullRequest,
       native?.sendCookieSyncPullResult,
-      async ({profileId}) => {
-        const profile = state.profiles.find(
-            (item) => item.id === profileId && !item.deleted_at);
-        if (!profile) {
-          throw new Error('This launch\'s profile no longer exists.');
-        }
-        const assigned = assignedSet(profile, state.cookies);
+      async ({profileId, orgId}) => {
+        const {profile, cookies} = await resolveLaunchProfile(profileId, orgId);
+        const assigned = assignedSet(profile, cookies);
         if (!assigned) {
           return {cookies: [], set: null};
         }
@@ -304,6 +360,58 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         return {
           cookies: rows.map(({id: _rowId, ...entry}) => entry),
           set: assigned.name,
+        };
+      },
+      cloud);
+
+  // "What does the Launcher actually have for this profile?" -- answered
+  // without applying anything.
+  //
+  // The pull handler above answers the same question but the only way to ask it
+  // was to accept the answer: it imports the set into the live jar. So the one
+  // button that says it replaces this browser's cookies was also the only way
+  // to find out what it would replace them with.
+  //
+  // Metadata only, deliberately. Every field here is something you would read
+  // off a cookie table -- which sites, how many, when they expire -- and none
+  // of it is a credential. `value` is left out: these are live session cookies,
+  // this route is reachable by anything on loopback holding the run token, and
+  // "show me the list" does not require handing over the sessions themselves.
+  // The full-tab editor already shows values, behind the app's own auth.
+  useChannel(
+      native?.onCookieListRequest,
+      native?.sendCookieListResult,
+      async ({profileId, orgId}) => {
+        const {profile, cookies: sets} = await resolveLaunchProfile(profileId, orgId);
+        const assigned = assignedSet(profile, sets);
+        if (!assigned) {
+          // Not an error: a profile with no assigned set is an ordinary state,
+          // and the panel says so rather than painting a failure.
+          return {set: null, count: 0, cookies: []};
+        }
+        let rows;
+        try {
+          rows = await cookieActions.loadEntries(assigned);
+        } catch (error) {
+          console.error('cookie list: could not read the assigned set', error);
+          throw new Error('Could not read the assigned cookie set.');
+        }
+        return {
+          set: assigned.name,
+          count: rows.length,
+          cookies: rows.map((entry) => ({
+            domain: String(entry.domain || ''),
+            name: String(entry.name || ''),
+            path: String(entry.path || '/'),
+            secure: Boolean(entry.secure),
+            httpOnly: Boolean(entry.httpOnly),
+            sameSite: String(entry.sameSite || ''),
+            // Null means a session cookie, which is a real and different thing
+            // from one expiring at the epoch.
+            expires: Number.isFinite(Number(entry.expirationDate)) ?
+              Number(entry.expirationDate) :
+              null,
+          })),
         };
       },
       cloud);
@@ -614,6 +722,97 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
     return target;
   }
 
+  // POST /v1/profiles/create. Builds the row through the very pipeline the New
+  // Profile dialog uses -- newProfileDraft for every default, then profileFromDraft
+  // -- so an API-made profile and a hand-made one are the same shape, and the id
+  // is minted by the draft (never taken from the caller: it is also the on-disk
+  // directory name, with a filesystem-safety check on the column).
+  useApiChannel(
+      'argus:create-profile-request',
+      async (payload: {
+        requestId: string;
+        name: string;
+        folderId?: string;
+        status?: string;
+        tags?: string[];
+        color?: string;
+        avatar?: string;
+        proxyMode?: string;
+        proxyId?: string;
+        startUrl?: string;
+        fingerprintOs?: string;
+        randomizeFingerprint?: boolean;
+        allowedFolders?: string[] | null;
+      }) => {
+        requireSignedIn();
+        const {allowedFolders} = payload;
+        const folderId = payload.folderId?.trim() || '';
+        // A scoped key may only create into a folder it holds, and only into a
+        // real one: the root ('') is allowed, but a named folder that does not
+        // exist is a 400 rather than a row filed nowhere.
+        if (allowedFolders && !allowedFolders.includes(folderId)) {
+          throw new ApiError('This key is not scoped to that folder', 403);
+        }
+        if (folderId && !state.folders.some((folder) => folder.id === folderId)) {
+          throw new ApiError(`No folder with id ${folderId}`, 400);
+        }
+        // assigned means "on a specific proxy from the library", so it needs one
+        // that resolves -- otherwise the row is exactly what ProfileModal refuses
+        // to save. Default to assigned only when a proxyId was given; a bare
+        // create is a direct-connection profile.
+        const proxyMode = payload.proxyMode || (payload.proxyId ? 'assigned' : 'direct');
+        if (proxyMode !== 'assigned' && proxyMode !== 'direct' && proxyMode !== 'free_proxy') {
+          throw new ApiError('proxyMode must be assigned, direct or free_proxy', 400);
+        }
+        if (proxyMode === 'assigned' &&
+            (!payload.proxyId || !state.proxies.some((proxy) => proxy.id === payload.proxyId))) {
+          throw new ApiError('Proxy is required, or pick direct / free_proxy instead.', 400);
+        }
+        // The route only type-checks avatar; the brand:/'' rule that the HTTP
+        // update handler enforces has to be re-applied here, since a create with
+        // an https:// avatar would otherwise reach the row.
+        const avatar = payload.avatar?.trim() || '';
+        if (avatar && !avatar.startsWith('brand:')) {
+          throw new ApiError('avatar must be "brand:<slug>" or omitted', 400);
+        }
+        if (payload.fingerprintOs && !osPresets.includes(payload.fingerprintOs)) {
+          throw new ApiError(`fingerprintOs must be one of: ${osPresets.join(', ')}`, 400);
+        }
+
+        let draft = newProfileDraft();
+        draft = {
+          ...draft,
+          name: payload.name,
+          status: payload.status?.trim() || draft.status,
+          color: payload.color?.trim() || draft.color,
+          avatar,
+          folder_id: folderId,
+          proxy_mode: proxyMode,
+          proxy_id: proxyMode === 'assigned' ? (payload.proxyId || '') : '',
+          start_url: payload.startUrl?.trim() || '',
+          tags: (payload.tags || []).join(', '),
+        };
+        const os = payload.fingerprintOs;
+        if (os && os !== draft.fingerprint_os) {
+          draft = withFingerprintOs(draft, os);
+        }
+        if (payload.randomizeFingerprint) {
+          draft = {...draft, ...randomFingerprintPatch(os || draft.fingerprint_os)};
+        }
+        const profile = profileFromDraft(draft, new Date().toISOString());
+
+        // The org's profile limit is enforced by trg_profile_limit on the INSERT
+        // and comes back here as a plain sentence -- surfaced as a 400 the agent
+        // can read, the same way create-automation handles its own limit.
+        const error = await profileActions.create(profile);
+        if (error) {
+          throw new ApiError(error, 400);
+        }
+        toast.setMessage(`Created ${profile.name}`);
+        return {profile};
+      },
+      cloud);
+
   useChannel(
       native?.onUpdateProfileRequest,
       native?.sendUpdateProfileResult,
@@ -629,11 +828,37 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
             !allowedFolders.includes(fields.folder_id || '')) {
           return {matched: false, profileId};
         }
+        // 'assigned' is only meaningful with a proxy behind it. An agent flipping
+        // a proxyless profile to assigned would write the row ProfileModal
+        // refuses to save; point it at argus_assign_proxy, which sets both at
+        // once. The proxy may be one this same patch is not touching, so check
+        // the effective value: the incoming proxy_id, else the stored one.
+        if (fields.proxy_mode === 'assigned') {
+          const effectiveProxyId = 'proxy_id' in fields ? fields.proxy_id : existing.proxy_id;
+          if (!effectiveProxyId || !state.proxies.some((proxy) => proxy.id === effectiveProxyId)) {
+            throw new ApiError(
+                'This profile has no proxy assigned. Use argus_assign_proxy first, ' +
+                'or set proxyMode to direct or free_proxy.', 400);
+          }
+        }
+        // direct and free_proxy carry no proxy, so clear the id when moving to
+        // one -- the same rule profileFromDraft applies on save.
+        const cleared = (fields.proxy_mode === 'direct' || fields.proxy_mode === 'free_proxy') ?
+          {...fields, proxy_id: null} : fields;
+        // '' detaches the launch automation; anything else must name a real one.
+        if (cleared.automation_id) {
+          if (!state.automations.some((item) => item.id === cleared.automation_id)) {
+            throw new ApiError(`No automation with id ${cleared.automation_id}`, 400);
+          }
+        } else if ('automation_id' in cleared) {
+          cleared.automation_id = null;
+        }
         // An agent posting eight tags gets five, on the same terms as the
         // editor and the CSV importer -- this is the third and last write path
         // into profiles.tags, and none of them may leave a row the dialog
         // would then refuse to save.
-        const patch = 'tags' in fields ? {...fields, tags: normalizeTags(fields.tags || [])} : fields;
+        const patch = 'tags' in cleared ?
+          {...cleared, tags: normalizeTags(cleared.tags || [])} : cleared;
         if (!await profileActions.update(existing, patch)) {
           throw new Error('Failed to save to cloud state.');
         }
@@ -744,7 +969,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         // cannot run its tiles or re-check its proxy. Minted with the port the
         // caller reserved, so a tile drives this session rather than a stale one.
         const runToken = await native?.mintRunToken?.(
-            profile.id, profile.name, cdpPort,
+            profile.id, profile.name, data.orgId || '', cdpPort,
             startPageAutomations(state.automations, profile)) || '';
         const apiPort = runToken ? (await native?.getApiStatus?.())?.port : 0;
         const result = await launchProfile(

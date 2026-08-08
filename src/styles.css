@@ -979,6 +979,16 @@ button:disabled .btn-spin {
   display: grid;
   grid-template-columns: 236px 1fr;
   height: 100vh;
+  transition: grid-template-columns 0.16s var(--ease);
+}
+
+/* Nine tab labels are worth reading on the first day and worth nothing on the
+ * hundredth, but the open rail charges 236px for them forever. Collapsed it is
+ * the same 12px padding either side of a 40px button -- see .rail-toggle. The
+ * single class on the shell is what the four rules below key off: one flag, set
+ * in one place. */
+.app-shell.rail-collapsed {
+  grid-template-columns: 64px 1fr;
 }
 
 .sidebar {
@@ -991,6 +1001,13 @@ button:disabled .btn-spin {
   padding: 20px 12px 16px;
 }
 
+/* Nothing in a 40px track has room to overflow sideways, and the rail is a
+ * scroll container, so without this a collapsed rail can still be nudged
+ * horizontally by a stray wide child. */
+.rail-collapsed .sidebar {
+  overflow-x: hidden;
+}
+
 /* Horizontal padding matches `nav button` below so the mark's left edge lines
  * up with the tab labels. The rule underneath gives it its own band instead of
  * sitting 6px off the first tab. */
@@ -1000,6 +1017,74 @@ button:disabled .btn-spin {
   display: flex;
   margin: 0 0 14px;
   padding: 0 12px 14px;
+}
+
+/* The 12px that lines the mark up with the tab labels is 12px the collapsed
+ * rail does not have -- the whole track is 40px wide. */
+.rail-collapsed .brand {
+  justify-content: center;
+  padding: 0 0 14px;
+}
+
+/* ── Rail toggle ────────────────────────────────────────────────────────────
+ * components/Shell.tsx.
+ *
+ * Open, it is a plain glyph button on the trailing edge of the brand row, which
+ * is where every editor and issue tracker puts it. `margin-left: auto` rather
+ * than a spacer element: the row has exactly two children.
+ *
+ * Transparent and shadowless like `nav button`, and for the same reason -- a
+ * raised control in a flat rail reads as pasted on top of it. */
+.rail-toggle {
+  align-items: center;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0;
+  width: 28px;
+}
+
+.rail-toggle:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Collapsed, the mark and the toggle are one button. The two children are
+ * stacked in the same grid cell rather than swapped in JS: a CSS crossfade
+ * cannot get out of step with :hover, and it keeps Shell.tsx from having to
+ * hold hover state for a decoration.
+ *
+ * :focus-visible alongside :hover, not hover alone -- otherwise the only way to
+ * find out the mark is a button is to own a mouse. */
+.rail-toggle.is-brand {
+  display: grid;
+  height: 40px;
+  margin: 0;
+  place-items: center;
+  width: 40px;
+}
+
+.rail-toggle.is-brand > * {
+  grid-area: 1 / 1;
+  transition: opacity 0.12s var(--ease);
+}
+
+.rail-toggle.is-brand .rail-toggle-glyph,
+.rail-toggle.is-brand:hover .brand-mark,
+.rail-toggle.is-brand:focus-visible .brand-mark {
+  opacity: 0;
+}
+
+.rail-toggle.is-brand:hover .rail-toggle-glyph,
+.rail-toggle.is-brand:focus-visible .rail-toggle-glyph {
+  opacity: 1;
 }
 
 /* The source art is black-on-white with no alpha, so it is used as a mask and
@@ -1063,6 +1148,20 @@ nav button.active {
 
 nav button.active svg {
   color: var(--ink);
+}
+
+/* display: none rather than a width transition: a label caught mid-collapse is
+ * a clipped word, which is worse than no word. It also takes the label out of
+ * the accessibility tree, which is why Shell.tsx puts an unconditional
+ * aria-label on the button. */
+.rail-collapsed .nav-label {
+  display: none;
+}
+
+/* The 12px that held the label off the icon has nothing to hold off. */
+.rail-collapsed nav button {
+  justify-content: center;
+  padding: 0;
 }
 
 .update-panel {
@@ -1171,6 +1270,16 @@ nav button.active svg {
   padding: 5px 10px;
 }
 
+/* One track, not three: collapsed, the trigger is the mark and nothing else.
+ * Squared back to the 40px the nav buttons use, because the two lines that made
+ * it taller than them are the two lines that are gone. */
+.workspace-trigger.is-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  min-height: 40px;
+  padding: 0;
+}
+
 .workspace-lines {
   display: grid;
   gap: 0;
@@ -1204,10 +1313,19 @@ nav button.active svg {
   width: 24px;
 }
 
+/* The three rules below are scoped to `span` on purpose. An initials chip is
+ * drawn by us and can take any fill we like; a logo is drawn by the customer,
+ * usually with transparency, and the plate behind it is not decoration -- it is
+ * the surface showing through, so it has to BE that surface. Unscoped, the
+ * `.active` rule below outranked the img rule on specificity (0,3,0 against
+ * 0,2,1) and stamped a white plate behind the logo of the workspace you were in
+ * while every other logo got a dark one: one image, two plates, decided by
+ * selection. */
+
 /* Solid on the trigger. It is the one mark on screen at rest, at the foot of
  * the rail, and it is what answers "whose data am I looking at" from across the
  * room. */
-.account-trigger .workspace-mark {
+.account-trigger span.workspace-mark {
   background: var(--accent);
   color: var(--accent-ink);
 }
@@ -1216,23 +1334,35 @@ nav button.active svg {
  * rule the settings rail applies to its glyphs, and for the same reason its
  * comment gives: three solid ink chips stacked in a 252px panel out-shout the
  * names they belong to, which are the thing being chosen between. */
-.workspace-pop-list .workspace-mark {
+.workspace-pop-list span.workspace-mark {
   background: var(--raised-soft);
   border: 1px solid var(--border);
   color: var(--ink-soft);
 }
 
-.workspace-pop-item.active .workspace-mark {
+.workspace-pop-item.active span.workspace-mark {
   background: var(--accent);
   border-color: transparent;
   color: var(--accent-ink);
 }
 
 /* `contain`, not `cover`. A wordmark cropped to fill is unreadable, where the
- * face the account avatar held is not. */
-.account img.workspace-mark,
-.workspace-pop img.workspace-mark {
+ * face the account avatar held is not.
+ *
+ * Two plates rather than one, because these are two different surfaces and the
+ * plate's whole job is to match the one it is on. The trigger sits on the rail,
+ * which is --paper; the popover is a --raised card, and painting --paper there
+ * -- as a single shared rule used to -- cut a #161616 hole in a #222222 panel
+ * in dark mode. The hairline is what gives the artwork an edge once the plate
+ * stops being visible on its own. */
+.account-trigger img.workspace-mark {
   background: var(--paper);
+  border: 1px solid var(--border-soft);
+  object-fit: contain;
+}
+
+.workspace-pop img.workspace-mark {
+  background: var(--raised-soft);
   border: 1px solid var(--border-soft);
   object-fit: contain;
 }
@@ -2055,6 +2185,20 @@ img.settings-identity-avatar {
   min-height: var(--control-h);
 }
 
+/* --control-h-sm, the same height .launch takes in a table row, so Add profile
+   and the Launch button it sits above are one size of control rather than two.
+   At the full --control-h it was the largest thing on the page after the title,
+   which oversold a button you press once per profile.
+ *
+ * The row keeps its --control-h floor above, so shrinking these does not move
+ * the title or the content under it -- and the flat .filter-trigger actions
+ * (Refresh, Import) and the .icon-button bell are excluded: both already carry
+ * their own geometry, and this selector outranks theirs. */
+.topbar .actions button:not(.filter-trigger):not(.icon-button) {
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
 /* The main data surface -- the profiles, cookies and proxies tables, and every
  * panel drawn to match them. Takes the largest radius in the scale: these are
  * the biggest boxes on screen, and a corner that reads as generous on a 400px
@@ -2127,7 +2271,15 @@ img.settings-identity-avatar {
  *
  * Padding rather than .th-sort's padding-plus-cancelling-negative-margin: the
  * header has a <th>'s own 14px to eat into, and pulling 8px back here would
- * close the toolbar's 10px flex gap to 2px between two adjacent filters. */
+ * close the toolbar's 10px flex gap to 2px between two adjacent filters.
+ *
+ * It has since outgrown the filters and become the app's quiet-control
+ * silhouette generally: Refresh and Columns take it in the toolbar, and Import
+ * takes it in the .topbar beside a solid Add profile. The reasoning carries
+ * over unchanged -- the last bordered box in the row was the one still claiming
+ * to matter more than the table under it -- and in the header it buys a second
+ * thing: with only one bordered button left up there, the border says which of
+ * the two actions is the primary one. */
 .filter-trigger {
   align-items: center;
   /* Not stretch. .table-toolbar is a flex row with no align-items, so a control
@@ -2407,6 +2559,50 @@ img.settings-identity-avatar {
    distinction worth drawing, that pressing it leaves the row. */
 .cell-link:not(:disabled):hover {
   color: var(--accent);
+}
+
+/* The glyph that is also the colour control (CellColor).
+   display: contents so the wrapper that swallows the row's click adds no box of
+   its own -- the name cell is a flex row and an extra inline-flex between it
+   and the plate would change the gap. Same trick .cell-copy-slot uses, and for
+   the same reason: the swallow is a behaviour, not a layout. */
+.cell-color {
+  display: contents;
+}
+
+/* No plate behind it and no ::before fill: the thing being pressed is already a
+   32px coloured circle, which is the argument .cell-trigger-chip makes about a
+   status chip. The ring is the whole hover state, drawn outside the circle so
+   the colour it is announcing stays unobscured. */
+.cell-color-trigger {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+  transition: box-shadow 0.12s var(--ease);
+}
+
+.cell-color-trigger:not(:disabled):hover,
+.cell-color-trigger[aria-expanded='true'] {
+  background: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.cell-color-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* Roomier than a picker panel: this holds one row of 28px swatches rather than
+   a list of rows, and the padding a list needs leaves them looking dropped in. */
+.cell-color-pop {
+  padding: 12px;
 }
 
 .cell-pop-search {
@@ -2797,6 +2993,10 @@ tbody tr:hover .cell-copy .cell-copy-button,
   margin-left: auto;
 }
 
+/* Refresh (components/ui/RefreshButton.tsx) is a .topbar action, not a toolbar
+   one -- it refetches the whole workspace rather than narrowing this table -- so
+   it needs no margin rule here. The class stays as the component's own hook. */
+
 /* How many columns are switched off, on the trigger itself. It is the fact
    somebody wants when a column they expected is not there, and the only way to
    tell a configured table from a default one without opening the panel. */
@@ -3019,8 +3219,15 @@ td.name-cell {
   white-space: nowrap;
 }
 
+/* The third selector is the same plate wrapped in the button that changes its
+   colour (CellColor). It cannot be folded into the first: `>` walks the DOM,
+   not the box tree, so the `display: contents` span between the cell and the
+   button breaks the child combinator even though the button is what the cell
+   actually lays out. Getting this wrong is what dropped the 12px between a
+   cookie-set's icon and its name. */
 td.name-cell > .avatar,
-td.name-cell > .proxy-flag {
+td.name-cell > .proxy-flag,
+td.name-cell .cell-color-trigger {
   margin-right: 12px;
   vertical-align: middle;
 }
@@ -3652,24 +3859,31 @@ td.actions-cell {
   min-height: var(--control-h);
 }
 
-/* The per-row Edit and Delete. .icon-button strips the fill and border a bare
- * <button> would have, which is right in a toolbar but not here: sitting next
- * to a filled Launch, two naked glyphs read as marks printed on the row rather
- * than as controls. These take a filled surface back and match Launch's
- * height so the three form one group.
+/* The per-row Edit, Share and Delete.
  *
- * --raised rather than the --raised-soft the ghost buttons now use: those sit on
- * the page, this one sits inside a table row, and the two have different
- * backgrounds to lift off. */
-/* --control-h-sm, not 36px. .icon-button is always applied alongside this class
+ * These carried a fill and a hairline border, on the argument that a naked glyph
+ * beside a filled Launch reads as a mark printed on the row rather than as
+ * something to press. That argument bought its affordance with three framed
+ * boxes in every row of a table that can show twenty-five of them -- seventy-five
+ * outlines whose only job was to be noticed, in the column furthest from the
+ * data. The toolbar above went flat for the same reason (see .filter-trigger),
+ * and this is the same trade one surface further in.
+ *
+ * So: nothing at rest, and the --hover plate at --radius-xs under the pointer,
+ * which is where the affordance actually has to be. Launch keeps its fill and is
+ * now the only bordered thing in the cell, which is the honest hierarchy -- it
+ * is the one action of the four you came to the row for.
+ *
+ * --control-h-sm, not 36px. .icon-button is always applied alongside this class
  * and both have specificity (0,1,0), so the later rule's `width: 32px` won on
  * width while this one's `height: 36px` won on height -- every row action in
  * the app rendered as a 32x36 rectangle rather than a square. Matching the
  * smaller token squares the box and keeps the two rules agreeing. */
 .row-action {
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
   color: var(--ink-soft);
   height: var(--control-h-sm);
   width: var(--control-h-sm);
@@ -3677,12 +3891,13 @@ td.actions-cell {
 
 .row-action:not(:disabled):hover {
   background: var(--hover);
+  box-shadow: none;
   color: var(--ink);
 }
 
+/* No border-color to set any more; the tint and the ink carry it alone. */
 .row-action-danger:not(:disabled):hover {
   background: var(--danger-bg);
-  border-color: var(--danger);
   color: var(--danger);
 }
 
@@ -4099,6 +4314,33 @@ button:disabled {
 .folder-glyph.small {
   border-radius: 5px;
   height: 20px;
+  width: 20px;
+}
+
+/* A cookie-set's mark where the set is a value rather than the subject of its
+   row: the Profiles table's Cookie set cell, that cell's picker, the profile
+   dialog and the Select-cookies dialog.
+   Deliberately .folder-glyph.small's box, so a Folder cell and a Cookie set
+   cell in one row line their names up -- and deliberately round rather than
+   that rule's 5px, because round is the shape the set wears in its own table's
+   Name cell. Same mark, two sizes, one shape.
+   The colour arrives as an inline style from profileColorStyle, so an unmarked
+   set inherits this ink instead. */
+.cookie-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.cookie-glyph {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  height: 20px;
+  justify-content: center;
   width: 20px;
 }
 
@@ -7917,7 +8159,10 @@ textarea {
 .start-brand {
   display: flex;
   justify-content: center;
-  margin: 0 0 -12px;
+  /* The negative top pulls the mark clear of the tab's own padding; the
+   * positive bottom works against .start-page's 26px gap rather than with it,
+   * so the mark keeps its air above the search pill instead of sitting on it. */
+  margin: -18px 0 4px;
 }
 
 /* Masked, not an <img>. The source art is black line work on transparent, so
@@ -7928,14 +8173,15 @@ textarea {
 .start-brand-mark {
   background-color: var(--ink);
   display: block;
-  height: 44px;
+  height: 76px;
   mask-image: var(--argus-mark);
   mask-position: center;
   mask-repeat: no-repeat;
   mask-size: contain;
   /* The art is 269x346, so a square box would letterbox it. This is its
-   * aspect ratio at the height above, which keeps the mask tight to the ink. */
-  width: 34px;
+   * aspect ratio at the height above, which keeps the mask tight to the ink.
+   * Recompute it whenever the height moves. */
+  width: 59px;
 }
 
 .start-search {
@@ -8029,42 +8275,314 @@ textarea {
  * one, matching the generated browser page: a shortcut takes you somewhere and
  * a workflow does something, and a row of each under one heading would say they
  * were the same kind of thing. */
-.start-automations {
+/* Bookmarks, Automations and Session: three labelled blocks, in that order, on
+ * this tab and on the generated browser page. The bookmark grid used to be the
+ * only one without a heading, which read as the page itself rather than as one
+ * of three things on it. */
+.start-section {
   display: grid;
   gap: 10px;
 }
 
 .start-section-label {
+  align-items: center;
   color: var(--ink-soft);
+  display: flex;
   font-size: 12px;
   font-weight: 700;
+  gap: 8px;
   letter-spacing: 0.04em;
   margin: 0;
   text-transform: uppercase;
 }
 
-/* Sits under the label rather than at the foot of the section: it explains what
- * pinning does, which is the decision being made in the row below it. */
-.start-section-note {
-  color: var(--ink-faint);
-  font-size: 13px;
-  line-height: 1.45;
-  margin: -4px 0 0;
-}
+/* The mark on the Automations heading is lucide's Workflow at 16px, the same
+ * icon the sidebar rail gives the Automations tab and the same one the
+ * generated page inlines as WORKFLOW_ICON. It is drawn by the component and
+ * takes the label's own colour, so there is no rule for it here -- the masked
+ * Argus helmet this replaced needed one. */
 
-/* An automation tile is a preview, not a control -- the run happens in the
- * browser, in a profile's session. So it takes the tile's shape and none of its
- * pressability: no hover fill, no pointer. The X in the corner is the only
- * thing on it you can click, and that one is a real button.
+/* The rounded (i) that carries a section's one explanatory sentence, and the
+ * bubble it opens on hover or keyboard focus.
  *
- * Scoped through .start-tile to outrank .start-tile-open:hover, which is
- * declared further down this file and would otherwise win on source order. */
-.start-tile .start-tile-static {
-  cursor: default;
+ * The Automations note used to be a standing paragraph here. It says a thing
+ * you learn once, so on a tab you aim at rather than read it was permanently in
+ * the way -- and the generated page had no room for it at all, so the two
+ * surfaces could not carry the same heading.
+ *
+ * The bubble is drawn here rather than left to title=. On the generated page
+ * the browser never drew that tooltip at all, and the two surfaces have to
+ * behave the same way; this one is also a rule a screenshot can prove. Kept in
+ * step with .label-info in lib/homePage.ts. */
+.start-label-info {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--ink-faint);
+  cursor: help;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: inherit;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  transition: color 0.12s var(--ease);
+  width: 18px;
 }
 
-.start-tile .start-tile-static:hover {
+.start-label-info:hover {
+  color: var(--ink);
+}
+
+/* Anchored to the (i)'s left edge rather than centred on it: these headings sit
+ * at the left edge of a 640px column, and a centred 260px bubble on the first
+ * of them hangs off the page. */
+.start-label-info::after {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: var(--ink);
+  content: attr(data-tip);
+  font-size: 12px;
+  font-weight: 400;
+  left: -7px;
+  letter-spacing: 0;
+  line-height: 1.4;
+  max-width: 260px;
+  opacity: 0;
+  padding: 7px 10px;
+  pointer-events: none;
+  position: absolute;
+  text-align: left;
+  text-transform: none;
+  top: calc(100% + 7px);
+  transition: opacity 0.12s var(--ease);
+  white-space: normal;
+  width: max-content;
+  z-index: 10;
+}
+
+.start-label-info:focus-visible::after,
+.start-label-info:hover::after {
+  opacity: 1;
+}
+
+/* ── Automation cards ───────────────────────────────────────────────────────
+ * Two to a row, roughly two bookmark tiles wide, matching the generated
+ * browser page. These were tiles the same size and shape as the bookmarks
+ * above them, which said a shortcut and a workflow were the same kind of thing
+ * and left no room to say which workflow this is or how long it is.
+ *
+ * A card here is a preview, not a control -- the run happens in the browser, in
+ * a profile's session. So it carries the browser card's shape and none of its
+ * controls: no Run (there is no session to run in) and no open-in-launcher
+ * (the launcher is what you are looking at). The X in the corner is the only
+ * thing on it you can press, and that one is a real button. */
+.start-card-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* Three slots -- mark, text, controls -- exactly like .auto-card on the
+ * generated browser page. The two used to differ by a whole row, which made one
+ * the taller cousin of the other rather than the same card in two places.
+ * minmax(0, 1fr) rather than 1fr so a long name ellipsises instead of pushing
+ * the controls out of the card. */
+.start-card {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 12px;
+  position: relative;
+}
+
+/* The third slot. Empty on this surface until the card is hovered: the browser
+ * card's Run and open-in-launcher have no meaning here (no session to run in,
+ * and the launcher is what you are looking at), so the only control is the
+ * unpin X. It reserves its width at all times so revealing it cannot reflow
+ * the row. */
+.start-card-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  min-height: 26px;
+}
+
+.start-card-unpin {
+  min-height: 26px;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+  width: 26px;
+}
+
+.start-card:hover .start-card-unpin,
+.start-card:focus-within .start-card-unpin {
+  opacity: 1;
+}
+
+.start-card-icon {
+  align-items: center;
+  background: var(--paper);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  display: flex;
+  flex: 0 0 auto;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+/* min-width: 0 because a grid item defaults to min-width: auto, and without it
+ * a long unbreakable name widens its own column and skews the row. */
+.start-card-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.start-card-text strong {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.start-card-text small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one card that is an action rather than a preview, marked the same way the
+ * Add bookmark tile is: dashed, unfilled, and pressable. */
+.start-card-add {
   background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  color: var(--ink);
+  justify-content: flex-start;
+  min-height: 0;
+  text-align: left;
+  transition: background 0.14s var(--ease), border-color 0.14s var(--ease);
+}
+
+.start-card-add:not(:disabled):hover {
+  background: var(--paper);
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+/* ── Session card ───────────────────────────────────────────────────────────
+ * The block that takes up the bottom third of every profile's start page,
+ * previewed here with fixed sample values.
+ *
+ * It is a preview and says so: this tab has no profile and no session, so a
+ * card filled with real-looking numbers would be phantom data. It is here
+ * because this is where you decide what the start page carries, and deciding
+ * that without seeing the block is deciding blind.
+ *
+ * The four rows, their icons and their order are the same four homePage.ts
+ * emits (.session-fields / .field). Changing one means changing both. */
+.start-session-card {
+  display: block;
+  padding: 14px;
+}
+
+.start-session-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+
+/* Says outright that the values below are made up. Borrows the warmup status
+ * pair rather than tinting --accent: this is a caveat, not a state the profile
+ * is in. */
+.start-session-tag {
+  background: var(--status-warmup-bg);
+  border-radius: 999px;
+  color: var(--status-warmup-ink);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  text-transform: uppercase;
+}
+
+/* The Re-check control, drawn but not pressable -- same argument as the
+ * automation card's missing Run button. A span, not a disabled button: a
+ * disabled control says "not right now", and this one says "not here". */
+.pill-static {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+}
+
+.start-session-fields {
+  display: grid;
+  gap: 9px 16px;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+}
+
+.start-field {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.start-field.wide {
+  align-items: flex-start;
+  grid-column: 1 / -1;
+}
+
+/* A fixed label column, so the four values line up as a column rather than
+ * starting wherever their own label happened to end. */
+.start-field dt {
+  align-items: center;
+  color: var(--ink-faint);
+  display: flex;
+  flex: 0 0 88px;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 7px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.start-field.wide dt {
+  padding-top: 1px;
+}
+
+.start-field dd {
+  color: var(--ink);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+  min-width: 0;
 }
 
 /* Drops a column at a time rather than letting auto-fill decide, so the tiles
@@ -8108,34 +8626,41 @@ textarea {
   color: var(--ink);
 }
 
+/* No plate and no border: the site's own logo is the tile. The frame this used
+ * to draw was a second rectangle inside one the hover fill already provides,
+ * and it shrank the one part of the tile a person actually recognises. Losing
+ * it buys 14px of logo.
+ *
+ * The box stays a fixed square so a favicon and a monogram produce identically
+ * sized tiles, which is the whole reason it exists. Matches .mark on the
+ * generated browser page. */
 .start-tile-icon {
   align-items: center;
-  background: var(--raised);
-  border: 1px solid var(--border-soft);
   border-radius: 13px;
   color: var(--ink-soft);
   display: flex;
-  height: 46px;
+  height: 56px;
   justify-content: center;
-  width: 46px;
+  width: 56px;
 }
 
 /* Dashed, so the one tile that is an action rather than a destination is
- * distinguishable from a bookmark whose favicon has not resolved yet. */
+ * distinguishable from a bookmark whose favicon has not resolved yet. It is
+ * the only tile that keeps a frame, and now that is the whole signal. */
 .start-tile-add .start-tile-icon {
   background: transparent;
-  border-style: dashed;
+  border: 1px dashed var(--border-soft);
 }
 
 /* BookmarkFavicon renders the same markup here as in the profile-editor chips,
  * so both sizings have to be scoped. Unscoped, whichever came last would win
  * and one of the two would be sized for the other. */
 .start-tile .bookmark-favicon {
-  border-radius: 8px;
+  border-radius: 9px;
   flex: 0 0 auto;
-  height: 26px;
+  height: 40px;
   object-fit: contain;
-  width: 26px;
+  width: 40px;
 }
 
 .start-tile .bookmark-monogram {
@@ -8144,7 +8669,7 @@ textarea {
   border: 0;
   color: var(--ink-soft);
   display: inline-flex;
-  font-size: 13px;
+  font-size: 20px;
   font-weight: 800;
   justify-content: center;
   padding: 0;
@@ -8177,7 +8702,9 @@ textarea {
 }
 
 .start-tile:hover .start-tile-edit,
-.start-tile:focus-within .start-tile-edit {
+.start-tile:focus-within .start-tile-edit,
+.start-card:hover .start-tile-edit,
+.start-card:focus-within .start-tile-edit {
   opacity: 1;
 }
 

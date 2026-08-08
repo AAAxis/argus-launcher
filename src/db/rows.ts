@@ -194,6 +194,9 @@ export type ProxyRow = {
   id: string;
   org_id: string;
   name: string | null;
+  // See 20260810000000_proxy_cookie_statuses.sql. Free text, null for every row
+  // written before the column existed -- which reads as baseProxyStatuses[0].
+  status: string | null;
   type: string | null;
   host: string | null;
   port: number | null;
@@ -258,6 +261,11 @@ export type CookieSetRow = {
   tags: string[] | null;
   deleted_at: string | null;
   assigned_to: string | null;
+  // Both from 20260810000000_proxy_cookie_statuses.sql, both null for every row
+  // written before it: `status` reads as baseCookieStatuses[0] and `color`
+  // falls back to the folder's tint.
+  status: string | null;
+  color: string | null;
 };
 
 // Primary key is (org_id, id), not (id): addExtensionFromWebStoreLink uses the

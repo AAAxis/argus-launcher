@@ -42,8 +42,9 @@ contextBridge.exposeInMainWorld('argusNative', {
   reserveCdpPort: () => ipcRenderer.invoke('argus:reserve-cdp-port'),
   resolveProfileCdp: (profileId) =>
     ipcRenderer.invoke('argus:resolve-profile-cdp', {profileId}),
-  mintRunToken: (profileId, profileName, cdpPort, automations) =>
-    ipcRenderer.invoke('argus:mint-run-token', {profileId, profileName, cdpPort, automations}),
+  mintRunToken: (profileId, profileName, orgId, cdpPort, automations) =>
+    ipcRenderer.invoke('argus:mint-run-token',
+        {profileId, profileName, orgId, cdpPort, automations}),
   waitForCdp: (port, timeoutMs) =>
     ipcRenderer.invoke('argus:wait-for-cdp', {port, timeoutMs}),
   startAutomationRun: (payload) => ipcRenderer.invoke('argus:start-automation-run', payload),
@@ -152,6 +153,13 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendCookieSyncPullResult: (requestId, result, error) =>
     ipcRenderer.send('argus:cookie-sync-pull-result', {requestId, result, error}),
+  onCookieListRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:cookie-list-request', listener);
+    return () => ipcRenderer.removeListener('argus:cookie-list-request', listener);
+  },
+  sendCookieListResult: (requestId, result, error) =>
+    ipcRenderer.send('argus:cookie-list-result', {requestId, result, error}),
   onReimportProxiesRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:reimport-proxies-request', listener);
@@ -278,4 +286,13 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   sendRecheckProxyResult: (requestId, result, error) =>
     ipcRenderer.send('argus:recheck-proxy-result', {requestId, result, error}),
+  // A launch's start page asking for one of its own automations to be opened
+  // here. One-way, unlike the pair above: main has already raised the window,
+  // and there is no answer the page could show even if this failed -- see
+  // openInLauncherFromPage in main.cjs.
+  onOpenAutomationRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:open-automation-request', listener);
+    return () => ipcRenderer.removeListener('argus:open-automation-request', listener);
+  },
 });

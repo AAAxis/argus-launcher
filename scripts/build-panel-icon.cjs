@@ -22,14 +22,15 @@ const {iconSpecs} = require('./panel-icon-art.cjs');
 const OUT_DIR = path.join(__dirname, '../extensions/cookie-manager/icons');
 
 async function main() {
-  fs.mkdirSync(OUT_DIR, {recursive: true});
   const specs = iconSpecs();
   const window = await openRenderWindow();
   try {
     for (const spec of specs) {
+      const dir = path.join(OUT_DIR, spec.dir);
+      fs.mkdirSync(dir, {recursive: true});
       const png = await render(window, spec.svg(), spec.size);
-      fs.writeFileSync(path.join(OUT_DIR, `icon-${spec.size}.png`), png);
-      console.log(`  wrote icon-${spec.size}.png`);
+      fs.writeFileSync(path.join(dir, `icon-${spec.size}.png`), png);
+      console.log(`  wrote ${spec.dir}/icon-${spec.size}.png`);
     }
   } finally {
     window.destroy();
@@ -37,9 +38,8 @@ async function main() {
   console.log(`${specs.length} icons -> ${OUT_DIR}`);
 }
 
-// Frameless and transparent: the plate has rounded corners, and they have to
-// come out as alpha rather than composited onto white -- an opaque-cornered
-// action icon is visibly a square sitting in the toolbar.
+// Frameless and transparent: the mark is drawn straight onto alpha, so anything
+// composited behind it would ship as an opaque square sitting in the toolbar.
 async function openRenderWindow() {
   const window = new BrowserWindow({
     width: 256,

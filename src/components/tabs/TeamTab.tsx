@@ -549,7 +549,7 @@ function SharedView({pending, members, userId, onShare, onAccept, onDecline, onC
                             is_org_member, and an offer left dangling by someone
                             who is on holiday should not need them to clear it. */}
                         <button
-                          className="ghost icon-button row-action row-action-danger"
+                          className="icon-button row-action row-action-danger"
                           onClick={() => onCancel(item.id)}
                           title="Withdraw this share"
                         ><X size={16} /></button>
@@ -626,13 +626,13 @@ function MemberRow({
               are the owner, who has nobody to hand the workspace to. */}
           {isSelf ? (
             !isTheOwner && (
-              <button className="ghost icon-button row-action" onClick={onLeave} title="Leave team">
+              <button className="icon-button row-action" onClick={onLeave} title="Leave team">
                 <LogOut size={16} />
               </button>
             )
           ) : isOwner && !isTheOwner ? (
             <button
-              className="ghost icon-button row-action row-action-danger"
+              className="icon-button row-action row-action-danger"
               onClick={onRemove}
               title={`Remove ${name}`}
             ><Trash2 size={16} /></button>
@@ -692,7 +692,7 @@ function InviteRow({invite, members, copied, resending, onCopy, onResend, onRevo
               invite_expired -- so offering either would hand the admin
               something that fails for their teammate rather than for them. */}
           {!expired && (
-            <button className="ghost icon-button row-action" disabled={resending}
+            <button className="icon-button row-action" disabled={resending}
               onClick={onResend}
               title={resending ? 'Sending…' : `Email this invitation to ${invite.email} again`}>
               <Send size={16} />
@@ -704,13 +704,13 @@ function InviteRow({invite, members, copied, resending, onCopy, onResend, onRevo
               made a website deployed without its Resend key look like a working
               one. */}
           {!expired && !invite.last_emailed_at && (
-            <button className="ghost icon-button row-action" onClick={onCopy}
+            <button className="icon-button row-action" onClick={onCopy}
               title={copied ? 'Link copied' : 'Copy invite link'}>
               <Copy size={16} />
             </button>
           )}
           <button
-            className="ghost icon-button row-action row-action-danger"
+            className="icon-button row-action row-action-danger"
             onClick={onRevoke}
             title="Revoke invite"
           ><X size={16} /></button>

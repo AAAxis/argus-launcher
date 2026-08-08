@@ -15,6 +15,7 @@ const builtInExtensions = require('./built-in-extensions.cjs');
 const {resolveFavicon} = require('./favicons.cjs');
 const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
+const screenGeometry = require('./screen-geometry.cjs');
 const cdpCore = require('./cdp-core.cjs');
 const automationRunner = require('./automation/runner.cjs');
 const automationStore = require('./automation/store.cjs');
@@ -24,8 +25,9 @@ const automationConnectors = require('./automation/connectors.cjs');
 const automationNotify = require('./automation/notify.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
-  createRunTokens, handleCookiePullFromPage, handleCookiePushFromPage,
-  handleRecheckFromPage, handleRunFromPage,
+  createRunTokens, handleCookieListFromPage, handleCookiePullFromPage,
+  handleCookiePushFromPage, handleOpenInLauncherFromPage, handleRecheckFromPage,
+  handleRunFromPage,
 } = require('./automation/run-token.cjs');
 const {routes: apiRoutes} = require('./api/routes.json');
 
@@ -399,6 +401,10 @@ function bundledBrowserAppPath() {
 
 function browserAppCandidates(preferredAppPath) {
   const candidates = [
+    // An explicit per-run env override outranks every installed copy -- it is
+    // set by hand to test a working-tree browser build (browser/src/out) that
+    // the managed R2 resource would otherwise always shadow.
+    process.env.ARGUS_BROWSER_APP,
     managedBrowserAppPath(),
     bundledBrowserAppPath(),
     preferredAppPath,
@@ -976,8 +982,35 @@ function builtInExtensionDeps() {
   };
 }
 
+// Which ink the panel's toolbar button should be drawn in, resolved to a
+// boolean here because the extension cannot resolve it itself.
+//
+// `theme` travels to the panel unresolved on purpose -- 'system' has to stay
+// 'system' so prefers-color-scheme keeps deciding the panel's *CSS* inside
+// another process. But an action icon is a bitmap Chrome will not re-tint, and
+// a service worker has no matchMedia, so the icon needs a concrete answer
+// before anything has been opened. This is the same resolution the launcher
+// already does for the per-profile Dock tile (profileIconPng below), and for
+// the same reason: artwork has to commit where CSS does not.
+//
+// A guess, and allowed to be: the browser follows the OS appearance, so it
+// agrees with nativeTheme in the ordinary case, and sidepanel.js corrects it
+// with the browser's own prefers-color-scheme the first time the panel opens.
+// Both inks are legible enough to click, so being wrong costs a mismatch, never
+// a missing button.
+function resolveToolbarDark(theme) {
+  if (theme === 'dark') return true;
+  if (theme === 'light') return false;
+  return nativeTheme.shouldUseDarkColors;
+}
+
 function builtInExtensionPaths(payload) {
-  return builtInExtensions.materializeBuiltIns(payload, builtInExtensionDeps());
+  const sessionPanel = payload.sessionPanel ? {
+    ...payload.sessionPanel,
+    toolbarDark: resolveToolbarDark(payload.sessionPanel.theme),
+  } : payload.sessionPanel;
+  return builtInExtensions.materializeBuiltIns(
+      {...payload, sessionPanel}, builtInExtensionDeps());
 }
 
 // ---------------------------------------------------------------------------
@@ -1540,6 +1573,23 @@ function base64UrlEncode(text) {
       .replace(/=+$/, '');
 }
 
+// One locale into the list a browser actually reports: the region tag first,
+// then the bare language, the way real navigator.languages and real
+// Accept-Language headers are both built ("en-US" -> ["en-US", "en"]).
+//
+// Shared rather than inlined because two surfaces have to produce the same
+// list from the same input -- the fingerprint JSON the renderer reads for
+// navigator.languages, and the intl.accept_languages pref that decides the
+// HTTP header. Those disagreeing is exactly the cross-layer mismatch this is
+// here to avoid.
+function languageList(language) {
+  if (!language) {
+    return [];
+  }
+  const base = language.split('-')[0];
+  return base && base !== language ? [language, base] : [language];
+}
+
 // Fills in whatever the renderer left unresolved on the runtime fingerprint
 // (timezone/languages when the profile is set to derive them from the proxy,
 // and lat/long for "manual" geolocation) from electron/proxy-geo.cjs, the same
@@ -1556,8 +1606,7 @@ function resolveRuntimeFingerprintArg(fingerprint, proxy, timezone, language, ge
     resolved.timezone = timezone;
   }
   if ((!resolved.languages || !resolved.languages.length) && language) {
-    const base = language.split('-')[0];
-    resolved.languages = base && base !== language ? [language, base] : [language];
+    resolved.languages = languageList(language);
   }
   if (resolved.geolocation_mode === 'manual' &&
       (resolved.latitude == null || resolved.longitude == null)) {
@@ -1735,18 +1784,36 @@ async function checkProxy(proxy) {
     return {ok: false, error: 'Proxy host and port are required'};
   }
   const started = Date.now();
-  // Queried concurrently (not one-by-one) so a single slow/rate-limited/
-  // blocked geolocation service doesn't stall or fail the whole check --
-  // the fastest successful response wins.
+  // Queried concurrently (not one-by-one) so a single slow/rate-limited/blocked
+  // geolocation service doesn't stall or fail the whole check. Concurrency is
+  // for latency; the ORDER of this list is what decides the answer, because
+  // Promise.all resolves in input order and the pick below is the first
+  // qualifying entry -- never whoever happened to reply first.
+  //
+  // ip-api.com leads on data quality, not speed. It is the only one of the
+  // three that returns city, region, lat/lon and timezone together on the free
+  // tier, and the fallbacks disagree with it in exactly the ways users report:
+  // ipinfo.io collapses region and often omits the timezone, and ipapi.co
+  // rate-limits hard enough that a busy day silently demotes every check to a
+  // different provider with a different city for the same IP. That demotion is
+  // the "why does it say Los Angeles here and Kansas there" complaint -- the
+  // answer moved because the provider did.
   const endpoints = [
+    // Explicit ip-api field list: the default omits the network attributes
+    // (`as`, `isp`) and always omits the `hosting`/datacenter flag, which the
+    // panel needs to warn that an exit is a datacenter IP. Requesting fields by
+    // name also keeps the response small. status/message gate the parse; the
+    // rest are the location + network the parser reads.
+    'http://ip-api.com/json/?fields=status,message,country,countryCode,region,' +
+      'regionName,city,lat,lon,timezone,isp,org,as,hosting,query',
     'https://ipapi.co/json/',
     'https://ipinfo.io/json',
-    'http://ip-api.com/json/',
   ];
   const results = await Promise.all(endpoints.map((endpoint) => checkProxyEndpoint(proxy, endpoint)));
-  // Prefer a success that actually carries a timezone over a merely faster one:
-  // the timezone decides what the profile reports to every site it visits, and a
-  // provider that omits it would push us back to the country-granularity guess.
+  // Prefer a success that actually carries a timezone over one that does not:
+  // the timezone decides what the profile reports to every site it visits, and
+  // a provider that omits it would push us back to the country-granularity
+  // guess (which puts a Denver proxy in New York).
   const succeeded = results.filter((result) => result.ok);
   const success = succeeded.find((result) => result.timezone) || succeeded[0];
   if (success) {
@@ -1920,6 +1987,61 @@ function writeProfileStartupPrefs(userDataDir, startupUrl, argusHomeUrl) {
     exit_type: 'Normal',
     exited_cleanly: true,
   };
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+}
+
+// The two fingerprint facts that live in Preferences rather than in the
+// fingerprint JSON, written before every launch.
+//
+// Both exist because a command-line switch could not do the job:
+//
+//   1. --window-size only shapes the FIRST window a profile ever opens.
+//      Chromium then saves the user's bounds in browser.window_placement and
+//      restores those on every later launch, so a window resized once stayed
+//      that size forever -- including when it was larger than the screen the
+//      profile claims to have. A browser window bigger than its own display is
+//      impossible on real hardware and needs no fingerprinting service to spot.
+//
+//   2. --lang sets the UI locale, NOT the Accept-Language header. The header
+//      comes from intl.accept_languages, which nothing was writing, so a
+//      profile shipped a spoofed navigator.languages over a header still
+//      listing the host machine's languages. Two layers of the same request
+//      disagreeing is a cleaner signal than either value on its own.
+//
+// Written unconditionally rather than folded into writeProfileStartupPrefs,
+// which returns early when a profile has no startup URL -- these must not be
+// skipped for the profiles that happen to lack one.
+function writeProfileFingerprintPrefs(userDataDir, {screen, preset, languages}) {
+  if (!userDataDir) {
+    return;
+  }
+  const placement = screenGeometry.windowPlacement(screen, preset);
+  const accept = Array.isArray(languages) ? languages.filter(Boolean) : [];
+  if (!placement && !accept.length) {
+    return;
+  }
+  const defaultDir = path.join(userDataDir, 'Default');
+  ensureDirectoryPath(defaultDir);
+  const prefsPath = path.join(defaultDir, 'Preferences');
+  let prefs = {};
+  try {
+    prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+  } catch {
+    prefs = {};
+  }
+  if (placement) {
+    prefs.browser = {...(prefs.browser || {}), window_placement: placement};
+  }
+  if (accept.length) {
+    // Comma-separated, in preference order, exactly as Chromium stores it.
+    // `selected_languages` is the settings-UI mirror of the same list; leaving
+    // it behind makes Settings show one language while requests send another.
+    prefs.intl = {
+      ...(prefs.intl || {}),
+      accept_languages: accept.join(','),
+      selected_languages: accept.join(','),
+    };
+  }
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
 }
 
@@ -2236,6 +2358,10 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   // assigned-proxy profile's connection is never contested.
   extensionPaths.push(...await builtInExtensionPaths(payload));
   const uniqueExtensionPaths = [...new Set(extensionPaths)].filter(isLoadableExtensionDir);
+  // After builtInExtensionPaths, never before: the id is derived from the
+  // extension's on-disk directory, which that call creates. The browser's
+  // native "Argus Helper" toolbar button opens this extension's side panel.
+  const panelExtensionId = builtInExtensions.argusPanelExtensionId(payload);
   const switches = launchSafeSwitches(payload.commandLineSwitches);
   const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
   const explicitLanguage = payload.runtimeFingerprint?.languages?.[0] || null;
@@ -2255,6 +2381,21 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   }
   const fingerprintArg = resolveRuntimeFingerprintArg(
       payload.runtimeFingerprint, payload.proxy, timezone, language, proxyGeo);
+  // After `language` resolves and before the browser is spawned: the window
+  // bounds and the Accept-Language header are both prefs, and neither can be
+  // expressed as a switch. See writeProfileFingerprintPrefs for why each one
+  // has to be written rather than passed.
+  //
+  // The language list mirrors what the fingerprint injector will report as
+  // navigator.languages -- the base tag follows the region tag, the way a real
+  // Accept-Language does ("en-US,en"), so the header and the JS agree.
+  writeProfileFingerprintPrefs(payload.userDataDir, {
+    screen: payload.runtimeFingerprint?.screen,
+    preset: payload.runtimeFingerprint?.preset,
+    languages: payload.runtimeFingerprint?.languages?.length ?
+      payload.runtimeFingerprint.languages :
+      languageList(language),
+  });
   // The renderer's fingerprintSwitches() already emits --lang when the user set
   // an explicit fingerprint language; only fall back to the proxy-derived one
   // here so we don't send a conflicting duplicate.
@@ -2283,6 +2424,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
     ...(payload.useFreeProxy ? ['--argus-free-proxy'] : []),
     ...(fingerprintArg ? [`--argus-fingerprint-json=${fingerprintArg}`] : []),
     ...(uniqueExtensionPaths.length ? [`--load-extension=${uniqueExtensionPaths.join(',')}`] : []),
+    ...(panelExtensionId ? [`--argus-panel-extension-id=${panelExtensionId}`] : []),
     ...switches,
     ...(!hasLangSwitch && language ? [`--lang=${language}`] : []),
     ...extraArgs,
@@ -3639,11 +3781,43 @@ function raiseOsNotification(title, body) {
 // refusal paths can be tested against the real code rather than a copy --
 // scripts/verify-run-token.mjs drives exactly that module. See its header for
 // what a token does and does not authorize.
-const runTokens = createRunTokens();
+//
+// The store is persisted because a browser window outlives this process. It
+// used to be memory-only, so quitting the launcher silently invalidated the
+// session of every profile already open: the window kept running, its next
+// cookie push got the same 403 a forged token gets, and the panel reported the
+// session as stale when the only thing that had changed was that the launcher
+// had been restarted.
+//
+// 0600, and under userData rather than anywhere a profile can read: the file's
+// contents are the credentials themselves. A read failure is non-fatal --
+// worst case the store starts empty and open windows have to be relaunched,
+// which is exactly where we were before it existed.
+function runTokenStorePath() {
+  return path.join(app.getPath('userData'), 'run-tokens.json');
+}
+
+const runTokens = createRunTokens({
+  load: () => {
+    // Absent on a first run and after every clean install, which is ordinary
+    // and not worth the factory's warning. Anything else -- unreadable,
+    // truncated, not JSON -- is left to throw so it gets said out loud.
+    if (!fs.existsSync(runTokenStorePath())) {
+      return [];
+    }
+    const parsed = JSON.parse(fs.readFileSync(runTokenStorePath(), 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  },
+  save: (entries) => {
+    // Written whole and replaced, not appended: the map is the truth and a
+    // partial file is worse than no file.
+    fs.writeFileSync(runTokenStorePath(), JSON.stringify(entries), {mode: 0o600});
+  },
+});
 
 ipcMain.handle('argus:mint-run-token',
-    async (_event, {profileId, profileName, cdpPort, automations}) =>
-      runTokens.mint({profileId, profileName, cdpPort, automations}));
+    async (_event, {profileId, profileName, orgId, cdpPort, automations}) =>
+      runTokens.mint({profileId, profileName, orgId, cdpPort, automations}));
 
 ipcMain.handle('argus:reserve-cdp-port', async () => {
   // The renderer has no node:net, so port allocation lives here even though
@@ -4218,6 +4392,32 @@ function runFromPage(req, res) {
   });
 }
 
+// Brings the launcher window forward with one of a launch's own automations
+// open, asked for by that launch's start page.
+//
+// The window is raised here; naming which workflow to show is the renderer's,
+// because it owns the tabs and the cloud rows. The send is fire-and-forget for
+// the reason handleOpenInLauncherFromPage gives -- and if the renderer has not
+// finished booting, the user still gets a launcher window in front of them,
+// which is most of what they asked for.
+function openInLauncherFromPage(req, res) {
+  handleOpenInLauncherFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    open: (entry, automation) => {
+      focusMainWindow();
+      if (mainWindow) {
+        mainWindow.webContents.send('argus:open-automation-request', {
+          automationId: automation.id,
+          profileId: entry.profileId,
+        });
+      }
+    },
+  });
+}
+
 // Re-checks the proxy assigned to a launch's profile, asked for by that
 // launch's start page.
 //
@@ -4308,15 +4508,20 @@ function settlePageRequest(requestId, result, error) {
 
 ipcMain.on('argus:cookie-sync-push-result', (_event, {requestId, result, error}) =>
   settlePageRequest(requestId, result, error));
+ipcMain.on('argus:cookie-list-result', (_event, {requestId, result, error}) =>
+  settlePageRequest(requestId, result, error));
 ipcMain.on('argus:cookie-sync-pull-result', (_event, {requestId, result, error}) =>
   settlePageRequest(requestId, result, error));
 
 function cookiePushFromProfile(req, res) {
   handleCookiePushFromPage({
     req, res, tokens: runTokens, sendJson,
+    // orgId comes off the ENTRY, never off the request body: it is what the
+    // launcher stamped at mint time, and a caller able to name its own org
+    // would be choosing which workspace to write into. See run-token.cjs.
     pushCookies: (entry, cookies, saveAs) =>
       askRendererOnPageChannel('argus:cookie-sync-push-request',
-          {profileId: entry.profileId, cookies, saveAs}),
+          {profileId: entry.profileId, orgId: entry.orgId || '', cookies, saveAs}),
   });
 }
 
@@ -4325,7 +4530,16 @@ function cookiePullForProfile(req, res) {
     req, res, tokens: runTokens, sendJson,
     pullCookies: (entry) =>
       askRendererOnPageChannel('argus:cookie-sync-pull-request',
-          {profileId: entry.profileId}),
+          {profileId: entry.profileId, orgId: entry.orgId || ''}),
+  });
+}
+
+function cookieListForProfile(req, res) {
+  handleCookieListFromPage({
+    req, res, tokens: runTokens, sendJson,
+    listCookies: (entry) =>
+      askRendererOnPageChannel('argus:cookie-list-request',
+          {profileId: entry.profileId, orgId: entry.orgId || ''}),
   });
 }
 
@@ -4413,13 +4627,17 @@ function startAutomationApiServer() {
     }
 
     // Above the bearer gate on purpose: the caller is a file:// page, which has
-    // no key and must never be given one. Both authenticate with a per-launch
-    // run token instead -- see runTokens for what that does and does not
-    // authorize. Neither is in electron/api/routes.json: they are not part of
+    // no key and must never be given one. All three authenticate with a
+    // per-launch run token instead -- see runTokens for what that does and does
+    // not authorize. None is in electron/api/routes.json: they are not part of
     // the keyed surface and must never be advertised as one, which is why
     // verify-api-routes skips them by name.
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/run-from-page') {
       runFromPage(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/open-in-launcher') {
+      openInLauncherFromPage(req, res);
       return;
     }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/proxies/recheck-from-page') {
@@ -4436,6 +4654,10 @@ function startAutomationApiServer() {
     }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/cookies/pull-for-profile') {
       cookiePullForProfile(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/cookies/list-for-profile') {
+      cookieListForProfile(req, res);
       return;
     }
 
@@ -4837,6 +5059,17 @@ function startAutomationApiServer() {
         if (typeof payload.folderId === 'string' || payload.folderId === null) fields.folder_id = payload.folderId;
         if (typeof payload.email === 'string') fields.email = payload.email;
         if (typeof payload.password === 'string') fields.password = payload.password;
+        // proxy mode, start URL and the launch automation. The renderer does
+        // the value-dependent checks these need -- that a proxy actually exists
+        // before 'assigned' is allowed, that an automation id resolves -- since
+        // this process owns no data. Bare proxy_id assignment stays with
+        // assign-proxy, which resolves against the library.
+        if (payload.proxyMode === 'assigned' || payload.proxyMode === 'direct' ||
+            payload.proxyMode === 'free_proxy') {
+          fields.proxy_mode = payload.proxyMode;
+        }
+        if (typeof payload.startUrl === 'string') fields.start_url = payload.startUrl;
+        if (typeof payload.automationId === 'string') fields.automation_id = payload.automationId;
         mainWindow.webContents.send('argus:update-profile-request', {
           requestId,
           profileId: payload.profileId,

@@ -173,10 +173,10 @@ async function updateBadge(sync) {
     } else if (state.pushPending) {
       text = '…';
       color = '#b45309';
-    } else if (state.inSync) {
-      text = '✓';
-      color = '#1a7f3c';
     }
+    // In-sync deliberately shows NO badge. A steady-state green check on the
+    // toolbar icon reads as clutter, not information -- the badge exists to
+    // flag problems, and the panel itself is where healthy sync status lives.
   }
   try {
     await chrome.action.setBadgeText({text});
@@ -198,9 +198,15 @@ async function updateBadge(sync) {
 // 200 whose body would not parse) is 'server-error' and says nothing about
 // the token -- run-token.cjs's own work() failures (a dead proxy, a
 // renderer-side throw like loadEntries) surface as exactly this, not as 403.
+// 409 is the one refusal that is not a fault: the launcher has moved to a
+// different workspace, so this profile's sets are not the ones it can write.
+// Kept distinct from 'refused' because the remedy is the opposite -- relaunching
+// is what fixes a dead token and is exactly the wrong advice here, where
+// switching the workspace back resumes a session that is otherwise fine.
 function classifyStatus(status) {
   if (status === 429) return 'rate-limited';
   if (status === 403) return 'refused';
+  if (status === 409) return 'other-workspace';
   return 'server-error';
 }
 
@@ -253,11 +259,26 @@ async function pushToLauncher(opts) {
     // gets a chance to read it.
     const tokenHash = await hashText(config.token);
     if (state.pushTokenHash !== tokenHash) {
-      state = await setSyncState({inSync: false, signature: '', pushTokenHash: tokenHash});
+      // The error fields go with the watermark, for the same reason and on the
+      // same evidence: they describe an attempt made against a token that no
+      // longer exists. Keeping them made a healthy relaunch open on "Launcher
+      // rejected the request" -- the panel accusing the new session of the old
+      // one's failure -- until the first push happened to succeed and clear it.
+      state = await setSyncState({
+        inSync: false, signature: '', pushTokenHash: tokenHash,
+        lastError: '', lastErrorKind: '', lastErrorSource: '',
+      });
     }
 
     if (!manual && state.paused) {
-      await setSyncState({pushPending: false});
+      // Pausing clears the last failure too. An error kind is a statement about
+      // the last attempt; while paused there will be no next attempt, so a kind
+      // left here can never be disproved -- and classifySync would go on
+      // reporting a dead token as the reason sync is idle when the real reason
+      // is that the user turned it off.
+      await setSyncState({
+        pushPending: false, lastError: '', lastErrorKind: '', lastErrorSource: '',
+      });
       return {ok: false, error: 'Sync is paused.'};
     }
 
@@ -382,6 +403,32 @@ function schedulePush() {
   if (!pushTimer) void setSyncState({pushPending: true}).catch(reportUnhandled('marking push pending'));
   retryQueued = false;
   queuePush(PUSH_DEBOUNCE_MS);
+}
+
+// ---- list (launcher -> browser, read-only) ---------------------------------
+// What the launcher holds for this profile, without applying any of it.
+//
+// Unlike pullFromLauncher below, this touches nothing: no import, no jar
+// change, and -- importantly -- no sync state. A failure here is the user
+// looking something up, not the sync engine failing, and writing lastErrorKind
+// from it would make an expanded list repaint the sync card as broken.
+async function listLauncherCookies() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/cookies/list-for-profile`,
+      {runToken: config.token});
+  if (!result.ok) {
+    return {ok: false, error: result.message, kind: result.kind};
+  }
+  return {
+    ok: true,
+    set: result.body.set || null,
+    count: Number(result.body.count) || 0,
+    cookies: Array.isArray(result.body.cookies) ? result.body.cookies : [],
+  };
 }
 
 // ---- pull (launcher -> browser) --------------------------------------------
@@ -659,6 +706,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case 'get-session':
           sendResponse({ok: true, session: await sessionData()});
           return;
+        case 'toolbar-theme':
+          // The panel telling us what prefers-color-scheme actually resolved to
+          // in this browser, which beats the appearance the launcher guessed at
+          // launch. Sent on open and on every flip while it is open.
+          applyActionIcon(Boolean(message.dark));
+          sendResponse({ok: true});
+          return;
         case 'recheck-proxy':
           sendResponse(await recheckProxy());
           return;
@@ -682,6 +736,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         case 'pull-from-launcher':
           sendResponse(await pullFromLauncher());
+          return;
+        case 'list-launcher-cookies':
+          sendResponse(await listLauncherCookies());
           return;
         case 'save-as-set':
           // `message.cookies` omitted -> the whole current jar (popup's
@@ -769,15 +826,69 @@ function registerPanelBehavior() {
       .catch(reportUnhandled('registering side panel behavior'));
 }
 
+// ---- action icon, per toolbar theme -----------------------------------------
+// Chrome never re-tints an extension's action icon, and the toolbar is
+// near-white in one theme and near-charcoal in the other, so one bitmap is
+// legible in at most one of them. We ship both inks (see
+// scripts/panel-icon-art.cjs) and choose here.
+//
+// Two signals, in order of when they become available:
+//
+//   1. `toolbarDark` in argus-session.json -- the appearance the launcher
+//      resolved at launch, written by built-in-extensions.cjs. Available before
+//      anything is opened, which is the only moment that matters for an icon
+//      the user has not clicked yet.
+//   2. the panel's own prefers-color-scheme, messaged in by sidepanel.js when
+//      it opens and whenever it flips. Strictly better evidence -- it is the
+//      rendering engine's own answer rather than another process's guess -- but
+//      it does not exist until the user opens the panel once.
+//
+// Wrong-but-visible is the failure mode either way: both inks are legible
+// enough to click, so a mis-guess is a cosmetic mismatch and never a lost
+// button. That is why 1 is allowed to be a guess at all.
+const ICON_SIZES = [16, 32, 48, 128];
+let appliedIconDark = null;
+
+function applyActionIcon(dark) {
+  if (dark === appliedIconDark) return;
+  appliedIconDark = dark;
+  const dir = dark ? 'on-dark' : 'on-light';
+  const path = {};
+  for (const size of ICON_SIZES) {
+    path[size] = `icons/${dir}/icon-${size}.png`;
+  }
+  // Callback form, not the promise: setIcon resolves through a callback on
+  // every Chrome that has it, and the promise overload is newer than the floor
+  // this extension supports.
+  try {
+    chrome.action.setIcon({path}, () => void chrome.runtime.lastError);
+  } catch (error) {
+    console.warn('Argus: could not set the action icon', error);
+  }
+}
+
+async function applyActionIconFromSession() {
+  const data = await sessionData();
+  // No session file means this window was not launched from the launcher, and
+  // there is nothing to read a theme from. Leave the manifest's default in
+  // place rather than guessing dark.
+  if (data && typeof data.toolbarDark === 'boolean') {
+    applyActionIcon(data.toolbarDark);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   registerPanelBehavior();
+  void applyActionIconFromSession().catch(reportUnhandled('action icon (onInstalled)'));
   void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (onInstalled)'));
 });
 chrome.runtime.onStartup.addListener(() => {
   registerPanelBehavior();
+  void applyActionIconFromSession().catch(reportUnhandled('action icon (onStartup)'));
   void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (onStartup)'));
 });
 registerPanelBehavior();
+void applyActionIconFromSession().catch(reportUnhandled('action icon (initial)'));
 void importSeedCookiesIfPresent().catch(reportUnhandled('seed import (initial)'));
 chrome.cookies.onChanged.addListener(() => schedulePush());
 void pushToLauncher().catch(reportUnhandled('initial push'));

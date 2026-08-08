@@ -66,6 +66,14 @@ const BUILT_IN_EXTENSIONS = [
     // session dashboard at all, and two clicks behind a menu is not a place a
     // primary surface can live. See seedPinnedExtensions below for how, and why
     // only a stable placement can ask for this.
+    //
+    // NOTE: on a browser build that carries the native "Argus Helper" toolbar
+    // button (chrome/browser/ui/views/toolbar/argus_toolbar_button.*, driven by
+    // --argus-panel-extension-id), flip this to false -- the native button then
+    // owns the panel and pinning the extension too would show two buttons. It
+    // stays true here because the shipped binary predates that button, and on it
+    // the native side-panel action is unpinned, so this pin is the only way to
+    // reach the panel at all.
     pinned: true,
     // The Argus Panel: the browser's side-panel dashboard. Cookie export/import
     // and sync, the session's proxy readout, and this launch's automations,
@@ -339,6 +347,24 @@ function seedPinnedExtensions(payload, deps) {
   return ids;
 }
 
+// The id the Argus Panel extension will load under in this profile, or '' if
+// the extension is disabled or its directory does not exist yet. Passed to the
+// browser as --argus-panel-extension-id so its native "Argus Helper" toolbar
+// button can drive this extension's side panel. Only meaningful after
+// materializeBuiltIns has copied the folder: the id is derived from a
+// realpath()ed directory that has to exist.
+function argusPanelExtensionId(payload) {
+  const entry = BUILT_IN_EXTENSIONS.find((candidate) => candidate.key === 'cookie_manager');
+  if (!entry || !builtInEnabled(payload.builtInExtensions, entry)) {
+    return '';
+  }
+  try {
+    return unpackedExtensionId(path.join(payload.userDataDir, entry.placement.name));
+  } catch {
+    return '';
+  }
+}
+
 // Every enabled built-in's directory, in table order.
 async function materializeBuiltIns(payload, deps) {
   const enabled = BUILT_IN_EXTENSIONS.filter(
@@ -359,6 +385,7 @@ module.exports = {
   BUILT_IN_EXTENSIONS,
   BUILT_IN_EXTENSION_KEYS,
   CAPTCHA_PLUGIN_ID,
+  argusPanelExtensionId,
   builtInEnabled,
   builtInExtension,
   materializeBuiltIns,

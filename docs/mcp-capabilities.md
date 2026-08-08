@@ -195,14 +195,14 @@ to the user's account).
 
 ### 4a. Deliberately omitted
 
-`electron/mcp/tools.cjs:9-13` states the rule: destructive and bulk-import
-routes are not exposed, and can be added behind an explicit opt-in. These routes
-exist and work over HTTP but have **no MCP tool**:
+`electron/mcp/tools.cjs:9-13` states the rule: bulk-import routes are not
+exposed, and destructive ones only behind an explicit opt-in. As of the
+profile-CRUD change, `profiles/delete` (soft-only), `profiles/update-fingerprint`
+and `profiles/create` now have tools — see §4b. These routes still exist and work
+over HTTP but have **no MCP tool**:
 
 | Route | Effect withheld from agents |
 |---|---|
-| `POST /v1/profiles/delete` | soft-delete or permanent purge of a profile |
-| `POST /v1/profiles/update-fingerprint` | merge arbitrary fingerprint fields |
 | `POST /v1/proxies/create` | add a proxy to the library |
 | `POST /v1/proxies/update` | edit a proxy |
 | `POST /v1/proxies/delete` | delete a proxy (unassigns profiles) |
@@ -210,6 +210,10 @@ exist and work over HTTP but have **no MCP tool**:
 | `POST /v1/cookies/bulk-match` | match a cookies folder onto profiles |
 | `POST /v1/cookies/push-local` | write a cookie snapshot into a profile |
 | `POST /v1/monitoring/report` | write a monitoring result to Supabase |
+
+Note `argus_delete_profile` is soft-delete only: the route accepts
+`permanent: true`, but the tool never sends it, so an irreversible purge stays in
+the app.
 
 Editing and deleting a profile note have no route at all, let alone a tool, and
 that is a security boundary rather than a decision about scope. Every write on
@@ -226,16 +230,17 @@ stated intent.
 
 ### 4b. Not built — no route exists at all
 
-**[verified]** `POST /v1/profiles/create`, `POST /v1/folders/list` and
-`GET /v1/cookies` all return `404 {"status":false,"msg":"Not found"}` with a
-valid token. The route allow-list is the pathname chain at
-`electron/main.cjs:3687-3706`; anything not on it 404s.
+**[verified]** `POST /v1/folders/list` and `GET /v1/cookies` return
+`404 {"status":false,"msg":"Not found"}` with a valid token. The route allow-list
+is the pathname chain at `electron/main.cjs:3687-3706`; anything not on it 404s.
+(`POST /v1/profiles/create` was on this list and is now a real route — see below.)
 
 Compared against what the app itself can do, an agent has **no** way to:
 
-- **Create a profile.** No create route exists. Agents can only drive profiles a
-  human already made (`src/components/modals/ProfileModal.tsx:44`,
-  `src/workspace/useProfileActions.ts:56`).
+- **Create a profile.** ~~No create route exists.~~ **Now possible** via
+  `argus_create_profile` / `POST /v1/profiles/create`, which builds the row
+  through the same `newProfileDraft`/`profileFromDraft` pipeline the New Profile
+  dialog uses.
 - **Duplicate, restore from Trash, or purge.** (`useProfileActions.ts:117,126`)
 - **Import or export profiles as CSV.** (`useProfileActions.ts:242,319`)
 - **See or manage folders.** No route lists folders — yet
@@ -253,14 +258,19 @@ Compared against what the app itself can do, an agent has **no** way to:
 - **Manage extensions.** Install from the Web Store or a folder, enable/disable
   (`useLibraryActions.ts:197,242,261,273,291`). Not exposed.
 - **Manage bookmarks / the start page.** (`useLibraryActions.ts:136,164,183`)
-- **Edit fingerprints.** The route exists but is deliberately withheld (§4a).
-  Agents can read a fingerprint and not change it.
-- **Set `proxy_mode`.** `argus_update_profile` does not accept it and
-  `argus_assign_proxy` always forces `'assigned'`. An agent can never move a
-  profile to Direct or Free Proxy, nor back.
-- **Set the start URL, command-line switches, or the profile's account
-  email/password** through a declared tool parameter (all editable in the UI at
-  `ProfileModal.tsx:382,392,400,488`). See the caveat in §4c.
+- **Edit fingerprints.** ~~The route exists but is deliberately withheld.~~
+  **Now possible** via `argus_update_fingerprint`, which merges a whitelisted set
+  of fingerprint fields into the stored one.
+- **Set `proxy_mode`.** ~~`argus_update_profile` does not accept it.~~ **Now
+  possible**: `argus_update_profile` accepts `proxyMode` (assigned/direct/
+  free_proxy). Assigning a specific proxy is still `argus_assign_proxy`; switching
+  to direct/free_proxy clears the proxy.
+- **Set the start URL** — **now possible** via `argus_update_profile.startUrl`
+  and `argus_create_profile.startUrl`. **Command-line switches and the profile's
+  account email/password** are still not exposed through any declared tool
+  parameter (editable in the UI at `ProfileModal.tsx:382,392,400,488`), by
+  design: switches are a launch-time code-execution surface and credentials are a
+  deliberately closed write hole. See the caveat in §4c.
 - **Manage account, org, plan, API keys or integrations.** Nothing under
   `src/settings/` is reachable.
 - **Control tabs.** `argus_list_tabs` returns tab ids, but no tool accepts one.
@@ -273,17 +283,12 @@ Compared against what the app itself can do, an agent has **no** way to:
 
 ### 4c. Looks like an oversight, not intent
 
-1. **`argus_update_profile` declares a `notes` parameter that does nothing.**
-   `tools.cjs:124` advertises `notes`; the route maps only `name`, `tags`,
-   `status`, `color`, `folder_id`, `email`, `password`
-   (`electron/main.cjs:3982-3989`). There is no notes field on `ArgusProfile` at
-   all. An agent writing notes gets a silent success.
-2. **`argus_update_profile` forwards every argument it is given.** Its `run` is
-   `api.post('/v1/profiles/update', args)` (`tools.cjs:129`) — the whole
-   arguments object, unfiltered. The schema does not set
-   `additionalProperties: false`, so a model that passes `email` or `password`
-   will have them written to the profile even though neither is a documented
-   parameter.
+1. ~~**`argus_update_profile` declares a `notes` parameter that does nothing.**~~
+   **Fixed.** The phantom `notes` parameter is gone; the tool's schema now
+   declares only fields the route actually maps.
+2. ~~**`argus_update_profile` forwards every argument it is given.**~~ **Fixed.**
+   Its `run` now forwards only the declared fields via an explicit whitelist, so
+   a guessed `email`/`password` is dropped at the tool layer rather than written.
 3. **`argus_check_proxy` declares `type` and the route drops it.**
    `tools.cjs:162` documents `type: 'http or socks5'`; the handler passes only
    `{host, port, username, password}` to `checkProxy`

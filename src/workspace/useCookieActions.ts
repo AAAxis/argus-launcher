@@ -59,6 +59,12 @@ export type CookieFields = {
   name?: string;
   folder_id?: string | null;
   tags?: string[];
+  // The two marks a set carries for the user rather than for a launch: the
+  // status chip and the colour of its icon. Both are set from the table only,
+  // and both take '' to mean "back to unmarked" -- which for the colour is what
+  // returns the icon to its folder's tint.
+  status?: string;
+  color?: string;
 };
 
 export function useCookieActions({data, toast}: WorkspaceCore) {
@@ -138,6 +144,15 @@ export function useCookieActions({data, toast}: WorkspaceCore) {
     }
     if ('tags' in fields) {
       next.tags = normalizeTags(fields.tags || []);
+    }
+    // Both stored as undefined rather than '' when cleared, so the mapper writes
+    // a null and a read of the row comes back to the same fallback a row that
+    // was never marked gets.
+    if ('status' in fields) {
+      next.status = fields.status || undefined;
+    }
+    if ('color' in fields) {
+      next.color = fields.color || undefined;
     }
     if (!await withDb((activeOrgId) => db.cookieSets.update(activeOrgId, id, next))) {
       return false;

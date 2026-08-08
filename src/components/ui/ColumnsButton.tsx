@@ -37,11 +37,23 @@ export function ColumnsButton<Row, Ctx>({
       panelClassName="columns-pop"
       // The count, not a dot: "3 hidden" is the fact somebody wants when a
       // column they expected is missing, and it is the only way to tell a
-      // configured table from a default one without opening the panel.
-      trigger={<><Columns3 size={16} /> Columns{hidden > 0 && (
-        <span className="columns-trigger-count">{hidden} hidden</span>
-      )}</>}
-      triggerClassName="ghost columns-trigger"
+      // configured table from a default one without opening the panel. Outside
+      // the label span on purpose: the label goes quiet at rest and the badge
+      // must not, or the one thing worth noticing here fades with it.
+      trigger={
+        <>
+          <span className="filter-trigger-label">
+            <Columns3 size={15} strokeWidth={1.9} /> Columns
+          </span>
+          {hidden > 0 && <span className="columns-trigger-count">{hidden} hidden</span>}
+        </>
+      }
+      // Flat, like the status and tag filters it shares a toolbar with, rather
+      // than the bordered ghost this used to be. See the .filter-trigger note in
+      // styles.css: a row of boxes above a table whose own headers carry none
+      // read as heavier than the thing it configures, and Columns was the last
+      // box left in it.
+      triggerClassName="filter-trigger columns-trigger"
       width={248}
     >
       <>

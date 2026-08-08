@@ -3,7 +3,11 @@
 // browser at launch, so it is the copy that matters most.
 import {describe, expect, it} from 'vitest';
 // @ts-expect-error CJS module without types
-import {parseProxyGeo, resolveLanguage, resolveTimezone} from '../../electron/proxy-geo.cjs';
+import {parseProxyGeo, parseProxyNetwork, resolveLanguage, resolveTimezone} from '../../electron/proxy-geo.cjs';
+
+// The three network keys parseProxyGeo now also returns; every location case
+// below carries them as undefined because those inputs describe no network.
+const NO_NETWORK = {asn: undefined, isp: undefined, hosting: undefined};
 
 describe('parseProxyGeo', () => {
   // Each provider is a different dialect. Reading only one is how these fields
@@ -14,7 +18,7 @@ describe('parseProxyGeo', () => {
       latitude: 39.7392, longitude: -104.9903,
     })).toEqual({
       timezone: 'America/Denver', city: 'Denver', region: 'Colorado',
-      latitude: 39.7392, longitude: -104.9903,
+      latitude: 39.7392, longitude: -104.9903, ...NO_NETWORK,
     });
   });
 
@@ -24,7 +28,7 @@ describe('parseProxyGeo', () => {
       lat: 41.8781, lon: -87.6298,
     })).toEqual({
       timezone: 'America/Chicago', city: 'Chicago', region: 'Illinois',
-      latitude: 41.8781, longitude: -87.6298,
+      latitude: 41.8781, longitude: -87.6298, ...NO_NETWORK,
     });
   });
 
@@ -44,7 +48,7 @@ describe('parseProxyGeo', () => {
   it('survives a response with no location at all', () => {
     expect(parseProxyGeo({})).toEqual({
       timezone: undefined, city: undefined, region: undefined,
-      latitude: undefined, longitude: undefined,
+      latitude: undefined, longitude: undefined, ...NO_NETWORK,
     });
   });
 
@@ -52,6 +56,40 @@ describe('parseProxyGeo', () => {
     expect(parseProxyGeo({lat: 'n/a', lon: ''})).toMatchObject({
       latitude: undefined, longitude: undefined,
     });
+  });
+
+  it('carries the ip-api network fields through', () => {
+    expect(parseProxyGeo({
+      timezone: 'America/Los_Angeles', city: 'Los Angeles',
+      as: 'AS62240 Clouvider Limited', isp: 'Clouvider', hosting: true,
+    })).toMatchObject({
+      asn: 'AS62240 Clouvider Limited', isp: 'Clouvider', hosting: true,
+    });
+  });
+});
+
+// The datacenter verdict. Only ip-api reports these, and a wrong reading here
+// is what puts a residential-looking browser behind a flagged IP -- so the
+// distinction between "false" and "not reported" has to survive intact.
+describe('parseProxyNetwork', () => {
+  it('reads as/isp/hosting from the ip-api dialect', () => {
+    expect(parseProxyNetwork({
+      as: 'AS62240 Clouvider Limited', isp: 'Clouvider', hosting: true,
+    })).toEqual({asn: 'AS62240 Clouvider Limited', isp: 'Clouvider', hosting: true});
+  });
+
+  it('falls back to org when isp is absent', () => {
+    expect(parseProxyNetwork({as: 'AS13335', org: 'Cloudflare'}))
+        .toMatchObject({isp: 'Cloudflare'});
+  });
+
+  it('keeps a residential (hosting=false) verdict distinct from an absent one', () => {
+    expect(parseProxyNetwork({hosting: false}).hosting).toBe(false);
+    expect(parseProxyNetwork({}).hosting).toBeUndefined();
+  });
+
+  it('treats a non-boolean hosting value as not reported', () => {
+    expect(parseProxyNetwork({hosting: 'yes'}).hosting).toBeUndefined();
   });
 });
 

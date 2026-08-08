@@ -1,16 +1,20 @@
 // Every column the Cookies table can show.
 //
-// The same seven it has always shown, with Tags and Folder now edited where
-// they are read, through the same CellControls the Profiles and Proxies tables
-// use.
+// Tags and Folder are edited where they are read, through the same CellControls
+// the Profiles and Proxies tables use -- and so are the two marks a set carries
+// for the user's own benefit rather than the launcher's: its status and the
+// colour of its icon.
 //
 // Ids are the old useTableSort keys, unchanged.
 import {Cookie} from 'lucide-react';
 import {AssignedCell} from '../components/ui/AssignedCell';
 import {Assignee} from '../components/ui/Assignee';
-import {CellPicker, CellTags} from '../components/ui/CellControls';
+import {CellColor, CellPicker, CellTags} from '../components/ui/CellControls';
 import {FolderLabel} from '../components/ui/FolderLabel';
+import {StatusChip} from '../components/ui/StatusChip';
+import {defaultCookieStatus} from '../data/statuses';
 import {assigneeName} from '../lib/assignees';
+import {cookieSetColor} from '../lib/cookieMark';
 import {profileColorStyle} from '../lib/profileColors';
 import {daysUntilPurge} from '../lib/trash';
 import {formatDateShort} from '../lib/text';
@@ -36,13 +40,16 @@ export type CookieColumnContext = {
 
 export type CookieCellOptions = {
   folders: CellOption[];
+  statuses: CellOption[];
 };
 
-// Both writes land in cookies.save, a partial patch -- the rules live in
+// Every write lands in cookies.save, a partial patch -- the rules live in
 // tables/cookieCellActions.tsx.
 export type CookieCellActions = {
   setTags: (cookie: ArgusCookie, tags: string[]) => void;
   setFolder: (cookie: ArgusCookie, folderId: string) => void;
+  setStatus: (cookie: ArgusCookie, status: string) => void;
+  setColor: (cookie: ArgusCookie, color: string) => void;
 };
 
 export type CookieColumn = TableColumn<ArgusCookie, CookieColumnContext>;
@@ -54,13 +61,50 @@ export const COOKIE_COLUMNS: CookieColumn[] = [
     locked: true,
     cellClassName: 'name-cell',
     sort: (cookie) => cookie.name,
+    // The icon is the set's own mark and the way to change it. Its colour falls
+    // back to the folder's, which is what it was before a set could carry one:
+    // a folder tint tells you where the set is filed, which is useful right up
+    // to the point where two sets in one folder need telling apart.
+    //
+    // No `stopRowClick` on the column, deliberately -- the name beside the icon
+    // still selects the row. CellColor swallows the click on the swatch alone.
     cell: (cookie, context) => (
       <>
-        <span className="avatar" style={profileColorStyle(context.folderFor(cookie)?.color)}>
-          <Cookie size={15} strokeWidth={1.75} />
-        </span>
+        <CellColor
+          label={`Colour for ${cookie.name}`}
+          onChange={(color) => context.actions.setColor(cookie, color)}
+          value={cookie.color || ''}
+        >
+          <span
+            className="avatar"
+            style={profileColorStyle(cookieSetColor(cookie, context.state.cookie_folders))}
+          >
+            <Cookie size={15} strokeWidth={1.75} />
+          </span>
+        </CellColor>
         {cookie.name}
       </>
+    ),
+  },
+  {
+    // Visible by default rather than hidden behind the column picker, the same
+    // call the Proxies status column makes and for the same reason.
+    id: 'status',
+    label: 'Status',
+    description: 'A label you mark the set with.',
+    cellClassName: 'cell-fit',
+    stopRowClick: true,
+    sort: (cookie) => cookie.status || defaultCookieStatus,
+    cell: (cookie, context) => (
+      <CellPicker
+        chip
+        label={`Change status for ${cookie.name}`}
+        onPick={(status) => context.actions.setStatus(cookie, status)}
+        options={context.options.statuses}
+        trigger={<StatusChip status={cookie.status || defaultCookieStatus} />}
+        value={cookie.status || defaultCookieStatus}
+        width={230}
+      />
     ),
   },
   {

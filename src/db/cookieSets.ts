@@ -11,7 +11,8 @@ import type {CookieSetRow} from './rows';
 // them on every load, which useCloudData repeats on each window focus. This
 // list is metadata; loadPayload fetches a body, one set at a time.
 const COLUMNS =
-  'id,org_id,name,updated_at,created_at,source_url,count,folder_id,tags,deleted_at,assigned_to';
+  'id,org_id,name,updated_at,created_at,source_url,count,folder_id,tags,deleted_at,' +
+  'assigned_to,status,color';
 
 // Trashed sets come back too, exactly as profiles.list returns soft-deleted
 // profiles: Trash is a view the tab filters into, not a second read.
@@ -64,8 +65,8 @@ export async function create(
   raise(error, 'cookieSets.create');
 }
 
-// Metadata only: name, folder, tags. The payload goes through savePayload,
-// which has to write three columns at once.
+// Metadata only: name, folder, tags, status, colour. The payload goes through
+// savePayload, which has to write three columns at once.
 export async function update(
     orgId: string, id: string, patch: Partial<ArgusCookie>): Promise<void> {
   const client = requireClient();

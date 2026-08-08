@@ -12,6 +12,8 @@ import {CellPicker, CellTextEdit} from '../components/ui/CellControls';
 import {FolderLabel} from '../components/ui/FolderLabel';
 import {FlagIcon} from '../components/ui/icons';
 import {ProxyCheckCell, storedCheckState} from '../components/ui/ProxyCheckCell';
+import {StatusChip} from '../components/ui/StatusChip';
+import {defaultProxyStatus} from '../data/statuses';
 import {assigneeName} from '../lib/assignees';
 import {profilesUsingProxy, proxyCountryLabel, splitPastedConnection} from '../lib/proxies';
 import type {CellOption} from '../components/ui/CellControls';
@@ -33,6 +35,7 @@ export type ProxyCellOptions = {
   types: CellOption[];
   folders: CellOption[];
   members: CellOption[];
+  statuses: CellOption[];
 };
 
 // Every write a cell can perform. Narrow signatures, built in
@@ -41,6 +44,7 @@ export type ProxyCellOptions = {
 // every connection edit clears the stored check.
 export type ProxyCellActions = {
   setName: (proxy: ArgusProxy, name: string) => void;
+  setStatus: (proxy: ArgusProxy, status: string) => void;
   setType: (proxy: ArgusProxy, type: 'http' | 'socks5') => void;
   setEndpoint: (proxy: ArgusProxy, endpoint: ProxyEndpoint) => void;
   setUsername: (proxy: ArgusProxy, username: string) => void;
@@ -136,6 +140,35 @@ export const PROXY_COLUMNS: ProxyColumn[] = [
           value={proxy.name || ''}
         />
       </>
+    ),
+  },
+  {
+    // Visible by default, for the reason Login and Password below are: this is
+    // the column the feature exists to add, and one you have to find in the
+    // picker first has not been added.
+    //
+    // Not to be confused with the Check column further down. That one is the
+    // machine's answer -- did the last check reach the exit -- and is written
+    // only by the checker. This is the user's own mark, and nothing writes it
+    // but the user.
+    id: 'status',
+    label: 'Status',
+    description: 'A label you mark the proxy with. Not the check result.',
+    cellClassName: 'cell-fit',
+    stopRowClick: true,
+    sort: (proxy) => proxy.status || defaultProxyStatus,
+    cell: (proxy, context) => (
+      <CellPicker
+        // The chip is already a bordered pill, so it takes the hover itself --
+        // the same argument the Profiles status cell makes.
+        chip
+        label={`Change status for ${proxyLabel(proxy)}`}
+        onPick={(status) => context.actions.setStatus(proxy, status)}
+        options={context.options.statuses}
+        trigger={<StatusChip status={proxy.status || defaultProxyStatus} />}
+        value={proxy.status || defaultProxyStatus}
+        width={230}
+      />
     ),
   },
   {

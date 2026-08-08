@@ -4,7 +4,7 @@ import {proxyToRow, rowToProxy} from './mappers';
 import type {ProxyRow} from './rows';
 
 const COLUMNS =
-  'id,org_id,name,type,host,port,username,password,folder_id,last_checked_at,last_ip,' +
+  'id,org_id,name,status,type,host,port,username,password,folder_id,last_checked_at,last_ip,' +
   'last_country,last_latency_ms,created_at,last_country_code,last_error,assigned_to,' +
   'last_timezone,last_city,last_region,last_latitude,last_longitude';
 
@@ -73,6 +73,19 @@ export async function rename(orgId: string, id: string, name: string): Promise<v
       .eq('org_id', orgId)
       .eq('id', id);
   raise(error, 'proxies.rename');
+}
+
+// Marks one proxy with a status. Narrow for the same reason rename is -- this
+// is edited inline in the table, and marking a proxy "Dead" must not carry a
+// stale copy of the row over a check the background sweep just recorded.
+export async function setStatus(orgId: string, id: string, status: string): Promise<void> {
+  const client = requireClient();
+  const {error} = await client
+      .from('proxies')
+      .update({status})
+      .eq('org_id', orgId)
+      .eq('id', id);
+  raise(error, 'proxies.setStatus');
 }
 
 // The connection fields a table cell can edit. Credentials take null to mean

@@ -17,12 +17,13 @@ import {ColumnsButton} from '../ui/ColumnsButton';
 import {EmptyState} from '../ui/EmptyState';
 import {FolderGlyph} from '../ui/FolderGlyph';
 import {PaginationBar} from '../ui/PaginationBar';
-import {FolderSelect, TagFilter} from '../ui/TableFilters';
+import {FolderSelect, StatusFilter, TagFilter} from '../ui/TableFilters';
 import {ColumnCells, ColumnHeaders} from '../../tables/TableColumns';
 import {COOKIE_COLUMNS} from '../../tables/cookieColumns';
 import {useCookieCellActions, useCookieCellOptions} from '../../tables/cookieCellActions';
 import {sortColumnsFrom} from '../../tables/columns';
 import {useTableColumns} from '../../tables/ColumnLayouts';
+import {defaultCookieStatus} from '../../data/statuses';
 import {TRASH_FOLDER_ID} from '../../lib/trash';
 import {useOrg} from '../../org';
 import {paginate} from '../../lib/paginate';
@@ -67,7 +68,7 @@ export function CookiesTab({
   onShare,
   onShowAbout,
 }: CookiesTabProps) {
-  const {data, toast, library, cookies, cookieTagOptions} = useWorkspace();
+  const {data, toast, library, cookies, cookieTagOptions, cookieStatusOptions} = useWorkspace();
   const org = useOrg();
   const state = data.state;
   const {run, isPending} = useAsyncAction();
@@ -76,6 +77,8 @@ export function CookiesTab({
   const [search, setSearch] = useState('');
   // Held as a tagKey, so "Instagram" and "instagram" are one dropdown entry.
   const [tagFilter, setTagFilter] = useState('');
+  // '' for "All statuses".
+  const [statusFilter, setStatusFilter] = useState('');
   const [usageFilter, setUsageFilter] = useState<UsageFilter>('');
   // "Only what I'm on the hook for." Distinct from usageFilter beside it, which
   // asks whether any PROFILE holds the set -- a different question about a
@@ -89,7 +92,7 @@ export function CookiesTab({
   const [purge, setPurge] = useState<PurgeRequest | null>(null);
 
   const inTrash = folderId === TRASH_FOLDER_ID;
-  const filtered = Boolean(search.trim() || tagFilter || usageFilter || mineOnly);
+  const filtered = Boolean(search.trim() || tagFilter || statusFilter || usageFilter || mineOnly);
   const usage = cookies.usageCounts();
 
   // Gates the "Assigned to me" filter chip; the Assigned column is gated by the
@@ -98,7 +101,7 @@ export function CookiesTab({
 
   // Options memoised, actions rebuilt every render -- see
   // tables/cookieCellActions.tsx.
-  const cellOptions = useCookieCellOptions(state);
+  const cellOptions = useCookieCellOptions(state, cookieStatusOptions);
   const cellActions = useCookieCellActions();
   const columnContext: CookieColumnContext = {
     state,
@@ -130,7 +133,7 @@ export function CookiesTab({
   }
 
   const visible = sorting.sort(visibleCookieSets(
-      state.cookies, {folderId, tagFilter, usageFilter, search}, usage)
+      state.cookies, {folderId, tagFilter, statusFilter, usageFilter, search}, usage)
       .filter((cookie) => !mineOnly || cookie.assigned_to === org.userId));
   const {items, page: clampedPage, totalPages, total} = paginate(visible, page, pageSize);
 
@@ -267,6 +270,11 @@ export function CookiesTab({
         {/* Only tags actually on a set: a dropdown listing every brand when the
           * library uses two of them is a list of ways to empty the table. */}
         <TagFilter value={tagFilter} options={cookieTagOptions} onChange={setTagFilter} />
+        <StatusFilter
+          onChange={setStatusFilter}
+          options={cookieStatusOptions}
+          value={statusFilter}
+        />
         <select
           value={usageFilter}
           onChange={(event) => setUsageFilter(event.target.value as UsageFilter)}
@@ -529,7 +537,7 @@ export function CookiesTab({
                           </button>
                           <button
                             aria-label={`Assign ${cookie.name} to profiles`}
-                            className="ghost icon-button row-action"
+                            className="icon-button row-action"
                             onClick={(event) => {
                               event.stopPropagation();
                               onAssignCookieSet(cookie);
@@ -543,7 +551,7 @@ export function CookiesTab({
                             * one outside it. */}
                           <button
                             aria-label={`Share ${cookie.name}`}
-                            className="ghost icon-button row-action"
+                            className="icon-button row-action"
                             onClick={(event) => {
                               event.stopPropagation();
                               onShare({kind: 'cookie_set', ids: [cookie.id]});
@@ -555,7 +563,7 @@ export function CookiesTab({
                           <BusyButton
                             ariaLabel={`Duplicate ${cookie.name}`}
                             busy={isPending(`duplicate-${cookie.id}`)}
-                            className="ghost icon-button row-action"
+                            className="icon-button row-action"
                             icon={<Copy size={16} />}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -565,7 +573,7 @@ export function CookiesTab({
                           />
                           <button
                             aria-label={`Delete ${cookie.name}`}
-                            className="ghost icon-button row-action row-action-danger"
+                            className="icon-button row-action row-action-danger"
                             onClick={(event) => {
                               event.stopPropagation();
                               void trashSets([cookie.id], `"${cookie.name}"`);
@@ -593,7 +601,7 @@ export function CookiesTab({
                       'Nothing matches those filters' :
                       inTrash ? 'Trash is empty' : 'This folder is empty'}
                     body={filtered ?
-                      'Try a different search term, or clear the tag and usage filters.' :
+                      'Try a different search term, or clear the tag, status and usage filters.' :
                       inTrash ?
                         'Deleted cookie-sets wait here for 30 days before they are purged.' :
                         'Cookie-sets you add to this folder will show up here.'}
@@ -658,9 +666,10 @@ function selectionLabel(size: number): string {
 // deliberately so.
 function visibleCookieSets(
     allCookies: ArgusCookie[],
-    {folderId, tagFilter, usageFilter, search}: {
+    {folderId, tagFilter, statusFilter, usageFilter, search}: {
       folderId: string;
       tagFilter: string;
+      statusFilter: string;
       usageFilter: UsageFilter;
       search: string;
     },
@@ -670,10 +679,16 @@ function visibleCookieSets(
   const inFolder = folderId && !inTrash ?
     byTrash.filter((cookie) => cookie.folder_id === folderId) :
     byTrash;
-  const byUsage = usageFilter ?
+  // Against the same fallback the cell renders, so filtering by Fresh finds the
+  // sets nobody has marked at all.
+  const byStatus = statusFilter ?
     inFolder.filter((cookie) =>
-      (usageFilter === 'used') === Boolean(usage.get(cookie.id))) :
+      (cookie.status || defaultCookieStatus).toLowerCase() === statusFilter.toLowerCase()) :
     inFolder;
+  const byUsage = usageFilter ?
+    byStatus.filter((cookie) =>
+      (usageFilter === 'used') === Boolean(usage.get(cookie.id))) :
+    byStatus;
   // Compared on tagKey, so a set tagged "Instagram" and one tagged "instagram"
   // both answer to the one dropdown entry.
   const byTag = tagFilter ?

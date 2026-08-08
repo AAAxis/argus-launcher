@@ -8,6 +8,7 @@ import {AvatarPicker} from '../ui/AvatarPicker';
 import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
+import {CookieSetLabel} from '../ui/CookieSetLabel';
 import {Field} from '../ui/Field';
 import {FormGroup} from '../ui/FormGroup';
 import {NotesPanel} from '../ui/NotesPanel';
@@ -159,12 +160,21 @@ export function ProfileModal({
     });
   }
 
+  // The attached set, with its mark and the count it has always shown. A set
+  // the workspace no longer holds falls back to the bare id: the profile still
+  // points at something, and blanking the field would read as "no cookies".
   function cookieLabel(cookieId: string) {
     const cookie = state.cookies.find((item) => item.id === cookieId);
     if (!cookie) {
-      return cookieId;
+      return <span>{cookieId}</span>;
     }
-    return cookie.count ? `${cookie.name} (${cookie.count} cookies)` : cookie.name;
+    return (
+      <CookieSetLabel
+        cookie={cookie}
+        folders={state.cookie_folders}
+        text={cookie.count ? `${cookie.name} (${cookie.count} cookies)` : cookie.name}
+      />
+    );
   }
 
   // Where a Summary group's Edit button lands. The fingerprint group opens the
@@ -561,7 +571,7 @@ export function ProfileModal({
                 </button>
                 {draft.cookie_mode === 'saved' && draft.cookie_id ? (
                   <>
-                    <span>{cookieLabel(draft.cookie_id)}</span>
+                    {cookieLabel(draft.cookie_id)}
                     <button
                       className="icon-button danger-icon"
                       type="button"

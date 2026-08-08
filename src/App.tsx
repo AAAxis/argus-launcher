@@ -48,6 +48,7 @@ import {
 import {SettingsDialog} from './settings/SettingsDialog';
 import {BusyButton} from './components/ui/BusyButton';
 import {LoadingState} from './components/ui/LoadingState';
+import {RefreshButton} from './components/ui/RefreshButton';
 import {COOKIE_INTRO_STEPS} from './data/cookieIntro';
 import {PROFILE_INTRO_STEPS} from './data/profileIntro';
 import {DEFAULT_FOLDER_ICON} from './data/folderIcons';
@@ -58,6 +59,7 @@ import {SITE_LINKS} from './data/links';
 import {runTarget} from './automations/target';
 import {SITE_URL} from './lib/auth';
 import {hasSeenProfileIntro, markProfileIntroSeen} from './lib/introSeen';
+import {isSidebarCollapsed, setSidebarCollapsed} from './lib/sidebarCollapsed';
 import {acknowledgePlan, lastAcknowledgedPlan} from './lib/planWelcome';
 import {isPlanKey, PLANS, showsPlanPicker} from './plans';
 import {TRASH_FOLDER_ID} from './lib/trash';
@@ -98,6 +100,10 @@ export function App() {
   // and closing it does not unmount what it opened.
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [leavingWorkspace, setLeavingWorkspace] = useState(false);
+  // Lives here and not in Sidebar because the column it changes is on
+  // .app-shell, which is this component's element. The initialiser is the lazy
+  // form so localStorage is read once on mount rather than on every render.
+  const [railCollapsed, setRailCollapsed] = useState(isSidebarCollapsed);
   // Which folder each tab is filtered to. Held here rather than in the tabs
   // because creating a folder from the dialog switches the view to it.
   const [profileFolderId, setProfileFolderId] = useState('');
@@ -315,6 +321,23 @@ export function App() {
     }
   }, [introReady]);
 
+  // A profile's start page asking for one of its automation cards to be opened
+  // here. main.cjs has already brought this window to the front; all that is
+  // left is to show the thing the user pressed for.
+  //
+  // The workflow may have been deleted, or unshared, since the session that is
+  // asking was launched -- then the Automations tab is the closest true answer,
+  // exactly as the bell's history handler above resolves the same problem.
+  useEffect(() => {
+    return native?.onOpenAutomationRequest?.(({automationId}) => {
+      const automation = data.state.automations.find((item) => item.id === automationId);
+      setActiveTab('automations');
+      if (automation) {
+        setAutomationDraft({automation, exists: true});
+      }
+    });
+  }, [data.state.automations]);
+
   // The Plans tab sells the first paid plan, so it goes away when one is bought
   // -- which can happen while the user is standing on it, on the focus refresh
   // that follows a purchase. Without this the sidebar entry vanishes and the
@@ -346,14 +369,22 @@ export function App() {
   const openIntegration = findIntegration(integrations.openId);
 
   return (
-    <main className="app-shell">
+    <main className={railCollapsed ? 'app-shell rail-collapsed' : 'app-shell'}>
       <Sidebar
         activeTab={activeTab}
+        collapsed={railCollapsed}
         onCreateWorkspace={() => setCreatingWorkspace(true)}
         onLeaveWorkspace={() => setLeavingWorkspace(true)}
         onSettings={() => setSettingsOpen(true)}
         onSignOut={() => void signOut()}
         onTab={setActiveTab}
+        // Not the updater form: it would put the localStorage write inside a
+        // function React is free to call twice.
+        onToggleCollapsed={() => {
+          const next = !railCollapsed;
+          setRailCollapsed(next);
+          setSidebarCollapsed(next);
+        }}
       />
 
       <section className="content">
@@ -951,10 +982,21 @@ export function App() {
       case 'profiles':
         return (
           <>
-            <button className="ghost" onClick={() => editors.setImportOpen(true)}>
-              <Upload size={18} /> Import
+            {/* Flat, the same silhouette the toolbar's filters and Columns take
+              * -- see the .filter-trigger note in styles.css. Three bordered
+              * buttons side by side made Refresh, Import and Add profile read as
+              * equal offers, when only the last is the thing you came here to
+              * do. The border is the hierarchy.
+              *
+              * Refresh first, and here rather than in the table toolbar: it acts
+              * on the whole workspace -- proxies, hand-offs and the plan as well
+              * as this table -- so it belongs beside the other header actions
+              * and not among controls that only narrow the rows below. */}
+            <RefreshButton />
+            <button className="filter-trigger" onClick={() => editors.setImportOpen(true)}>
+              <span className="filter-trigger-label"><Upload size={16} strokeWidth={1.9} /> Import</span>
             </button>
-            <button onClick={editors.newProfile}><UserPlus size={18} /> Add profile</button>
+            <button onClick={editors.newProfile}><UserPlus size={16} /> Add profile</button>
           </>
         );
       // 'automations' has no case, on the same terms as 'extensions': both put
@@ -964,24 +1006,28 @@ export function App() {
       case 'proxies':
         return (
           <>
-            <button className="ghost" onClick={() => editors.setProxyImportOpen(true)}>
-              <Upload size={18} /> Import
+            {/* Matched to the Profiles pair above. This one sits in the same
+              * slot of the same header, so a bordered Import here and a flat one
+              * there would read as the button changing shape when you switch
+              * tabs. */}
+            <button className="filter-trigger" onClick={() => editors.setProxyImportOpen(true)}>
+              <span className="filter-trigger-label"><Upload size={16} strokeWidth={1.9} /> Import</span>
             </button>
-            <button onClick={editors.newProxy}><Plus size={18} /> Add proxy</button>
+            <button onClick={editors.newProxy}><Plus size={16} /> Add proxy</button>
           </>
         );
       case 'cookies':
         return (
           <>
             <button className="ghost" onClick={() => setCookieIntroOpen(true)}>
-              <BookOpen size={18} /> About
+              <BookOpen size={16} /> About
             </button>
             <BusyButton
               busy={isPending('add-cookie-set')}
               busyLabel="Uploading…"
               onClick={() => void run('add-cookie-set', addCookieSetFromPicker)}
             >
-              <Plus size={18} /> Cookie-set
+              <Plus size={16} /> Cookie-set
             </BusyButton>
           </>
         );
@@ -991,7 +1037,7 @@ export function App() {
         // browser's worth of bookmarks across.
         return (
           <button onClick={() => editors.setBookmarkImportOpen(true)}>
-            <Upload size={18} /> Import bookmarks
+            <Upload size={16} /> Import bookmarks
           </button>
         );
       default:

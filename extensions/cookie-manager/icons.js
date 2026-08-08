@@ -48,6 +48,10 @@ const ArgusIcons = (() => {
     play: '<path d="M8 5.2v13.6l11.5-6.8z" fill="currentColor" stroke="none"/>',
     externalLink: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/>' +
       '<path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+    // Disclosure. Rotated 90deg by CSS when its section is open, rather than
+    // swapping to a second glyph -- one shape that turns reads as the same
+    // control in two states, two shapes read as two controls.
+    chevronRight: '<path d="m9 5 7 7-7 7"/>',
   };
 
   // fill/stroke are set on the element rather than left to CSS: make() is called

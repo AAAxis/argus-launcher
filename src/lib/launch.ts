@@ -31,8 +31,23 @@ export function buildLaunchPayload(
   // useProfileActions uses to decide whether this launch needs a debugging
   // port. Read from one place so the tiles on the page and the port behind them
   // cannot disagree, which they could when this was keyed off `startPage`.
-  const tileAutomations = startPageAutomations(state.automations, profile)
-      .map((item) => ({id: item.id, name: item.name}));
+  const pinnedAutomations = startPageAutomations(state.automations, profile);
+  const tileAutomations = pinnedAutomations.map((item) => ({id: item.id, name: item.name}));
+  // The same list again, with what a start-page card shows and the side panel's
+  // list does not: the description, and how many steps there are. Kept separate
+  // from tileAutomations rather than widening it, because that object is also
+  // the side panel's contract (SessionPanelData in native.ts, asserted by
+  // sessionPanelContract.test.ts) and the panel draws a one-line list.
+  //
+  // `steps` itself never travels. It carries selectors, urls and typed values,
+  // and this lands in a file:// document that goes on to visit arbitrary sites;
+  // the count is the one thing about them the page is allowed to know.
+  const pageAutomations = pinnedAutomations.map((item) => ({
+    id: item.id,
+    name: item.name,
+    description: item.description || '',
+    stepCount: item.steps?.length || 0,
+  }));
   // Composed once, spent twice: the start page's status pill and the browser
   // side panel's Session card are both built from this object. Deriving it in
   // each place instead is how one session ends up described two ways -- the
@@ -69,6 +84,14 @@ export function buildLaunchPayload(
   // so in practice this catches the window where another worker trashed a set
   // that this session has not reloaded yet.
   const savedMode = profile.cookie_mode === 'saved';
+  // Resolved once and spent twice, for the same reason proxyStatus above is:
+  // the browser is seeded from this name and the start page's session card
+  // reports it, so deciding it separately in each place is how the page ends up
+  // naming a set the session did not actually get.
+  const cookieSetName = savedMode ?
+    (savedCookie?.name || null) :
+    (profile.cookie_import_name || null);
+  const recheckable = canRecheckProxy(profile, proxy);
   return {
     id: profile.id,
     name: profile.name,
@@ -93,15 +116,17 @@ export function buildLaunchPayload(
     // automation API -- run in the renderer, so localStorage is available on
     // either path.
     homeHtml: anonymousHomeHtml(
-      profile, state.shared_bookmarks, proxyStatus, readSearchEngine(),
-      theme, tileAutomations, startPage || null),
+      profile, state.shared_bookmarks, proxyStatus, readSearchEngine(), theme, {
+        automations: pageAutomations,
+        run: startPage || null,
+        cookieSetName,
+        recheckable,
+      }),
     cookieImportPath: savedMode ? null : (profile.cookie_import_path || null),
     cookieImportUrl: savedMode ?
       (savedCookie?.url || null) :
       (profile.cookie_import_url || null),
-    cookieImportName: savedMode ?
-      (savedCookie?.name || null) :
-      (profile.cookie_import_name || null),
+    cookieImportName: cookieSetName,
     // Passed through as saved, not normalized here: what a missing key means
     // differs per extension (the three original ones default on so state saved
     // before their toggles existed keeps them; CaptchaPlugin defaults off
@@ -116,7 +141,7 @@ export function buildLaunchPayload(
       profile: {id: profile.id, name: profile.name},
       theme,
       proxy: proxyStatus,
-      recheckable: canRecheckProxy(profile, proxy),
+      recheckable,
       automations: tileAutomations,
     } : null,
   };

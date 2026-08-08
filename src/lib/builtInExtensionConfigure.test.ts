@@ -4,7 +4,7 @@ import path from 'node:path';
 import {describe, expect, it} from 'vitest';
 // CJS interop: the same table main.cjs materializes extensions from.
 // @ts-expect-error CJS module without types
-import {builtInExtension, seedPinnedExtensions, unpackedExtensionId} from '../../electron/built-in-extensions.cjs';
+import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId} from '../../electron/built-in-extensions.cjs';
 
 const deps = {parseCookieUrl: async () => [], parseCookieFile: () => []};
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'argus-ext-'));
@@ -157,13 +157,19 @@ describe('pinning the panel to the toolbar', () => {
     expect(readPinned(userDataDir)).toBeUndefined();
   });
 
-  // Only the panel asks to be pinned. A per-launch placement (FoxyWall) must
-  // never be eligible: its path, and therefore its id, changes every launch.
-  it('pins only the panel', () => {
+  // The id the native "Argus Helper" toolbar button drives the panel by --
+  // passed to the browser as --argus-panel-extension-id.
+  it('derives the panel extension id once its directory exists', () => {
+    const userDataDir = tempDir();
+    const dir = materialize(userDataDir);
+    expect(argusPanelExtensionId({userDataDir})).toBe(unpackedExtensionId(dir));
+  });
+
+  it('derives no panel extension id when the panel is switched off', () => {
     const userDataDir = tempDir();
     materialize(userDataDir);
-    fs.mkdirSync(path.join(userDataDir, 'ArgysBundled', 'SMSActivate'), {recursive: true});
-    expect(seedPinnedExtensions({userDataDir}, deps)).toHaveLength(1);
+    expect(argusPanelExtensionId(
+        {userDataDir, builtInExtensions: {cookie_manager: false}})).toBe('');
   });
 });
 
@@ -185,6 +191,43 @@ describe('Argus Panel manifest', () => {
     const dir = path.join(__dirname, '../../extensions/cookie-manager');
     for (const file of ['sidepanel.html', 'sidepanel.css', 'sidepanel.js', 'icons.js']) {
       expect(fs.existsSync(path.join(dir, file)), `${file} is missing`).toBe(true);
+    }
+  });
+
+  // Every <script src> in the markup, not a list kept here: the panel gained
+  // sync-status.js and the two places that enumerate its scripts (this and
+  // scripts/preview-panel.mjs) both had to learn about it. One of them didn't,
+  // and the preview rendered a blank panel. Read the document instead.
+  it('ships every script sidepanel.html loads, in a file that exists', () => {
+    const dir = path.join(__dirname, '../../extensions/cookie-manager');
+    const html = fs.readFileSync(path.join(dir, 'sidepanel.html'), 'utf8');
+    const sources = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((match) => match[1]);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) {
+      expect(fs.existsSync(path.join(dir, source)), `${source} is missing`).toBe(true);
+    }
+  });
+
+  // A toolbar button whose icon file does not exist renders as a blank square
+  // -- present, clickable, and invisible. Nothing else here would catch a
+  // renamed icon directory, and the icons moved into per-theme subdirectories
+  // exactly once, which is the change that would have shipped that.
+  it('points at icon files that exist, in both themes', () => {
+    const dir = path.join(__dirname, '../../extensions/cookie-manager');
+    const declared = [
+      ...Object.values(manifest.icons as Record<string, string>),
+      ...Object.values(manifest.action.default_icon as Record<string, string>),
+    ];
+    expect(declared.length).toBe(8);
+    for (const rel of declared) {
+      expect(fs.existsSync(path.join(dir, rel)), `${rel} is missing`).toBe(true);
+    }
+    // background.js swaps to the other ink at runtime by substituting the
+    // directory, so that set has to be complete too even though the manifest
+    // never names it.
+    for (const rel of declared) {
+      const other = rel.replace('/on-light/', '/on-dark/');
+      expect(fs.existsSync(path.join(dir, other)), `${other} is missing`).toBe(true);
     }
   });
 });

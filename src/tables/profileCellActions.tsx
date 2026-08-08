@@ -15,6 +15,7 @@
 // option lists ARE memoised, because they are pure derivations of arrays that
 // only change when the data does.
 import {useMemo} from 'react';
+import {CookieSetLabel} from '../components/ui/CookieSetLabel';
 import {PlatformIcon} from '../components/ui/icons';
 import {statusOptionRows} from '../components/ui/StatusChip';
 import {
@@ -87,12 +88,16 @@ export function useProfileCellOptions(
     label: automation.name,
   })), [state.automations]);
 
+  // Drawn with the set's own mark, the same one the Cookies table gives it and
+  // the same one the cell's trigger now shows -- so picking a set from this
+  // list and reading it back afterwards are the same act of recognition.
   const cookieSets = useMemo<CellOption[]>(() => state.cookies
       .filter((cookie) => !cookie.deleted_at)
       .map((cookie) => ({
         value: cookie.id,
         label: cookie.name,
-      })), [state.cookies]);
+        render: <CookieSetLabel cookie={cookie} folders={state.cookie_folders} />,
+      })), [state.cookies, state.cookie_folders]);
 
   return {
     platforms: PLATFORM_OPTIONS,

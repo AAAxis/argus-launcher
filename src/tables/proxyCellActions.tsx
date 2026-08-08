@@ -17,6 +17,7 @@
 // does.
 import {useMemo} from 'react';
 import {FolderGlyph} from '../components/ui/FolderGlyph';
+import {statusOptionRows} from '../components/ui/StatusChip';
 import {useOrg} from '../org';
 import {useWorkspace} from '../workspace/WorkspaceProvider';
 import type {CellOption} from '../components/ui/CellControls';
@@ -48,9 +49,16 @@ export function folderCellOptions(folders: ArgusFolder[]): CellOption[] {
   }));
 }
 
-export function useProxyCellOptions(state: CloudState): ProxyCellOptions {
+export function useProxyCellOptions(
+    state: CloudState, statuses: string[]): ProxyCellOptions {
   const folders = useMemo(() =>
     folderCellOptions(state.proxy_folders), [state.proxy_folders]);
+
+  // The label list arrives already deduped from the provider; this only turns
+  // it into rows that draw the chip rather than its name -- the same
+  // statusOptionRows the Profiles table's picker is built from, so the two
+  // pickers cannot drift apart in how a status looks.
+  const statusRows = useMemo(() => statusOptionRows(statuses), [statuses]);
 
   // Yourself first and named "You", the same word the Assignee chip uses --
   // the same mapping useProfileCellOptions builds from the same roster.
@@ -60,7 +68,7 @@ export function useProxyCellOptions(state: CloudState): ProxyCellOptions {
     searchText: `${member.display_name || ''} ${member.email}`.toLowerCase(),
   })), [state.members]);
 
-  return {types: PROXY_TYPE_OPTIONS, folders, members};
+  return {types: PROXY_TYPE_OPTIONS, folders, members, statuses: statusRows};
 }
 
 export function useProxyCellActions(): ProxyCellActions {
@@ -69,6 +77,11 @@ export function useProxyCellActions(): ProxyCellActions {
 
   return {
     setName: (proxy, name) => void proxies.rename(proxy, name),
+
+    // A narrow one-column write, like the rename above and for the same reason.
+    // Deliberately NOT setConnection: a status is the user's own note about the
+    // proxy, so marking one must not clear the stored check.
+    setStatus: (proxy, status) => void proxies.setStatus(proxy, status),
 
     setType: (proxy, type) => void proxies.setConnection(proxy, {type}),
 
