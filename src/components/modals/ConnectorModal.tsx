@@ -8,10 +8,11 @@
 // an existing config would leave the old kind's keys orphaned inside `config`,
 // and "delete it and add the right one" is honest about what that is.
 import {useEffect, useState} from 'react';
-import {ArrowLeft, Check, ExternalLink, Eye, EyeOff, X} from 'lucide-react';
+import {ArrowLeft, Check, ExternalLink, X} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {Field} from '../ui/Field';
 import {Modal} from '../ui/Modal';
+import {SecretInput} from '../ui/SecretInput';
 import {ConnectorMark} from '../automations/ConnectorsView';
 import {native} from '../../native';
 import {
@@ -24,38 +25,6 @@ import type {ArgusConnector} from '../../types';
 // One value, not two booleans: `ok` picks the tone and `message` is the
 // service's own sentence, which is the only diagnostic worth showing.
 type TestResult = {ok: boolean; message: string};
-
-// A secret renders as a password input with its own reveal toggle. type="text"
-// under the toggle rather than always-password: the value is pasted once and
-// read back only to compare against the credential in hand, and a permanently
-// hidden field makes the one check that matters impossible.
-function SecretInput({value, placeholder, onChange}: {
-  value: string;
-  placeholder?: string;
-  onChange: (next: string) => void;
-}) {
-  const [shown, setShown] = useState(false);
-  return (
-    <div className="connector-secret-input">
-      <input
-        type={shown ? 'text' : 'password'}
-        value={value}
-        placeholder={placeholder}
-        autoComplete="off"
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <button
-        aria-label={shown ? 'Hide value' : 'Show value'}
-        className="ghost icon-button"
-        onClick={() => setShown((current) => !current)}
-        title={shown ? 'Hide value' : 'Show value'}
-        type="button"
-      >
-        {shown ? <EyeOff size={14} /> : <Eye size={14} />}
-      </button>
-    </div>
-  );
-}
 
 export function ConnectorModal({connector, exists, onClose}: {
   connector: ArgusConnector;

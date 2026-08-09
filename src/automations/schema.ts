@@ -70,6 +70,16 @@ export type FieldSpec = {
   // selector -- and because a step type added later may name its selector
   // something else.
   check?: 'selector';
+  // Marks the field that names a variable this step WRITES -- setVar.name,
+  // extract.into and the four other `into`s. Declared for the same reason
+  // `check` is, and the argument is the same one: the six fields share a
+  // regex and a kind but so could a field added later that writes nothing,
+  // and `into` is a name this catalogue chose rather than a rule.
+  //
+  // What reads it: the editor's insert chips and its unset-variable warning
+  // (src/automations/varRefs.ts), which need to know what a run will have
+  // written by the time a step asks for it.
+  writesVar?: boolean;
   // Show this field only when a sibling holds one of these values. The value is
   // a single string or a list of them.
   showWhen?: Record<string, string | string[]>;

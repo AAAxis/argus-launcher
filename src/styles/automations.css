@@ -1182,3 +1182,200 @@
   min-height: 26px;
   padding: 0 8px;
 }
+
+/* ── Parameters: declaring them, and answering them ────────────────────────── */
+
+/* The declaration card, above the settings card in the editor's right column.
+   Its own surface for the same reason the settings card has one -- but ABOVE
+   it, because parameters are what the steps read and the settings below are
+   wiring you set once. */
+.automation-parameters {
+  gap: 10px;
+}
+
+.automation-parameters-head h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.automation-parameters-head code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.automation-param {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.automation-param-row {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+}
+
+/* The whole collapsed row is the toggle, not just the chevron: a 14px target
+   beside a 300px row is a target nobody aims at. */
+.automation-param-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.automation-param-toggle:hover {
+  color: var(--accent-strong);
+}
+
+/* Monospace because it is a variable name, and the same treatment it gets
+   inside a {{vars.x}} template. Truncates rather than wrapping -- the summary
+   is a glance, and the expanded body has the whole of it. */
+.automation-param-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-param-body {
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.automation-param-add {
+  justify-self: start;
+}
+
+/* Warnings, not errors. Same list, quieter ink: these do not block Save, and
+   painting them --danger would say the workflow is broken when a caller may
+   well be supplying the variable. */
+.automation-problems.is-warning {
+  color: var(--status-warmup-ink);
+}
+
+/* ── Answering parameters (profile editor and Run dialog) ── */
+
+.param-values {
+  display: grid;
+  gap: 10px;
+}
+
+.param-value-missing {
+  color: var(--danger);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
+/* Insert chips under an interpolated step field. Small and quiet: they are an
+   affordance beside the input, not a second control competing with it. */
+.automation-insert-vars {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.automation-insert-vars-label {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.automation-insert-var {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.automation-insert-var:hover {
+  background: var(--hover);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* ── The profile editor's Automation values block ── */
+
+.profile-automation-values {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.profile-automation-values-block {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+.profile-automation-values-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.profile-automation-values-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-automation-values-note {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.profile-automation-values-add {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 6px;
+}
+
+.profile-automation-values-add select {
+  flex: 1;
+}
+
+/* ── The Run dialog's per-profile values ── */
+
+/* The wrapper that lets the form be a SIBLING of the row's <label> rather than
+   a child of it -- a label's implicit activation would toggle the checkbox on
+   every click into an input. */
+.run-profiles-entry {
+  display: grid;
+}
+
+/* Indented to the row's checkbox column, so the values read as belonging to
+   the profile above them rather than as a new section. */
+.run-profiles-params {
+  border-left: 2px solid var(--border-soft);
+  margin: 0 0 8px 34px;
+  padding: 2px 0 2px 12px;
+}
+
+.run-profiles-save {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

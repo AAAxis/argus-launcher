@@ -110,7 +110,8 @@ function AddStep({onAdd, subtle}: {
 }
 
 export function StepList({
-  steps, onChange, checkProfile, connectors = [], automations = [], depth = 0,
+  steps, onChange, checkProfile, connectors = [], automations = [], varNames = [],
+  depth = 0,
 }: {
   steps: AutomationStep[];
   onChange: (next: AutomationStep[]) => void;
@@ -124,6 +125,8 @@ export function StepList({
   // The workspace's other automations, for callAutomation's picker -- the one
   // being edited is excluded by the caller.
   automations?: {id: string; name: string}[];
+  // The automation's declared parameter names, for StepFields' insert chips.
+  varNames?: string[];
   depth?: number;
 }) {
   // A Set, not a single id. It used to be `string | null`, so opening one step
@@ -259,6 +262,7 @@ export function StepList({
                     checkProfile={checkProfile}
                     connectors={connectors}
                     automations={automations}
+                    varNames={varNames}
                   />
                 </div>
               )}
@@ -286,6 +290,7 @@ export function StepList({
                           checkProfile={checkProfile}
                           connectors={connectors}
                           automations={automations}
+                          varNames={varNames}
                           depth={depth + 1}
                           onChange={(next) => replace(
                               index,

@@ -299,6 +299,20 @@ export function resolveRunVars(input: {
   return out;
 }
 
+// Stored values to the strings a form holds.
+//
+// One helper rather than one per surface: the profile draft and the Run dialog
+// both need it, and two copies would eventually disagree about what a stored
+// list looks like in a textarea -- which is the difference between three cities
+// and the string "Dortmund,Essen,Bochum".
+export function valuesToStrings(values: ParamValues = {}): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(values)) {
+    out[name] = Array.isArray(value) ? value.join('\n') : String(value ?? '');
+  }
+  return out;
+}
+
 // Every variable name that must be masked in a run's log and record.
 //
 // Takes the whole set of declarations in play -- the root automation's and

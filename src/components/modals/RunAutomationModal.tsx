@@ -17,7 +17,7 @@
 // library's sweep (proxies.checkMany), so a result seen here is the same result
 // the Proxies tab shows, recorded the same way -- not a second opinion this
 // dialog forms and forgets.
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Play, SearchX, ShieldAlert, ShieldCheck, Wrench} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {Checkbox} from '../ui/Checkbox';
@@ -26,6 +26,10 @@ import {ProfileAvatar} from '../ui/ProfileAvatar';
 import {ProxyCheckCell, storedCheckState} from '../ui/ProxyCheckCell';
 import {StatusChip} from '../ui/StatusChip';
 import {RUN_CONCURRENCY} from '../../automations/limit';
+import {
+  describeMissingParams, resolveRunVars, valuesToStrings,
+} from '../../automations/parameters';
+import {ParamValueFields} from '../automations/ParamValueFields';
 import {isRunnable, proxiesToCheck, runReadiness} from '../../automations/runReadiness';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {RunReadiness} from '../../automations/runReadiness';
@@ -47,7 +51,8 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
   onFixProxy: (proxy: ArgusProxy) => void;
   onClose: () => void;
 }) {
-  const {data, automations, proxies, selectedProfileId, checkingProxyIds} = useWorkspace();
+  const {data, automations, profiles, proxies, selectedProfileId, checkingProxyIds} =
+    useWorkspace();
   const state = data.state;
 
   // A trashed profile cannot launch, so it is not a candidate -- offering one
@@ -77,6 +82,44 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
     return map;
     // state.proxies is the dependency that matters -- see above.
   }, [candidates, state.proxies]);
+
+  const parameters = useMemo(() => automation.parameters || [], [automation.parameters]);
+
+  // Per-profile answers for THIS run, seeded from what each profile already
+  // holds. Filled rather than empty, because the point of the row is to show
+  // what this profile is about to run with -- an empty box beside a ticked
+  // profile answers a different question.
+  //
+  // Consequence worth naming: emptying a box the profile had filled falls back
+  // to the profile's own value rather than to the automation's default, because
+  // resolveRunVars treats a blank override as "not supplied" and the profile
+  // layer is still underneath. Typing a different value -- the thing this
+  // dialog is for -- behaves exactly as it looks.
+  const [overrides, setOverrides] = useState<Record<string, Record<string, string>>>(() => {
+    const seeded: Record<string, Record<string, string>> = {};
+    for (const profile of candidates) {
+      seeded[profile.id] = valuesToStrings(profile.automation_vars?.[automation.id]);
+    }
+    return seeded;
+  });
+  const [saveToProfiles, setSaveToProfiles] = useState(false);
+
+  // What this profile would actually run with. The same call run() makes, with
+  // the same inputs, so the dialog and the run cannot disagree about whether a
+  // required value is answered.
+  const varsFor = useCallback((profile: ArgusProfile) => resolveRunVars({
+    parameters,
+    profileValues: profile.automation_vars?.[automation.id],
+    overrides: overrides[profile.id],
+  }), [parameters, automation.id, overrides]);
+
+  // Deliberately NOT part of blockFor, which disables the checkbox. The values
+  // are edited on the row itself, and the row's form only appears once it is
+  // ticked -- so blocking the tick would hide the only place the problem can be
+  // fixed. This blocks the Run BUTTON instead, and the row says which value.
+  const missingFor = useCallback(
+      (profile: ArgusProfile) => describeMissingParams(parameters, varsFor(profile)),
+      [parameters, varsFor]);
 
   function blockFor(profile: ArgusProfile): Block {
     if (running.has(profile.id)) {
@@ -161,6 +204,14 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
 
   const blocked = candidates.filter((profile) => blockFor(profile));
   const chosen = candidates.filter((profile) => picked.has(profile.id));
+  // Ticked, but not answerable yet. One sentence for the Run button's title,
+  // naming the profiles rather than counting them -- with three rows on screen
+  // "2 profiles need values" makes you check all three.
+  const unanswered = chosen.filter((profile) => missingFor(profile));
+  const unansweredNote = unanswered.length === 0 ? '' :
+    unanswered.length === 1 ?
+      `${unanswered[0].name} ${missingFor(unanswered[0])}.` :
+      `${unanswered.map((profile) => profile.name).join(', ')} need values.`;
 
   function toggle(id: string) {
     setPicked((current) => {
@@ -197,13 +248,26 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
   }
 
   function start() {
-    if (!chosen.length) {
+    if (!chosen.length || unanswered.length) {
       return;
+    }
+    // Written back before the run starts, and only when asked. Off by default
+    // because a value typed for one run is usually for one run -- silently
+    // rewriting the profile would make "try Essen once" permanent.
+    if (saveToProfiles && parameters.length > 0) {
+      for (const profile of chosen) {
+        void profiles.update(profile, {
+          automation_vars: {
+            ...profile.automation_vars,
+            [automation.id]: droppingBlanks(overrides[profile.id] || {}),
+          },
+        });
+      }
     }
     // Not awaited, and the dialog closes: a batch is minutes long, and holding
     // this open would hide the cards and the history that report it. runMany
     // owns the pacing, the summary and the failures from here.
-    void automations.runMany(automation, chosen);
+    void automations.runMany(automation, chosen, {varsByProfile: overrides});
     onClose();
   }
 
@@ -222,17 +286,23 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
           <button className="ghost" onClick={recheck} disabled={sweeping || !visible.length}>
             <ShieldCheck size={16} /> Re-check proxies
           </button>
-          <BusyButton
-            busy={sweeping}
-            busyLabel="Checking proxies…"
-            disabled={!chosen.length}
-            icon={<Play size={16} />}
-            onClick={start}
-          >
-            {chosen.length ?
-              `Run on ${chosen.length} ${chosen.length === 1 ? 'profile' : 'profiles'}` :
-              'Run'}
-          </BusyButton>
+          {/* The title sits on a wrapper span, not on the button: Chromium
+              suppresses pointer events on a disabled control, so a title on the
+              button itself never appears at the one moment it is needed. Same
+              reason the card's Run button wraps its own. */}
+          <span title={unansweredNote || undefined}>
+            <BusyButton
+              busy={sweeping}
+              busyLabel="Checking proxies…"
+              disabled={!chosen.length || unanswered.length > 0}
+              icon={<Play size={16} />}
+              onClick={start}
+            >
+              {chosen.length ?
+                `Run on ${chosen.length} ${chosen.length === 1 ? 'profile' : 'profiles'}` :
+                'Run'}
+            </BusyButton>
+          </span>
         </>
       }
     >
@@ -260,11 +330,15 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
         {visible.map((profile) => {
           const value = readiness.get(profile.id);
           const block = blockFor(profile);
+          // Ticked, and this automation asks for something. The form is a
+          // SIBLING of the row's <label>, never a child: a label's implicit
+          // activation would toggle the checkbox on every click into an input.
+          const showValues = parameters.length > 0 && picked.has(profile.id);
           return (
+            <div className="run-profiles-entry" key={profile.id}>
             <label
               aria-disabled={block ? true : undefined}
               className={`move-profiles-row run-profiles-row${block ? ' is-blocked' : ''}`}
-              key={profile.id}
             >
               <Checkbox
                 checked={picked.has(profile.id)}
@@ -317,6 +391,17 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
                 )}
               </span>
             </label>
+            {showValues && (
+              <div className="run-profiles-params">
+                <ParamValueFields
+                  parameters={parameters}
+                  values={overrides[profile.id] || {}}
+                  onChange={(next) =>
+                    setOverrides((current) => ({...current, [profile.id]: next}))}
+                />
+              </div>
+            )}
+            </div>
           );
         })}
         {visible.length === 0 && (
@@ -329,6 +414,15 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
         )}
       </div>
 
+      {parameters.length > 0 && chosen.length > 0 && (
+        <label className="run-profiles-save">
+          <Checkbox checked={saveToProfiles} onChange={() => setSaveToProfiles((on) => !on)} />
+          <span>
+            Save these values to {chosen.length === 1 ? 'the profile' : 'the profiles'}
+          </span>
+        </label>
+      )}
+
       {blocked.length > 0 && (
         <p className="run-blocked-note">
           <ShieldAlert size={15} />
@@ -337,6 +431,15 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
       )}
     </Modal>
   );
+}
+
+// A blank is "not set", so it is dropped rather than stored -- the same rule
+// the profile editor's save follows (draftVarsToProfile in drafts.ts). Storing
+// "" would look identical in the form and behave identically at run time, while
+// hiding which values the user actually chose.
+function droppingBlanks(values: Record<string, string>): Record<string, unknown> {
+  return Object.fromEntries(
+      Object.entries(values).filter(([, value]) => value.trim() !== ''));
 }
 
 // What this profile connects through, under its name. Empty for the modes with

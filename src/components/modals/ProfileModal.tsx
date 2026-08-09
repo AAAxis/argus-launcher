@@ -1,7 +1,7 @@
 import {useRef, useState} from 'react';
 import {
   Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
-  Tag, Terminal, Trash2, UserCheck, UserRound, UserRoundCog, Workflow,
+  SlidersHorizontal, Tag, Terminal, Trash2, UserCheck, UserRound, UserRoundCog, Workflow,
 } from 'lucide-react';
 import {AssigneeSelect} from '../ui/AssigneeSelect';
 import {AvatarPicker} from '../ui/AvatarPicker';
@@ -17,6 +17,7 @@ import {Modal} from '../ui/Modal';
 import {RotateButton} from '../ui/RotateButton';
 import {StatusPicker} from '../ui/StatusChip';
 import {TagInput} from '../ui/TagInput';
+import {ProfileAutomationValues} from '../automations/ProfileAutomationValues';
 import {FingerprintDatalists, FingerprintFields} from './FingerprintFields';
 import {TimezoneOverrideModal} from './ConfirmModals';
 import {ProfileSummary} from './ProfileSummary';
@@ -637,6 +638,25 @@ export function ProfileModal({
                     <option key={automation.id} value={automation.id}>{automation.name}</option>
                   ))}
                 </select>
+              </Field>
+              {/* Directly under the picker, because the first question after
+                  "which automation" is "with what". `group`, not a label: the
+                  block is a set of controls and a <label> around them would fire
+                  its implicit activation on the first one. */}
+              <Field
+                label="Automation values"
+                icon={<SlidersHorizontal size={14} />}
+                hint="What this profile answers when an automation asks. One workflow can
+                  then run a different city, group or account per profile."
+                wide
+                group
+              >
+                <ProfileAutomationValues
+                  automations={automations}
+                  attachedId={draft.automation_id}
+                  value={draft.automation_vars}
+                  onChange={(automation_vars) => set({automation_vars})}
+                />
               </Field>
               <Field
                 label="Command line switches"

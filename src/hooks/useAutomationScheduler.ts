@@ -17,6 +17,7 @@
 // refused start.
 import {useEffect, useRef} from 'react';
 import * as db from '../db';
+import {describeMissingParams, resolveRunVars} from '../automations/parameters';
 import {nextDueAt} from '../automations/schedule';
 import type {AutomationActions} from '../workspace/useAutomationActions';
 import type {ArgusAutomation, ArgusProfile, CloudState} from '../types';
@@ -121,7 +122,29 @@ export function useAutomationScheduler(
       if (targets.length === 0) {
         return;
       }
-      await actions.runMany(automation, targets, {trigger: 'schedule'});
+      // A profile with no value for a required parameter is skipped, and the
+      // rest of the slot still fires. run() would refuse it anyway; doing it
+      // here keeps one unanswered profile from spending a concurrency slot on
+      // a run that cannot start, and says so somewhere a developer can find it.
+      //
+      // Deliberately not a toast: a schedule fires while nobody is looking at
+      // the window, so a dialog would be waiting hours later for a slot that is
+      // long past. The profile editor flags the same gap where it can be fixed.
+      const answerable = targets.filter((profile) => {
+        const missing = describeMissingParams(automation.parameters, resolveRunVars({
+          parameters: automation.parameters,
+          profileValues: profile.automation_vars?.[automation.id],
+        }));
+        if (missing) {
+          console.warn(
+              `[schedule] skipped ${profile.name} for "${automation.name}": it ${missing}.`);
+        }
+        return !missing;
+      });
+      if (answerable.length === 0) {
+        return;
+      }
+      await actions.runMany(automation, answerable, {trigger: 'schedule'});
     }
   }, []);
 }

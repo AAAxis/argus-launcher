@@ -81,7 +81,7 @@
        "showWhen": {"what": "attr"}, "placeholder": "href"},
       {"key": "all", "kind": "boolean", "label": "All matches (stores an array)"},
       {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
-       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true,
        "hint": "Readable afterwards as {{vars.<name>}}."}
     ]
   },
@@ -97,7 +97,7 @@
       {"key": "args", "kind": "keyvalue", "label": "Values passed in as `vars`",
        "interpolate": true},
       {"key": "into", "kind": "text", "label": "Store result in variable",
-       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true}
     ]
   },
   "screenshot": {
@@ -131,7 +131,7 @@
     "cdp": [],
     "fields": [
       {"key": "name", "kind": "text", "label": "Name", "required": true,
-       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true},
       {"key": "value", "kind": "text", "label": "Value", "required": true, "interpolate": true}
     ]
   },
@@ -148,7 +148,7 @@
       {"key": "body", "kind": "textarea", "label": "Body", "interpolate": true,
        "showWhen": {"method": "POST"}},
       {"key": "into", "kind": "text", "label": "Store response in variable",
-       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true}
     ],
     "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
   },
@@ -173,7 +173,7 @@
       {"key": "maxTokens", "kind": "number", "label": "Answer length cap (tokens)", "min": 1,
        "max": 4096, "default": 512},
       {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
-       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true,
        "hint": "Readable afterwards as {{vars.<name>}}."}
     ],
     "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies. Page text is truncated before it is sent."
@@ -193,7 +193,7 @@
       {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
        "showWhen": {"context": "selector"}, "check": "selector"},
       {"key": "into", "kind": "text", "label": "Store the answer in variable",
-       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true,
        "hint": "Stores \"yes\" or \"no\". Branch on it with an If step: {{vars.<name>}} equals yes."},
       {"key": "onFalse", "kind": "select", "label": "If the answer is no", "default": "continue",
        "options": ["continue", "fail"],

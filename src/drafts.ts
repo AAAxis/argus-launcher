@@ -12,6 +12,7 @@ import {
 import {DEFAULT_PROFILE_COLOR, normalizeProfileColor, randomProfileColor} from './lib/profileColors';
 import {newRowId} from './lib/random';
 import {normalizeTags} from './lib/tags';
+import {valuesToStrings} from './automations/parameters';
 import {numberOrNull} from './lib/text';
 import type {ArgusProfile, ArgusProxy, ProxyMode, SharedBookmark} from './types';
 import type {FolderKind} from './workspace/useLibraryActions';
@@ -264,19 +265,14 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
   };
 }
 
-// Stored parameter values to form state. Every leaf becomes a string, because
-// that is what the controls hold -- a `true` from an agent over MCP renders as
-// a ticked box only once it is the string 'true'. A list arrives as a string[]
-// and goes back to the textarea's one-per-line text.
+// Stored parameter values to form state, one automation at a time. Every leaf
+// becomes a string through valuesToStrings, which the Run dialog also uses --
+// the two surfaces show the same boxes and must fill them the same way.
 function profileVarsToDraft(
     stored: ArgusProfile['automation_vars']): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {};
   for (const [automationId, values] of Object.entries(stored || {})) {
-    const entry: Record<string, string> = {};
-    for (const [name, value] of Object.entries(values || {})) {
-      entry[name] = Array.isArray(value) ? value.join('\n') : String(value ?? '');
-    }
-    out[automationId] = entry;
+    out[automationId] = valuesToStrings(values);
   }
   return out;
 }

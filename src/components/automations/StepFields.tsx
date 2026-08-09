@@ -182,6 +182,57 @@ function ConditionFields({value, onChange}: {
   );
 }
 
+// One-click {{vars.x}} insertion, under any field substitution actually
+// touches.
+//
+// Insertion goes at the CURSOR, not at the end: a url is usually
+// "https://immo.de/<here>/rent", and appending would make the chip useful only
+// for fields that are still empty. The target is found by walking up from the
+// button, so this works for both the <input> and <textarea> cases without
+// either control having to hold a ref.
+function InsertVarChips({names, onInsert}: {
+  names: string[];
+  onInsert: (snippet: string, target: HTMLInputElement | HTMLTextAreaElement | null) => void;
+}) {
+  if (names.length === 0) {
+    return null;
+  }
+  return (
+    <div className="automation-insert-vars">
+      <span className="automation-insert-vars-label">insert</span>
+      {names.map((name) => (
+        <button
+          key={name}
+          type="button"
+          className="automation-insert-var"
+          title={`Insert {{vars.${name}}}`}
+          onClick={(event) => {
+            const scope = event.currentTarget.closest('.field, .automation-field');
+            onInsert(`{{vars.${name}}}`,
+                scope?.querySelector('input, textarea') as
+                  HTMLInputElement | HTMLTextAreaElement | null);
+          }}
+        >{name}</button>
+      ))}
+    </div>
+  );
+}
+
+// Splices `snippet` in at the caret, or appends when the field was never
+// focused (selectionStart is null on a control the user has not touched).
+function spliceAtCaret(
+    current: string,
+    snippet: string,
+    target: HTMLInputElement | HTMLTextAreaElement | null,
+): string {
+  const at = target?.selectionStart;
+  if (at === undefined || at === null) {
+    return current + snippet;
+  }
+  const end = target?.selectionEnd ?? at;
+  return current.slice(0, at) + snippet + current.slice(end);
+}
+
 function control(
     field: FieldSpec,
     value: unknown,
@@ -300,9 +351,16 @@ function control(
   }
 }
 
-export function StepFields({step, onChange, checkProfile, connectors = [], automations = []}: {
+export function StepFields({
+  step, onChange, checkProfile, connectors = [], automations = [], varNames = [],
+}: {
   step: AutomationStep;
   onChange: (next: AutomationStep) => void;
+  // The automation's declared parameters, for the insert chips. Threaded from
+  // the editor the same way connectors and automations are -- StepList is the
+  // recursion, so a step inside a loop body offers the same chips as one at the
+  // top level.
+  varNames?: string[];
   // Threaded from the editor rather than read from context, exactly as
   // checkProfile is: StepList is also the recursion, and a branch's steps
   // choose from the same list.
@@ -358,6 +416,17 @@ export function StepFields({step, onChange, checkProfile, connectors = [], autom
                 selector={String(values[field.key] ?? '')}
                 profileId={checkProfile?.id || null}
                 profileName={checkProfile?.name || null}
+              />
+            )}
+            {/* Only where substitution happens. Offering a chip on
+                evaluate.script would be worse than offering none: that field
+                is never interpolated, so the inserted template would sit in
+                the source as literal text. */}
+            {field.interpolate && (
+              <InsertVarChips
+                names={varNames}
+                onInsert={(snippet, target) =>
+                  set(spliceAtCaret(String(values[field.key] ?? ''), snippet, target))}
               />
             )}
           </Field>

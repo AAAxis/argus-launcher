@@ -13,8 +13,11 @@ import {BrandIconPicker} from '../ui/BrandIconPicker';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
 import {TagInput} from '../ui/TagInput';
+import {ParametersCard} from '../automations/ParametersCard';
 import {StepList} from '../automations/StepList';
 import {STEP_SCHEMA} from '../../automations/schema';
+import {validateParams} from '../../automations/parameters';
+import {unsetVariables} from '../../automations/varRefs';
 import {
   MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES, validateSchedule,
 } from '../../automations/schedule';
@@ -395,6 +398,16 @@ export function AutomationModal({
   // step does -- the scheduler refuses invalid documents, so saving one would
   // silently never fire.
   const scheduleProblems = draft.schedule ? validateSchedule(draft.schedule) : [];
+  // A malformed declaration blocks Save for the same reason: the MCP handlers
+  // refuse one, so saving it here would make the editor and the API disagree
+  // about what a valid automation is. Shown in the Parameters card itself,
+  // beside the row that is wrong, rather than in the list under the steps.
+  const parameterProblems = validateParams(draft.parameters || []);
+  // Warnings, NOT problems. A {{vars.x}} with no local source is often correct
+  // -- a callAutomation caller or an MCP run can supply it -- so this is said
+  // and not enforced. Folding it into `problems` would refuse to save a
+  // workflow that runs.
+  const varWarnings = unsetVariables(draft.steps, draft.parameters || []);
 
   // Only applied when it parses AND validates. Anything else leaves the step
   // list exactly as it was.
@@ -453,7 +466,8 @@ export function AutomationModal({
           <BusyButton
             busy={saving}
             busyLabel="Saving"
-            disabled={problems.length > 0 || scheduleProblems.length > 0 || !draft.name.trim()}
+            disabled={problems.length > 0 || scheduleProblems.length > 0 ||
+              parameterProblems.length > 0 || !draft.name.trim()}
             onClick={() => void save()}
           >Save</BusyButton>
         </>
@@ -493,6 +507,11 @@ export function AutomationModal({
               checkProfile={checkProfile}
               connectors={connectors}
               automations={automations.filter((entry) => entry.id !== draft.id)}
+              // Named parameters only. A variable an earlier step writes is
+              // already in the bag by the time a later one reads it, but
+              // offering those as chips too would make the row grow with every
+              // extract in the workflow and bury the handful the user chose.
+              varNames={(draft.parameters || []).map((param) => param.name)}
               onChange={(steps) => setDraft({...draft, steps})}
             />
           ) : (
@@ -515,6 +534,15 @@ export function AutomationModal({
               {problems.slice(0, 5).map((problem) => <li key={problem}>{problem}</li>)}
             </ul>
           )}
+
+          {/* Its own list, and a quieter one: these do not block Save, so
+              putting them in the same red block as the problems would say the
+              workflow is broken when it may well be finished. */}
+          {varWarnings.length > 0 && view === 'steps' && (
+            <ul className="automation-problems is-warning">
+              {varWarnings.slice(0, 3).map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          )}
         </div>
 
         <aside className="profile-editor-side">
@@ -533,6 +561,13 @@ export function AutomationModal({
                 'Pick profiles and run'}
             ><Play size={16} /> Run now</button>
           )}
+
+          {/* Above the settings card, not inside it: parameters are what the
+              steps read, and the card below is wiring you set once. */}
+          <ParametersCard
+            parameters={draft.parameters || []}
+            onChange={(parameters) => setDraft({...draft, parameters})}
+          />
 
           {/* Name has moved to the dialog's heading -- this column is settings
               now, not identity. They sit on their own surface so the column
