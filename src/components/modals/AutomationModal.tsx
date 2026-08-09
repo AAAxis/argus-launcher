@@ -6,13 +6,15 @@
 // inline WITHOUT clobbering the step list -- you keep editing the text until it
 // is right, rather than losing it the moment you mistype a brace.
 import {useState} from 'react';
-import {Pencil, Play, Send, Trash2} from 'lucide-react';
+import {Folder, Pencil, Play, Send, Trash2, Workflow} from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {Field} from '../ui/Field';
 import {BrandIconPicker} from '../ui/BrandIconPicker';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
+import {Popover} from '../ui/Popover';
 import {TagInput} from '../ui/TagInput';
+import {AutomationMark} from '../automations/AutomationMark';
 import {ParametersCard} from '../automations/ParametersCard';
 import {StepList} from '../automations/StepList';
 import {STEP_SCHEMA} from '../../automations/schema';
@@ -351,7 +353,7 @@ function ScheduleFields({value, profiles, problems, onChange}: {
 
 export function AutomationModal({
   automation, exists, tagOptions = [], checkProfile, connectors = [], profiles = [],
-  automations = [], members = [], telegramLinked = false, telegramPref = null,
+  automations = [], folders = [], members = [], telegramLinked = false, telegramPref = null,
   onTelegramPref, onLinkTelegram, onClose, onSave, onRun, onDelete,
 }: {
   automation: ArgusAutomation;
@@ -369,6 +371,9 @@ export function AutomationModal({
   // edited is filtered out HERE, not by the picker: this file knows the draft's
   // id, and excluding it is what makes a self-call inexpressible in the UI.
   automations?: {id: string; name: string}[];
+  // The workspace's automation folders, for the Folder picker. Names and ids
+  // only, like the two lists above -- filing is all this dialog does with one.
+  folders?: {id: string; name: string}[];
   // The roster, for the attribution line -- created_by/updated_by are uuids.
   members?: OrgMember[];
   // Personal Telegram: whether MY account is linked, and MY preference for
@@ -392,6 +397,7 @@ export function AutomationModal({
   const [jsonError, setJsonError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   const problems = validate(draft.steps);
   // A schedule that is present but unsound blocks Save the same way a bad
@@ -408,6 +414,24 @@ export function AutomationModal({
   // and not enforced. Folding it into `problems` would refuse to save a
   // workflow that runs.
   const varWarnings = unsetVariables(draft.steps, draft.parameters || []);
+
+  // Whether anything has actually changed since the dialog opened.
+  //
+  // A string compare of the whole document, which is the whole of the
+  // question: an automation is JSON by construction -- steps, parameters and
+  // schedule are all plain data, which is what lets the JSON view round-trip
+  // it -- and key order is stable because both sides came from the same
+  // object. It costs nothing beside the three validators already running on
+  // every keystroke.
+  const dirty = JSON.stringify(draft) !== JSON.stringify(automation);
+  // The document is unsound: a bad step, an unsound schedule, a malformed
+  // parameter, or no name. Save can never happen in this state.
+  const blocked = problems.length > 0 || scheduleProblems.length > 0 ||
+    parameterProblems.length > 0 || !draft.name.trim();
+  // Greyed out until there is something to apply. Only for an automation that
+  // exists -- a draft has never been written, so "unchanged" still means
+  // "unsaved" and Save has work to do.
+  const canSave = !blocked && (!exists || dirty);
 
   // Only applied when it parses AND validates. Anything else leaves the step
   // list exactly as it was.
@@ -439,38 +463,134 @@ export function AutomationModal({
     onClose();
   }
 
+  // Every way out of this dialog -- the X, the backdrop and Cancel -- goes
+  // through here, which is the point: an editor this tall is easy to dismiss by
+  // accident, and a mis-click on the backdrop used to throw away a step tree
+  // with no way back. Clean drafts still close instantly; nobody should have to
+  // confirm closing something they only looked at.
+  function requestClose() {
+    if (dirty) {
+      setConfirmClose(true);
+      return;
+    }
+    onClose();
+  }
+
+  // Save from the prompt. The prompt closes first either way: on success `save`
+  // closes the editor behind it, and on failure the error belongs in the
+  // header where every other save error appears, not in a dialog that is on
+  // its way out.
+  async function saveFromPrompt() {
+    setConfirmClose(false);
+    await save();
+  }
+
   return (
     <Modal
-      onClose={onClose}
+      onClose={requestClose}
       className="automation-modal"
-      title={
-        <TitleField
-          value={draft.name}
-          onChange={(name) => setDraft({...draft, name})}
-        />
-      }
-      subtitle={`${draft.steps.length} step${draft.steps.length === 1 ? '' : 's'}`}
-      footer={
-        <>
+      // One header instead of a header and a footer.
+      //
+      // The four things you can do to an automation used to be in three
+      // places: Save, Cancel and Delete in the footer, and Run halfway down
+      // the settings column, below the parameters. They are one set of
+      // actions and they now read as one, directly under the name of the
+      // thing they act on. The header is sticky, which is the part that makes
+      // this an improvement rather than a move -- a footer is always reachable
+      // on a dialog this tall, and a header that scrolled away would not be.
+      header={
+        <div className="automation-head">
+          <div className="automation-head-title">
+            {/* The icon was a picker in the settings column, five fields down,
+                and the mark it produced was only ever visible back in the
+                grid -- so you chose it blind. It is the heading's own glyph
+                now, and clicking it is how you change it. */}
+            <Popover
+              label={`Change the icon and colour for ${draft.name.trim() || 'this automation'}`}
+              panelClassName="automation-icon-pop"
+              triggerClassName="automation-icon-trigger"
+              trigger={<AutomationMark icon={draft.icon} color={draft.color} size={28} />}
+              width={320}
+            >
+              <Field label="Icon" group>
+                <BrandIconPicker
+                  value={draft.icon || ''}
+                  onChange={(icon) => setDraft({...draft, icon: icon || null})}
+                />
+              </Field>
+              <Field
+                label="Card colour"
+                // Says where it lands, because with a brand logo picked it is
+                // no longer behind the mark -- AutomationMark leaves a logo
+                // its own colours and the tint moves to the card's frame.
+                hint="Tints the card's frame in the grid."
+                group
+              >
+                <ColorPicker
+                  label="Card colour"
+                  value={draft.color || ''}
+                  onChange={(color) => setDraft({...draft, color})}
+                />
+              </Field>
+            </Popover>
+            <div className="automation-head-name">
+              <h2>
+                <TitleField
+                  value={draft.name}
+                  onChange={(name) => setDraft({...draft, name})}
+                />
+              </h2>
+              {/* Its own mark, so the second line reads as a line of its own
+                  rather than as a caption hanging off the name. It is also
+                  what lets the brand mark stay on the title's line at the size
+                  the grid card draws it -- see .automation-head-title. */}
+              <p className="automation-head-steps">
+                <Workflow size={13} strokeWidth={2} aria-hidden="true" />
+                {draft.steps.length} step{draft.steps.length === 1 ? '' : 's'}
+              </p>
+            </div>
+          </div>
+
+          <div className="automation-head-actions">
+            {/* Primary, and first, for the reason it was primary in the
+                sidebar: it is the thing you came here to do. Everything else
+                in this dialog is configuration. */}
+            {onRun && exists && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => onRun(draft)}
+                disabled={problems.length > 0}
+                title={problems.length > 0 ?
+                  'Fix the problems listed under the steps first.' :
+                  'Pick profiles and run'}
+              ><Play size={16} /> Run now</button>
+            )}
+            {/* Grouped away from Run so the destructive one is not adjacent to
+                the one people reach for. Delete only for an automation that
+                exists: there is nothing to delete about a draft, and Cancel
+                already discards one. */}
+            <div className="automation-head-actions-end">
+              {onDelete && exists && (
+                <button type="button" className="ghost danger" onClick={onDelete}>
+                  <Trash2 size={16} /> Delete
+                </button>
+              )}
+              <button type="button" className="ghost" onClick={requestClose}>Cancel</button>
+              <BusyButton
+                busy={saving}
+                busyLabel="Saving"
+                disabled={!canSave}
+                title={!blocked && exists && !dirty ? 'No changes to save' : undefined}
+                onClick={() => void save()}
+              >Save</BusyButton>
+            </div>
+          </div>
+
+          {/* Under the button that failed, rather than at the bottom of a
+              dialog that scrolls. */}
           {saveError && <p className="settings-error">{saveError}</p>}
-          {/* .modal-actions gives .danger `margin-right: auto`, so this sits at
-              the far left of the row and Cancel/Save stay together at the
-              right. Only for an automation that exists: there is nothing to
-              delete about a draft, and Cancel already discards one. */}
-          {onDelete && exists && (
-            <button type="button" className="ghost danger" onClick={onDelete}>
-              <Trash2 size={16} /> Delete
-            </button>
-          )}
-          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-          <BusyButton
-            busy={saving}
-            busyLabel="Saving"
-            disabled={problems.length > 0 || scheduleProblems.length > 0 ||
-              parameterProblems.length > 0 || !draft.name.trim()}
-            onClick={() => void save()}
-          >Save</BusyButton>
-        </>
+        </div>
       }
     >
       <div className="profile-editor-layout">
@@ -546,23 +666,11 @@ export function AutomationModal({
         </div>
 
         <aside className="profile-editor-side">
-          {/* First, and primary. It was a ghost button at the bottom of the
-              column, below five settings -- so the one action you came here to
-              take was the quietest thing on the panel and the last thing you
-              reached. Everything under it is configuration. */}
-          {onRun && exists && (
-            <button
-              type="button"
-              className="primary automation-run-now"
-              onClick={() => onRun(draft)}
-              disabled={problems.length > 0}
-              title={problems.length > 0 ?
-                'Fix the problems listed under the steps first.' :
-                'Pick profiles and run'}
-            ><Play size={16} /> Run now</button>
-          )}
+          {/* Run now used to head this column. It is in the header with the
+              other three actions now, so the column is settings top to
+              bottom.
 
-          {/* Above the settings card, not inside it: parameters are what the
+              First, and outside the settings card: parameters are what the
               steps read, and the card below is wiring you set once. */}
           <ParametersCard
             parameters={draft.parameters || []}
@@ -581,22 +689,28 @@ export function AutomationModal({
                 onChange={(event) => setDraft({...draft, description: event.target.value})}
               />
             </Field>
-            {/* Identity before wiring: the icon and colour are how this card is
-                found in the grid, the same question the profile avatar answers.
-                Brands only -- the catalog is what lets an agent set one by
-                name over MCP. */}
-            <Field label="Icon" group>
-              <BrandIconPicker
-                value={draft.icon || ''}
-                onChange={(icon) => setDraft({...draft, icon: icon || null})}
-              />
-            </Field>
-            <Field label="Card colour" group>
-              <ColorPicker
-                label="Card colour"
-                value={draft.color || ''}
-                onChange={(color) => setDraft({...draft, color})}
-              />
+            {/* Icon and Card colour used to sit here, between the description
+                and the tags. They are behind the mark in the header now -- not
+                copied there, moved: two places to set one value is worse than
+                either, and the header is where you can see the result. */}
+            {/* Filing only. The hint says so because "folder" is a word people
+                reasonably expect to change behaviour, and here it changes
+                nothing except which card of the rail this appears under. */}
+            <Field
+              label="Folder"
+              icon={<Folder size={14} />}
+              hint="Where this appears in the automations list. Nothing else changes."
+            >
+              <select
+                value={draft.folder_id || ''}
+                onChange={(event) =>
+                  setDraft({...draft, folder_id: event.target.value || null})}
+              >
+                <option value="">All automations</option>
+                {folders.map((folder) => (
+                  <option value={folder.id} key={folder.id}>{folder.name}</option>
+                ))}
+              </select>
             </Field>
             <Field
               label="Tags"
@@ -763,6 +877,62 @@ export function AutomationModal({
           )}
         </aside>
       </div>
+
+      {/* Raised by every way out of this dialog when there is something to
+          lose. Three answers, because two would be a trap either way round:
+          "discard or cancel" makes saving a second trip through a dialog you
+          just dismissed, and "save or cancel" gives you no way to leave.
+
+          Not a window.confirm: the buttons have to say Discard and Save rather
+          than OK and Cancel, and the destructive one has to be the quiet one.
+          Nested, so it stacks on the editor with the dimmer backdrop. */}
+      {confirmClose && (
+        <Modal
+          nested
+          className="small-modal"
+          // The backdrop and the X both mean "I did not mean to close" --
+          // which is Keep editing, the safe answer, so they share it.
+          onClose={() => setConfirmClose(false)}
+          title="Save your changes?"
+          footer={
+            <>
+              <button
+                type="button"
+                className="ghost danger"
+                onClick={() => {
+                  setConfirmClose(false);
+                  onClose();
+                }}
+              >Discard</button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setConfirmClose(false)}
+              >Keep editing</button>
+              <BusyButton
+                busy={saving}
+                busyLabel="Saving"
+                // Blocked, not merely unchanged: reaching this prompt means
+                // something changed. A draft that does not validate cannot be
+                // saved from here either, and the reason is on the editor
+                // behind this -- which is what Keep editing goes back to.
+                disabled={blocked}
+                title={blocked ? 'Fix the problems in the editor first.' : undefined}
+                onClick={() => void saveFromPrompt()}
+              >Save</BusyButton>
+            </>
+          }
+        >
+          <p className="error-detail">
+            {blocked ?
+              `${draft.name.trim() || 'This automation'} has unsaved changes, but they ` +
+                'cannot be saved yet — the editor lists what needs fixing. Discarding ' +
+                'loses them.' :
+              `${draft.name.trim() || 'This automation'} has unsaved changes. ` +
+                'Discarding loses them.'}
+          </p>
+        </Modal>
+      )}
     </Modal>
   );
 }

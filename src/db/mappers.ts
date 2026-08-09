@@ -614,6 +614,8 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
       row.notify_on : null,
     icon: row.icon ?? null,
     color: row.color ?? null,
+    folder_id: row.folder_id ?? null,
+    deleted_at: row.deleted_at ?? null,
     last_run_at: row.last_run_at ?? null,
     last_run_status: isRunStatus(row.last_run_status) ? row.last_run_status : null,
     created_by: row.created_by ?? null,
@@ -650,6 +652,11 @@ export function automationToRow(
     notify_on: automation.notify_on ?? null,
     icon: automation.icon ?? null,
     color: automation.color ?? null,
+    folder_id: automation.folder_id ?? null,
+    // deleted_at is absent on purpose. replace() writes every editable column,
+    // and Trash is not one of them -- softDelete and restore own that field.
+    // Writing it here would let an ordinary editor save on a trashed row
+    // silently restore it, bypassing trg_automation_limit_restore.
     // created_via/created_by_label are set on create and then never rewritten:
     // replace() runs on every editor save, and a human's save must not adopt
     // an agent's automation (or the reverse). created_by keeps its DB default,
@@ -704,6 +711,9 @@ export function automationPatchToRow(
   }
   if ('color' in patch) {
     row.color = patch.color ?? null;
+  }
+  if ('folder_id' in patch) {
+    row.folder_id = patch.folder_id ?? null;
   }
   if ('schedule' in patch) {
     row.schedule = (patch.schedule as Record<string, unknown> | null) ?? null;

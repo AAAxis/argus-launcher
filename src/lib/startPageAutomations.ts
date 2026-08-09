@@ -15,6 +15,12 @@ export function startPageAutomations(
     // Omitted on the Start page tab, which is previewing what every profile
     // gets rather than one profile's page: that is the pinned set alone.
     profile?: Pick<ArgusProfile, 'automation_id'>): ArgusAutomation[] {
-  return automations.filter((item) =>
-    item.pinned || (profile?.automation_id ? item.id === profile.automation_id : false));
+  // deleted_at first, and here rather than at the three call sites, for the
+  // same reason this function exists at all: a trashed automation that still
+  // drew a tile on one of them and not the others is exactly the silent
+  // disagreement the shared helper is for. A profile keeps its automation_id
+  // through a soft delete so that restoring is lossless, which is precisely
+  // what makes this filter necessary.
+  return automations.filter((item) => !item.deleted_at && (
+    item.pinned || (profile?.automation_id ? item.id === profile.automation_id : false)));
 }

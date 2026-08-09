@@ -24,7 +24,8 @@ import type {ClipboardEvent} from 'react';
 import type {BookmarkDraft, FolderDraft, ProxyDraft, StatusDraft} from '../../drafts';
 import type {TagUsage} from '../../lib/tags';
 import type {ProxyCheckResult} from '../../native';
-import type {ArgusFolder, ArgusProxy, SharedBookmark} from '../../types';
+import type {FolderKind} from '../../workspace/useLibraryActions';
+import type {ArgusFolder, ArgusProxy, CloudState, SharedBookmark} from '../../types';
 
 export function ProxyModal({draft, source, onChange, onClose, onSaved, onRequestDelete}: {
   draft: ProxyDraft;
@@ -421,6 +422,73 @@ export function BookmarkModal({draft, onChange, onClose}: {
   );
 }
 
+// Everything the folder dialog says that depends on which library it belongs
+// to, in one place.
+//
+// This was five separate nested ternaries reading `isProxy ? … : isCookie ? …
+// : …`, which is a shape that only holds for three kinds -- a fourth turns
+// each of them into a four-deep chain, and forgetting one is invisible because
+// the profile branch is the fall-through and reads as plausible copy for
+// anything. A record keyed by FolderKind cannot be under-filled: leave a kind
+// out and typecheck fails.
+const FOLDER_COPY: Record<FolderKind, {
+  subtitle: string;
+  // Used in the delete confirmation, which has to name where the contents go.
+  consequence: string;
+  namePlaceholder: string;
+  iconHint: string;
+  colourHint: string;
+}> = {
+  profile: {
+    subtitle: 'Folders organize launcher profiles only. Browser sessions stay separate.',
+    consequence: 'Profiles will move to All profiles.',
+    namePlaceholder: 'Warmup',
+    iconHint: 'Shown next to the folder in the profiles list.',
+    colourHint: "Tints the folder's icon in the folder row and in the profiles table.",
+  },
+  proxy: {
+    subtitle:
+      'Folders group proxies in your library. Which profile a proxy is assigned to is separate.',
+    consequence: 'Proxies will move to All proxies.',
+    namePlaceholder: 'United States',
+    iconHint: 'A glyph or a country flag, shown next to the folder in the proxies list.',
+    colourHint: "Tints the folder's icon in the folder row and in the proxies table.",
+  },
+  cookie: {
+    subtitle: 'Folders group cookie-sets in your library. ' +
+      'Which profiles a set is assigned to is separate.',
+    consequence: 'Cookie-sets will move to All cookie-sets.',
+    namePlaceholder: 'Instagram',
+    iconHint: 'Shown next to the folder in the cookie-sets list.',
+    colourHint: "Tints the folder's icon in the folder row and in the cookie-sets table.",
+  },
+  automation: {
+    // Says what a folder is NOT, because this is the one library where the
+    // obvious wrong guess -- that filing changes what runs -- is a guess
+    // somebody will act on.
+    subtitle: 'Folders group automations in your library. Schedules, start-page pins ' +
+      'and what each one runs against are all separate.',
+    consequence: 'Automations will move to All automations.',
+    namePlaceholder: 'Warmup',
+    iconHint: 'Shown next to the folder in the automations list.',
+    colourHint: "Tints the folder's icon in the folder row above the automation grid.",
+  },
+};
+
+// The state list a folder of this kind lives in.
+function foldersOfKind(state: CloudState, kind: FolderKind): ArgusFolder[] {
+  switch (kind) {
+    case 'proxy':
+      return state.proxy_folders;
+    case 'cookie':
+      return state.cookie_folders;
+    case 'automation':
+      return state.automation_folders;
+    default:
+      return state.folders;
+  }
+}
+
 export function FolderModal({draft, onChange, onClose, onCreated}: {
   draft: FolderDraft;
   onChange: (draft: FolderDraft) => void;
@@ -434,6 +502,7 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
   const state = data.state;
   const isProxy = draft.kind === 'proxy';
   const isCookie = draft.kind === 'cookie';
+  const copy = FOLDER_COPY[draft.kind];
   // Only on create. Re-offering suggestions while editing would invite
   // overwriting a folder someone has already named and filled.
   //
@@ -477,18 +546,12 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
   }
 
   async function remove() {
-    const folders = isProxy ? state.proxy_folders : isCookie ? state.cookie_folders : state.folders;
-    const folder = folders.find((item) => item.id === draft.id);
+    const folder = foldersOfKind(state, draft.kind).find((item) => item.id === draft.id);
     onClose();
     if (!folder) {
       return;
     }
-    const consequence = isProxy ?
-      'Proxies will move to All proxies.' :
-      isCookie ?
-        'Cookie-sets will move to All cookie-sets.' :
-        'Profiles will move to All profiles.';
-    if (!window.confirm(`Delete folder ${folder.name}? ${consequence}`)) {
+    if (!window.confirm(`Delete folder ${folder.name}? ${copy.consequence}`)) {
       return;
     }
     if (await library.removeFolder(folder.id)) {
@@ -501,11 +564,7 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
       className="small-modal"
       onClose={onClose}
       title={draft.id ? 'Edit folder' : 'Create folder'}
-      subtitle={isProxy ?
-        'Folders group proxies in your library. Which profile a proxy is assigned to is separate.' :
-        isCookie ?
-          'Folders group cookie-sets in your library. Which profiles a set is assigned to is separate.' :
-          'Folders organize launcher profiles only. Browser sessions stay separate.'}
+      subtitle={copy.subtitle}
       footer={
         <>
           {draft.id && (
@@ -589,7 +648,7 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
           <input
             type="text"
             autoFocus
-            placeholder={isProxy ? 'United States' : isCookie ? 'Instagram' : 'Warmup'}
+            placeholder={copy.namePlaceholder}
             value={draft.name}
             onChange={(event) => onChange({...draft, name: event.target.value})}
             onKeyDown={(event) => {
@@ -603,11 +662,7 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
         <Field
           label="Icon"
           icon={<LayoutGrid size={14} />}
-          hint={isProxy ?
-            'A glyph or a country flag, shown next to the folder in the proxies list.' :
-            isCookie ?
-              'Shown next to the folder in the cookie-sets list.' :
-              'Shown next to the folder in the profiles list.'}
+          hint={copy.iconHint}
           wide
           group
         >
@@ -625,11 +680,7 @@ export function FolderModal({draft, onChange, onClose, onCreated}: {
           <Field
             label="Colour"
             icon={<Palette size={14} />}
-            hint={isProxy ?
-              "Tints the folder's icon in the folder row and in the proxies table." :
-              isCookie ?
-                "Tints the folder's icon in the folder row and in the cookie-sets table." :
-                "Tints the folder's icon in the folder row and in the profiles table."}
+            hint={copy.colourHint}
             wide
             group
           >

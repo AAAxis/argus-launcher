@@ -12,6 +12,7 @@
 import {useState} from 'react';
 import {ChevronDown, ChevronRight, Plus, Trash2} from 'lucide-react';
 import {Field} from '../ui/Field';
+import {InfoHint} from '../ui/InfoHint';
 import {
   MAX_PARAMETERS, PARAM_KINDS, paramLabel, paramSummary, validateParams,
 } from '../../automations/parameters';
@@ -225,7 +226,34 @@ export function ParametersCard({parameters, onChange}: {
   return (
     <div className="automation-settings-card automation-parameters">
       <div className="automation-parameters-head">
-        <h3>Parameters</h3>
+        {/* The one line of hint under this heading was the whole of the
+            documentation for the feature -- enough to recognise a parameter,
+            not enough to write one. The rest is behind the "i" rather than
+            under the heading, for the reason InfoHint exists: four paragraphs
+            of explanation pushed the card around and were read once. */}
+        <div className="automation-parameters-title">
+          <h3>Parameters</h3>
+          <InfoHint label="parameters" width={360}>
+            <p><strong>Parameters are what a run asks for.</strong></p>
+            <p>
+              Declare one here and any step field can read it as{' '}
+              <code>{'{{vars.name}}'}</code> — so one workflow searches for
+              anything, instead of the search term being a literal buried in a
+              Type step.
+            </p>
+            <p>
+              A value can arrive from three places, and the last one to supply
+              it wins: the <strong>default</strong> you set here, then the{' '}
+              <strong>profile's</strong> saved answer, then whatever is{' '}
+              <strong>typed in the Run dialog</strong>. Blank never overrides,
+              so clearing a box falls back rather than sending nothing.
+            </p>
+            <p>
+              A <strong>required</strong> parameter blocks the run until it has
+              a value, wherever that value comes from.
+            </p>
+          </InfoHint>
+        </div>
         <p className="field-hint">
           What this automation asks for. Steps read them as{' '}
           <code>{'{{vars.name}}'}</code>, and every profile can hold its own answers.

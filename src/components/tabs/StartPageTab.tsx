@@ -192,7 +192,9 @@ function SessionPreview() {
 // decides that.
 function AutomationSection() {
   const {data, automations: automationActions} = useWorkspace();
-  const all = data.state.automations;
+  // Trashed workflows are still in state -- Trash is a view of this list, not
+  // a second read -- so every surface that offers one has to say so.
+  const all = data.state.automations.filter((item) => !item.deleted_at);
   const pinned = startPageAutomations(all);
   const unpinned = all.filter((item) => !item.pinned);
 

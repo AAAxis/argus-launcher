@@ -6,7 +6,7 @@ import {createContext, useContext, useState} from 'react';
 import type {ReactNode} from 'react';
 import {defaultCloudState} from './src/data/statuses';
 import type {
-  ArgusAutomation, ArgusNotification, ArgusProfile, CloudState, OrgMember,
+  ArgusAutomation, ArgusFolder, ArgusNotification, ArgusProfile, CloudState, OrgMember,
 } from './src/types';
 
 const now = Date.now();
@@ -48,7 +48,7 @@ const AUTOMATIONS: ArgusAutomation[] = [
       {name: 'districts', label: 'Districts', kind: 'list',
         hint: 'One per line. A Loop step runs over them.'},
     ] as ArgusAutomation['parameters'],
-    icon: 'brand:facebook', color: 'blue',
+    icon: 'brand:facebook', color: 'blue', folder_id: 'f-social',
     last_run_at: iso(42), last_run_status: 'ok',
     created_by: 'u', created_via: 'user', created_at: iso(60 * 24 * 6),
     schedule: {enabled: true, kind: 'interval', everyMinutes: 30, profileIds: ['p1', 'p2']},
@@ -61,7 +61,7 @@ const AUTOMATIONS: ArgusAutomation[] = [
       {id: 's2', type: 'callAutomation', automationId: 'a1'},
     ] as ArgusAutomation['steps'],
     tags: ['whatsapp'],
-    icon: 'brand:whatsapp', color: 'green',
+    icon: 'brand:whatsapp', color: 'green', folder_id: 'f-social',
     last_run_at: iso(60 * 26), last_run_status: 'failed',
     created_by: 'v', created_via: 'user', created_at: iso(60 * 24 * 3),
     schedule: {enabled: true, kind: 'daily', at: '09:00', profileIds: ['p1']},
@@ -81,6 +81,26 @@ const AUTOMATIONS: ArgusAutomation[] = [
     steps: [{id: 's1', type: 'goto', url: 'https://example.com'}] as ArgusAutomation['steps'],
     created_by: 'v', created_via: 'user', created_at: iso(60 * 24 * 40),
   },
+  // In Trash, so the rail's Trash card has a count and its view has a card to
+  // draw. Deleted four days ago, which is inside the 30-day window -- the card
+  // shows what is left of it.
+  {
+    id: 'a5', name: 'Old signup flow',
+    description: 'Superseded by the warm-up. Kept until the quarter closes.',
+    steps: [{id: 's1', type: 'goto', url: 'https://example.com/signup'}] as
+      ArgusAutomation['steps'],
+    icon: 'brand:x', color: 'red', folder_id: 'f-social',
+    created_by: 'v', created_via: 'user', created_at: iso(60 * 24 * 90),
+    deleted_at: iso(60 * 24 * 4),
+  },
+];
+
+// Two folders and one empty one: the empty one is the only way to see the
+// "Move automations here" dialog, which is this grid's substitute for the
+// selection model the table tabs have.
+const AUTOMATION_FOLDERS: ArgusFolder[] = [
+  {id: 'f-social', name: 'Social', icon: 'users', color: 'violet'},
+  {id: 'f-scraping', name: 'Scraping', icon: 'folder', color: 'amber'},
 ];
 
 // The bell's two kinds. One handoff, and four notifications covering every
@@ -138,7 +158,17 @@ type Ctx = {
     unlinkTelegram: () => Promise<void>;
     testTelegram: () => Promise<string | null>;
     runMany: (...args: unknown[]) => Promise<void>;
+    // Trash and filing. Stateful, like the stars above and for the same
+    // reason: Restore and Move are the two things worth clicking in the
+    // folder rail, and frozen fixtures would make both look broken.
+    restore: (ids: string[]) => Promise<boolean>;
+    purge: (ids: string[]) => Promise<boolean>;
+    purgeAll: () => Promise<boolean>;
+    assignToFolder: (ids: string[], folderId: string | null) => Promise<boolean>;
   };
+  // The folder rail's Delete button. Nothing behind it here -- the dialog that
+  // creates and renames folders is mounted from App, which this harness is not.
+  library: {removeFolder: (folderId: string) => Promise<boolean>};
   // Enough of the two action bundles for RunAutomationModal, which reads
   // profiles.update (the "save these values" checkbox) and proxies.checkMany
   // (its opening sweep). Both are no-ops here -- this harness renders, it does
@@ -168,9 +198,15 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   // fixtures would make the panel look correct and behave like nothing.
   const [notifications, setNotifications] = useState(NOTIFICATIONS);
   const [pending, setPending] = useState(PENDING);
+  // Same reasoning as `notifications`: Restore, Delete permanently, Empty
+  // Trash and Move are all optimistic patches in the real app, and a frozen
+  // list would leave every one of them looking like a dead button.
+  const [automations, setAutomations] = useState(AUTOMATIONS);
+  const [automationFolders, setAutomationFolders] = useState(AUTOMATION_FOLDERS);
   const state: CloudState = {
     ...defaultCloudState,
-    automations: AUTOMATIONS,
+    automations,
+    automation_folders: automationFolders,
     profiles: PROFILES,
     members: MEMBERS,
     notifications,
@@ -200,6 +236,34 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
       unlinkTelegram: async () => {},
       testTelegram: async () => null,
       runMany: async () => {},
+      restore: async (ids) => {
+        setAutomations((list) => list.map((item) =>
+          ids.includes(item.id) ? {...item, deleted_at: null} : item));
+        return true;
+      },
+      purge: async (ids) => {
+        setAutomations((list) => list.filter((item) => !ids.includes(item.id)));
+        return true;
+      },
+      purgeAll: async () => {
+        setAutomations((list) => list.filter((item) => !item.deleted_at));
+        return true;
+      },
+      assignToFolder: async (ids, folderId) => {
+        setAutomations((list) => list.map((item) =>
+          ids.includes(item.id) ? {...item, folder_id: folderId} : item));
+        return true;
+      },
+    },
+    library: {
+      removeFolder: async (folderId) => {
+        setAutomationFolders((list) => list.filter((item) => item.id !== folderId));
+        // Mirrors the FK's ON DELETE SET NULL, which is what the real
+        // useLibraryActions does locally for the same reason.
+        setAutomations((list) => list.map((item) =>
+          item.folder_id === folderId ? {...item, folder_id: null} : item));
+        return true;
+      },
     },
     profiles: {update: async () => true},
     proxies: {checkMany: async () => {}},

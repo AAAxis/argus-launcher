@@ -120,6 +120,7 @@ export function App() {
   const [profileFolderId, setProfileFolderId] = useState('');
   const [proxyFolderId, setProxyFolderId] = useState('');
   const [cookieFolderId, setCookieFolderId] = useState('');
+  const [automationFolderId, setAutomationFolderId] = useState('');
   // What a just-created folder was suggested from -- a tag for a profile
   // folder, an ISO country code for a proxy one. Held for exactly one hand-off:
   // the tab opens its move dialog on it, then clears it.
@@ -704,10 +705,14 @@ export function App() {
               setFolderFillCountry(seed || '');
               return;
             }
-            // Cookie folders are never suggested from anything, so there is no
-            // seed to hand on -- just select the new folder.
+            // Cookie and automation folders are never suggested from anything,
+            // so there is no seed to hand on -- just select the new folder.
             if (editors.folderDraft?.kind === 'cookie') {
               setCookieFolderId(folderId);
+              return;
+            }
+            if (editors.folderDraft?.kind === 'automation') {
+              setAutomationFolderId(folderId);
               return;
             }
             setProfileFolderId(folderId);
@@ -750,10 +755,15 @@ export function App() {
           profiles={data.state.profiles
               .filter((profile) => !profile.deleted_at)
               .map((profile) => ({id: profile.id, name: profile.name}))}
-          // For callAutomation's picker. The modal excludes the draft itself.
-          automations={data.state.automations.map((automation) => ({
-            id: automation.id,
-            name: automation.name,
+          // For callAutomation's picker. The modal excludes the draft itself;
+          // trashed ones are excluded here, for the same reason the profile
+          // list above drops deleted rows -- you cannot call what is in Trash.
+          automations={data.state.automations
+              .filter((automation) => !automation.deleted_at)
+              .map((automation) => ({id: automation.id, name: automation.name}))}
+          folders={data.state.automation_folders.map((folder) => ({
+            id: folder.id,
+            name: folder.name,
           }))}
           members={data.state.members}
           telegramLinked={Boolean(data.state.telegram_link)}
@@ -941,7 +951,32 @@ export function App() {
       case 'automations':
         return (
           <AutomationsTab
-            onNew={() => setAutomationDraft({automation: workspace.automations.newAutomation(), exists: false})}
+            folderId={automationFolderId}
+            onFolderId={setAutomationFolderId}
+            onNewFolder={() => editors.setFolderDraft({
+              kind: 'automation',
+              name: '',
+              icon: DEFAULT_FOLDER_ICON,
+              color: DEFAULT_PROFILE_COLOR,
+            })}
+            onEditFolder={(folder) => editors.setFolderDraft({
+              id: folder.id,
+              kind: 'automation',
+              name: folder.name,
+              icon: folder.icon || DEFAULT_FOLDER_ICON,
+              color: normalizeProfileColor(folder.color),
+            })}
+            // Filed where you are standing. Creating one inside a folder and
+            // finding it in All automations is the kind of small betrayal that
+            // makes people stop trusting the folder rail. TRASH_FOLDER_ID
+            // cannot reach here -- the tab hides both New buttons in Trash.
+            onNew={() => setAutomationDraft({
+              automation: {
+                ...workspace.automations.newAutomation(),
+                folder_id: automationFolderId || null,
+              },
+              exists: false,
+            })}
             onLoadExample={() => void loadExampleAutomation()}
             onCreateDemoProfile={() => void createDemoProfile()}
             onEdit={(automation) => setAutomationDraft({automation, exists: true})}
@@ -996,7 +1031,11 @@ export function App() {
         return (
           <PlansTab
             profileCount={data.state.profiles.filter((profile) => !profile.deleted_at).length}
-            automationCount={data.state.automations.length}
+            // Trashed ones do not count -- enforce_automation_limit skips them
+            // too, so a meter that included them would say the plan was full
+            // while the app happily made another.
+            automationCount={
+              data.state.automations.filter((automation) => !automation.deleted_at).length}
             memberCount={data.state.members.length}
             onOpenSite={openAccountPage}
           />

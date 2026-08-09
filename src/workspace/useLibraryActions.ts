@@ -23,7 +23,7 @@ export type LibraryActions = ReturnType<typeof useLibraryActions>;
 // is not something a call site should be able to leave to chance, and a proxy
 // folder that quietly became a profile folder would vanish from the tab that
 // created it.
-export type FolderKind = 'profile' | 'proxy' | 'cookie';
+export type FolderKind = 'profile' | 'proxy' | 'cookie' | 'automation';
 
 export type FolderFields = {
   kind: FolderKind;
@@ -45,10 +45,16 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
   // rather than asking the caller for it keeps delete callers at one argument
   // and makes the paths structurally unable to disagree.
   const folderList = (kind: FolderKind) => {
-    if (kind === 'proxy') {
-      return patch.proxyFolders;
+    switch (kind) {
+      case 'proxy':
+        return patch.proxyFolders;
+      case 'cookie':
+        return patch.cookieFolders;
+      case 'automation':
+        return patch.automationFolders;
+      default:
+        return patch.folders;
     }
-    return kind === 'cookie' ? patch.cookieFolders : patch.folders;
   };
 
   function kindOfFolder(folderId: string): FolderKind | null {
@@ -58,7 +64,11 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
     if (state.proxy_folders.some((folder) => folder.id === folderId)) {
       return 'proxy';
     }
-    return state.cookie_folders.some((folder) => folder.id === folderId) ? 'cookie' : null;
+    if (state.cookie_folders.some((folder) => folder.id === folderId)) {
+      return 'cookie';
+    }
+    return state.automation_folders.some((folder) => folder.id === folderId) ?
+      'automation' : null;
   }
 
   async function createFolder(
@@ -84,13 +94,19 @@ export function useLibraryActions({data, toast}: WorkspaceCore) {
     return true;
   }
 
-  // profiles.folder_id / proxies.folder_id / cookie_sets.folder_id are all
-  // nulled server-side by the FK's ON DELETE SET NULL, so this is genuinely one
-  // statement; the local lists just mirror it.
+  // profiles.folder_id / proxies.folder_id / cookie_sets.folder_id /
+  // automations.folder_id are all nulled server-side by the FK's ON DELETE SET
+  // NULL, so this is genuinely one statement; the local lists just mirror it.
   async function removeFolder(folderId: string): Promise<boolean> {
     const kind = kindOfFolder(folderId);
     if (!await withDb((activeOrgId) => db.folders.remove(activeOrgId, folderId))) {
       return false;
+    }
+    if (kind === 'automation') {
+      patch.automationFolders((list) => list.filter((item) => item.id !== folderId));
+      patch.automations((list) => list.map((automation) =>
+        automation.folder_id === folderId ? {...automation, folder_id: null} : automation));
+      return true;
     }
     if (kind === 'proxy') {
       patch.proxyFolders((list) => list.filter((item) => item.id !== folderId));

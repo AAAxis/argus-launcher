@@ -388,12 +388,22 @@ Compared against what the app itself can do, an agent has **no** way to:
 - **Duplicate, restore from Trash, or purge.** (`useProfileActions.ts:117,126`)
 - **Import or export profiles as CSV.** (`useProfileActions.ts:242,319`)
 - **See folders.** ~~No route lists folders.~~ **Now possible** via
-  `argus_list_folders`, which returns the profile, proxy and cookie folder ids
-  the three `folderId` arguments take (profile folders narrowed to the key's
-  scope). **Creating, renaming and deleting** folders
+  `argus_list_folders`, which returns the profile, proxy, cookie and automation
+  folder ids the four `folderId` arguments take (profile folders narrowed to the
+  key's scope; the other three are listed whole, because the scope is a gate on
+  profiles and means nothing to them). The four groups are separate namespaces
+  even though one table backs them, so an automation's `folderId` has to come
+  from the `automations` group — `automationExtras` rejects an id from any of
+  the others. **Creating, renaming and deleting** folders
   (`src/workspace/useLibraryActions.ts:64,74,90`) are still unreachable, on
   purpose: a folder is how a workspace is organised, not a side effect of a
   script.
+- **Restore an automation from Trash, or delete one permanently.**
+  `argus_delete_automation` moves an automation to Trash, where it stops
+  running and stops being listed but stays recoverable for 30 days. Both ways
+  out of Trash — Restore and Delete permanently — are app-only, on the same
+  terms as the profile Trash above: an agent may undo its own reach, but only a
+  person may make it final.
 - **See statuses.** ~~`custom_statuses` is never listed.~~ **Now possible** via
   `argus_list_statuses`, which returns the built-in labels per table plus the
   workspace's custom ones. `argus_update_profile.status` is still a free string,

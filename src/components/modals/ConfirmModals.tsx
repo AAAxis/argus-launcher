@@ -88,13 +88,14 @@ export function ProfileDeleteModal({request, onClose, onDeleted}: {
   );
 }
 
-// Deleting a workflow, from the editor's own footer.
+// Deleting a workflow, from the editor's own header.
 //
 // It was a window.confirm() on the card, which is the pattern the three dialogs
-// around it exist to replace -- and it is the one destructive action in the app
-// whose consequence lands somewhere the user is not looking: every profile with
-// this automation attached silently stops running anything on launch. That
-// sentence is the reason this is a dialog and not a native confirm.
+// around it exist to replace -- and its consequence lands somewhere the user is
+// not looking: every profile with this automation attached stops running
+// anything on launch. That sentence is the reason this is a dialog and not a
+// native confirm, and it still is now that the delete only reaches Trash --
+// "it will come back" is no comfort to someone who does not know what stopped.
 export type AutomationDeleteRequest = {
   id: string;
   label: string;
@@ -112,11 +113,11 @@ export function AutomationDeleteModal({request, onClose, onDeleted}: {
   const {id, label, attachedProfiles} = request;
 
   async function confirm() {
-    if (!await automations.remove([id])) {
+    if (!await automations.softDelete([id])) {
       return;
     }
     onDeleted();
-    toast.setMessage(`${label} deleted`);
+    toast.setMessage(`${label} moved to Trash`);
   }
 
   return (
@@ -140,14 +141,18 @@ export function AutomationDeleteModal({request, onClose, onDeleted}: {
       }
     >
       <p className="error-detail">
-        This permanently removes the workflow and its steps. Runs already in its
+        This moves the workflow to Trash, where it stays for{' '}
+        {TRASH_RETENTION_DAYS} days and can be restored. Runs already in its
         history stay where they are.
       </p>
       {attachedProfiles > 0 && (
         <p className="error-detail">
+          {/* "stop running it" and not "lose it": the attachment survives, so
+              a restore puts these profiles back the way they were. */}
           {attachedProfiles === 1 ?
-            '1 profile has it attached and will stop running it on launch.' :
-            `${attachedProfiles} profiles have it attached and will stop running it on launch.`}
+            '1 profile has it attached and will stop running it on launch until it is restored.' :
+            `${attachedProfiles} profiles have it attached and will stop running it on launch ` +
+            'until it is restored.'}
         </p>
       )}
     </Modal>

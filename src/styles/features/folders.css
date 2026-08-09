@@ -17,10 +17,17 @@
  * under it. Every number below came down one step together -- the height, the
  * column, the plate, the curve and the count -- because shrinking only some of
  * them leaves a card with the old proportions at a smaller size. */
+/* 190px, not 160. A card is a 24px glyph, the name, and a count badge, and at
+   160 the two longest "All …" labels in the app -- All cookie-sets and All
+   automations -- both ellipsised to "All automati…", which is the one label on
+   the rail that must never be ambiguous. 190 is the width that fits them with
+   the count still on the same line. Only the MINIMUM moves: the columns are
+   1fr, so on any real window they stretch past this and the change costs a
+   column only below about 1000px. */
 .folder-row {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
 }
 
 /* Both shapes the card takes: a plain <button> for All profiles / Trash / New
@@ -273,6 +280,28 @@
    country is the thing being filed by. */
 .move-proxies-row {
   grid-template-columns: 18px max-content minmax(0, 1fr) max-content max-content;
+}
+
+/* One fewer: an automation has no status chip, so the row is the selector, the
+   name and where it is filed now. The mark sits inside the name cell rather
+   than in a column of its own -- see MoveAutomationsModal. */
+.move-automations-row {
+  grid-template-columns: 18px minmax(0, 1fr) max-content;
+}
+
+.move-automations-row .move-profiles-name {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* text-overflow does nothing on the flex parent, so the truncation belongs on
+   the text itself -- the same split .run-profiles-row makes. */
+.move-automations-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Fixed width so an unchecked proxy -- which renders "--" instead of a flag --

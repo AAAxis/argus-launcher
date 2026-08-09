@@ -70,7 +70,9 @@ export function ProfileModal({
   const org = useOrg();
   const orgId = org.orgId;
   const state = data.state;
-  const automations = state.automations;
+  // Live ones only: this feeds the "run on launch" picker and the per-profile
+  // parameter values below it, and neither should offer something in Trash.
+  const automations = state.automations.filter((automation) => !automation.deleted_at);
   const {run, isPending} = useAsyncAction();
   // An initialiser, not an effect: the dialog is unmounted between opens, so
   // there is never a mounted instance whose prop changes under it.

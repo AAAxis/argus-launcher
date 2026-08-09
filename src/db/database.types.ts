@@ -229,7 +229,9 @@ export type Database = {
           created_by: string | null
           created_by_label: string | null
           created_via: string
+          deleted_at: string | null
           description: string | null
+          folder_id: string | null
           icon: string | null
           id: string
           last_run_at: string | null
@@ -256,7 +258,9 @@ export type Database = {
           created_by?: string | null
           created_by_label?: string | null
           created_via?: string
+          deleted_at?: string | null
           description?: string | null
+          folder_id?: string | null
           icon?: string | null
           id: string
           last_run_at?: string | null
@@ -283,7 +287,9 @@ export type Database = {
           created_by?: string | null
           created_by_label?: string | null
           created_via?: string
+          deleted_at?: string | null
           description?: string | null
+          folder_id?: string | null
           icon?: string | null
           id?: string
           last_run_at?: string | null
@@ -303,6 +309,13 @@ export type Database = {
           variables?: Json
         }
         Relationships: [
+          {
+            foreignKeyName: "automations_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "automations_org_id_fkey"
             columns: ["org_id"]

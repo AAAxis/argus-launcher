@@ -335,374 +335,389 @@ export function ProfilesTab({
 
   return (
     <>
-      <section className="table-toolbar">
-        <input
-          type="text"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search profiles by name or tag"
-        />
-        <StatusFilter value={statusFilter} options={statusOptions} onChange={setStatusFilter} />
-        {/* Only tags that are actually on a profile: a dropdown listing all
-          * twenty brands when the workspace uses two of them is a list of
-          * eighteen ways to empty the table. */}
-        <TagFilter value={tagFilter} options={tagOptions} onChange={setTagFilter} />
-        {/* Only offered on a team. On a one-person workspace every row is
-          * yours, so this would be a control that never changes anything. */}
-        {showAssignee && (
-          <button
-            aria-pressed={mineOnly}
-            className={mineOnly ? 'choice-chip active' : 'choice-chip'}
-            onClick={() => setMineOnly((value) => !value)}
-            type="button"
-          >Assigned to me</button>
-        )}
-        {/* In the toolbar rather than the selection bar, because the whole point
-          * is that it needs no selection: emptying Trash after a failed import
-          * meant ticking every row across every page first. */}
-        {inTrash && trashCount > 0 && (
-          <button className="danger ghost" onClick={emptyTrash}>
-            <Trash2 size={16} /> Empty Trash ({trashCount})
-          </button>
-        )}
-        {/* Last, and pushed to the far end by its own margin: everything to its
-          * left narrows the rows, this one decides what a row shows. (Refresh
-          * briefly sat here too; it lives in the .topbar with Import and Add
-          * profile now -- it acts on the workspace, not on this table.) */}
-        <ColumnsButton
-          registry={PROFILE_COLUMNS}
-          context={{isTeam: showAssignee}}
-          isVisible={isVisible}
-          onToggle={toggleColumn}
-          onReset={reset}
-        />
-      </section>
-
-      {/* The folder navigation, in full: All profiles, the folders themselves,
-        * Trash, and the way to make another one. This replaced a dropdown --
-        * finding out what folders existed took opening it, and the only route
-        * to editing or deleting one was to select it first. */}
-      <section className="folder-row" aria-label="Folders">
-        <button
-          aria-pressed={!folderId}
-          className={folderId ? 'folder-card' : 'folder-card active'}
-          onClick={() => onFolderId('')}
-          type="button"
-        >
-          <span className="folder-glyph"><UsersRound size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">All profiles</span>
-          <span className="folder-card-count">{allCount}</span>
-        </button>
-
-        {state.folders.map((folder) => {
-          const count = state.profiles.filter((profile) =>
-            !profile.deleted_at && profile.folder_id === folder.id).length;
-          const active = folder.id === folderId;
-          return (
-            // A div, not a button: the pencil and the trash are buttons of
-            // their own, and nesting those inside the card's own button is
-            // both invalid and unclickable.
-            <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
-              <button
-                aria-pressed={active}
-                className="folder-card-main"
-                onClick={() => onFolderId(folder.id)}
-                type="button"
-              >
-                <FolderGlyph color={folder.color} icon={folder.icon} />
-                <span className="folder-card-name">{folder.name}</span>
-              </button>
-              <span className="folder-card-count">{count}</span>
-              <span className="folder-card-actions">
-                <button
-                  aria-label={`Edit ${folder.name}`}
-                  onClick={() => onEditFolder(folder)}
-                  title={`Edit ${folder.name}`}
-                  type="button"
-                >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  aria-label={`Delete ${folder.name}`}
-                  className="danger-icon"
-                  onClick={() => void deleteFolder(folder)}
-                  title={`Delete ${folder.name}`}
-                  type="button"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </span>
-            </div>
-          );
-        })}
-
-        <button
-          aria-pressed={inTrash}
-          className={inTrash ? 'folder-card active' : 'folder-card'}
-          onClick={() => onFolderId(TRASH_FOLDER_ID)}
-          type="button"
-        >
-          <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">Trash</span>
-          <span className="folder-card-count">{trashCount}</span>
-        </button>
-
-        <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
-          <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">New folder</span>
-        </button>
-      </section>
-
-      {/* Below the folder rail, not above it. Ticking a row used to insert this
-        * between the filters and the folders, which pushed the folder cards --
-        * and the whole table under them -- down by its height. */}
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            {inTrash ? (
-              <>
-                <button className="ghost" onClick={restoreSelection}>Restore selected</button>
-                <button className="danger ghost" onClick={purgeSelection}>
-                  <Trash2 size={16} /> Delete forever
-                </button>
-              </>
-            ) : (
-              <>
-                <FolderSelect
-                  folders={state.folders}
-                  noFolderLabel="All profiles"
-                  onPick={(id) => void moveSelectionToFolder(id)}
-                />
-                <button className="ghost" onClick={checkSelectionProxies}>
-                  <ShieldCheck size={16} /> Check proxies
-                </button>
-                <BusyButton
-                  className="ghost"
-                  busy={isPending('import-cookies')}
-                  icon={<Cookie size={16} />}
-                  busyLabel="Importing…"
-                  onClick={() => void run('import-cookies', importCookiesForSelection)}
-                >
-                  Import cookies
-                </BusyButton>
-                <button
-                  className="ghost"
-                  onClick={() => void profiles.exportToCsv(selection.selectedFrom(state.profiles))}
-                >
-                  <Download size={16} /> Export selected
-                </button>
-                <button
-                  className="ghost"
-                  onClick={() => onShare({kind: 'profile', ids: [...selection.ids]})}
-                >
-                  <Share2 size={16} /> Share…
-                </button>
-                <button
-                  className="danger ghost"
-                  onClick={() => onRequestDelete(
-                      [...selection.ids],
-                      `${selection.size} selected ${selection.size === 1 ? 'profile' : 'profiles'}`,
-                      selection.clear)}
-                >
-                  <Trash2 size={16} /> Delete selected
-                </button>
-              </>
-            )}
-          </div>
+      {/* The tab as two objects, the same pair an automation card is drawn as: a
+        * frame carrying everything the app says *about* the table -- the filters,
+        * the folder rail, the selection bar, the pager -- and the table itself
+        * inset in it, holding the profiles. Reaching for a control means reaching
+        * outside the rows it acts on.
+        *
+        * It also takes over being the flex child that fills the page, because
+        * `.content > .table-wrap` no longer matches with this in between. The
+        * frame holds the height and hands the scrolling down to the table, so the
+        * toolbar and the pager stay put and only the rows move -- which is what
+        * they did before, and has to keep being true. */}
+      <div className="table-frame">
+        <section className="table-toolbar">
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search profiles by name or tag"
+          />
+          <StatusFilter value={statusFilter} options={statusOptions} onChange={setStatusFilter} />
+          {/* Only tags that are actually on a profile: a dropdown listing all
+            * twenty brands when the workspace uses two of them is a list of
+            * eighteen ways to empty the table. */}
+          <TagFilter value={tagFilter} options={tagOptions} onChange={setTagFilter} />
+          {/* Only offered on a team. On a one-person workspace every row is
+            * yours, so this would be a control that never changes anything. */}
+          {showAssignee && (
+            <button
+              aria-pressed={mineOnly}
+              className={mineOnly ? 'choice-chip active' : 'choice-chip'}
+              onClick={() => setMineOnly((value) => !value)}
+              type="button"
+            >Assigned to me</button>
+          )}
+          {/* In the toolbar rather than the selection bar, because the whole point
+            * is that it needs no selection: emptying Trash after a failed import
+            * meant ticking every row across every page first. */}
+          {inTrash && trashCount > 0 && (
+            <button className="danger ghost" onClick={emptyTrash}>
+              <Trash2 size={16} /> Empty Trash ({trashCount})
+            </button>
+          )}
+          {/* Last, and pushed to the far end by its own margin: everything to its
+            * left narrows the rows, this one decides what a row shows. (Refresh
+            * briefly sat here too; it lives in the .topbar with Import and Add
+            * profile now -- it acts on the workspace, not on this table.) */}
+          <ColumnsButton
+            registry={PROFILE_COLUMNS}
+            context={{isTeam: showAssignee}}
+            isVisible={isVisible}
+            onToggle={toggleColumn}
+            onReset={reset}
+          />
         </section>
-      )}
 
-      <section className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>
-                {visible.length > 0 && (
-                  <Checkbox
-                    label={`Select all ${visible.length} profiles on this page`}
-                    checked={selection.allSelected(visible)}
-                    indeterminate={visible.some((item) => selection.has(item.id))}
-                    onChange={() => selection.toggleAll(visible)}
-                  />
-                )}
-              </th>
-              {/* Which columns these are, in what order, and what each sorts
-                * by all live in tables/profileColumns.tsx. */}
-              <ColumnHeaders columns={columns} sorting={sorting} />
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((profile) => {
-              // Still read here, by the row's check-proxy button. The Proxy and
-              // Proxy check cells look it up themselves, through the context.
-              const proxy = profiles.proxyFor(profile);
-              const isNew = newIds.has(profile.id);
-              const rowClass = [
-                profile.id === selectedProfileId ? 'selected' : '',
-                selection.has(profile.id) ? 'row-checked' : '',
-                isNew ? 'is-new' : '',
-              ].filter(Boolean).join(' ');
-              return (
-                <tr
-                  key={profile.id}
-                  className={rowClass}
-                  onClick={() => setSelectedProfileId(profile.id)}
-                  // So the green is never the only thing saying so. There is no
-                  // column to hang a "New" chip off -- the registry is the
-                  // user's to arrange -- and the row itself is the thing the
-                  // marker is about.
-                  title={isNew ? 'Added since you last looked' : undefined}
+        {/* The folder navigation, in full: All profiles, the folders themselves,
+          * Trash, and the way to make another one. This replaced a dropdown --
+          * finding out what folders existed took opening it, and the only route
+          * to editing or deleting one was to select it first. */}
+        <section className="folder-row" aria-label="Folders">
+          <button
+            aria-pressed={!folderId}
+            className={folderId ? 'folder-card' : 'folder-card active'}
+            onClick={() => onFolderId('')}
+            type="button"
+          >
+            <span className="folder-glyph"><UsersRound size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">All profiles</span>
+            <span className="folder-card-count">{allCount}</span>
+          </button>
+
+          {state.folders.map((folder) => {
+            const count = state.profiles.filter((profile) =>
+              !profile.deleted_at && profile.folder_id === folder.id).length;
+            const active = folder.id === folderId;
+            return (
+              // A div, not a button: the pencil and the trash are buttons of
+              // their own, and nesting those inside the card's own button is
+              // both invalid and unclickable.
+              <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
+                <button
+                  aria-pressed={active}
+                  className="folder-card-main"
+                  onClick={() => onFolderId(folder.id)}
+                  type="button"
                 >
-                  <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
+                  <FolderGlyph color={folder.color} icon={folder.icon} />
+                  <span className="folder-card-name">{folder.name}</span>
+                </button>
+                <span className="folder-card-count">{count}</span>
+                <span className="folder-card-actions">
+                  <button
+                    aria-label={`Edit ${folder.name}`}
+                    onClick={() => onEditFolder(folder)}
+                    title={`Edit ${folder.name}`}
+                    type="button"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${folder.name}`}
+                    className="danger-icon"
+                    onClick={() => void deleteFolder(folder)}
+                    title={`Delete ${folder.name}`}
+                    type="button"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+
+          <button
+            aria-pressed={inTrash}
+            className={inTrash ? 'folder-card active' : 'folder-card'}
+            onClick={() => onFolderId(TRASH_FOLDER_ID)}
+            type="button"
+          >
+            <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">Trash</span>
+            <span className="folder-card-count">{trashCount}</span>
+          </button>
+
+          <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
+            <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">New folder</span>
+          </button>
+        </section>
+
+        {/* Below the folder rail, not above it. Ticking a row used to insert this
+          * between the filters and the folders, which pushed the folder cards --
+          * and the whole table under them -- down by its height. */}
+        {selection.size > 0 && (
+          <section className="selection-toolbar">
+            <div className="selection-toolbar-actions">
+              {inTrash ? (
+                <>
+                  <button className="ghost" onClick={restoreSelection}>Restore selected</button>
+                  <button className="danger ghost" onClick={purgeSelection}>
+                    <Trash2 size={16} /> Delete forever
+                  </button>
+                </>
+              ) : (
+                <>
+                  <FolderSelect
+                    folders={state.folders}
+                    noFolderLabel="All profiles"
+                    onPick={(id) => void moveSelectionToFolder(id)}
+                  />
+                  <button className="ghost" onClick={checkSelectionProxies}>
+                    <ShieldCheck size={16} /> Check proxies
+                  </button>
+                  <BusyButton
+                    className="ghost"
+                    busy={isPending('import-cookies')}
+                    icon={<Cookie size={16} />}
+                    busyLabel="Importing…"
+                    onClick={() => void run('import-cookies', importCookiesForSelection)}
+                  >
+                    Import cookies
+                  </BusyButton>
+                  <button
+                    className="ghost"
+                    onClick={() => void profiles.exportToCsv(selection.selectedFrom(state.profiles))}
+                  >
+                    <Download size={16} /> Export selected
+                  </button>
+                  <button
+                    className="ghost"
+                    onClick={() => onShare({kind: 'profile', ids: [...selection.ids]})}
+                  >
+                    <Share2 size={16} /> Share…
+                  </button>
+                  <button
+                    className="danger ghost"
+                    onClick={() => onRequestDelete(
+                        [...selection.ids],
+                        `${selection.size} selected ${selection.size === 1 ? 'profile' : 'profiles'}`,
+                        selection.clear)}
+                  >
+                    <Trash2 size={16} /> Delete selected
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
+        <section className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  {visible.length > 0 && (
                     <Checkbox
-                      label={`Select ${profile.name || profile.id}`}
-                      checked={selection.has(profile.id)}
-                      onChange={() => selection.toggle(profile.id)}
+                      label={`Select all ${visible.length} profiles on this page`}
+                      checked={selection.allSelected(visible)}
+                      indeterminate={visible.some((item) => selection.has(item.id))}
+                      onChange={() => selection.toggleAll(visible)}
                     />
-                  </td>
-                  <ColumnCells columns={columns} context={columnContext} row={profile} />
-                  <td className="actions-cell">
-                    <div className="row-actions">
-                      {profile.deleted_at ? (
+                  )}
+                </th>
+                {/* Which columns these are, in what order, and what each sorts
+                  * by all live in tables/profileColumns.tsx. */}
+                <ColumnHeaders columns={columns} sorting={sorting} />
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((profile) => {
+                // Still read here, by the row's check-proxy button. The Proxy and
+                // Proxy check cells look it up themselves, through the context.
+                const proxy = profiles.proxyFor(profile);
+                const isNew = newIds.has(profile.id);
+                const rowClass = [
+                  profile.id === selectedProfileId ? 'selected' : '',
+                  selection.has(profile.id) ? 'row-checked' : '',
+                  isNew ? 'is-new' : '',
+                ].filter(Boolean).join(' ');
+                return (
+                  <tr
+                    key={profile.id}
+                    className={rowClass}
+                    onClick={() => setSelectedProfileId(profile.id)}
+                    // So the green is never the only thing saying so. There is no
+                    // column to hang a "New" chip off -- the registry is the
+                    // user's to arrange -- and the row itself is the thing the
+                    // marker is about.
+                    title={isNew ? 'Added since you last looked' : undefined}
+                  >
+                    <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        label={`Select ${profile.name || profile.id}`}
+                        checked={selection.has(profile.id)}
+                        onChange={() => selection.toggle(profile.id)}
+                      />
+                    </td>
+                    <ColumnCells columns={columns} context={columnContext} row={profile} />
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        {profile.deleted_at ? (
+                          <>
+                            <button className="ghost" onClick={(event) => {
+                              event.stopPropagation();
+                              void restoreOne(profile);
+                            }}>Restore</button>
+                            <button
+                              className="icon-button danger-icon"
+                              aria-label={`Permanently delete ${profile.name}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                purgeOne(profile);
+                              }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <BusyButton
+                              className="launch"
+                              busy={isPending(`launch-${profile.id}`)}
+                              icon={<Play size={16} />}
+                              onClick={() => void run(`launch-${profile.id}`, () => profiles.launch(profile))}
+                            >
+                              Launch
+                            </BusyButton>
+                            {/* The manual proxy re-check used to be a fifth button
+                              * here. It is now the Proxy check chip itself, which
+                              * is the thing it acts on -- and a row of five
+                              * controls was already one too many (see below). */}
+                            {/* Bare, with the affordance moved into the hover
+                              * plate -- see .row-action in styles.css. This was
+                              * bordered on the argument that a naked glyph beside
+                              * a filled Launch reads as decoration; what settled
+                              * it the other way is that the argument cost three
+                              * outlines in every row of a twenty-five row table,
+                              * and Launch is the only one of the four you came to
+                              * the row for. */}
+                            <button
+                              aria-label={`Edit ${profile.name}`}
+                              className="icon-button row-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onEditProfile(profile);
+                              }}
+                              title={`Edit ${profile.name}`}
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            {/* Four controls, which is what this row wants. It was
+                              * five while the proxy re-check lived here; moving
+                              * that onto the Proxy check chip is what bought the
+                              * space back. Share stays a button rather than
+                              * something you reach by ticking a checkbox first,
+                              * because a feature you cannot see is worse than a
+                              * row that is a little busy. If a fifth arrives
+                              * again, that is the moment for an overflow menu. */}
+                            <button
+                              aria-label={`Share ${profile.name}`}
+                              className="icon-button row-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onShare({kind: 'profile', ids: [profile.id]});
+                              }}
+                              title="Share with another workspace"
+                            >
+                              <Share2 size={16} />
+                            </button>
+                            <button
+                              aria-label={`Delete ${profile.name}`}
+                              className="icon-button row-action row-action-danger"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onRequestDelete([profile.id], profile.name);
+                              }}
+                              title={`Delete ${profile.name}`}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {items.length === 0 && (
+                <tr className="empty-row-tr">
+                  {/* Counted, not written down: the number of columns is now the
+                    * user's to choose. A short colSpan leaves a stray empty cell
+                    * at the end of the row. */}
+                  <td colSpan={columnCount}>
+                    <EmptyState
+                      icon={<SearchX size={22} />}
+                      title={filtered ?
+                        'Nothing matches those filters' :
+                        inTrash ? 'Trash is empty' : 'This folder is empty'}
+                      body={filtered ?
+                        'Try a different search term, or clear the status and tag filters.' :
+                        inTrash ? 'Deleted profiles wait here for 30 days before they are purged.' :
+                          'Profiles you add to this folder will show up here.'}
+                    >
+                      {!inTrash && !filtered && (
                         <>
-                          <button className="ghost" onClick={(event) => {
-                            event.stopPropagation();
-                            void restoreOne(profile);
-                          }}>Restore</button>
-                          <button
-                            className="icon-button danger-icon"
-                            aria-label={`Permanently delete ${profile.name}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              purgeOne(profile);
-                            }}
-                          >
-                            <Trash2 size={16} />
+                          <button onClick={onNewProfile} type="button">
+                            <UserPlus size={16} /> Add profile
                           </button>
-                        </>
-                      ) : (
-                        <>
-                          <BusyButton
-                            className="launch"
-                            busy={isPending(`launch-${profile.id}`)}
-                            icon={<Play size={16} />}
-                            onClick={() => void run(`launch-${profile.id}`, () => profiles.launch(profile))}
-                          >
-                            Launch
-                          </BusyButton>
-                          {/* The manual proxy re-check used to be a fifth button
-                            * here. It is now the Proxy check chip itself, which
-                            * is the thing it acts on -- and a row of five
-                            * controls was already one too many (see below). */}
-                          {/* Bare, with the affordance moved into the hover
-                            * plate -- see .row-action in styles.css. This was
-                            * bordered on the argument that a naked glyph beside
-                            * a filled Launch reads as decoration; what settled
-                            * it the other way is that the argument cost three
-                            * outlines in every row of a twenty-five row table,
-                            * and Launch is the only one of the four you came to
-                            * the row for. */}
-                          <button
-                            aria-label={`Edit ${profile.name}`}
-                            className="icon-button row-action"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onEditProfile(profile);
-                            }}
-                            title={`Edit ${profile.name}`}
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          {/* Four controls, which is what this row wants. It was
-                            * five while the proxy re-check lived here; moving
-                            * that onto the Proxy check chip is what bought the
-                            * space back. Share stays a button rather than
-                            * something you reach by ticking a checkbox first,
-                            * because a feature you cannot see is worse than a
-                            * row that is a little busy. If a fifth arrives
-                            * again, that is the moment for an overflow menu. */}
-                          <button
-                            aria-label={`Share ${profile.name}`}
-                            className="icon-button row-action"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onShare({kind: 'profile', ids: [profile.id]});
-                            }}
-                            title="Share with another workspace"
-                          >
-                            <Share2 size={16} />
-                          </button>
-                          <button
-                            aria-label={`Delete ${profile.name}`}
-                            className="icon-button row-action row-action-danger"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onRequestDelete([profile.id], profile.name);
-                            }}
-                            title={`Delete ${profile.name}`}
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {/* A brand-new folder is far more often filled from
+                            * profiles that already exist than from scratch, and
+                            * the only route to that was selecting rows in a
+                            * table you have to leave this folder to see. */}
+                          {activeFolder && movableCount > 0 && (
+                            <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
+                              <FolderInput size={16} /> Move profiles here
+                            </button>
+                          )}
                         </>
                       )}
-                    </div>
+                    </EmptyState>
                   </td>
                 </tr>
-              );
-            })}
-            {items.length === 0 && (
-              <tr className="empty-row-tr">
-                {/* Counted, not written down: the number of columns is now the
-                  * user's to choose. A short colSpan leaves a stray empty cell
-                  * at the end of the row. */}
-                <td colSpan={columnCount}>
-                  <EmptyState
-                    icon={<SearchX size={22} />}
-                    title={filtered ?
-                      'Nothing matches those filters' :
-                      inTrash ? 'Trash is empty' : 'This folder is empty'}
-                    body={filtered ?
-                      'Try a different search term, or clear the status and tag filters.' :
-                      inTrash ? 'Deleted profiles wait here for 30 days before they are purged.' :
-                        'Profiles you add to this folder will show up here.'}
-                  >
-                    {!inTrash && !filtered && (
-                      <>
-                        <button onClick={onNewProfile} type="button">
-                          <UserPlus size={16} /> Add profile
-                        </button>
-                        {/* A brand-new folder is far more often filled from
-                          * profiles that already exist than from scratch, and
-                          * the only route to that was selecting rows in a
-                          * table you have to leave this folder to see. */}
-                        {activeFolder && movableCount > 0 && (
-                          <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
-                            <FolderInput size={16} /> Move profiles here
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </EmptyState>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+              )}
+            </tbody>
+          </table>
+        </section>
 
-      <PaginationBar
-        page={clampedPage}
-        totalPages={totalPages}
-        total={total}
-        pageSize={pageSize}
-        onPage={setPage}
-        onPageSize={(size) => { setPageSize(size); setPage(0); }}
-        extra={selection.size > 0 && (
-          <span className="pagination-selected">{selection.size} selected</span>
-        )}
-      />
+        <PaginationBar
+          page={clampedPage}
+          totalPages={totalPages}
+          total={total}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={(size) => { setPageSize(size); setPage(0); }}
+          extra={selection.size > 0 && (
+            <span className="pagination-selected">{selection.size} selected</span>
+          )}
+        />
+      </div>
 
+      {/* Outside the frame: a modal is not part of the table's furniture, and
+        * nesting it in a flex column that owns the page height would make it one. */}
       {(moveOpen || fillTag) && activeFolder && (
         <MoveProfilesModal
           folder={activeFolder}

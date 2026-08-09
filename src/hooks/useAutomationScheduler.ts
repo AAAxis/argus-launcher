@@ -57,7 +57,10 @@ export function useAutomationScheduler(
       const now = new Date();
       for (const automation of cloud.automations) {
         const schedule = automation.schedule;
-        if (!schedule?.enabled || inFlight.current.has(automation.id)) {
+        // deleted_at first: a trashed automation keeps its schedule so that
+        // restoring puts it back intact, and a schedule that kept firing from
+        // Trash would be the loudest possible way to discover that.
+        if (automation.deleted_at || !schedule?.enabled || inFlight.current.has(automation.id)) {
           continue;
         }
         const key = watermarkKey(org, automation.id);

@@ -50,9 +50,21 @@
    pages" chip has a legitimate zero state. Left in the flow rather than
    centred like the hero -- the toolbar above it is still the subject of the
    page, and this is a footnote under the chip that caused it. */
+/* The answer under an empty grid: a chip that matched nothing, an empty
+   folder, or an empty Trash. A <p> in three of the four cases and a <div>
+   holding a sentence and a button in the folder one, so the rules cover both
+   -- `margin: 0` on the element and on any paragraph inside it. */
 .automation-view-empty {
+  align-items: flex-start;
   color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
   font-size: 13px;
+  gap: 10px;
+  margin: 0;
+}
+
+.automation-view-empty p {
   margin: 0;
 }
 
@@ -94,37 +106,58 @@
    share stays on .automation-card; everything only the framed one has lands
    here.
 
-   --paper, not a color-mix against --ink: recessed means *darker* in light and
-   in dark both, and mixing toward the ink colour reverses that in dark, where
-   --ink is near-white. The two palettes already name the surface. */
+   --frame, and not --paper: the frame is not *recessed*, it is the other
+   surface from the card, and which of the two is darker flips with the theme.
+   Light is a grey tray holding a white card; dark is a lighter tray holding a
+   darker one. tokens.css owns that inversion so no rule here has to know which
+   theme it is in -- see the note on --frame there.
+
+   No border. Two rules used to draw one edge: .automation-card's hairline and
+   this surface step. The step alone is the frame, and the line on top of it
+   read as a third object between the frame and the page. .automation-card
+   keeps its border for the Connectors view, which reuses that card unframed. */
 .automation-card-framed {
-  background: var(--paper);
+  background: var(--frame);
+  border: 0;
   /* The bar and the card carry their own internal spacing, so there is nothing
      for the flex gap to do. */
   gap: 0;
   /* Asymmetric on purpose. The top opens far enough to seat the bar -- that
      edge is a place, and it holds three controls. The other three are only an
-     edge: 2px, the thinnest line that still reads as a surface behind the card
-     rather than as a slightly thick border. Nothing sits in them, so any more
-     is a margin the card is paying for. The top's own spacing moved into the
-     bar, which is why this is 0 up there rather than a fourth number. */
-  padding: 0 2px 2px;
+     edge: thin enough to read as a surface behind the card rather than as a
+     slightly thick border. Nothing sits in them, so any more is a margin the
+     card is paying for. The top's own spacing moved into the bar, which is why
+     this is 0 up there rather than a fourth number.
+
+     3px, not the 2px it was: the frame used to be 1px of border plus 2px of
+     padding, and dropping the border without paying that pixel back would have
+     shrunk the edge by a third and pulled the card's corner off the frame's --
+     see the concentric-arc note below, which is measured against this number. */
+  padding: 0 3px 3px;
 }
 
 /* Was on .automation-card, which the frame now outranks by source order alone
    -- and .is-new, being two classes to its one, would have won and painted the
    frame in the card's colour. Written at the same weight so the pair still
-   describes a frame and a card rather than one flat green box. */
+   describes a frame and a card rather than one flat green box.
+
+   An automation with a colour of its own outranks this: automationFrameStyle
+   puts the tint on the element, and no stylesheet beats an inline style. So a
+   coloured arrival shows its own colour on the frame and the green only on the
+   body below, which is enough to read as new -- and better than the previous
+   arrangement, where the two fought over one border-color and the winner
+   depended on which had been written last. */
 .automation-card-framed.is-new {
-  background: color-mix(in srgb, var(--profile-green-bg) 70%, var(--paper));
-  border-color: var(--profile-green-border);
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, var(--frame));
 }
 
 /* The card proper. --radius-sm because the frame is 14px on the outside and
    5px thick: an inner corner has to lose exactly the frame's width or the two
    arcs stop being concentric and the gap pinches at the corners. */
 .automation-card-body {
-  background: var(--raised);
+  background: var(--frame-card);
+  /* The only line left in the card, now that the frame draws none -- and what
+     makes the inset read as inset rather than as a patch of a second colour. */
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   display: flex;
@@ -138,7 +171,7 @@
 }
 
 .automation-card-framed.is-new .automation-card-body {
-  background: color-mix(in srgb, var(--profile-green-bg) 55%, var(--raised));
+  background: color-mix(in srgb, var(--profile-green-bg) 55%, var(--frame-card));
   border-color: var(--profile-green-border);
 }
 
@@ -763,17 +796,210 @@
  *
  * Scoped to the automation editor. The profile editor uses the same layout
  * class and settled its own spacing long ago inside .profile-summary. */
+/* The header's margin-bottom: -14px cancels the panel grid's gap so the bar's
+   background covers it -- otherwise the first 14px of the body would scroll
+   through the strip between the border and the content, in full view. That
+   left the Steps/JSON chips and the Parameters card sitting flush against the
+   rule. This is the gap paid back, on the body's side of the border, where it
+   scrolls away under the bar instead of showing content through it. */
+.automation-modal .profile-editor-layout {
+  padding-top: 18px;
+}
+
 .automation-modal .profile-editor-side {
   align-content: start;
   display: grid;
   gap: 16px;
 }
 
-/* Full width, because it is the column's action rather than one control in a
-   row of them. */
-.automation-run-now {
+/* ── The editor's header ─────────────────────────────────────────────────────
+ *
+ * Save, Cancel and Delete were a footer and Run was the top of the settings
+ * column. They are one row under the name now, and the header is sticky, which
+ * is the whole reason the move is safe: a footer on a dialog this tall is
+ * always reachable and a header that scrolled away would not be.
+ *
+ * The negative margins cancel .profile-modal's own 18px padding on three sides
+ * so the bar's background reaches the panel's edges, and the padding pays it
+ * back. The fourth number, margin-bottom: -14px, cancels the panel grid's gap:
+ * without it the first 14px of the body would scroll through the strip between
+ * the header's border and the content, in full view.
+ *
+ * top: -18px, not 0. Sticky measures against the scroll container's PADDING
+ * box, and the negative top margin has already lifted this to the border box
+ * 18px above it -- so 0 would shove the bar down by that much and park it over
+ * the body from the first frame. */
+.automation-modal > header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  margin: -18px -18px -14px;
+  padding: 18px 18px 14px;
+  position: sticky;
+  top: -18px;
+  /* Over the body, and under .popover-panel's 90 -- which is a DOM child of
+     this bar, so it is inside this stacking context and clears it anyway. */
+  z-index: 2;
+}
+
+/* Modal's close X, out of the flex flow.
+ *
+ * As a flex sibling it held a column of its own down the full height of a
+ * two-row header, and the action row stopped 46px short of the panel's edge to
+ * clear a control that is only on the title line. Absolute against the sticky
+ * bar (which is a positioned ancestor already), so Save now ends where the
+ * body's right edge is and the X keeps its place on the first line.
+ *
+ * The title row pays for it with padding-right instead -- see below -- because
+ * that IS the row the X shares. */
+.automation-modal > header > .icon-button {
+  margin-top: 0;
+  position: absolute;
+  right: 18px;
+  top: 18px;
+}
+
+.automation-head {
+  display: grid;
+  flex: 1;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* flex-start, not center. The mark is a single-row object -- 34px, the size
+   the grid card draws it at -- and centring it against a two-row block floated
+   it in the gutter between the name and the step count, belonging to neither.
+   It sits on the name's line and the step count gets a mark of its own. */
+.automation-head-title {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  /* Clears the absolutely positioned X above. Only this row needs it. */
+  padding-right: 40px;
+}
+
+/* min-width: 0 twice over: the h2 ellipsises a long name, and a grid item will
+   not shrink below its content without being told it may. */
+.automation-head-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Optically on the h2's cap line: the 34px mark against a 28px line box is 3px
+   taller each side, and 1px of that goes back to the heading's own leading. */
+.automation-icon-trigger {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
   justify-content: center;
-  width: 100%;
+  margin-top: -2px;
+  min-height: 0;
+  padding: 3px;
+}
+
+.automation-icon-trigger:hover,
+.automation-icon-trigger[aria-expanded="true"] {
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.automation-icon-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The step count, with its own mark so the second line reads as a line rather
+   than as text hanging off the one above it. */
+.automation-head-steps {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+/* Two pickers stacked, on the panel's own padding. .icon-choices is a
+   grid of 38px cells, so 320 lands seven to a row without a partial column. */
+.automation-icon-pop {
+  display: grid;
+  gap: 14px;
+}
+
+.automation-head-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Delete, Cancel and Save travel together at the trailing edge, away from Run.
+   margin-left: auto rather than justify-content on the parent, so the group
+   still sits right when there is no Run button to push against -- a draft
+   automation has none. */
+.automation-head-actions-end {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Flat, in .filter-trigger's vocabulary -- the silhouette every header action
+   in this app takes. Three bordered boxes in a row under the title read as a
+   form's footer that had floated to the top; the header is a place for actions,
+   not a place for controls. Run now keeps its fill: it is the one thing this
+   screen is for, and the only filled thing on the bar. */
+.automation-head-actions-end > button {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  /* --ink-soft is the base here and Save steps up to --ink below. Cancel is
+     the quietest of the three: it is the one that throws work away without
+     asking, and nothing should draw the eye to it. */
+  color: var(--ink-soft);
+  font-weight: 500;
+  min-height: 0;
+  padding: 6px 10px;
+}
+
+.automation-head-actions-end > button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Save is still the affirmative one, and weight plus ink level is the only way
+   left to say so: --accent in this system is INK, not a hue -- near-black in
+   light and near-white in dark -- so accent-coloured text lands within seven
+   RGB points of --ink on a dark bar and the distinction disappears exactly
+   half the time. Weight and ink level survive both themes. */
+.automation-head-actions-end > button:not(.ghost) {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.automation-head-actions-end > button:disabled {
+  color: var(--ink-faint);
+}
+
+.automation-head-actions-end > .ghost.danger {
+  background: none;
+  color: var(--danger);
+}
+
+.automation-head-actions-end > .ghost.danger:not(:disabled):hover {
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+
+/* Trash's second action. "Delete permanently" is two words longer than
+   anything else this foot holds and wrapped to two lines in a 300px card,
+   which made the row taller than every other card in the grid. */
+.automation-card-edit.danger {
+  color: var(--danger);
+  white-space: nowrap;
 }
 
 /* The settings, on their own surface. --paper against the dialog's --raised is
@@ -790,9 +1016,13 @@
 
 /* ── The dialog's editable title ── */
 
+/* flex, not inline-flex. An inline-flex box shrink-wraps its contents, which
+   is fine for the read state (text plus a pencil) and useless for the edit
+   one: `width: 100%` against a shrink-to-fit parent resolves to the content's
+   own width, so the input sized itself to the name instead of to the row. */
 .automation-title {
   align-items: center;
-  display: inline-flex;
+  display: flex;
   gap: 8px;
   min-width: 0;
 }
@@ -803,13 +1033,39 @@
   white-space: nowrap;
 }
 
-/* Sized to the heading it replaces, so switching in and out of edit does not
-   move the dialog's first line. */
-.automation-title-input {
+/* The heading in an editable state, not an input parked where the heading was.
+ *
+ * It inherited the app's text-input rule -- a 999px pill, 16px of side padding
+ * and the 36px --control-h floor -- which around a 20px heading read as a
+ * search box someone had dropped into the title line, shrink-wrapped to 269px
+ * with the name jumping 16px right the moment you clicked the pencil.
+ *
+ * So: the radius comes down to the panel's own scale, the padding down to
+ * something a heading can carry, and a negative margin cancels what is left so
+ * the first character stays exactly where it was rendered a moment ago.
+ * --paper rather than transparent, because an editable field that looks like
+ * static text is its own problem.
+ *
+ * Two classes deep on purpose. `input[type="text"]` is specificity 0-1-1 --
+ * a type selector AND an attribute selector -- so a single class loses to it
+ * and every one of these declarations was being thrown away. (font-size got
+ * through only because the base rule does not set it; `input { font: inherit }`
+ * is 0-0-1 and does lose.) */
+.automation-modal .automation-title-input {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Fills the title row instead of sizing to its own text, so a long name has
+     the width the heading had and nothing below it moves. */
+  flex: 1;
   font-size: inherit;
   font-weight: inherit;
-  max-width: 420px;
-  min-width: 220px;
+  letter-spacing: inherit;
+  /* -7px: the 6px of padding plus the 1px border. */
+  margin-left: -7px;
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 6px;
 }
 
 /* ── The selector Check ── */
@@ -1219,9 +1475,26 @@
 
 /* ---- card identity, stars, run verdicts, arrivals ------------------------ */
 
-/* The picked brand mark on its colour plate. Same box as .is-fallback, but the
- * fill and border come inline from profileColorStyle -- six theme-aware token
- * triples or the user's own hex -- so the rule only shapes, never colours. */
+/* The plate behind an *uncoloured* automation's glyph. .extension-mark.is-fallback
+ * fills with --paper, which the card body now is in dark -- so the plate had
+ * nothing to sit against and vanished, taking the glyph's box with it. Stepping
+ * back to --frame puts it on the same side of the card it is already on in
+ * light, and does it without either rule naming a theme.
+ *
+ * The coloured path needs nothing: AutomationMark only reaches for
+ * .automation-mark below when there is a colour, and then profileColorStyle
+ * fills the plate inline. */
+.automation-card-head > .extension-mark.is-fallback {
+  background: var(--frame);
+}
+
+/* The default workflow glyph on its colour plate. Same box as .is-fallback,
+ * but the fill and border come inline from profileColorStyle -- six
+ * theme-aware token triples or the user's own hex -- so the rule only shapes,
+ * never colours.
+ *
+ * Brand marks used to land here too, which is what put an 18px Instagram logo
+ * in the middle of a violet chip. They take .is-brand below instead. */
 .extension-mark.automation-mark {
   align-items: center;
   background: var(--paper);
@@ -1229,6 +1502,32 @@
   border-radius: 8px;
   display: flex;
   justify-content: center;
+}
+
+/* A brand logo is its own colour and its own shape. It gets the box and
+ * nothing else: no plate, no hairline, no radius, and no tint -- AutomationMark
+ * does not pass profileColorStyle down this path at all, and the automation's
+ * colour goes to the card's frame instead.
+ *
+ * The two rules on .tag-logo undo TagMark's inline sizing, which is written for
+ * a chip: it fixes height and lets width run to size * 1.9 so a wordmark like
+ * eBay is not squashed. Inside a square box that spills, so the width is capped
+ * back and object-fit -- already on .tag-logo -- letterboxes the wide cuts.
+ * The theme-adapt filters (.invert-on-light and friends) still apply: they are
+ * what keeps a single-colour mark like TikTok visible, and the surface behind
+ * it is --raised now rather than --paper, which is the same direction in both
+ * themes. */
+.extension-mark.is-brand {
+  align-items: center;
+  background: none;
+  border: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.extension-mark.is-brand .tag-logo {
+  height: 100%;
+  max-width: 100%;
 }
 
 /* My star. A bare glyph riding inline at the end of the card's name -- inside
@@ -1441,10 +1740,20 @@
   gap: 10px;
 }
 
+/* The heading and its "i" on one line, with the hint below the pair. Its own
+   row rather than the InfoHint sitting inside the h3, so the trigger's 4px of
+   button padding cannot nudge the heading's baseline. */
+.automation-parameters-title {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
 .automation-parameters-head h3 {
   font-size: 13px;
   font-weight: 600;
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .automation-parameters-head code {

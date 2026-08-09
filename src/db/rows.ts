@@ -347,9 +347,15 @@ export type AutomationRow = {
   notify_connector_id: string | null;
   notify_on: string | null;
   // Card identity: 'brand:<slug>' (the profile-avatar grammar) or null for the
-  // default workflow glyph; a ProfileColorKey or '#rrggbb' tinting its plate.
+  // default workflow glyph; a ProfileColorKey or '#rrggbb' tinting its plate,
+  // or the card's frame where a brand mark leaves no plate to tint.
   icon: string | null;
   color: string | null;
+  // The automation folder this is filed in. Shares the `folders` table with
+  // profiles, proxies and cookie sets, separated by folders.kind.
+  folder_id: string | null;
+  // Set while in Trash, cleared on restore. 20260817.
+  deleted_at: string | null;
   // Denormalized verdict of the newest finished run -- reported by
   // recordRunOutcome, never recomputed. automation_runs holds the truth.
   last_run_at: string | null;

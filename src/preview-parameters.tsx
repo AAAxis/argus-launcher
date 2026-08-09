@@ -28,8 +28,14 @@ function Editor() {
       exists
       profiles={data.state.profiles}
       automations={data.state.automations}
+      folders={data.state.automation_folders}
       members={data.state.members}
       onClose={() => {}}
+      // Both are no-ops that exist only to be rendered: the header draws Run
+      // and Delete only for an automation that can be run and deleted, so a
+      // harness without them shows two of the four actions.
+      onDelete={() => {}}
+      onRun={() => {}}
       onSave={async (next) => {
         setDraft(next);
         return null;

@@ -36,9 +36,18 @@ export type ApiRoute = {
   path: string;
   group: string;
   label: string;
-  // 'unscoped' additionally requires a key with no folder scope. Automations
-  // are org-wide and have no folder of their own, so a key granted one folder
-  // may run them but may not author them.
+  // 'unscoped' additionally requires a key with no folder scope: a key granted
+  // one folder may RUN an automation but may not author one.
+  //
+  // The original reason was that automations were org-wide and had no folder,
+  // so there was nothing for a folder scope to mean. 20260817 gave them
+  // folders and that reason is gone, but the rule stays and is now a choice
+  // rather than a consequence: an automation folder is filing, not a
+  // permission boundary. Every member's RLS policy on `automations` is plain
+  // org membership, so a scoped key that could author by folder would be
+  // reading a guarantee into a label that the database does not enforce.
+  // Widening this is a permissions change and wants its own change, not a
+  // side effect of adding a folder rail.
   scope: 'any' | 'unscoped';
   // Present when this route's dispatch is driven from the table. The older
   // routes are documented here but still dispatched by hand in main.cjs.

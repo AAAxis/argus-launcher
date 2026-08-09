@@ -192,297 +192,309 @@ export function ProxiesTab({
 
   return (
     <>
-      <section className="table-toolbar">
-        <input
-          type="text"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search proxies by name, host, or country"
-        />
-        <StatusFilter
-          onChange={setStatusFilter}
-          options={proxyStatusOptions}
-          value={statusFilter}
-        />
-        <select
-          value={assignedFilter}
-          onChange={(event) => setAssignedFilter(event.target.value as '' | 'assigned' | 'unassigned')}
-        >
-          <option value="">All proxies</option>
-          <option value="assigned">Used by a profile</option>
-          <option value="unassigned">Not used by any profile</option>
-        </select>
-        {/* Only offered on a team. On a one-person workspace every row is
-            yours, so the filter would be a control that never changes
-            anything. */}
-        {state.members.length > 1 && (
-          <button
-            aria-pressed={mineOnly}
-            className={mineOnly ? 'choice-chip active' : 'choice-chip'}
-            onClick={() => setMineOnly((value) => !value)}
-            type="button"
-          >Assigned to me</button>
-        )}
-        {visible.length > 0 && (
-          <button
-            className="ghost"
-            onClick={() => void proxies.checkMany(visible)}
-            title="Check every proxy this filter is showing"
+      {/* The frame, exactly as the Profiles tab draws it -- the chrome on a
+        * recessed shell, the table inset in it as the content card, and the
+        * height stopping here so the rows scroll rather than the page. See
+        * ProfilesTab for the full reasoning; this tab has borrowed its
+        * vocabulary since it was written.
+        *
+        * Only this return takes a frame. The empty state is its own early
+        * return -- a centred .tab-empty with the provider strip under it -- and
+        * has no table to inset, so framing it would draw a shell around a
+        * sentence. */}
+      <div className="table-frame">
+        <section className="table-toolbar">
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search proxies by name, host, or country"
+          />
+          <StatusFilter
+            onChange={setStatusFilter}
+            options={proxyStatusOptions}
+            value={statusFilter}
+          />
+          <select
+            value={assignedFilter}
+            onChange={(event) => setAssignedFilter(event.target.value as '' | 'assigned' | 'unassigned')}
           >
-            <ShieldCheck size={16} /> Check all
-          </button>
-        )}
-        {visible.length > 0 && (
-          <button className="ghost" onClick={() => void proxies.exportToCsv(visible)}>
-            <Download size={16} /> Export all
-          </button>
-        )}
-        <ColumnsButton
-          registry={PROXY_COLUMNS}
-          context={{isTeam: showAssignee}}
-          isVisible={isVisible}
-          onToggle={toggleColumn}
-          onReset={reset}
-        />
-      </section>
-
-      {/* The same folder navigation the Profiles tab has, minus Trash: a proxy
-        * is deleted outright, there is no soft-delete to hold it. */}
-      <section className="folder-row" aria-label="Folders">
-        <button
-          aria-pressed={!folderId}
-          className={folderId ? 'folder-card' : 'folder-card active'}
-          onClick={() => onFolderId('')}
-          type="button"
-        >
-          <span className="folder-glyph"><Waypoints size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">All proxies</span>
-          <span className="folder-card-count">{state.proxies.length}</span>
-        </button>
-
-        {state.proxy_folders.map((folder) => {
-          const count = state.proxies.filter((proxy) => proxy.folder_id === folder.id).length;
-          const active = folder.id === folderId;
-          return (
-            // A div, not a button: the pencil and the trash are buttons of
-            // their own, and nesting those inside the card's own button is
-            // both invalid and unclickable.
-            <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
-              <button
-                aria-pressed={active}
-                className="folder-card-main"
-                onClick={() => onFolderId(folder.id)}
-                type="button"
-              >
-                <FolderGlyph color={folder.color} icon={folder.icon} />
-                <span className="folder-card-name">{folder.name}</span>
-              </button>
-              <span className="folder-card-count">{count}</span>
-              <span className="folder-card-actions">
-                <button
-                  aria-label={`Edit ${folder.name}`}
-                  onClick={() => onEditFolder(folder)}
-                  title={`Edit ${folder.name}`}
-                  type="button"
-                >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  aria-label={`Delete ${folder.name}`}
-                  className="danger-icon"
-                  onClick={() => void deleteFolder(folder)}
-                  title={`Delete ${folder.name}`}
-                  type="button"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </span>
-            </div>
-          );
-        })}
-
-        <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
-          <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">New folder</span>
-        </button>
-      </section>
-
-      {/* Below the folder rail, not above it. Ticking a row used to insert this
-        * between the filters and the folders, which pushed the folder cards and
-        * the whole table down by its height -- the navigation moving because of
-        * a selection made inside it. */}
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            <FolderSelect
-              folders={state.proxy_folders}
-              noFolderLabel="All proxies"
-              onPick={(id) => void moveSelectionToFolder(id)}
-            />
+            <option value="">All proxies</option>
+            <option value="assigned">Used by a profile</option>
+            <option value="unassigned">Not used by any profile</option>
+          </select>
+          {/* Only offered on a team. On a one-person workspace every row is
+              yours, so the filter would be a control that never changes
+              anything. */}
+          {state.members.length > 1 && (
+            <button
+              aria-pressed={mineOnly}
+              className={mineOnly ? 'choice-chip active' : 'choice-chip'}
+              onClick={() => setMineOnly((value) => !value)}
+              type="button"
+            >Assigned to me</button>
+          )}
+          {visible.length > 0 && (
             <button
               className="ghost"
-              onClick={() => void proxies.checkMany(selection.selectedFrom(state.proxies))}
+              onClick={() => void proxies.checkMany(visible)}
+              title="Check every proxy this filter is showing"
             >
-              <ShieldCheck size={16} /> Check selected
+              <ShieldCheck size={16} /> Check all
             </button>
-            {/* The fix for a library imported from a file that carried no
-              * credentials: the proxies are already saved and already assigned,
-              * so setting the login here repairs those profiles in place. */}
-            <button className="ghost" onClick={() => setCredentialsOpen(true)}>
-              <KeyRound size={16} /> Set credentials…
+          )}
+          {visible.length > 0 && (
+            <button className="ghost" onClick={() => void proxies.exportToCsv(visible)}>
+              <Download size={16} /> Export all
             </button>
-            <button
-              className="ghost"
-              onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
-            >
-              <Download size={16} /> Export selected
-            </button>
-            <button
-              className="ghost"
-              onClick={() => onShare({kind: 'proxy', ids: [...selection.ids]})}
-            >
-              <Share2 size={16} /> Share…
-            </button>
-            <button
-              className="danger ghost"
-              onClick={() => onRequestDelete(
-                  [...selection.ids],
-                  `${selection.size} selected ${selection.size === 1 ? 'proxy' : 'proxies'}`,
-                  selection.clear)}
-            >
-              <Trash2 size={16} /> Delete selected
-            </button>
-          </div>
+          )}
+          <ColumnsButton
+            registry={PROXY_COLUMNS}
+            context={{isTeam: showAssignee}}
+            isVisible={isVisible}
+            onToggle={toggleColumn}
+            onReset={reset}
+          />
         </section>
-      )}
 
-      <section className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>
-                {visible.length > 0 && (
-                  <Checkbox
-                    label={`Select all ${visible.length} proxies on this page`}
-                    checked={selection.allSelected(visible)}
-                    indeterminate={visible.some((item) => selection.has(item.id))}
-                    onChange={() => selection.toggleAll(visible)}
-                  />
-                )}
-              </th>
-              {/* Which columns, in what order, and what each sorts by all live
-                * in tables/proxyColumns.tsx. */}
-              <ColumnHeaders columns={columns} sorting={sorting} />
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((proxy) => {
-              const label = proxy.name || proxy.host;
-              const isNew = newIds.has(proxy.id);
-              const rowClass = [
-                selection.has(proxy.id) ? 'row-checked' : '',
-                isNew ? 'is-new' : '',
-              ].filter(Boolean).join(' ');
-              return (
-                <tr
-                  key={proxy.id}
-                  className={rowClass}
-                  // So the green is never the only thing saying so. See the same
-                  // title on the Profiles row.
-                  title={isNew ? 'Added since you last looked' : undefined}
+        {/* The same folder navigation the Profiles tab has, minus Trash: a proxy
+          * is deleted outright, there is no soft-delete to hold it. */}
+        <section className="folder-row" aria-label="Folders">
+          <button
+            aria-pressed={!folderId}
+            className={folderId ? 'folder-card' : 'folder-card active'}
+            onClick={() => onFolderId('')}
+            type="button"
+          >
+            <span className="folder-glyph"><Waypoints size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">All proxies</span>
+            <span className="folder-card-count">{state.proxies.length}</span>
+          </button>
+
+          {state.proxy_folders.map((folder) => {
+            const count = state.proxies.filter((proxy) => proxy.folder_id === folder.id).length;
+            const active = folder.id === folderId;
+            return (
+              // A div, not a button: the pencil and the trash are buttons of
+              // their own, and nesting those inside the card's own button is
+              // both invalid and unclickable.
+              <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
+                <button
+                  aria-pressed={active}
+                  className="folder-card-main"
+                  onClick={() => onFolderId(folder.id)}
+                  type="button"
                 >
-                  <td className="checkbox-cell">
+                  <FolderGlyph color={folder.color} icon={folder.icon} />
+                  <span className="folder-card-name">{folder.name}</span>
+                </button>
+                <span className="folder-card-count">{count}</span>
+                <span className="folder-card-actions">
+                  <button
+                    aria-label={`Edit ${folder.name}`}
+                    onClick={() => onEditFolder(folder)}
+                    title={`Edit ${folder.name}`}
+                    type="button"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${folder.name}`}
+                    className="danger-icon"
+                    onClick={() => void deleteFolder(folder)}
+                    title={`Delete ${folder.name}`}
+                    type="button"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+
+          <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
+            <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">New folder</span>
+          </button>
+        </section>
+
+        {/* Below the folder rail, not above it. Ticking a row used to insert this
+          * between the filters and the folders, which pushed the folder cards and
+          * the whole table down by its height -- the navigation moving because of
+          * a selection made inside it. */}
+        {selection.size > 0 && (
+          <section className="selection-toolbar">
+            <div className="selection-toolbar-actions">
+              <FolderSelect
+                folders={state.proxy_folders}
+                noFolderLabel="All proxies"
+                onPick={(id) => void moveSelectionToFolder(id)}
+              />
+              <button
+                className="ghost"
+                onClick={() => void proxies.checkMany(selection.selectedFrom(state.proxies))}
+              >
+                <ShieldCheck size={16} /> Check selected
+              </button>
+              {/* The fix for a library imported from a file that carried no
+                * credentials: the proxies are already saved and already assigned,
+                * so setting the login here repairs those profiles in place. */}
+              <button className="ghost" onClick={() => setCredentialsOpen(true)}>
+                <KeyRound size={16} /> Set credentials…
+              </button>
+              <button
+                className="ghost"
+                onClick={() => void proxies.exportToCsv(selection.selectedFrom(state.proxies))}
+              >
+                <Download size={16} /> Export selected
+              </button>
+              <button
+                className="ghost"
+                onClick={() => onShare({kind: 'proxy', ids: [...selection.ids]})}
+              >
+                <Share2 size={16} /> Share…
+              </button>
+              <button
+                className="danger ghost"
+                onClick={() => onRequestDelete(
+                    [...selection.ids],
+                    `${selection.size} selected ${selection.size === 1 ? 'proxy' : 'proxies'}`,
+                    selection.clear)}
+              >
+                <Trash2 size={16} /> Delete selected
+              </button>
+            </div>
+          </section>
+        )}
+
+        <section className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  {visible.length > 0 && (
                     <Checkbox
-                      label={`Select ${proxy.name || proxy.host}`}
-                      checked={selection.has(proxy.id)}
-                      onChange={() => selection.toggle(proxy.id)}
+                      label={`Select all ${visible.length} proxies on this page`}
+                      checked={selection.allSelected(visible)}
+                      indeterminate={visible.some((item) => selection.has(item.id))}
+                      onChange={() => selection.toggleAll(visible)}
                     />
-                  </td>
-                  <ColumnCells columns={columns} context={columnContext} row={proxy} />
-                  <td className="actions-cell">
-                    {/* No per-row Check button: the check chip re-checks on
-                      * click now, the same trade the Profiles row made when
-                      * its chip learned to -- the affordance lives on the
-                      * thing it acts on. */}
-                    <div className="row-actions">
-                      <button
-                        aria-label={`Share ${label}`}
-                        className="icon-button row-action"
-                        onClick={() => onShare({kind: 'proxy', ids: [proxy.id]})}
-                        title="Share with another workspace"
-                      >
-                        <Share2 size={16} />
-                      </button>
-                      <button
-                        aria-label={`Edit ${label}`}
-                        className="icon-button row-action"
-                        onClick={() => onEditProxy(proxy)}
-                        title={`Edit ${label}`}
-                      >
-                        <Pencil size={16} />
-                      </button>
-                      <button
-                        aria-label={`Delete ${label}`}
-                        className="icon-button row-action row-action-danger"
-                        onClick={() => onRequestDelete([proxy.id], label)}
-                        title={`Delete ${label}`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                  )}
+                </th>
+                {/* Which columns, in what order, and what each sorts by all live
+                  * in tables/proxyColumns.tsx. */}
+                <ColumnHeaders columns={columns} sorting={sorting} />
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((proxy) => {
+                const label = proxy.name || proxy.host;
+                const isNew = newIds.has(proxy.id);
+                const rowClass = [
+                  selection.has(proxy.id) ? 'row-checked' : '',
+                  isNew ? 'is-new' : '',
+                ].filter(Boolean).join(' ');
+                return (
+                  <tr
+                    key={proxy.id}
+                    className={rowClass}
+                    // So the green is never the only thing saying so. See the same
+                    // title on the Profiles row.
+                    title={isNew ? 'Added since you last looked' : undefined}
+                  >
+                    <td className="checkbox-cell">
+                      <Checkbox
+                        label={`Select ${proxy.name || proxy.host}`}
+                        checked={selection.has(proxy.id)}
+                        onChange={() => selection.toggle(proxy.id)}
+                      />
+                    </td>
+                    <ColumnCells columns={columns} context={columnContext} row={proxy} />
+                    <td className="actions-cell">
+                      {/* No per-row Check button: the check chip re-checks on
+                        * click now, the same trade the Profiles row made when
+                        * its chip learned to -- the affordance lives on the
+                        * thing it acts on. */}
+                      <div className="row-actions">
+                        <button
+                          aria-label={`Share ${label}`}
+                          className="icon-button row-action"
+                          onClick={() => onShare({kind: 'proxy', ids: [proxy.id]})}
+                          title="Share with another workspace"
+                        >
+                          <Share2 size={16} />
+                        </button>
+                        <button
+                          aria-label={`Edit ${label}`}
+                          className="icon-button row-action"
+                          onClick={() => onEditProxy(proxy)}
+                          title={`Edit ${label}`}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          aria-label={`Delete ${label}`}
+                          className="icon-button row-action row-action-danger"
+                          onClick={() => onRequestDelete([proxy.id], label)}
+                          title={`Delete ${label}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {items.length === 0 && (
+                <tr className="empty-row-tr">
+                  {/* Counted rather than written down -- the number of columns is
+                    * the user's to choose now. A short colSpan leaves a stray
+                    * empty cell at the end of the row. */}
+                  <td colSpan={columnCount}>
+                    <EmptyState
+                      icon={<SearchX size={22} />}
+                      title={filtered ? 'Nothing matches those filters' : 'This folder is empty'}
+                      body={filtered ?
+                        'Try a different search term, or clear the status and assignment filters.' :
+                        'Proxies you move into this folder will show up here.'}
+                    >
+                      {!filtered && (
+                        <>
+                          <button onClick={onAddProxy} type="button">
+                            <Plus size={16} /> Add proxy
+                          </button>
+                          {/* A brand-new folder is far more often filled from
+                            * proxies that already exist than from scratch, and
+                            * the only route to that was selecting rows in a
+                            * table you have to leave this folder to see. */}
+                          {activeFolder && movableCount > 0 && (
+                            <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
+                              <FolderInput size={16} /> Move proxies here
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </EmptyState>
                   </td>
                 </tr>
-              );
-            })}
-            {items.length === 0 && (
-              <tr className="empty-row-tr">
-                {/* Counted rather than written down -- the number of columns is
-                  * the user's to choose now. A short colSpan leaves a stray
-                  * empty cell at the end of the row. */}
-                <td colSpan={columnCount}>
-                  <EmptyState
-                    icon={<SearchX size={22} />}
-                    title={filtered ? 'Nothing matches those filters' : 'This folder is empty'}
-                    body={filtered ?
-                      'Try a different search term, or clear the status and assignment filters.' :
-                      'Proxies you move into this folder will show up here.'}
-                  >
-                    {!filtered && (
-                      <>
-                        <button onClick={onAddProxy} type="button">
-                          <Plus size={16} /> Add proxy
-                        </button>
-                        {/* A brand-new folder is far more often filled from
-                          * proxies that already exist than from scratch, and
-                          * the only route to that was selecting rows in a
-                          * table you have to leave this folder to see. */}
-                        {activeFolder && movableCount > 0 && (
-                          <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
-                            <FolderInput size={16} /> Move proxies here
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </EmptyState>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+              )}
+            </tbody>
+          </table>
+        </section>
 
-      <PaginationBar
-        page={clampedPage}
-        totalPages={totalPages}
-        total={total}
-        pageSize={pageSize}
-        onPage={setPage}
-        onPageSize={(size) => { setPageSize(size); setPage(0); }}
-        extra={selection.size > 0 && (
-          <span className="pagination-selected">{selection.size} selected</span>
-        )}
-      />
+        <PaginationBar
+          page={clampedPage}
+          totalPages={totalPages}
+          total={total}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={(size) => { setPageSize(size); setPage(0); }}
+          extra={selection.size > 0 && (
+            <span className="pagination-selected">{selection.size} selected</span>
+          )}
+        />
+      </div>
 
       {(moveOpen || fillCountry) && activeFolder && (
         <MoveProxiesModal

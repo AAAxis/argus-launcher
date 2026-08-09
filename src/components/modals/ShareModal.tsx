@@ -98,11 +98,15 @@ export function ShareModal({request, onClose, onShare}: {
       }));
     }
     if (kind === 'automation') {
-      return state.automations.map((automation) => ({
-        id: automation.id,
-        name: automation.name || 'Untitled',
-        detail: `${automation.steps.length} steps`,
-      }));
+      // Trashed ones are filtered out for the same reason the profiles branch
+      // below drops deleted rows: you cannot share what is on its way out.
+      return state.automations
+          .filter((automation) => !automation.deleted_at)
+          .map((automation) => ({
+            id: automation.id,
+            name: automation.name || 'Untitled',
+            detail: `${automation.steps.length} steps`,
+          }));
     }
     return state.profiles.filter((profile) => !profile.deleted_at).map((profile) => ({
       id: profile.id,

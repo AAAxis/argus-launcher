@@ -57,6 +57,7 @@ export const defaultCloudState: CloudState = {
   folders: [],
   proxy_folders: [],
   cookie_folders: [],
+  automation_folders: [],
   proxies: [],
   cookies: [],
   shared_extensions: [],

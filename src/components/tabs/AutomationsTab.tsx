@@ -18,30 +18,35 @@
 // per action.
 import {useEffect, useMemo, useState} from 'react';
 import {
-  Bot, BookOpen, CircleCheck, CircleSlash, CircleX, Clock, History, LoaderCircle,
-  MonitorSmartphone, Pencil, Play, Plus, Rocket, Share2, Sparkles, Star,
-  TriangleAlert, Workflow,
+  Bot, BookOpen, CircleCheck, CircleSlash, CircleX, Clock, FolderInput, FolderPlus,
+  History, LoaderCircle, MonitorSmartphone, Pencil, Play, Plus, Rocket, Share2,
+  Sparkles, Star, Trash2, TriangleAlert, Undo2, Workflow,
 } from 'lucide-react';
 import {Assignee} from '../ui/Assignee';
+import {AutomationMark, automationFrameStyle} from '../automations/AutomationMark';
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {ConnectorsView} from '../automations/ConnectorsView';
+import {FolderGlyph} from '../ui/FolderGlyph';
+import {MoveAutomationsModal} from '../modals/MoveAutomationsModal';
 import {NotificationBotView} from '../automations/NotificationBotView';
-import {TagChip, TagMark} from '../ui/TagChip';
+import {TagChip} from '../ui/TagChip';
+import {useAsyncAction} from '../../useAsyncAction';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import {SITE_LINKS} from '../../data/links';
 import {assigneeName} from '../../lib/assignees';
 import {ago} from '../../lib/relativeTime';
-import {parseAvatar} from '../../lib/profileAvatar';
-import {profileColorStyle} from '../../lib/profileColors';
+import {TRASH_FOLDER_ID, TRASH_RETENTION_DAYS, daysUntilPurge} from '../../lib/trash';
 import {automationCap} from '../../automations/limit';
 import {describeRunBlock} from '../../automations/runReadiness';
 import {RUN_LABEL} from '../../automations/runStatus';
 import {describeSchedule} from '../../automations/schedule';
 import {sortAutomations} from '../../automations/sort';
 import type {ShareRequest} from '../modals/ShareModal';
-import type {ArgusAutomation, ArgusConnector, AutomationRun} from '../../types';
+import type {
+  ArgusAutomation, ArgusConnector, ArgusFolder, AutomationRun,
+} from '../../types';
 import type {RunStatus} from '../../automations/types';
 
 // All, or the ones the browser start pages show. Chips rather than a filter
@@ -71,9 +76,18 @@ const RUN_GLYPH: Record<RunStatus, typeof CircleCheck> = {
 };
 
 export function AutomationsTab({
+  folderId, onFolderId, onNewFolder, onEditFolder,
   onEdit, onNew, onLoadExample, onCreateDemoProfile, onRun, onHistory, onShare, onOpenSite,
   onNewConnector, onEditConnector, newIds,
 }: {
+  // '' is All automations and TRASH_FOLDER_ID is Trash; anything else is a
+  // folder id. Held in App rather than here for the reason the other three
+  // tabs hold it there: creating a folder has to switch the view to it, and
+  // the dialog that creates one is mounted from App.
+  folderId: string;
+  onFolderId: (folderId: string) => void;
+  onNewFolder: () => void;
+  onEditFolder: (folder: ArgusFolder) => void;
   onEdit: (automation: ArgusAutomation) => void;
   onNew: () => void;
   // Inserts the pre-written example and opens it. Unlike onNew it writes a row
@@ -105,22 +119,57 @@ export function AutomationsTab({
   // tabs nobody is standing on. See src/lib/newSince.ts.
   newIds: ReadonlySet<string>;
 }) {
-  const {data, automations} = useWorkspace();
+  const {data, automations, library, toast} = useWorkspace();
   const org = useOrg();
+  // `runAction`, not `run`: each card in the grid below binds `run` to its own
+  // newest AutomationRun, and the shadowing is silent right up until something
+  // in a card tries to call this one.
+  const {run: runAction, isPending} = useAsyncAction();
   const [view, setView] = useState<View>('all');
+  // The "move automations here" picker, offered from an empty folder. This
+  // grid has no selection model -- see onShare -- so filing an existing
+  // automation happens either here or in the editor's Folder field.
+  const [moveOpen, setMoveOpen] = useState(false);
   const {state} = data;
+  const inTrash = folderId === TRASH_FOLDER_ID;
+
   // Starred first, then newest -- re-sorted here rather than trusting the DB
   // order because stars are per-user state the query cannot see.
-  const list = useMemo(
+  //
+  // Trash is a folder in the rail but a flag on the row, so it splits the list
+  // before anything else narrows it -- the shape visibleProfiles() uses.
+  const sorted = useMemo(
       () => sortAutomations(state.automations, state.automation_stars),
       [state.automations, state.automation_stars]);
+  const liveAutomations = useMemo(
+      () => sorted.filter((automation) => !automation.deleted_at), [sorted]);
+  const trashedAutomations = useMemo(
+      () => sorted.filter((automation) => automation.deleted_at), [sorted]);
+  // What the chips and the grid narrow: Trash, or the chosen folder, or all.
+  const list = useMemo(() => {
+    if (inTrash) {
+      return trashedAutomations;
+    }
+    return folderId ?
+      liveAutomations.filter((automation) => automation.folder_id === folderId) :
+      liveAutomations;
+  }, [inTrash, folderId, liveAutomations, trashedAutomations]);
   const starred = useMemo(
       () => new Set(state.automation_stars), [state.automation_stars]);
 
+  // The real folder the view is pointed at, if any. '' is All automations and
+  // TRASH_FOLDER_ID is a flag on the row; neither is somewhere an automation
+  // can be moved to.
+  const activeFolder = inTrash ? null :
+    state.automation_folders.find((folder) => folder.id === folderId) || null;
+
   // UX only, never security: trg_automation_limit is the real gate and
   // describeDbError turns its exception into the same sentence. This just says
-  // it before the click rather than after.
-  const {atCap} = automationCap(org.org, list.length);
+  // it before the click rather than after. Counted over every live automation
+  // rather than the filtered view -- the cap is a property of the workspace,
+  // and trashed rows do not count against it (enforce_automation_limit skips
+  // them, so a meter that included them would disagree with the database).
+  const {atCap} = automationCap(org.org, liveAutomations.length);
   // Trashed profiles still exist and can be restored, so they are not "no
   // profiles" -- offering to mint a Demo one on top of them would be the app
   // failing to see what the user already has.
@@ -156,7 +205,50 @@ export function AutomationsTab({
     }
   }
 
-  const automationsEmpty = list.length === 0;
+  // Nothing in the workspace at all -- not an empty folder, and not an empty
+  // Trash. Those are answers; this is the invitation to write the first one,
+  // and it replaces the whole screen including the folder rail (there is
+  // nothing to file and nowhere to file it from).
+  const automationsEmpty = state.automations.length === 0;
+
+  async function deleteFolder(folder: ArgusFolder) {
+    if (!window.confirm(
+        `Delete folder ${folder.name}? Automations will move to All automations.`)) {
+      return;
+    }
+    if (await library.removeFolder(folder.id)) {
+      if (folderId === folder.id) {
+        onFolderId('');
+      }
+      toast.setMessage(`${folder.name} folder deleted`);
+    }
+  }
+
+  async function purgeOne(automation: ArgusAutomation) {
+    // The one place in the app an automation can actually be destroyed, so it
+    // says so plainly. window.confirm rather than a dialog of its own: it is
+    // reachable only from inside Trash, which is already the "are you sure"
+    // step -- unlike the editor's Delete, whose consequence (profiles quietly
+    // stopping) needs a sentence that no native prompt can carry.
+    if (!window.confirm(
+        `Permanently delete ${automation.name}? This cannot be undone.`)) {
+      return;
+    }
+    if (await automations.purge([automation.id])) {
+      toast.setMessage(`${automation.name} deleted`);
+    }
+  }
+
+  async function emptyTrash() {
+    if (!window.confirm(
+        `Permanently delete ${trashedAutomations.length} ` +
+        `automation${trashedAutomations.length === 1 ? '' : 's'}? This cannot be undone.`)) {
+      return;
+    }
+    if (await automations.purgeAll()) {
+      toast.setMessage('Trash emptied');
+    }
+  }
 
   // .tab-empty, the shape an empty Profiles, Proxies, Cookies or Start tab
   // takes: a centred column with the mark at a fixed 56px, so the glyph lands
@@ -274,19 +366,109 @@ export function AutomationsTab({
             <span className="integration-bar-count">
               <strong>{shown.length}</strong> {shown.length === 1 ? 'automation' : 'automations'}
             </span>
-            <button
-              className="ghost"
-              disabled={atCap}
-              onClick={onNew}
-              title={atCap ?
-                'Your plan doesn\'t include any more automations.' :
-                'Create an automation'}
-            >
-              <Plus size={16} /> New automation
-            </button>
+            {/* In Trash the one bulk action replaces the one that makes no
+                sense there: you do not create an automation into Trash. */}
+            {inTrash ? (
+              <button
+                className="ghost danger"
+                disabled={trashedAutomations.length === 0}
+                onClick={() => void emptyTrash()}
+                title="Permanently delete everything in Trash"
+              >
+                <Trash2 size={16} /> Empty Trash
+              </button>
+            ) : (
+              <button
+                className="ghost"
+                disabled={atCap}
+                onClick={onNew}
+                title={atCap ?
+                  'Your plan doesn\'t include any more automations.' :
+                  'Create an automation'}
+              >
+                <Plus size={16} /> New automation
+              </button>
+            )}
           </div>
         )}
       </section>
+
+      {/* Not on Connectors or Notification bot. Those two chips are not views
+          of the automation list at all -- they are this tab's other two
+          collections -- so a folder rail above them would be filtering
+          something that is not on screen. */}
+      {view !== 'connectors' && view !== 'bot' && !automationsEmpty && (
+        <section className="folder-row" aria-label="Automation folders">
+          <button
+            aria-pressed={!folderId}
+            className={folderId ? 'folder-card' : 'folder-card active'}
+            onClick={() => onFolderId('')}
+            type="button"
+          >
+            <span className="folder-glyph"><Workflow size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">All automations</span>
+            <span className="folder-card-count">{liveAutomations.length}</span>
+          </button>
+
+          {state.automation_folders.map((folder) => {
+            const count = liveAutomations.filter(
+                (automation) => automation.folder_id === folder.id).length;
+            const active = folder.id === folderId;
+            return (
+              // A div, not a button: the pencil and the trash are buttons of
+              // their own, and nesting those inside the card's button is both
+              // invalid and unclickable.
+              <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
+                <button
+                  aria-pressed={active}
+                  className="folder-card-main"
+                  onClick={() => onFolderId(folder.id)}
+                  type="button"
+                >
+                  <FolderGlyph color={folder.color} icon={folder.icon} />
+                  <span className="folder-card-name">{folder.name}</span>
+                </button>
+                <span className="folder-card-count">{count}</span>
+                <span className="folder-card-actions">
+                  <button
+                    aria-label={`Edit ${folder.name}`}
+                    onClick={() => onEditFolder(folder)}
+                    title={`Edit ${folder.name}`}
+                    type="button"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${folder.name}`}
+                    className="danger-icon"
+                    onClick={() => void deleteFolder(folder)}
+                    title={`Delete ${folder.name}`}
+                    type="button"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+
+          <button
+            aria-pressed={inTrash}
+            className={inTrash ? 'folder-card active' : 'folder-card'}
+            onClick={() => onFolderId(TRASH_FOLDER_ID)}
+            type="button"
+          >
+            <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">Trash</span>
+            <span className="folder-card-count">{trashedAutomations.length}</span>
+          </button>
+
+          <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
+            <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">New folder</span>
+          </button>
+        </section>
+      )}
 
       {view === 'connectors' && (
         <ConnectorsView onNew={onNewConnector} onEdit={onEditConnector} />
@@ -323,11 +505,12 @@ export function AutomationsTab({
           const runningCount = live.get(automation.id) || 0;
           const busy = runningCount > 0;
           const isStarred = starred.has(automation.id);
-          // The brand mark the user picked, or the shared workflow glyph. The
-          // colour plate applies either way -- a coloured default glyph is
-          // still a navigable card.
-          const avatar = parseAvatar(automation.icon);
-          const plate = automation.color ? profileColorStyle(automation.color) : undefined;
+          // The colour used to tint the plate behind whatever mark the card
+          // drew, brand logo included, which put a violet chip behind the
+          // Instagram glyph. It rides the frame's edge now instead, so it
+          // still identifies the automation and no longer argues with a logo
+          // that brought its own colours -- see AutomationMark.
+          const frame = automationFrameStyle(automation.color);
           // The verdict the card reports: this session's newest run where there
           // is one, and otherwise the denormalized columns, written by whichever
           // machine ran it last -- which is what survives a restart and what
@@ -357,6 +540,7 @@ export function AutomationsTab({
                 'automation-card automation-card-framed is-new' :
                 'automation-card automation-card-framed'}
               key={automation.id}
+              style={frame}
             >
               {/* The chrome, on the frame rather than in the card: the two
                   secondary actions on the leading edge, the step count on the
@@ -417,16 +601,7 @@ export function AutomationsTab({
                     editor's footer beside Cancel and Save -- you open the thing
                     before you throw it away. */}
                 <div className="automation-card-head">
-                  <span
-                    aria-hidden="true"
-                    className={avatar || plate ?
-                      'extension-mark automation-mark' : 'extension-mark is-fallback'}
-                    style={plate}
-                  >
-                    {avatar?.kind === 'brand' ?
-                      <TagMark preset={avatar.preset} size={18} /> :
-                      <Workflow size={20} strokeWidth={1.75} />}
-                  </span>
+                  <AutomationMark icon={automation.icon} color={automation.color} />
                   {/* The star lives INSIDE the h3, straight after the last word
                       of the name, so it cannot wrap away from it into the badge
                       row -- a long name takes its star along to the second line.
@@ -465,10 +640,26 @@ export function AutomationsTab({
                   (automation.created_by && automation.created_by !== org.userId) ||
                   (automation.tags || []).length > 0) && (
                   <div className="automation-card-meta">
-                    {/* First, because "whose is this" is the question a team asks
-                        of a card before any of the others. Only rendered when
-                        somebody holds it -- an "Unassigned" badge on every card
-                        would be a grid of noise. */}
+                    {/* First in Trash, because how long is left is the only
+                        question worth asking about a card in there. */}
+                    {automation.deleted_at && (
+                      <Badge
+                        icon={<Clock size={12} />}
+                        title={`Deleted ${ago(automation.deleted_at)}. ` +
+                          `Removed for good ${TRASH_RETENTION_DAYS} days after that.`}
+                      >
+                        {(() => {
+                          const days = daysUntilPurge(automation.deleted_at);
+                          return days === 0 ?
+                            'Removed today' :
+                            `${days} day${days === 1 ? '' : 's'} left`;
+                        })()}
+                      </Badge>
+                    )}
+                    {/* "Whose is this" is the question a team asks of a card
+                        before any of the others. Only rendered when somebody
+                        holds it -- an "Unassigned" badge on every card would be
+                        a grid of noise. */}
                     {automation.assigned_to && (
                       <Assignee userId={automation.assigned_to} />
                     )}
@@ -552,6 +743,31 @@ export function AutomationsTab({
                   </button>
                 )}
 
+                {/* In Trash the two actions are the only two that make sense:
+                    put it back, or finish the job. Running or editing
+                    something the app is treating as deleted is not offered at
+                    all rather than offered and disabled -- there is no state
+                    the user could reach from here that would enable them,
+                    short of Restore, which is right there. */}
+                {inTrash ? (
+                  <div className="extension-card-foot">
+                    <BusyButton
+                      busy={isPending(`restore-${automation.id}`)}
+                      busyLabel="Restoring"
+                      icon={<Undo2 size={14} />}
+                      onClick={() => void runAction(`restore-${automation.id}`, async () => {
+                        if (await automations.restore([automation.id])) {
+                          toast.setMessage(`${automation.name} restored`);
+                        }
+                      })}
+                    >Restore</BusyButton>
+                    <button
+                      className="automation-card-edit danger"
+                      onClick={() => void purgeOne(automation)}
+                      type="button"
+                    ><Trash2 size={14} /> Delete permanently</button>
+                  </div>
+                ) : (
                 <div className="extension-card-foot">
                   {/* Opens the picker; it never starts a run itself. It used to
                       resolve a target with runTarget() and go, which is how a run
@@ -586,6 +802,7 @@ export function AutomationsTab({
                     type="button"
                   ><Pencil size={14} /> Edit</button>
                 </div>
+                )}
               </div>
             </article>
           );
@@ -596,23 +813,59 @@ export function AutomationsTab({
           * to get another one of these sits where the next one would go. Not
           * shown while the Pinned filter is on -- a new automation is not
           * pinned, so it would land outside the list it was added to. */}
-        {view === 'all' && !atCap && (
+        {view === 'all' && !atCap && !inTrash && (
           <button className="automation-card extension-add-tile" onClick={onNew} type="button">
             <span className="extension-add-icon"><Plus size={20} strokeWidth={1.75} /></span>
             <span className="extension-add-label">New automation</span>
-            <span className="extension-add-hint">A list of steps run against a profile</span>
+            <span className="extension-add-hint">
+              {activeFolder ?
+                `A list of steps run against a profile, filed in ${activeFolder.name}` :
+                'A list of steps run against a profile'}
+            </span>
           </button>
         )}
       </div>
 
-      {/* The Pinned view can be legitimately empty -- nothing is pinned by
-        * default -- and an empty grid under a chip that is clearly on reads as
-        * a page that failed rather than as an answer. */}
+      {/* Four ways to arrive at an empty grid, and they want four different
+        * sentences -- an empty view under a chip or a folder card that is
+        * clearly on reads as a page that failed rather than as an answer.
+        * The folder case gets a button, because "put something in it" is the
+        * one of the four with an action attached. */}
       {shown.length === 0 && (
-        <p className="automation-view-empty">
-          No automations are on your start pages yet. Open one and pin it, or pin it
-          from the Start page tab.
-        </p>
+        inTrash ? (
+          <p className="automation-view-empty">
+            Trash is empty. Deleted automations stay here for{' '}
+            {TRASH_RETENTION_DAYS} days before they are removed for good.
+          </p>
+        ) : activeFolder ? (
+          <div className="automation-view-empty">
+            <p>Nothing is filed in {activeFolder.name} yet.</p>
+            <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
+              <FolderInput size={16} /> Move automations here
+            </button>
+          </div>
+        ) : view === 'pinned' ? (
+          <p className="automation-view-empty">
+            No automations are on your start pages yet. Open one and pin it, or pin it
+            from the Start page tab.
+          </p>
+        ) : view === 'mine' ? (
+          <p className="automation-view-empty">
+            Nothing is assigned to you yet.
+          </p>
+        ) : (
+          // view 'all' with an empty list and no folder selected means folderId
+          // names a folder that is no longer in state -- a teammate deleted it
+          // while this window was open. Not an error worth a dialog: say so and
+          // point at the way back.
+          <p className="automation-view-empty">
+            That folder no longer exists. Pick another, or choose All automations.
+          </p>
+        )
+      )}
+
+      {moveOpen && activeFolder && (
+        <MoveAutomationsModal folder={activeFolder} onClose={() => setMoveOpen(false)} />
       )}
       </>}
     </section>

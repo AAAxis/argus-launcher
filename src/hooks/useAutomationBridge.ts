@@ -1069,6 +1069,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   function automationExtras(payload: {
     icon?: string;
     color?: string;
+    folderId?: string;
     notifyOn?: string;
     notifyConnectorId?: string;
     variables?: Record<string, unknown>;
@@ -1092,6 +1093,20 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
             'color must be slate, blue, green, violet, red, amber, or a #rrggbb hex', 400);
       }
       extras.color = color || null;
+    }
+    if (payload.folderId !== undefined) {
+      const folderId = payload.folderId.trim();
+      // Checked against the AUTOMATION folders specifically. All four
+      // libraries share one table, so a profile folder's id is a real id that
+      // would insert cleanly and then file the automation somewhere no view
+      // in the app can reach -- the error names the group to look in.
+      if (folderId && !state.automation_folders.some((folder) => folder.id === folderId)) {
+        throw new ApiError(
+            `No automation folder with id ${folderId}. Use an id from the ` +
+            '"automations" group of argus_list_folders — profile, proxy and ' +
+            'cookie folders are separate namespaces.', 400);
+      }
+      extras.folder_id = folderId || null;
     }
     if (payload.notifyOn !== undefined) {
       const notifyOn = payload.notifyOn.trim();
@@ -1157,13 +1172,32 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
     }
   }
 
+  // One automation, by id, and never one in Trash.
+  //
+  // Trashed rows stay in state so the tab can show Trash as a view of the same
+  // list, which means every channel that resolves an id has to exclude them or
+  // an agent gets to read, edit, run and subscribe to workflows the app is
+  // treating as deleted. 404 rather than a distinct code: an agent has no way
+  // to restore one, so "gone" is the whole of the useful answer.
+  function requireAutomation(automationId: string): ArgusAutomation {
+    const found = state.automations.find(
+        (item) => item.id === automationId && !item.deleted_at);
+    if (!found) {
+      throw new ApiError(`No automation with id ${automationId}`, 404);
+    }
+    return found;
+  }
+
   // Deliberately not the whole step tree: a workspace with thirty automations
   // would put every step of every one of them into an agent's context on a
   // request that only asked what exists. argus_get_automation is one call away.
   useApiChannel(
       'argus:list-automations-request',
       () => ({
-        automations: state.automations.map((automation) => ({
+        // Trash is not listed. An agent cannot restore one, so offering it
+        // would only produce calls that fail -- and the run and get channels
+        // refuse a trashed id for the same reason.
+        automations: state.automations.filter((item) => !item.deleted_at).map((automation) => ({
           id: automation.id,
           name: automation.name,
           description: automation.description || null,
@@ -1199,13 +1233,9 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
 
   useApiChannel(
       'argus:get-automation-request',
-      ({automationId}: {requestId: string; automationId: string}) => {
-        const found = state.automations.find((item) => item.id === automationId);
-        if (!found) {
-          throw new ApiError(`No automation with id ${automationId}`, 404);
-        }
-        return {automation: found};
-      },
+      ({automationId}: {requestId: string; automationId: string}) => ({
+        automation: requireAutomation(automationId),
+      }),
       cloud);
 
   useApiChannel(
@@ -1221,6 +1251,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         closeOnFinish?: boolean;
         icon?: string;
         color?: string;
+        folderId?: string;
         notifyOn?: string;
         notifyConnectorId?: string;
         variables?: Record<string, unknown>;
@@ -1294,16 +1325,18 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         closeOnFinish?: boolean;
         icon?: string;
         color?: string;
+        folderId?: string;
         notifyOn?: string;
         notifyConnectorId?: string;
         variables?: Record<string, unknown>;
+        // routes.json has always declared this and automationExtras has always
+        // read it; only this type left it out, so it worked structurally while
+        // saying the field did not exist.
+        parameters?: unknown;
         schedule?: unknown;
       }) => {
         requireSignedIn();
-        const existing = state.automations.find((item) => item.id === payload.automationId);
-        if (!existing) {
-          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
-        }
+        const existing = requireAutomation(payload.automationId);
         // Only what was sent. Spreading the payload wholesale would write
         // `undefined` over every field the caller left out, which is how a
         // rename would silently empty the step list. automationExtras keeps
@@ -1353,9 +1386,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       'argus:list-automation-runs-request',
       async (payload: {requestId: string; automationId: string; limit?: number}) => {
         requireSignedIn();
-        if (!state.automations.some((item) => item.id === payload.automationId)) {
-          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
-        }
+        requireAutomation(payload.automationId);
         const runs = await db.runs.list(data.orgId || '', {
           automationId: payload.automationId,
           limit: Math.min(Math.max(1, payload.limit ?? 20), 50),
@@ -1464,13 +1495,19 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       'argus:delete-automation-request',
       async ({automationId}: {requestId: string; automationId: string}) => {
         requireSignedIn();
-        const existing = state.automations.find((item) => item.id === automationId);
+        // Trashed rows stay in `state.automations`, so this has to say so
+        // rather than let a second delete look like it did something.
+        const existing = state.automations.find(
+            (item) => item.id === automationId && !item.deleted_at);
         if (!existing) {
           throw new ApiError(`No automation with id ${automationId}`, 404);
         }
-        await automationActions.remove([automationId]);
-        toast.setMessage(`Deleted ${existing.name}`);
-        return {deleted: automationId};
+        // To Trash, not gone. An agent deleting a workflow it misread is the
+        // case this protects, and the app offers no permanent delete outside
+        // Trash either -- the two surfaces mean the same thing by "delete".
+        await automationActions.softDelete([automationId]);
+        toast.setMessage(`${existing.name} moved to Trash`);
+        return {deleted: automationId, trashed: true};
       },
       cloud);
 
@@ -1483,10 +1520,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         vars?: Record<string, unknown>;
         allowedFolders?: string[] | null;
       }) => {
-        const automation = state.automations.find((item) => item.id === payload.automationId);
-        if (!automation) {
-          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
-        }
+        const automation = requireAutomation(payload.automationId);
         // The profile still goes through the folder gate. A scoped key may run
         // a shared automation, but only against a profile it can see -- and
         // re-read from the database, not from this window's render cache, for
@@ -1710,7 +1744,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   // ── Workspace vocabulary ───────────────────────────────────────────────────
   //
   // Two read-only lists that exist because other tools already take their
-  // values. folderId is settable on three routes and status is a free string on
+  // values. folderId is settable on four routes and status is a free string on
   // two, and until now neither could be discovered from outside the app -- so an
   // agent either guessed or left them alone. Read-only because creating a folder
   // or inventing a status is a workspace decision, not a side effect of a script.
@@ -1724,11 +1758,12 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           ({id: folder.id, name: folder.name});
         return {
           // Scope applies to profile folders only: it is a gate on profiles,
-          // and the proxy and cookie libraries it does not cover are listed
-          // whole rather than filtered by an id set that means nothing to them.
+          // and the other three libraries it does not cover are listed whole
+          // rather than filtered by an id set that means nothing to them.
           profiles: visible(state.folders).map(shape),
           proxies: state.proxy_folders.map(shape),
           cookies: state.cookie_folders.map(shape),
+          automations: state.automation_folders.map(shape),
         };
       },
       cloud);
@@ -1785,9 +1820,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       'argus:set-telegram-pref-request',
       async (payload: {requestId: string; automationId: string; notifyOn?: string}) => {
         requireSignedIn();
-        if (!state.automations.some((item) => item.id === payload.automationId)) {
-          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
-        }
+        requireAutomation(payload.automationId);
         const wanted = (payload.notifyOn || '').trim();
         if (wanted && wanted !== 'always' && wanted !== 'failure') {
           throw new ApiError('notifyOn must be always, failure, or empty to unsubscribe', 400);

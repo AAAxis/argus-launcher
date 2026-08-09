@@ -163,15 +163,61 @@ export function useAutomationActions(
     return null;
   }
 
-  // Answers whether the delete actually happened. The editor's Delete button
-  // closes the dialog it was clicked in, and a dialog that closes on a failed
-  // write reports success the toast is simultaneously denying.
-  async function remove(ids: string[]): Promise<boolean> {
+  // Delete, as the app and MCP both mean it now: into Trash, recoverable for
+  // 30 days. `purge` below is the permanent one, reachable only from there.
+  //
+  // Answers whether it actually happened. The editor's Delete button closes the
+  // dialog it was clicked in, and a dialog that closes on a failed write
+  // reports success the toast is simultaneously denying.
+  //
+  // Profiles keep their automation_id through a soft delete, unlike the
+  // permanent path below: restoring has to put things back exactly, and
+  // detaching here would silently unbind every profile the moment someone
+  // trashed a workflow by mistake. The surfaces that must not offer a trashed
+  // automation filter on deleted_at instead.
+  async function softDelete(ids: string[]): Promise<boolean> {
     if (ids.length === 0) {
       return false;
     }
-    const ok = await withDb((activeOrgId) => db.automations.remove(activeOrgId, ids));
-    if (!ok) {
+    const deletedAt = new Date().toISOString();
+    if (!await withDb((activeOrgId) => db.automations.softDelete(activeOrgId, ids))) {
+      return false;
+    }
+    patch.automations((list) => list.map((item) =>
+      ids.includes(item.id) ? {...item, deleted_at: deletedAt} : item));
+    // Callers left pointing at what just went to Trash. Non-blocking -- the
+    // delete happened -- but said out loud, because their next run will refuse
+    // and this is the moment that explains why.
+    const orphaned = state.automations.filter((item) =>
+      !ids.includes(item.id) && !item.deleted_at &&
+      collectCallees(item.steps).some((calleeId) => ids.includes(calleeId)));
+    if (orphaned.length > 0) {
+      toast.notify(
+          `${orphaned.map((item) => item.name).join(', ')} call${orphaned.length === 1 ? 's' : ''} ` +
+          'what you just deleted — their Run automation steps will now fail.',
+          {tone: 'info'});
+    }
+    return true;
+  }
+
+  // Restoring crosses the plan cap as much as creating does, so
+  // trg_automation_limit_restore fires on exactly this update and can refuse
+  // it. One statement for the set, so it either all lands or none of it does.
+  async function restore(ids: string[]): Promise<boolean> {
+    if (!await withDb((activeOrgId) => db.automations.restore(activeOrgId, ids))) {
+      return false;
+    }
+    patch.automations((list) => list.map((item) =>
+      ids.includes(item.id) ? {...item, deleted_at: null} : item));
+    return true;
+  }
+
+  // Permanent, from Trash.
+  async function purge(ids: string[]): Promise<boolean> {
+    if (ids.length === 0) {
+      return false;
+    }
+    if (!await withDb((activeOrgId) => db.automations.remove(activeOrgId, ids))) {
       return false;
     }
     patch.automations((list) => list.filter((item) => !ids.includes(item.id)));
@@ -182,18 +228,36 @@ export function useAutomationActions(
       profile.automation_id && ids.includes(profile.automation_id) ?
         {...profile, automation_id: null} :
         profile));
-    // Callers left pointing at what was just deleted. Non-blocking -- the
-    // delete happened -- but said out loud, because their next run will refuse
-    // with "no longer exists" and this is the moment that explains why.
-    const orphaned = state.automations.filter((item) =>
-      !ids.includes(item.id) &&
-      collectCallees(item.steps).some((calleeId) => ids.includes(calleeId)));
-    if (orphaned.length > 0) {
-      toast.notify(
-          `${orphaned.map((item) => item.name).join(', ')} call${orphaned.length === 1 ? 's' : ''} ` +
-          'what you just deleted — their Run automation steps will now fail.',
-          {tone: 'info'});
+    return true;
+  }
+
+  // Empty Trash. The local patch drops every trashed row rather than the ids
+  // the statement returned: those are the same set, and filtering on
+  // deleted_at keeps the two sides describing Trash the same way.
+  async function purgeAll(): Promise<boolean> {
+    const purged = state.automations.filter((item) => item.deleted_at).map((item) => item.id);
+    if (!await withDb((activeOrgId) => db.automations.purgeAll(activeOrgId))) {
+      return false;
     }
+    patch.automations((list) => list.filter((item) => !item.deleted_at));
+    patch.profiles((list) => list.map((profile) =>
+      profile.automation_id && purged.includes(profile.automation_id) ?
+        {...profile, automation_id: null} :
+        profile));
+    return true;
+  }
+
+  async function assignToFolder(ids: string[], folderId: string | null): Promise<boolean> {
+    const ok = await withDb(async (activeOrgId) => {
+      for (const id of ids) {
+        await db.automations.update(activeOrgId, id, {folder_id: folderId});
+      }
+    });
+    if (!ok) {
+      return false;
+    }
+    patch.automations((list) => list.map((item) =>
+      ids.includes(item.id) ? {...item, folder_id: folderId} : item));
     return true;
   }
 
@@ -500,9 +564,12 @@ export function useAutomationActions(
   }
 
   return {
-    runs, attach, exampleAutomation, newAutomation, remove, run, runMany, save, setPinned,
+    runs, attach, exampleAutomation, newAutomation, run, runMany, save, setPinned,
     setStarred, setTelegramPref, linkTelegram, unlinkTelegram, testTelegram,
     cancelRun,
+    // Trash. `softDelete` is what Delete means everywhere now; `purge` and
+    // `purgeAll` are permanent and only Trash offers them.
+    softDelete, restore, purge, purgeAll, assignToFolder,
     lastRunProfileId: (automationId: string) => lastRunProfileIds.current[automationId] || null,
   };
 }

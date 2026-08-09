@@ -3,9 +3,13 @@ import {optionalClient, raise, requireClient} from './client';
 import {automationPatchToRow, automationToRow, rowToAutomation} from './mappers';
 import type {AutomationRow} from './rows';
 
+// folder_id and deleted_at arrive with 20260817. Both are named here, which
+// means this build REQUIRES that migration: PostgREST fails the whole select
+// on an unknown column, and useCloudData's allSettled turns that into an empty
+// automations list rather than an error anyone sees.
 const COLUMNS =
   'id,org_id,name,description,steps,variables,parameters,tags,pinned,timeout_ms,close_on_finish,' +
-  'notify_connector_id,notify_on,icon,color,last_run_at,last_run_status,' +
+  'notify_connector_id,notify_on,icon,color,folder_id,deleted_at,last_run_at,last_run_status,' +
   'created_by,created_via,created_by_label,updated_by,schedule,' +
   'created_at,updated_at,assigned_to';
 
@@ -92,12 +96,12 @@ export async function recordRunOutcome(
   raise(error, 'automations.recordRunOutcome');
 }
 
-// Hard delete -- automations have no Trash.
+// Permanent delete. Reachable only from Trash -- Delete in the editor and over
+// MCP both call softDelete now.
 //
-// An automation is a document, not an asset: nothing on disk belongs to one, so
-// there is nothing to orphan. profiles.automation_id is ON DELETE SET NULL, so
-// this detaches rather than cascades, and automation_runs keeps a denormalized
-// automation_name so history stays readable afterwards.
+// profiles.automation_id is ON DELETE SET NULL, so this detaches the profiles
+// pointing at it rather than cascading, and automation_runs keeps a
+// denormalized automation_name so history stays readable afterwards.
 export async function remove(orgId: string, ids: string[]): Promise<void> {
   if (ids.length === 0) {
     return;
@@ -109,4 +113,81 @@ export async function remove(orgId: string, ids: string[]): Promise<void> {
       .eq('org_id', orgId)
       .in('id', ids);
   raise(error, 'automations.remove');
+}
+
+// Trash. The same five statements profiles.ts has, against the same column, so
+// TRASH_RETENTION_DAYS and the rest of src/lib/trash.ts apply unchanged.
+//
+// An automation used to be deleted outright, on the grounds that it is a
+// document with nothing on disk to orphan. True, and beside the point: the
+// steps in one are more work than a profile is, and this was the only thing in
+// the app a user could destroy in two clicks and never get back.
+export async function softDelete(orgId: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+  const client = requireClient();
+  const now = new Date().toISOString();
+  const {error} = await client
+      .from('automations')
+      .update({deleted_at: now, updated_at: now})
+      .eq('org_id', orgId)
+      .in('id', ids);
+  raise(error, 'automations.softDelete');
+}
+
+// Restoring crosses the plan cap -- trg_automation_limit_restore fires on
+// exactly this update, so it can raise automation_limit_reached. One statement
+// for the whole set, so a bulk restore either all lands or none of it does.
+export async function restore(orgId: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+  const client = requireClient();
+  const {error} = await client
+      .from('automations')
+      .update({deleted_at: null, updated_at: new Date().toISOString()})
+      .eq('org_id', orgId)
+      .in('id', ids);
+  raise(error, 'automations.restore');
+}
+
+// Empty Trash: everything with a deleted_at, whatever its age.
+//
+// Scoped by deleted_at rather than by an id list, which is what makes it safe
+// to offer without selecting anything first -- there is no way for the
+// statement to reach an automation that is not in Trash. Returns the ids
+// removed so the caller can patch local state and report a count.
+export async function purgeAll(orgId: string): Promise<string[]> {
+  const client = optionalClient();
+  if (!client) {
+    return [];
+  }
+  const {data, error} = await client
+      .from('automations')
+      .delete()
+      .eq('org_id', orgId)
+      .not('deleted_at', 'is', null)
+      .select('id');
+  raise(error, 'automations.purgeAll');
+  return ((data || []) as Array<{id: string}>).map((row) => row.id);
+}
+
+// The 30-day Trash expiry, as one statement instead of a filter-and-rewrite of
+// the whole array. purge_expired_data does the same nightly for the org whose
+// workspace nobody opens.
+export async function purgeExpired(orgId: string, cutoffIso: string): Promise<string[]> {
+  const client = optionalClient();
+  if (!client) {
+    return [];
+  }
+  const {data, error} = await client
+      .from('automations')
+      .delete()
+      .eq('org_id', orgId)
+      .not('deleted_at', 'is', null)
+      .lt('deleted_at', cutoffIso)
+      .select('id');
+  raise(error, 'automations.purgeExpired');
+  return ((data || []) as Array<{id: string}>).map((row) => row.id);
 }

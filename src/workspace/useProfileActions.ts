@@ -221,8 +221,12 @@ export function useProfileActions(
       // window opening or an error dialog.
       toast.setMessage(`Launching ${target.name}`);
 
+      // A profile keeps its automation_id while the automation is in Trash, so
+      // that restoring is lossless -- which means the launch path is where
+      // "trashed" has to mean "does not run".
       const attached = target.automation_id ?
-        state.automations.find((item) => item.id === target.automation_id) :
+        state.automations.find(
+            (item) => item.id === target.automation_id && !item.deleted_at) :
         null;
       // What this launch's start page will offer as tiles: the attached
       // automation plus every pinned one. Computed before the port decision

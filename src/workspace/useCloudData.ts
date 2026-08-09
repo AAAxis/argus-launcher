@@ -91,6 +91,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setState((current) => ({...current, proxy_folders: fn(current.proxy_folders)})),
     cookieFolders: (fn: (list: ArgusFolder[]) => ArgusFolder[]) =>
       setState((current) => ({...current, cookie_folders: fn(current.cookie_folders)})),
+    automationFolders: (fn: (list: ArgusFolder[]) => ArgusFolder[]) =>
+      setState((current) => ({...current, automation_folders: fn(current.automation_folders)})),
     cookies: (fn: (list: ArgusCookie[]) => ArgusCookie[]) =>
       setState((current) => ({...current, cookies: fn(current.cookies)})),
     extensions: (fn: (list: SharedExtension[]) => SharedExtension[]) =>
@@ -189,18 +191,22 @@ export function useCloudData(orgId: string | null, toast: Toast) {
 
       const profiles = take('profiles', profilesResult, []);
       const proxies = take('proxies', proxiesResult, []);
-      // One read, three lists. Every library's folders live in the same table
+      // One read, four lists. Every library's folders live in the same table
       // and are told apart by `kind`; splitting here rather than at each call
       // site is what keeps a proxy folder out of the profiles folder row.
       //
-      // Each filter names its own kind rather than excluding the others: the
-      // profiles list used to be `!== 'proxy'`, which silently swallowed
-      // cookie folders the moment a third kind existed.
+      // Each filter names its own kind rather than excluding the others. That
+      // is what the comment here has claimed since cookie folders landed, and
+      // the profiles line was the one that did not do it -- it read `!== 'proxy'
+      // && !== 'cookie'`, so every automation folder would have shown up in the
+      // profiles rail the day this fourth kind existed. Undefined is 'profile',
+      // the column's default and what every row predating proxy folders holds.
       const allFolders = take('folders', foldersResult, []);
       const folders = allFolders.filter(
-          (folder) => folder.kind !== 'proxy' && folder.kind !== 'cookie');
+          (folder) => !folder.kind || folder.kind === 'profile');
       const proxyFolders = allFolders.filter((folder) => folder.kind === 'proxy');
       const cookieFolders = allFolders.filter((folder) => folder.kind === 'cookie');
+      const automationFolders = allFolders.filter((folder) => folder.kind === 'automation');
       const cookies = take('cookie sets', cookiesResult, []);
       const sharedExtensions = take('extensions', extensionsResult, []);
       const bookmarkRows = take('bookmarks', bookmarksResult, []);
@@ -237,8 +243,12 @@ export function useCloudData(orgId: string | null, toast: Toast) {
           ...current,
           ...(profilesResult.status === 'fulfilled' ? {profiles} : {}),
           ...(proxiesResult.status === 'fulfilled' ? {proxies} : {}),
-          ...(foldersResult.status === 'fulfilled' ?
-            {folders, proxy_folders: proxyFolders, cookie_folders: cookieFolders} : {}),
+          ...(foldersResult.status === 'fulfilled' ? {
+            folders,
+            proxy_folders: proxyFolders,
+            cookie_folders: cookieFolders,
+            automation_folders: automationFolders,
+          } : {}),
           ...(cookiesResult.status === 'fulfilled' ? {cookies} : {}),
           ...(extensionsResult.status === 'fulfilled' ? {shared_extensions: sharedExtensions} : {}),
           ...(bookmarksResult.status === 'fulfilled' ?
@@ -270,6 +280,7 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         folders,
         proxy_folders: proxyFolders,
         cookie_folders: cookieFolders,
+        automation_folders: automationFolders,
         proxies,
         cookies,
         shared_extensions: sharedExtensions,
@@ -301,15 +312,18 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         return null;
       }
 
-      // Both Trash sweeps run after migrateLegacyCookieImports, not before: a
-      // set the migration just re-created would otherwise be eligible for the
-      // same pass that created it.
+      // All three Trash sweeps run after migrateLegacyCookieImports, not
+      // before: a set the migration just re-created would otherwise be
+      // eligible for the same pass that created it.
       const cutoff = trashCutoffIso();
       const purgedIds = await db.profiles.purgeExpired(targetOrgId, cutoff);
       const purged = purgedIds.length;
       const purgedCookieIds = await db.cookieSets.purgeExpired(targetOrgId, cutoff);
       const purgedCookies = purgedCookieIds.length;
-      const finalState: CloudState = purged === 0 && purgedCookies === 0 ?
+      const purgedAutomationIds = await db.automations.purgeExpired(targetOrgId, cutoff);
+      const purgedAutomations = purgedAutomationIds.length;
+      const finalState: CloudState =
+        purged === 0 && purgedCookies === 0 && purgedAutomations === 0 ?
         migratedState :
         {
           ...migratedState,
@@ -323,9 +337,17 @@ export function useCloudData(orgId: string | null, toast: Toast) {
               .map((profile) => profile.cookie_id &&
                   purgedCookieIds.includes(profile.cookie_id) ?
                 {...profile, cookie_id: null, cookie_mode: 'paste' as const} :
+                profile)
+              // Same fix for automation_id, which automations_folder_id's
+              // sibling FK nulls server-side on the same terms.
+              .map((profile) => profile.automation_id &&
+                  purgedAutomationIds.includes(profile.automation_id) ?
+                {...profile, automation_id: null} :
                 profile),
           cookies: migratedState.cookies.filter(
               (cookie) => !purgedCookieIds.includes(cookie.id)),
+          automations: migratedState.automations.filter(
+              (automation) => !purgedAutomationIds.includes(automation.id)),
         };
 
       if (mergedBookmarks.changed) {

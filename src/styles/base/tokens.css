@@ -34,6 +34,27 @@
   --hover: #ededed;
   --selected: #e9e9e9;
 
+  /* The framed-card pair: a shell carrying the chrome, with the content card inset
+   * in it. An automation card is drawn this way, and so is the profiles table --
+   * the actions live on the shell, so reaching for one means reaching outside the
+   * thing it acts on.
+   *
+   * Deliberately NOT --paper and --raised, even though those are the values here:
+   * the two swap places in dark, and any rule written against the ladder would have
+   * to branch on the theme to say the one thing this pattern means -- the card
+   * inside is the *other* surface from the frame around it, whichever way round
+   * that falls. Naming the pair is what keeps the branch out of the rules.
+   *
+   * Light reads as a sunken tray holding a white card. Dark reads as a raised tray
+   * holding a well: the frame lifts off the #1b1b1b page and the card sinks below
+   * it. The step is the same size both ways -- 13 points light, 12 dark -- so the
+   * pattern carries the same weight in either theme.
+   *
+   * A frame draws no border. The surface step is the whole of it; a hairline on top
+   * of it reads as a third object between the two. */
+  --frame: #f2f2f2;
+  --frame-card: #ffffff;
+
   /* Half a step under --raised, for a control that sits directly on the page
    * rather than inside a card. A ghost button filled with --raised is pure white
    * on a #f7f7f7 page -- the hardest edge in the chrome, on the quietest control
@@ -254,6 +275,12 @@
   --raised-soft: #222222;
   --hover: #1f1f1f;
   --selected: #0f0f0f;
+
+  /* Crossed over against the light block -- --frame takes --raised's value and
+     --frame-card takes --paper's -- which is the whole reason these two are not
+     just those tokens. See the note there. */
+  --frame: #222222;
+  --frame-card: #161616;
 
   --ink: #e9e9e9;
   --ink-soft: #9e9e9e;

@@ -264,391 +264,398 @@ export function CookiesTab({
 
   return (
     <>
-      <section className="table-toolbar">
-        <input
-          type="text"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search cookie-sets by name or tag"
-        />
-        {/* Only tags actually on a set: a dropdown listing every brand when the
-          * library uses two of them is a list of ways to empty the table. */}
-        <TagFilter value={tagFilter} options={cookieTagOptions} onChange={setTagFilter} />
-        <StatusFilter
-          onChange={setStatusFilter}
-          options={cookieStatusOptions}
-          value={statusFilter}
-        />
-        <select
-          value={usageFilter}
-          onChange={(event) => setUsageFilter(event.target.value as UsageFilter)}
-        >
-          <option value="">All cookie-sets</option>
-          <option value="used">In use</option>
-          <option value="unused">Unused</option>
-        </select>
-        {/* Only offered on a team; on a one-person workspace every set is
-          * yours and this would never change the list. */}
-        {showAssignee && (
-          <button
-            aria-pressed={mineOnly}
-            className={mineOnly ? 'choice-chip active' : 'choice-chip'}
-            onClick={() => setMineOnly((value) => !value)}
-            type="button"
-          >Assigned to me</button>
-        )}
-        {/* In the toolbar, not the selection bar: the point is that it needs no
-          * selection. Same placement as the Profiles tab's. */}
-        {inTrash && trashCount > 0 && (
-          <button className="danger ghost" onClick={emptyTrash}>
-            <Trash2 size={16} /> Empty Trash ({trashCount})
-          </button>
-        )}
-        <ColumnsButton
-          registry={COOKIE_COLUMNS}
-          context={{isTeam: showAssignee}}
-          isVisible={isVisible}
-          onToggle={toggleColumn}
-          onReset={reset}
-        />
-      </section>
-
-      <section className="folder-row" aria-label="Folders">
-        <button
-          aria-pressed={!folderId}
-          className={folderId ? 'folder-card' : 'folder-card active'}
-          onClick={() => onFolderId('')}
-          type="button"
-        >
-          <span className="folder-glyph"><Cookie size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">All cookie-sets</span>
-          <span className="folder-card-count">{allCount}</span>
-        </button>
-
-        {state.cookie_folders.map((folder) => {
-          const count = state.cookies.filter((cookie) =>
-            !cookie.deleted_at && cookie.folder_id === folder.id).length;
-          const active = folder.id === folderId;
-          return (
-            // A div, not a button: the pencil and the trash are buttons of their
-            // own, and nesting those inside the card's button is both invalid
-            // and unclickable.
-            <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
-              <button
-                aria-pressed={active}
-                className="folder-card-main"
-                onClick={() => onFolderId(folder.id)}
-                type="button"
-              >
-                <FolderGlyph color={folder.color} icon={folder.icon} />
-                <span className="folder-card-name">{folder.name}</span>
-              </button>
-              <span className="folder-card-count">{count}</span>
-              <span className="folder-card-actions">
-                <button
-                  aria-label={`Edit ${folder.name}`}
-                  onClick={() => onEditFolder(folder)}
-                  title={`Edit ${folder.name}`}
-                  type="button"
-                >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  aria-label={`Delete ${folder.name}`}
-                  className="danger-icon"
-                  onClick={() => void deleteFolder(folder)}
-                  title={`Delete ${folder.name}`}
-                  type="button"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </span>
-            </div>
-          );
-        })}
-
-        <button
-          aria-pressed={inTrash}
-          className={inTrash ? 'folder-card active' : 'folder-card'}
-          onClick={() => onFolderId(TRASH_FOLDER_ID)}
-          type="button"
-        >
-          <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">Trash</span>
-          <span className="folder-card-count">{trashCount}</span>
-        </button>
-
-        <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
-          <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
-          <span className="folder-card-name">New folder</span>
-        </button>
-      </section>
-
-      {/* Below the folder rail, not above it: ticking a row used to insert this
-        * between the filters and the folders, pushing the folder cards and the
-        * table down by its height. */}
-      {selection.size > 0 && (
-        <section className="selection-toolbar">
-          <div className="selection-toolbar-actions">
-            {inTrash ? (
-              <>
-                <button
-                  className="ghost"
-                  onClick={() => void restoreSets([...selection.ids], selectionLabel(selection.size))}
-                >
-                  Restore selected
-                </button>
-                <button
-                  className="danger ghost"
-                  onClick={() => void purgeSets([...selection.ids], selectionLabel(selection.size))}
-                >
-                  <Trash2 size={16} /> Delete forever
-                </button>
-              </>
-            ) : (
-              <>
-                <FolderSelect
-                  folders={state.cookie_folders}
-                  noFolderLabel="All cookie-sets"
-                  onPick={(id) => void moveSelectionToFolder(id)}
-                />
-                {/* One set at a time, because a profile carries exactly one:
-                  * assigning three sets to one profile has no meaning, and
-                  * silently letting the last one win would be worse. */}
-                <button
-                  className="ghost"
-                  disabled={selection.size !== 1}
-                  onClick={() => {
-                    const picked = selection.selectedFrom(state.cookies)[0];
-                    if (picked) {
-                      onAssignCookieSet(picked);
-                    }
-                  }}
-                  title={selection.size === 1 ?
-                    'Choose which profiles use this cookie-set' :
-                    'Select exactly one cookie-set: a profile carries one at a time'}
-                >
-                  <UserPlus size={16} /> Assign to profiles
-                </button>
-                <select
-                  value=""
-                  onChange={(event) => {
-                    const format = event.target.value as 'json' | 'netscape';
-                    void run('export', () =>
-                      cookies.exportSets(selection.selectedFrom(state.cookies), format));
-                  }}
-                >
-                  <option value="" disabled>Export selected…</option>
-                  <option value="json">As JSON</option>
-                  <option value="netscape">As cookies.txt</option>
-                </select>
-                {/* Every cookie set is a live session, so unlike the other tabs
-                  * there is no version of this that does not hand over signed-in
-                  * access -- the share sheet says so and the recipient is warned
-                  * again before they accept. */}
-                <button
-                  className="ghost"
-                  onClick={() => onShare({kind: 'cookie_set', ids: [...selection.ids]})}
-                >
-                  <Share2 size={16} /> Share…
-                </button>
-                <button
-                  className="danger ghost"
-                  onClick={() => void trashSets([...selection.ids], selectionLabel(selection.size))}
-                >
-                  <Trash2 size={16} /> Delete selected
-                </button>
-              </>
-            )}
-          </div>
+      {/* The frame, exactly as the Profiles tab draws it -- the chrome on a
+        * recessed shell, the table inset in it as the content card, and the
+        * height stopping here so the rows scroll rather than the page. See
+        * ProfilesTab for the full reasoning; this tab has borrowed its
+        * vocabulary since it was written. */}
+      <div className="table-frame">
+        <section className="table-toolbar">
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search cookie-sets by name or tag"
+          />
+          {/* Only tags actually on a set: a dropdown listing every brand when the
+            * library uses two of them is a list of ways to empty the table. */}
+          <TagFilter value={tagFilter} options={cookieTagOptions} onChange={setTagFilter} />
+          <StatusFilter
+            onChange={setStatusFilter}
+            options={cookieStatusOptions}
+            value={statusFilter}
+          />
+          <select
+            value={usageFilter}
+            onChange={(event) => setUsageFilter(event.target.value as UsageFilter)}
+          >
+            <option value="">All cookie-sets</option>
+            <option value="used">In use</option>
+            <option value="unused">Unused</option>
+          </select>
+          {/* Only offered on a team; on a one-person workspace every set is
+            * yours and this would never change the list. */}
+          {showAssignee && (
+            <button
+              aria-pressed={mineOnly}
+              className={mineOnly ? 'choice-chip active' : 'choice-chip'}
+              onClick={() => setMineOnly((value) => !value)}
+              type="button"
+            >Assigned to me</button>
+          )}
+          {/* In the toolbar, not the selection bar: the point is that it needs no
+            * selection. Same placement as the Profiles tab's. */}
+          {inTrash && trashCount > 0 && (
+            <button className="danger ghost" onClick={emptyTrash}>
+              <Trash2 size={16} /> Empty Trash ({trashCount})
+            </button>
+          )}
+          <ColumnsButton
+            registry={COOKIE_COLUMNS}
+            context={{isTeam: showAssignee}}
+            isVisible={isVisible}
+            onToggle={toggleColumn}
+            onReset={reset}
+          />
         </section>
-      )}
 
-      <section className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>
-                {visible.length > 0 && (
-                  <Checkbox
-                    label={`Select all ${visible.length} cookie-sets on this page`}
-                    checked={selection.allSelected(visible)}
-                    indeterminate={visible.some((item) => selection.has(item.id))}
-                    onChange={() => selection.toggleAll(visible)}
-                  />
-                )}
-              </th>
-              {/* Which columns, in what order, and what each sorts by all live
-                * in tables/cookieColumns.tsx. */}
-              <ColumnHeaders columns={columns} sorting={sorting} />
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((cookie) => {
-              const isNew = newIds.has(cookie.id);
-              const rowClass = [
-                selection.has(cookie.id) ? 'row-checked' : '',
-                isNew ? 'is-new' : '',
-              ].filter(Boolean).join(' ');
-              return (
-                // The row's own click opens the set -- a cookie-set has no
-                // "selected row" concept the way a profile does, so the obvious
-                // gesture is free to be the primary action. Not in Trash,
-                // though: the inspector can assign, edit and re-delete, and
-                // none of those mean anything for a set that has been thrown
-                // away. Trash rows offer Restore and Delete forever, and
-                // nothing else.
-                <tr
-                  key={cookie.id}
-                  className={rowClass}
-                  onClick={cookie.deleted_at ? undefined : () => onOpenCookieSet(cookie)}
-                  // So the green is never the only thing saying so. See the same
-                  // title on the Profiles row.
-                  title={isNew ? 'Added since you last looked' : undefined}
+        <section className="folder-row" aria-label="Folders">
+          <button
+            aria-pressed={!folderId}
+            className={folderId ? 'folder-card' : 'folder-card active'}
+            onClick={() => onFolderId('')}
+            type="button"
+          >
+            <span className="folder-glyph"><Cookie size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">All cookie-sets</span>
+            <span className="folder-card-count">{allCount}</span>
+          </button>
+
+          {state.cookie_folders.map((folder) => {
+            const count = state.cookies.filter((cookie) =>
+              !cookie.deleted_at && cookie.folder_id === folder.id).length;
+            const active = folder.id === folderId;
+            return (
+              // A div, not a button: the pencil and the trash are buttons of their
+              // own, and nesting those inside the card's button is both invalid
+              // and unclickable.
+              <div className={active ? 'folder-card active' : 'folder-card'} key={folder.id}>
+                <button
+                  aria-pressed={active}
+                  className="folder-card-main"
+                  onClick={() => onFolderId(folder.id)}
+                  type="button"
                 >
-                  <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
+                  <FolderGlyph color={folder.color} icon={folder.icon} />
+                  <span className="folder-card-name">{folder.name}</span>
+                </button>
+                <span className="folder-card-count">{count}</span>
+                <span className="folder-card-actions">
+                  <button
+                    aria-label={`Edit ${folder.name}`}
+                    onClick={() => onEditFolder(folder)}
+                    title={`Edit ${folder.name}`}
+                    type="button"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${folder.name}`}
+                    className="danger-icon"
+                    onClick={() => void deleteFolder(folder)}
+                    title={`Delete ${folder.name}`}
+                    type="button"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+
+          <button
+            aria-pressed={inTrash}
+            className={inTrash ? 'folder-card active' : 'folder-card'}
+            onClick={() => onFolderId(TRASH_FOLDER_ID)}
+            type="button"
+          >
+            <span className="folder-glyph"><Trash2 size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">Trash</span>
+            <span className="folder-card-count">{trashCount}</span>
+          </button>
+
+          <button className="folder-card folder-card-new" onClick={onNewFolder} type="button">
+            <span className="folder-glyph"><FolderPlus size={15} strokeWidth={1.75} /></span>
+            <span className="folder-card-name">New folder</span>
+          </button>
+        </section>
+
+        {/* Below the folder rail, not above it: ticking a row used to insert this
+          * between the filters and the folders, pushing the folder cards and the
+          * table down by its height. */}
+        {selection.size > 0 && (
+          <section className="selection-toolbar">
+            <div className="selection-toolbar-actions">
+              {inTrash ? (
+                <>
+                  <button
+                    className="ghost"
+                    onClick={() => void restoreSets([...selection.ids], selectionLabel(selection.size))}
+                  >
+                    Restore selected
+                  </button>
+                  <button
+                    className="danger ghost"
+                    onClick={() => void purgeSets([...selection.ids], selectionLabel(selection.size))}
+                  >
+                    <Trash2 size={16} /> Delete forever
+                  </button>
+                </>
+              ) : (
+                <>
+                  <FolderSelect
+                    folders={state.cookie_folders}
+                    noFolderLabel="All cookie-sets"
+                    onPick={(id) => void moveSelectionToFolder(id)}
+                  />
+                  {/* One set at a time, because a profile carries exactly one:
+                    * assigning three sets to one profile has no meaning, and
+                    * silently letting the last one win would be worse. */}
+                  <button
+                    className="ghost"
+                    disabled={selection.size !== 1}
+                    onClick={() => {
+                      const picked = selection.selectedFrom(state.cookies)[0];
+                      if (picked) {
+                        onAssignCookieSet(picked);
+                      }
+                    }}
+                    title={selection.size === 1 ?
+                      'Choose which profiles use this cookie-set' :
+                      'Select exactly one cookie-set: a profile carries one at a time'}
+                  >
+                    <UserPlus size={16} /> Assign to profiles
+                  </button>
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const format = event.target.value as 'json' | 'netscape';
+                      void run('export', () =>
+                        cookies.exportSets(selection.selectedFrom(state.cookies), format));
+                    }}
+                  >
+                    <option value="" disabled>Export selected…</option>
+                    <option value="json">As JSON</option>
+                    <option value="netscape">As cookies.txt</option>
+                  </select>
+                  {/* Every cookie set is a live session, so unlike the other tabs
+                    * there is no version of this that does not hand over signed-in
+                    * access -- the share sheet says so and the recipient is warned
+                    * again before they accept. */}
+                  <button
+                    className="ghost"
+                    onClick={() => onShare({kind: 'cookie_set', ids: [...selection.ids]})}
+                  >
+                    <Share2 size={16} /> Share…
+                  </button>
+                  <button
+                    className="danger ghost"
+                    onClick={() => void trashSets([...selection.ids], selectionLabel(selection.size))}
+                  >
+                    <Trash2 size={16} /> Delete selected
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
+        <section className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  {visible.length > 0 && (
                     <Checkbox
-                      label={`Select ${cookie.name || 'cookie-set'}`}
-                      checked={selection.has(cookie.id)}
-                      onChange={() => selection.toggle(cookie.id)}
+                      label={`Select all ${visible.length} cookie-sets on this page`}
+                      checked={selection.allSelected(visible)}
+                      indeterminate={visible.some((item) => selection.has(item.id))}
+                      onChange={() => selection.toggleAll(visible)}
                     />
-                  </td>
-                  <ColumnCells columns={columns} context={columnContext} row={cookie} />
-                  <td className="actions-cell">
-                    <div className="row-actions">
-                      {cookie.deleted_at ? (
+                  )}
+                </th>
+                {/* Which columns, in what order, and what each sorts by all live
+                  * in tables/cookieColumns.tsx. */}
+                <ColumnHeaders columns={columns} sorting={sorting} />
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((cookie) => {
+                const isNew = newIds.has(cookie.id);
+                const rowClass = [
+                  selection.has(cookie.id) ? 'row-checked' : '',
+                  isNew ? 'is-new' : '',
+                ].filter(Boolean).join(' ');
+                return (
+                  // The row's own click opens the set -- a cookie-set has no
+                  // "selected row" concept the way a profile does, so the obvious
+                  // gesture is free to be the primary action. Not in Trash,
+                  // though: the inspector can assign, edit and re-delete, and
+                  // none of those mean anything for a set that has been thrown
+                  // away. Trash rows offer Restore and Delete forever, and
+                  // nothing else.
+                  <tr
+                    key={cookie.id}
+                    className={rowClass}
+                    onClick={cookie.deleted_at ? undefined : () => onOpenCookieSet(cookie)}
+                    // So the green is never the only thing saying so. See the same
+                    // title on the Profiles row.
+                    title={isNew ? 'Added since you last looked' : undefined}
+                  >
+                    <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        label={`Select ${cookie.name || 'cookie-set'}`}
+                        checked={selection.has(cookie.id)}
+                        onChange={() => selection.toggle(cookie.id)}
+                      />
+                    </td>
+                    <ColumnCells columns={columns} context={columnContext} row={cookie} />
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        {cookie.deleted_at ? (
+                          <>
+                            <button className="ghost" onClick={(event) => {
+                              event.stopPropagation();
+                              void restoreSets([cookie.id], `"${cookie.name}"`);
+                            }}>Restore</button>
+                            <button
+                              aria-label={`Permanently delete ${cookie.name}`}
+                              className="icon-button danger-icon"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void purgeSets([cookie.id], `"${cookie.name}"`);
+                              }}
+                              title={`Permanently delete ${cookie.name}`}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="launch"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenCookieSet(cookie);
+                              }}
+                              type="button"
+                            >
+                              Open
+                            </button>
+                            <button
+                              aria-label={`Assign ${cookie.name} to profiles`}
+                              className="icon-button row-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onAssignCookieSet(cookie);
+                              }}
+                              title={`Assign ${cookie.name} to profiles`}
+                            >
+                              <UserPlus size={16} />
+                            </button>
+                            {/* Next to Assign on purpose: both answer "who else
+                              * gets this session", one inside the workspace and
+                              * one outside it. */}
+                            <button
+                              aria-label={`Share ${cookie.name}`}
+                              className="icon-button row-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onShare({kind: 'cookie_set', ids: [cookie.id]});
+                              }}
+                              title="Share with another workspace"
+                            >
+                              <Share2 size={16} />
+                            </button>
+                            <BusyButton
+                              ariaLabel={`Duplicate ${cookie.name}`}
+                              busy={isPending(`duplicate-${cookie.id}`)}
+                              className="icon-button row-action"
+                              icon={<Copy size={16} />}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void run(`duplicate-${cookie.id}`, () => duplicateOne(cookie));
+                              }}
+                              title={`Duplicate ${cookie.name}`}
+                            />
+                            <button
+                              aria-label={`Delete ${cookie.name}`}
+                              className="icon-button row-action row-action-danger"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void trashSets([cookie.id], `"${cookie.name}"`);
+                              }}
+                              title={`Delete ${cookie.name}`}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {items.length === 0 && (
+                <tr className="empty-row-tr">
+                  {/* Eight columns, nine on a team -- the Assigned column comes
+                    * and goes. A short colSpan leaves a stray empty cell at
+                    * the end of the row. */}
+                  <td colSpan={columnCount}>
+                    <EmptyState
+                      icon={<SearchX size={22} />}
+                      title={filtered ?
+                        'Nothing matches those filters' :
+                        inTrash ? 'Trash is empty' : 'This folder is empty'}
+                      body={filtered ?
+                        'Try a different search term, or clear the tag, status and usage filters.' :
+                        inTrash ?
+                          'Deleted cookie-sets wait here for 30 days before they are purged.' :
+                          'Cookie-sets you add to this folder will show up here.'}
+                    >
+                      {!inTrash && !filtered && (
                         <>
-                          <button className="ghost" onClick={(event) => {
-                            event.stopPropagation();
-                            void restoreSets([cookie.id], `"${cookie.name}"`);
-                          }}>Restore</button>
-                          <button
-                            aria-label={`Permanently delete ${cookie.name}`}
-                            className="icon-button danger-icon"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void purgeSets([cookie.id], `"${cookie.name}"`);
-                            }}
-                            title={`Permanently delete ${cookie.name}`}
-                          >
-                            <Trash2 size={16} />
+                          <button onClick={onNewCookieSet} type="button">
+                            <Cookie size={16} /> Add cookie-set
                           </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="launch"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onOpenCookieSet(cookie);
-                            }}
-                            type="button"
-                          >
-                            Open
-                          </button>
-                          <button
-                            aria-label={`Assign ${cookie.name} to profiles`}
-                            className="icon-button row-action"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onAssignCookieSet(cookie);
-                            }}
-                            title={`Assign ${cookie.name} to profiles`}
-                          >
-                            <UserPlus size={16} />
-                          </button>
-                          {/* Next to Assign on purpose: both answer "who else
-                            * gets this session", one inside the workspace and
-                            * one outside it. */}
-                          <button
-                            aria-label={`Share ${cookie.name}`}
-                            className="icon-button row-action"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onShare({kind: 'cookie_set', ids: [cookie.id]});
-                            }}
-                            title="Share with another workspace"
-                          >
-                            <Share2 size={16} />
-                          </button>
-                          <BusyButton
-                            ariaLabel={`Duplicate ${cookie.name}`}
-                            busy={isPending(`duplicate-${cookie.id}`)}
-                            className="icon-button row-action"
-                            icon={<Copy size={16} />}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void run(`duplicate-${cookie.id}`, () => duplicateOne(cookie));
-                            }}
-                            title={`Duplicate ${cookie.name}`}
-                          />
-                          <button
-                            aria-label={`Delete ${cookie.name}`}
-                            className="icon-button row-action row-action-danger"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void trashSets([cookie.id], `"${cookie.name}"`);
-                            }}
-                            title={`Delete ${cookie.name}`}
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {activeFolder && movableCount > 0 && (
+                            <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
+                              <FolderInput size={16} /> Move cookie-sets here
+                            </button>
+                          )}
                         </>
                       )}
-                    </div>
+                    </EmptyState>
                   </td>
                 </tr>
-              );
-            })}
-            {items.length === 0 && (
-              <tr className="empty-row-tr">
-                {/* Eight columns, nine on a team -- the Assigned column comes
-                  * and goes. A short colSpan leaves a stray empty cell at
-                  * the end of the row. */}
-                <td colSpan={columnCount}>
-                  <EmptyState
-                    icon={<SearchX size={22} />}
-                    title={filtered ?
-                      'Nothing matches those filters' :
-                      inTrash ? 'Trash is empty' : 'This folder is empty'}
-                    body={filtered ?
-                      'Try a different search term, or clear the tag, status and usage filters.' :
-                      inTrash ?
-                        'Deleted cookie-sets wait here for 30 days before they are purged.' :
-                        'Cookie-sets you add to this folder will show up here.'}
-                  >
-                    {!inTrash && !filtered && (
-                      <>
-                        <button onClick={onNewCookieSet} type="button">
-                          <Cookie size={16} /> Add cookie-set
-                        </button>
-                        {activeFolder && movableCount > 0 && (
-                          <button className="ghost" onClick={() => setMoveOpen(true)} type="button">
-                            <FolderInput size={16} /> Move cookie-sets here
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </EmptyState>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+              )}
+            </tbody>
+          </table>
+        </section>
 
-      <PaginationBar
-        page={clampedPage}
-        totalPages={totalPages}
-        total={total}
-        pageSize={pageSize}
-        onPage={setPage}
-        onPageSize={(size) => { setPageSize(size); setPage(0); }}
-        extra={selection.size > 0 && (
-          <span className="pagination-selected">{selection.size} selected</span>
-        )}
-      />
+        <PaginationBar
+          page={clampedPage}
+          totalPages={totalPages}
+          total={total}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={(size) => { setPageSize(size); setPage(0); }}
+          extra={selection.size > 0 && (
+            <span className="pagination-selected">{selection.size} selected</span>
+          )}
+        />
+      </div>
 
       {moveOpen && activeFolder && (
         <MoveCookieSetsModal folder={activeFolder} onClose={() => setMoveOpen(false)} />

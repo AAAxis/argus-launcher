@@ -83,10 +83,12 @@ export function useProfileCellOptions(
     searchText: `${member.display_name || ''} ${member.email}`.toLowerCase(),
   })), [state.members]);
 
-  const automations = useMemo<CellOption[]>(() => state.automations.map((automation) => ({
-    value: automation.id,
-    label: automation.name,
-  })), [state.automations]);
+  // Trashed workflows stay in state so Trash can be a view of it; a picker
+  // that offered one would attach a profile to something that will not run.
+  const automations = useMemo<CellOption[]>(() => state.automations
+      .filter((automation) => !automation.deleted_at)
+      .map((automation) => ({value: automation.id, label: automation.name})),
+  [state.automations]);
 
   // Drawn with the set's own mark, the same one the Cookies table gives it and
   // the same one the cell's trigger now shows -- so picking a set from this

@@ -181,15 +181,17 @@ export type ArgusProfile = {
 export type ArgusFolder = {
   id: string;
   name: string;
-  // Which library this folder belongs to. Profile, proxy and cookie-set folders
-  // all share one `folders` table -- the column exists so they stay separate
-  // namespaces rather than one pile the user has to read twice. Undefined
-  // means 'profile', the column's default and what every row predating proxy
-  // folders is.
+  // Which library this folder belongs to. Profile, proxy, cookie-set and
+  // automation folders all share one `folders` table -- the column exists so
+  // they stay separate namespaces rather than one pile the user has to read
+  // twice. Undefined means 'profile', the column's default and what every row
+  // predating proxy folders is.
   //
-  // There is no CHECK on the column, so a fourth library needs no migration --
+  // There is no CHECK on the column, so a fifth library needs no migration --
   // only a wider union here and a matching branch in the load-time split.
-  kind?: 'profile' | 'proxy' | 'cookie';
+  // 'automation' was exactly that: 20260817 adds automations.folder_id and
+  // touches this table not at all.
+  kind?: 'profile' | 'proxy' | 'cookie' | 'automation';
   // A key into FOLDER_ICONS (src/data/folderIcons.ts), or a "flag:<ISO>" key
   // for a country flag -- never a URL or markup, so an unknown value can only
   // ever downgrade to the plain folder glyph.
@@ -409,10 +411,22 @@ export type ArgusAutomation = {
   // with a sentence naming it rather than silently notifying nobody.
   notify_connector_id?: string | null;
   // Card identity: 'brand:<slug>' (the profile-avatar grammar, decoded by
-  // parseAvatar) or null for the default workflow glyph; `color` is a
-  // ProfileColorKey or '#rrggbb' tinting the icon's plate.
+  // parseAvatar) or null for the default workflow glyph. `color` is a
+  // ProfileColorKey or '#rrggbb'; it tints the plate behind the default glyph,
+  // and with a brand mark picked it tints the card's frame instead -- a logo
+  // brings its own colours and does not want a second one behind it. See
+  // components/automations/AutomationMark.tsx.
   icon?: string | null;
   color?: string | null;
+  // Which automation folder this is filed in, or null for "All automations".
+  // The folders table is shared with profiles, proxies and cookie sets and
+  // separated by `kind` -- see ArgusFolder.
+  folder_id?: string | null;
+  // Set when the automation is in Trash, cleared when it is restored. The grid
+  // filters on it exactly as the profiles table does, so Trash is a view of
+  // this list rather than a second read. Purged 30 days later, by the renderer
+  // on workspace load and by purge_expired_data for the org nobody opens.
+  deleted_at?: string | null;
   // Verdict of the newest finished run, denormalized onto the row by
   // recordRunOutcome so the card can show it without reading runs. The runs
   // table holds the truth; these are reported, never recomputed.
@@ -723,6 +737,7 @@ export type CloudState = {
   folders: ArgusFolder[];
   proxy_folders: ArgusFolder[];
   cookie_folders: ArgusFolder[];
+  automation_folders: ArgusFolder[];
   proxies: ArgusProxy[];
   // Every set in the library, trashed ones included -- the Cookies tab filters
   // on deleted_at the same way the Profiles tab does, so Trash is a view rather
@@ -731,9 +746,11 @@ export type CloudState = {
   shared_extensions: SharedExtension[];
   shared_bookmarks: SharedBookmark[];
   custom_statuses: string[];
-  // Saved workflows. Runs are deliberately NOT here: they are unbounded and
-  // only the history view wants them, so they are read on demand -- the same
-  // reason cookie_sets.list() leaves the `cookies` column out.
+  // Saved workflows, trashed ones included -- the Automations tab filters on
+  // deleted_at the way the Profiles and Cookies tabs do. Runs are deliberately
+  // NOT here: they are unbounded and only the history view wants them, so they
+  // are read on demand -- the same reason cookie_sets.list() leaves the
+  // `cookies` column out.
   automations: ArgusAutomation[];
   // The workspace's connectors -- AI endpoints and messaging targets. Loaded
   // with everything else rather than on demand because the automation editor

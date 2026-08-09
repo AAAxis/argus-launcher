@@ -377,7 +377,12 @@
         {
           "key": "color",
           "type": "string",
-          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex."
+          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex. Tints the card's plate, or its frame when an icon is set."
+        },
+        {
+          "key": "folderId",
+          "type": "string",
+          "description": "File it in an automation folder. Use the id from the automations list in argus_list_folders. Empty leaves it in All automations. Filing only: it changes nothing about how or when the automation runs."
         },
         {
           "key": "notifyOn",
@@ -437,7 +442,12 @@
         {
           "key": "color",
           "type": "string",
-          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex."
+          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex. Tints the card's plate, or its frame when an icon is set."
+        },
+        {
+          "key": "folderId",
+          "type": "string",
+          "description": "Move it to an automation folder. Use the id from the automations list in argus_list_folders. Empty moves it back to All automations. Filing only: it changes nothing about how or when the automation runs."
         },
         {
           "key": "notifyOn",
@@ -470,11 +480,11 @@
       "method": "POST",
       "path": "/v1/automations/delete",
       "group": "Automations",
-      "label": "Delete an automation. Profiles running it on launch are detached",
+      "label": "Move an automation to Trash. It stops running on launch and on its schedule",
       "scope": "unscoped",
       "channel": "argus:delete-automation-request",
       "mcp": "argus_delete_automation",
-      "mcpDescription": "Delete an automation permanently. Automations have no Trash. Profiles that ran it on launch are detached and its past runs stay readable.",
+      "mcpDescription": "Move an automation to Trash, where it stays for 30 days and can be restored from the app. It immediately stops running on launch and on any schedule, and disappears from argus_list_automations. Profiles keep it attached so that a restore puts them back as they were. Past runs stay readable. There is no API to restore or to delete permanently: both are done in the app.",
       "body": "{ \"automationId\": \"<id>\" }",
       "fields": [
         {"key": "automationId", "type": "string", "required": true}
@@ -602,11 +612,11 @@
       "method": "GET",
       "path": "/v1/folders",
       "group": "Workspace",
-      "label": "The folders profiles, proxies and cookie sets are filed in",
+      "label": "The folders profiles, proxies, cookie sets and automations are filed in",
       "scope": "any",
       "channel": "argus:list-folders-request",
       "mcp": "argus_list_folders",
-      "mcpDescription": "The workspace's folders, with the id every folderId argument takes. A folder-scoped key sees only the folders it is scoped to. Read-only: folders are created and renamed in the app.",
+      "mcpDescription": "The workspace's folders, grouped by what they file: profiles, proxies, cookies, automations. Each carries the id its folderId argument takes; the four groups are separate namespaces, so an automation's folderId must come from the automations group. A folder-scoped key sees only the profile folders it is scoped to. Read-only: folders are created and renamed in the app.",
       "fields": []
     },
     {

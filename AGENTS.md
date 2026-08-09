@@ -258,13 +258,17 @@ Get-CimInstance Win32_Process |
   why the insert path sets nothing and the CSV importer only writes assignments when the
   import dialog's picker names somebody other than the importer — and then only for rows
   it *created*, never rows it updated.
-- Profile folders and proxy folders share one `public.folders` table, told apart by
-  `folders.kind` (`'profile'` / `'proxy'`). `useCloudData` splits the single read into
-  `state.folders` and `state.proxy_folders` — that split is the only thing keeping a proxy
-  folder out of the profiles folder row, the assign dropdown, the move dialog and the
-  API-key folder scope, so do not "simplify" the two lists back into one filtered at each
-  call site. `library.createFolder`/`saveFolder` require an explicit `kind`;
-  `removeFolder` reads it back off state.
+- Profile, proxy, cookie-set and automation folders share one `public.folders` table,
+  told apart by `folders.kind`. `useCloudData` splits the single read into
+  `state.folders`, `state.proxy_folders`, `state.cookie_folders` and
+  `state.automation_folders` — that split is the only thing keeping one library's folder
+  out of another's folder row, assign dropdown, move dialog and API-key folder scope, so
+  do not "simplify" the lists back into one filtered at each call site.
+  `library.createFolder`/`saveFolder` require an explicit `kind`; `removeFolder` reads it
+  back off state. **Each branch of the split must name its own kind.** The profile line
+  was written as `kind !== 'proxy' && kind !== 'cookie'` and would have swallowed every
+  automation folder the day a fourth kind existed; there is no CHECK on the column, so
+  nothing but that filter stands between a new kind and the profiles rail.
 - A folder icon may be `flag:<ISO>` (e.g. `flag:US`) instead of a `FOLDER_ICONS` key —
   same contract, still a short key and never markup. `FolderGlyph` is the one place that
   resolves it, and a flag folder ignores its colour (the mark carries its own), which is
@@ -432,11 +436,17 @@ a second, field-less copy of each of those nine. `tools/list` then answers with
 thirty tools and `argus_update_profile` resolves to the copy that forwards no
 fields. `verify-api-routes` checks for exactly this.
 
-**A folder-scoped key may not author automations.** They are org-wide with no
-folder of their own, so scope cannot be applied to them the way it is applied to
-a profile — a key granted one folder could otherwise rewrite a workflow every
-other folder runs. List, read and run are allowed; create, update and delete are
-`403`. Enforced in `main.cjs` off the route's `scope` field.
+**A folder-scoped key may not author automations.** A key granted one folder
+could otherwise rewrite a workflow every other folder runs. List, read and run
+are allowed; create, update and delete are `403`. Enforced in `main.cjs` off the
+route's `scope` field.
+
+The original reason was that automations had no folder at all. 20260817 gave
+them one, and the rule stayed — deliberately. An automation folder is filing,
+not a permission boundary: every member's RLS policy on `automations` is plain
+org membership, so scoping authorship by folder would read a guarantee into a
+label the database does not enforce. Widening it is a permissions change and
+wants its own change.
 
 **The showcase example is an ordinary automation.** `src/data/showcaseAutomation.ts`
 is a plain template with **no `id`** — `exampleAutomation()` mints one with
