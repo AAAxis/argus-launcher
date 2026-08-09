@@ -2347,38 +2347,43 @@ function killStaleProfileProcess(profileId) {
 // window" failure. Detect a virtual/basic display adapter once and fall back to
 // software rendering so the window always appears. Machines with a real GPU are
 // left untouched, so their canvas/WebGL fingerprints keep hardware fidelity.
-let cachedGpuFallbackSwitches = null;
-function resolveGpuFallbackSwitches() {
-  if (cachedGpuFallbackSwitches !== null) {
-    return cachedGpuFallbackSwitches;
+let cachedSoftwareRendering = null;
+function hostNeedsSoftwareRendering() {
+  if (cachedSoftwareRendering !== null) {
+    return cachedSoftwareRendering;
   }
-  cachedGpuFallbackSwitches = [];
   if (process.platform !== 'win32') {
-    return cachedGpuFallbackSwitches;
+    cachedSoftwareRendering = false;
+    return cachedSoftwareRendering;
   }
-  const softwareSwitches = ['--disable-gpu', '--disable-gpu-compositing'];
   try {
     const result = spawnSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join '|'",
     ], {encoding: 'utf8', timeout: 8000});
     const names = (result.stdout || '').trim();
-    // Fall back when no adapter is reported at all, or every reported adapter is
-    // a software/virtual one that can't give Chromium a hardware GL context.
-    const softwareOnly = !names || names.split('|').every((n) =>
+    // True when no adapter is reported at all, or every reported adapter is a
+    // software/virtual one that can't give Chromium a hardware GL context.
+    cachedSoftwareRendering = !names || names.split('|').every((n) =>
         /basic display|microsoft (basic|hyper-v)|hyper-?v|virtual|vmware|standard vga|remote display|dameware|citrix|parsec|rdp/i.test(n));
-    if (softwareOnly) {
-      console.log(`GPU fallback: adapters="${names || '(none)'}" -> software rendering (${softwareSwitches.join(' ')})`);
-      cachedGpuFallbackSwitches = softwareSwitches;
-    } else {
-      console.log(`GPU fallback: hardware adapter present ("${names}"); keeping GPU on.`);
-    }
+    console.log(`GPU check: adapters="${names || '(none)'}" -> softwareRendering=${cachedSoftwareRendering}`);
   } catch (err) {
     // If detection itself fails, prefer a visible window over hardware GPU.
     console.warn(`GPU detection failed (${err}); defaulting to software rendering.`);
-    cachedGpuFallbackSwitches = softwareSwitches;
+    cachedSoftwareRendering = true;
   }
-  return cachedGpuFallbackSwitches;
+  return cachedSoftwareRendering;
+}
+
+// Software-rendering switches for GPU-less/VM hosts. Besides --disable-gpu (no
+// GL context on virtual adapters), Chromium's native window occlusion tracking
+// wrongly marks windows hidden over RDP/VDI and never paints them, so the fix
+// also needs CalculateNativeWinOcclusion disabled -- otherwise the process runs
+// but the window stays invisible. Empty on real-GPU machines.
+function softwareRenderingSwitches() {
+  return hostNeedsSoftwareRendering()
+      ? ['--disable-gpu', '--disable-gpu-compositing']
+      : [];
 }
 
 function spawnProfileBrowserDirectly(resolved, args, timezone) {
@@ -2561,7 +2566,7 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   const args = [
     '--argus-profile-launch',
     // Software-rendering fallback for GPU-less/VM hosts (no-op on real GPUs).
-    ...resolveGpuFallbackSwitches(),
+    ...softwareRenderingSwitches(),
     `--argus-profile-id=${payload.id}`,
     `--argus-profile-name=${payload.name}`,
     // The browser retints its own Dock tile from this (argus_dock_icon_mac.mm).
@@ -2578,7 +2583,9 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
     '--hide-crash-restore-bubble',
     '--disable-session-restore',
     '--disable-restore-session-state',
-    '--disable-features=InfiniteSessionRestore',
+    // On GPU-less/VM hosts also disable native window occlusion, which otherwise
+    // marks the window hidden over RDP/VDI and it never paints (see comment above).
+    `--disable-features=InfiniteSessionRestore${hostNeedsSoftwareRendering() ? ',CalculateNativeWinOcclusion' : ''}`,
     '--new-window',
     ...proxyArgs(payload.proxy),
     ...(payload.useFreeProxy ? ['--argus-free-proxy'] : []),
