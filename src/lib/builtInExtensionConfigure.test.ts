@@ -4,103 +4,90 @@ import path from 'node:path';
 import {describe, expect, it} from 'vitest';
 // CJS interop: the same table main.cjs materializes extensions from.
 // @ts-expect-error CJS module without types
-import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId, unpinRetiredExtensions, versionServiceWorker} from '../../electron/built-in-extensions.cjs';
+import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId, unpinRetiredExtensions, placementName, sourceDigest} from '../../electron/built-in-extensions.cjs';
 
 const deps = {parseCookieUrl: async () => [], parseCookieFile: () => []};
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'argus-ext-'));
 
-// Chromium caches an unpacked extension's service worker script against its
-// script PATH, independently of the manifest -- so copying a new background.js
-// over the old one at the same path ships bytes the browser will not read. That
-// is not a hypothetical: it is why the side panel's workspace lists answered
-// "Unknown message" from a profile whose background.js on disk implemented
-// them, through a relaunch and a full launcher restart.
+// A new build of the helper has to reach the browser, and for an unpacked MV3
+// extension the only lever that reliably does it is a new DIRECTORY.
 //
-// These assert the two halves that make the fix safe: the worker's name follows
-// its content, and NOTHING else moves -- particularly not the directory, which
-// is what the extension id, the toolbar button and chrome.storage.local are all
-// derived from.
-describe('service worker versioning', () => {
-  const extensionDir = (worker = 'background.js', body = 'self.x = 1;') => {
+// Two cheaper ones were shipped and both failed, which is why these assertions
+// are about the directory and not about anything inside it:
+//
+//   - Copying new bytes over the old ones at a stable path. Chromium caches an
+//     unpacked worker's script body against its path, so the browser kept
+//     running code from hours earlier while the file on disk implemented every
+//     feature the panel said was missing.
+//   - Renaming the SCRIPT under a stable directory. Worse: a service worker
+//     REGISTRATION is keyed to its script URL and lives in the profile, so every
+//     profile that had already run the extension was left pointing at a
+//     background.js that no longer existed. The worker never booted and the
+//     panel answered every message with "Receiving end does not exist".
+//
+// So: the name follows the source, and it follows ALL of the source.
+describe('extension identity follows its source', () => {
+  const panel = builtInExtension('cookie_manager')!;
+
+  it('lands the panel under a content-hashed directory', () => {
+    expect(panel.placement).toEqual({kind: 'hashed', prefix: 'ArgusPanel-'});
+    expect(placementName(panel)).toMatch(/^ArgusPanel-[0-9a-f]{12}$/);
+  });
+
+  it('retires both previous directory names', () => {
+    // Whatever a profile last launched has to be removed, or it sits in every
+    // user-data-dir forever. 'ArgusPanel' is the one this change retires.
+    expect(panel.retired).toContain('ArgusPanel');
+    expect(panel.retired).toContain('ArgysCookieManager');
+  });
+
+  it('gives the same source the same name', () => {
     const dir = tempDir();
-    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
-      manifest_version: 3,
-      name: 'Argus Helper',
-      version: '3.1.0',
-      background: {service_worker: worker},
-    }));
-    fs.writeFileSync(path.join(dir, worker), body);
-    return dir;
-  };
-  const workerName = (dir: string) =>
-    JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'))
-        .background?.service_worker;
-
-  it('renames the worker and points the manifest at the new name', () => {
-    const dir = extensionDir();
-    versionServiceWorker(dir);
-    const named = workerName(dir);
-    expect(named).toMatch(/^background\.[0-9a-f]{12}\.js$/);
-    expect(fs.existsSync(path.join(dir, named))).toBe(true);
-    // Exactly one worker on disk: leaving background.js beside it would be a
-    // dead file that still looks like the entry point to anyone reading the
-    // directory.
-    expect(fs.existsSync(path.join(dir, 'background.js'))).toBe(false);
+    fs.writeFileSync(path.join(dir, 'background.js'), 'self.x = 1;');
+    const other = tempDir();
+    fs.writeFileSync(path.join(other, 'background.js'), 'self.x = 1;');
+    expect(sourceDigest(dir)).toBe(sourceDigest(other));
   });
 
-  it('gives the same content the same name, so an unchanged build keeps its cache', () => {
-    const a = extensionDir();
-    const b = extensionDir();
-    versionServiceWorker(a);
-    versionServiceWorker(b);
-    expect(workerName(a)).toBe(workerName(b));
+  it('gives changed source a different name, which is the whole point', () => {
+    const a = tempDir();
+    fs.writeFileSync(path.join(a, 'background.js'), 'self.x = 1;');
+    const b = tempDir();
+    fs.writeFileSync(path.join(b, 'background.js'), 'self.x = 2;');
+    expect(sourceDigest(a)).not.toBe(sourceDigest(b));
   });
 
-  it('gives changed content a different name, which is the whole point', () => {
-    const a = extensionDir('background.js', 'self.x = 1;');
-    const b = extensionDir('background.js', 'self.x = 2;');
-    versionServiceWorker(a);
-    versionServiceWorker(b);
-    expect(workerName(a)).not.toBe(workerName(b));
+  // The worker importScripts() its siblings and the side panel is a whole
+  // document of them, so a change to any top-level file has to move the name.
+  it('follows every top-level file, not just the worker', () => {
+    const a = tempDir();
+    fs.writeFileSync(path.join(a, 'background.js'), 'self.x = 1;');
+    fs.writeFileSync(path.join(a, 'sidepanel.js'), 'A');
+    const b = tempDir();
+    fs.writeFileSync(path.join(b, 'background.js'), 'self.x = 1;');
+    fs.writeFileSync(path.join(b, 'sidepanel.js'), 'B');
+    expect(sourceDigest(a)).not.toBe(sourceDigest(b));
   });
 
-  // The worker importScripts() its siblings and their bodies are cached with
-  // it, so a change to cookie-format.js alone still has to move the name.
-  it('follows the sibling scripts the worker imports, not just the worker', () => {
-    const a = extensionDir();
-    const b = extensionDir();
-    fs.writeFileSync(path.join(a, 'cookie-format.js'), 'A');
-    fs.writeFileSync(path.join(b, 'cookie-format.js'), 'B');
-    versionServiceWorker(a);
-    versionServiceWorker(b);
-    expect(workerName(a)).not.toBe(workerName(b));
+  // A rename alone would move the digest even with identical bodies, or two
+  // builds that differ only in which file holds the code would collide.
+  it('follows file names, not only their contents', () => {
+    const a = tempDir();
+    fs.writeFileSync(path.join(a, 'one.js'), 'same');
+    const b = tempDir();
+    fs.writeFileSync(path.join(b, 'two.js'), 'same');
+    expect(sourceDigest(a)).not.toBe(sourceDigest(b));
   });
 
-  // The directory is the extension's identity: its id is a hash of this path
-  // (unpackedExtensionId), the browser is handed that id on the command line,
-  // and chrome.storage.local -- the seed watermark and the sync watermark --
-  // hangs off it. Versioning the SCRIPT is only worth doing because it leaves
-  // all of that alone.
-  it('does not move the directory, so the extension id is unchanged', () => {
-    const dir = extensionDir();
-    const before = unpackedExtensionId(dir);
-    versionServiceWorker(dir);
-    expect(unpackedExtensionId(dir)).toBe(before);
-  });
-
-  it('is idempotent: running it twice does not re-stamp an already-stamped name', () => {
-    const dir = extensionDir();
-    versionServiceWorker(dir);
-    const once = workerName(dir);
-    versionServiceWorker(dir);
-    expect(workerName(dir)).toBe(once);
-  });
-
-  it('leaves an extension with no service worker alone', () => {
-    const dir = tempDir();
-    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({name: 'x', version: '1'}));
-    expect(() => versionServiceWorker(dir)).not.toThrow();
-    expect(workerName(dir)).toBeUndefined();
+  // The directory IS the id, so a moving name is a moving id -- that is the
+  // mechanism, not a side effect, and the panel switch the browser is handed
+  // (--argus-panel-extension-id) is derived from the same path.
+  it('changes the extension id when the source changes', () => {
+    const a = tempDir();
+    fs.writeFileSync(path.join(a, 'background.js'), 'self.x = 1;');
+    const b = tempDir();
+    fs.writeFileSync(path.join(b, 'background.js'), 'self.x = 2;');
+    expect(unpackedExtensionId(a)).not.toBe(unpackedExtensionId(b));
   });
 });
 
@@ -171,7 +158,11 @@ describe('cookie_manager configure', () => {
 // and this repo reimplements, which is exactly the code that fails silently:
 // a wrong id or a wrong pref shape does not throw, it just means no button.
 describe('pinning the panel to the toolbar', () => {
-  const panelDir = (userDataDir: string) => path.join(userDataDir, 'ArgusPanel');
+  // Where the panel actually lands, asked of the table rather than spelled out:
+  // the directory is content-hashed now, so a literal here would silently stop
+  // matching the id these tests are about the moment the helper changes.
+  const panelDir = (userDataDir: string) =>
+    path.join(userDataDir, placementName(builtInExtension('cookie_manager')!));
 
   const materialize = (userDataDir: string) => {
     const dir = panelDir(userDataDir);
@@ -305,7 +296,11 @@ describe('pinning the panel to the toolbar', () => {
 // This is a pass over a list the user also owns, which is why every test here is
 // about what it must NOT touch.
 describe('unpinning a retired built-in', () => {
-  const panelDir = (userDataDir: string) => path.join(userDataDir, 'ArgusPanel');
+  // Where the panel actually lands, asked of the table rather than spelled out:
+  // the directory is content-hashed now, so a literal here would silently stop
+  // matching the id these tests are about the moment the helper changes.
+  const panelDir = (userDataDir: string) =>
+    path.join(userDataDir, placementName(builtInExtension('cookie_manager')!));
 
   const materialize = (userDataDir: string) => {
     const dir = panelDir(userDataDir);
