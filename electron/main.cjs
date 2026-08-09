@@ -28,10 +28,10 @@ const telegramLink = require('./telegram-link.cjs');
 const automationNotify = require('./automation/notify.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
-  createRunTokens, handleCancelRunFromPage, handleCookieListFromPage,
-  handleCookiePullFromPage, handleCookiePushFromPage,
-  handleOpenInLauncherFromPage, handleRecheckFromPage, handleRunFromPage,
-  handleRunStatusFromPage,
+  createRunTokens, handleAutomationListFromPage, handleCancelRunFromPage,
+  handleCookieListFromPage, handleCookiePullFromPage, handleCookiePushFromPage,
+  handleCookieSetsFromPage, handleOpenInLauncherFromPage, handleRecheckFromPage,
+  handleRunAnyFromPage, handleRunFromPage, handleRunStatusFromPage,
 } = require('./automation/run-token.cjs');
 const {createDrivingState} = require('./automation/driving-state.cjs');
 const {runSummary} = require('./automation/progress.cjs');
@@ -1607,17 +1607,26 @@ function proxyArgs(proxy) {
   return args;
 }
 
-// The current Argus Browser build does not actually consume any of the
-// --argus-proxy-* switches above -- nothing in argus-browser's command-line
-// handling reads them, so on Windows (running the current rebuilt browser)
-// an assigned proxy silently launches direct every time. What the browser
-// *does* read on startup is its own per-profile "argus.profile_data" pref
-// (ArgusProfileService::InitializeAsync in argus_profile_service.cc), which
-// it also writes itself when a proxy is connected from its in-browser UI, and
-// which it auto-reconnects to on every subsequent launch. Writing that same
-// pref block directly into the profile's Preferences file before spawn --
-// the same technique writeProfileStartupPrefs already uses for homepage/
-// session-restore prefs -- is what actually wires an assigned proxy in.
+// An assigned proxy is delivered twice, and both halves are load-bearing.
+//
+// The --argus-proxy-* switches above are read at startup by
+// ArgusProxyFromCommandLine (chrome/browser/ui/startup/startup_browser_creator
+// _impl.cc), which builds an argus::ArgusProxy and starts the SocksBridge for
+// this session. That is what carries an authenticated proxy, since no
+// --proxy-server is passed. This comment used to say the browser ignored those
+// switches entirely; that was true of an older build and is not true of the one
+// we ship -- do not delete them on that basis.
+//
+// The pref block below is the other half. The browser reads its own per-profile
+// "argus.profile_data" on startup (ArgusProfileService::InitializeAsync in
+// argus_profile_service.cc) and writes it itself when a proxy is connected from
+// its in-browser UI, auto-reconnecting to it on every subsequent launch. So a
+// profile whose proxy changed in the launcher would otherwise reconnect to the
+// previous one from its own saved pref; writing the block before spawn -- the
+// same technique writeProfileStartupPrefs already uses for homepage and
+// session-restore prefs -- is what keeps the browser's memory of the assignment
+// level with the launcher's.
+//
 // Chromium's JsonPrefStore treats dots in a registered pref name as nested
 // object paths, so the on-disk shape is {"argus": {"profile_data": {...}}},
 // not a flat "argus.profile_data" key.
@@ -3371,6 +3380,46 @@ ipcMain.handle('argus:select-cookie-file', async () => {
   };
 });
 
+// The same picker, several files at a time, for the cookie import dialog.
+//
+// People do not export one session at a time -- they end up with a directory of
+// them, which is the shape the per-profile "match cookies from a folder" flow
+// already assumes. Importing them into the library one modal at a time was the
+// only reason that directory could not go in.
+//
+// Each file is parsed here for its count, exactly as the single picker does, so
+// the review table can say how many cookies a file holds before anything is
+// uploaded. A file that cannot be read comes back with count 0 rather than
+// taking the whole selection down with it -- one bad export in a folder of
+// twenty is not a reason to refuse the other nineteen.
+ipcMain.handle('argus:select-cookie-files', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Select cookie files',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {name: 'Cookie files', extensions: ['json', 'txt', 'cookies']},
+      {name: 'All files', extensions: ['*']},
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+  return result.filePaths.map((filePath) => {
+    let count = 0;
+    try {
+      count = parseCookieFile(filePath).length;
+    } catch {
+      count = 0;
+    }
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      count,
+      base64: fs.readFileSync(filePath).toString('base64'),
+    };
+  });
+});
+
 ipcMain.handle('argus:select-cookie-folder', async () => {
   const result = await dialog.showOpenDialog({
     title: 'Select folder with cookie files',
@@ -4634,6 +4683,38 @@ function sendJson(res, statusCode, body) {
   res.end(JSON.stringify(body));
 }
 
+// sendJson for the from-page routes, and the ONLY difference is that the
+// caller is allowed to read the answer.
+//
+// Those routes are called by two surfaces. The bundled side panel is a
+// chrome-extension page holding <all_urls>, so Chromium exempts it from CORS
+// and it never needed this. The injected start page is a file:// document --
+// an opaque origin -- so its fetch() is a cross-origin request, and a response
+// with no Access-Control-Allow-Origin is blocked by the browser before the
+// page sees it. The request still ARRIVES here and is still carried out; only
+// the reply is discarded, which is why re-checking a proxy from the start page
+// reported "The check did not complete" while the panel, running the same
+// route against the same run token, worked.
+//
+// The wildcard is not a widening. The OPTIONS preflight at the top of this
+// server already answers every path with Access-Control-Allow-Origin: *, so a
+// hostile page can already reach these routes; what it cannot do is hold a run
+// token, which is minted per launch, written to the profile's own user-data-dir
+// at 0600 and never leaves it. This changes what a caller that already got
+// past that can READ, and the only callers that get past it are ours.
+//
+// Kept off the keyed routes deliberately. They are reached with a bearer key by
+// clients that are not browsers and do not care about CORS, so a wildcard there
+// would buy nothing and hand a hostile page the ability to read any reply it
+// could provoke.
+function sendPageJson(res, statusCode, body) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(JSON.stringify(body));
+}
+
 function sendRedirect(res, location) {
   res.writeHead(302, {Location: location});
   res.end();
@@ -4693,53 +4774,116 @@ function handleOAuthAuthorize(req, res, parsedUrl) {
   });
 }
 
+// Starts a resolved automation tile against a launch's own profile.
+//
+// Shared by the two from-page run routes. They differ only in where the tile
+// came from -- the token entry for one, a renderer round trip for the other --
+// and everything after that point (the blocked-parameter refusal, resolving the
+// session, the runner call) has to be identical or the two routes quietly grow
+// different behaviour for the same button.
+async function startTileForEntry(entry, tile, trigger) {
+  // Set when this profile has no value for a required parameter. Refused here,
+  // before a session is resolved: the alternative is a run that starts, drives
+  // a browser and dies on an unresolved {{vars.x}} in a sentence about
+  // interpolation rather than about the value nobody filled in.
+  if (tile.paramsBlocked) {
+    throw Object.assign(new Error(tile.paramsBlocked), {status: 400});
+  }
+  const session = await resolveProfileCdp(entry.profileId);
+  // A token whose automations list is non-empty was minted alongside a
+  // reserved port, so this cannot normally be reached -- but a run with
+  // nowhere to connect has to say so rather than dial http://127.0.0.1:null.
+  if (!session.running && !entry.cdpPort) {
+    throw Object.assign(new Error('This session has no debugging port'), {status: 409});
+  }
+  const cdpUrl = session.running && session.cdpUrl ?
+    session.cdpUrl :
+    `http://127.0.0.1:${entry.cdpPort}`;
+  return automationRunner.start({
+    app,
+    automation: tile,
+    profile: {id: entry.profileId, name: entry.profileName || ''},
+    trigger,
+    cdpUrl,
+    // Rides the tile: the renderer resolved the call tree, because this process
+    // has no catalogue to resolve against.
+    resolvedAutomations: tile.resolvedAutomations,
+    // Both ride the tile too: the renderer resolved this profile's parameter
+    // values against declarations this process cannot see.
+    vars: tile.vars,
+    secretVarNames: tile.secretVarNames,
+    onEvent: sendRunEvent,
+    pushCookies: (profileId, cookies) =>
+      askRendererOnPageChannel('argus:cookie-sync-push-request', {profileId, cookies}),
+  });
+}
+
 // Runs one of a launch's own automations, asked for by that launch's start page.
 // The authorization and the refusal semantics live in run-token.cjs; this is
 // only the part that needs the runner and the session.
+//
+// The tile comes off the run token, so this route needs no renderer at all --
+// which is why it stays even though runAnyFromPage below can serve the same
+// request. A pinned or assigned workflow still runs from the start page with
+// the launcher window closed.
 function runFromPage(req, res) {
   handleRunFromPage({
     req,
     res,
     tokens: runTokens,
-    sendJson,
-    startRun: async (entry, automation) => {
-      // Set at mint time when this profile has no value for a required
-      // parameter. Refused here, before a session is resolved: the alternative
-      // is a run that starts, drives a browser and dies on an unresolved
-      // {{vars.x}} in a sentence about interpolation rather than about the
-      // value nobody filled in.
-      if (automation.paramsBlocked) {
-        throw Object.assign(new Error(automation.paramsBlocked), {status: 400});
-      }
-      const session = await resolveProfileCdp(entry.profileId);
-      // A token whose automations list is non-empty was minted alongside a
-      // reserved port, so this cannot normally be reached -- but a run with
-      // nowhere to connect has to say so rather than dial http://127.0.0.1:null.
-      if (!session.running && !entry.cdpPort) {
-        throw Object.assign(new Error('This session has no debugging port'), {status: 409});
-      }
-      const cdpUrl = session.running && session.cdpUrl ?
-        session.cdpUrl :
-        `http://127.0.0.1:${entry.cdpPort}`;
-      return automationRunner.start({
-        app,
-        automation,
-        profile: {id: entry.profileId, name: entry.profileName || ''},
-        trigger: 'start-page',
-        cdpUrl,
-        // Rides the run token: the renderer resolved each tile's call tree at
-        // mint time, because this process has no catalogue to resolve against.
-        resolvedAutomations: automation.resolvedAutomations,
-        // Both ride the run token too: the renderer resolved this profile's
-        // parameter values at mint time, against declarations this process
-        // cannot see.
-        vars: automation.vars,
-        secretVarNames: automation.secretVarNames,
-        onEvent: sendRunEvent,
-        pushCookies: (profileId, cookies) =>
-          askRendererOnPageChannel('argus:cookie-sync-push-request', {profileId, cookies}),
-      });
+    sendJson: sendPageJson,
+    startRun: (entry, automation) => startTileForEntry(entry, automation, 'start-page'),
+  });
+}
+
+// Runs a workflow this launch was NOT handed, asked for by the side panel.
+//
+// The token entry cannot answer this one: it holds steps, resolved call trees,
+// variables and secret names only for the automations the launch was minted
+// with. Anything else has to be resolved now, by the renderer, which owns the
+// workspace's catalogue -- so unlike runFromPage this route needs the launcher
+// window open and says 503 when it is not.
+//
+// The resolved tile is deliberately NOT written back into the token store. It
+// carries the automation's full step tree and every resolved parameter value,
+// including secret ones; run-tokens.json is a 0600 file that persists across
+// restarts, and the point of resolving on demand is that none of this outlives
+// the request.
+function runAnyFromPage(req, res) {
+  handleRunAnyFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson: sendPageJson,
+    startAnyRun: async (entry, automationId) => {
+      const tile = await askRendererOnPageChannel(
+          'argus:panel-resolve-automation-request',
+          {profileId: entry.profileId, orgId: entry.orgId || '', automationId});
+      // 'start-page' rather than a trigger of its own, matching runFromPage.
+      // The panel already reports its offered runs as start-page runs (they go
+      // through that route), and the user presses ONE button -- which route
+      // serves it depends on whether the workflow happened to be pinned, which
+      // is not a distinction the runs list should be making up.
+      return startTileForEntry(entry, {
+        ...tile.automation,
+        resolvedAutomations: tile.resolvedAutomations,
+        vars: tile.vars,
+        secretVarNames: tile.secretVarNames,
+        paramsBlocked: tile.paramsBlocked,
+      }, 'start-page');
     },
+  });
+}
+
+// Every automation in a launch's workspace, asked for by that launch's side
+// panel. The launcher window owns the catalogue, so this is a round trip; with
+// the window closed the panel falls back to the launch snapshot it already has.
+function automationListFromPage(req, res) {
+  handleAutomationListFromPage({
+    req, res, tokens: runTokens, sendJson: sendPageJson,
+    listAutomations: (entry) =>
+      askRendererOnPageChannel('argus:panel-automations-request',
+          {profileId: entry.profileId, orgId: entry.orgId || ''}),
   });
 }
 
@@ -4761,7 +4905,7 @@ function openInLauncherFromPage(req, res) {
     req,
     res,
     tokens: runTokens,
-    sendJson,
+    sendJson: sendPageJson,
     open: (entry, automation) => {
       focusMainWindow();
       if (mainWindow) {
@@ -4787,7 +4931,7 @@ function runStatusFromPage(req, res) {
     req,
     res,
     tokens: runTokens,
-    sendJson,
+    sendJson: sendPageJson,
     // Both halves, because the panel needs to distinguish three states and two
     // fields cannot be collapsed into one: something is running, nothing is
     // running but the last one has an outcome worth reporting, and nothing has
@@ -4816,7 +4960,7 @@ function cancelRunFromPage(req, res) {
     req,
     res,
     tokens: runTokens,
-    sendJson,
+    sendJson: sendPageJson,
     cancel: (entry) => automationRunner.cancelForProfile(entry.profileId),
   });
 }
@@ -4870,7 +5014,7 @@ function recheckFromPage(req, res) {
     req,
     res,
     tokens: runTokens,
-    sendJson,
+    sendJson: sendPageJson,
     recheck: (entry) => askRendererForRecheck(entry.profileId),
   });
 }
@@ -4887,15 +5031,32 @@ function askRendererOnPageChannel(channel, payload) {
     const requestId = crypto.randomUUID();
     const timeout = setTimeout(() => {
       pendingPageRequests.delete(requestId);
+      // The channel is named because there is one failure this timeout cannot
+      // be told apart from otherwise, and it is the likeliest one after an
+      // upgrade: the renderer has no handler registered for this channel at
+      // all, because preload.cjs is from a previous build and the `native`
+      // function the handler subscribes through is undefined. That looks
+      // exactly like a slow launcher for twenty seconds and then reports as
+      // one. With the channel in the message it reads as what it is.
       reject(Object.assign(
-          new Error('Timed out waiting for Argus Launcher to answer'), {status: 504}));
+          new Error(`Argus Launcher did not answer (${channel}). If this ` +
+              'started after an update, quit Argus Launcher completely and ' +
+              'reopen it.'),
+          {status: 504}));
     }, AUTOMATION_REQUEST_TIMEOUT_MS);
     pendingPageRequests.set(requestId, {resolve, reject, timeout});
     mainWindow.webContents.send(channel, {...payload, requestId});
   });
 }
 
-function settlePageRequest(requestId, result, error) {
+// `status` is what the renderer decided this failure is, and it has to survive
+// the trip or the route lies about it. The push handler has thrown a 409 for
+// "this profile belongs to another workspace" since cross-workspace launches
+// were fixed, and until this argument existed every one of them reached the
+// panel as a 500 -- a code that means "the launcher broke", which the panel
+// then reported as a launcher error for a profile that was fine. 500 stays the
+// default, because a handler that throws a plain Error genuinely does not know.
+function settlePageRequest(requestId, result, error, status) {
   const pending = pendingPageRequests.get(requestId);
   if (!pending) {
     return;
@@ -4903,45 +5064,67 @@ function settlePageRequest(requestId, result, error) {
   pendingPageRequests.delete(requestId);
   clearTimeout(pending.timeout);
   if (error) {
-    pending.reject(Object.assign(new Error(error), {status: 500}));
+    pending.reject(Object.assign(new Error(error),
+        {status: Number.isFinite(status) ? status : 500}));
     return;
   }
   pending.resolve(result);
 }
 
-ipcMain.on('argus:cookie-sync-push-result', (_event, {requestId, result, error}) =>
-  settlePageRequest(requestId, result, error));
-ipcMain.on('argus:cookie-list-result', (_event, {requestId, result, error}) =>
-  settlePageRequest(requestId, result, error));
-ipcMain.on('argus:cookie-sync-pull-result', (_event, {requestId, result, error}) =>
-  settlePageRequest(requestId, result, error));
+ipcMain.on('argus:cookie-sync-push-result', (_event, {requestId, result, error, status}) =>
+  settlePageRequest(requestId, result, error, status));
+ipcMain.on('argus:cookie-list-result', (_event, {requestId, result, error, status}) =>
+  settlePageRequest(requestId, result, error, status));
+ipcMain.on('argus:cookie-sync-pull-result', (_event, {requestId, result, error, status}) =>
+  settlePageRequest(requestId, result, error, status));
+ipcMain.on('argus:cookie-sets-result', (_event, {requestId, result, error, status}) =>
+  settlePageRequest(requestId, result, error, status));
+ipcMain.on('argus:panel-automations-result', (_event, {requestId, result, error, status}) =>
+  settlePageRequest(requestId, result, error, status));
+ipcMain.on('argus:panel-resolve-automation-result', (_event, {requestId, result, error, status}) =>
+  settlePageRequest(requestId, result, error, status));
 
 function cookiePushFromProfile(req, res) {
   handleCookiePushFromPage({
-    req, res, tokens: runTokens, sendJson,
+    req, res, tokens: runTokens, sendJson: sendPageJson,
     // orgId comes off the ENTRY, never off the request body: it is what the
     // launcher stamped at mint time, and a caller able to name its own org
     // would be choosing which workspace to write into. See run-token.cjs.
-    pushCookies: (entry, cookies, saveAs) =>
-      askRendererOnPageChannel('argus:cookie-sync-push-request',
-          {profileId: entry.profileId, orgId: entry.orgId || '', cookies, saveAs}),
+    //
+    // `saveToSetId` is the opposite kind of field and is forwarded as such:
+    // request data the renderer resolves against that same entry-derived
+    // workspace, and refuses if it is not in it.
+    pushCookies: (entry, cookies, saveAs, saveToSetId) =>
+      askRendererOnPageChannel('argus:cookie-sync-push-request', {
+        profileId: entry.profileId, orgId: entry.orgId || '',
+        cookies, saveAs, saveToSetId,
+      }),
   });
 }
 
 function cookiePullForProfile(req, res) {
   handleCookiePullFromPage({
-    req, res, tokens: runTokens, sendJson,
-    pullCookies: (entry) =>
+    req, res, tokens: runTokens, sendJson: sendPageJson,
+    pullCookies: (entry, setId) =>
       askRendererOnPageChannel('argus:cookie-sync-pull-request',
-          {profileId: entry.profileId, orgId: entry.orgId || ''}),
+          {profileId: entry.profileId, orgId: entry.orgId || '', setId}),
   });
 }
 
 function cookieListForProfile(req, res) {
   handleCookieListFromPage({
-    req, res, tokens: runTokens, sendJson,
-    listCookies: (entry) =>
+    req, res, tokens: runTokens, sendJson: sendPageJson,
+    listCookies: (entry, setId) =>
       askRendererOnPageChannel('argus:cookie-list-request',
+          {profileId: entry.profileId, orgId: entry.orgId || '', setId}),
+  });
+}
+
+function cookieSetsForProfile(req, res) {
+  handleCookieSetsFromPage({
+    req, res, tokens: runTokens, sendJson: sendPageJson,
+    listSets: (entry) =>
+      askRendererOnPageChannel('argus:cookie-sets-request',
           {profileId: entry.profileId, orgId: entry.orgId || ''}),
   });
 }
@@ -5040,6 +5223,14 @@ function startAutomationApiServer() {
       runFromPage(req, res);
       return;
     }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/run-any-from-page') {
+      runAnyFromPage(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/list-from-page') {
+      automationListFromPage(req, res);
+      return;
+    }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/status-from-page') {
       runStatusFromPage(req, res);
       return;
@@ -5070,6 +5261,10 @@ function startAutomationApiServer() {
     }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/cookies/list-for-profile') {
       cookieListForProfile(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/cookies/list-sets-for-profile') {
+      cookieSetsForProfile(req, res);
       return;
     }
 
@@ -5494,6 +5689,10 @@ function startAutomationApiServer() {
         if (typeof payload.folderId === 'string' || payload.folderId === null) fields.folder_id = payload.folderId;
         if (typeof payload.email === 'string') fields.email = payload.email;
         if (typeof payload.password === 'string') fields.password = payload.password;
+        // Unlike the pair above, this one IS in the MCP tool's schema: it says
+        // where a login lives, not what the login is, so an agent setting it is
+        // filing a note rather than rewriting a credential.
+        if (typeof payload.loginUrl === 'string') fields.login_url = payload.loginUrl;
         // proxy mode, start URL and the launch automation. The renderer does
         // the value-dependent checks these need -- that a proxy actually exists
         // before 'assigned' is allowed, that an automation id resolves -- since

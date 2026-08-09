@@ -61,12 +61,12 @@ const FIXTURES = {
         // say "matches exit" -- that would be the panel agreeing with itself
         // and calling it a check.
         fields: [
-          {label: 'Exit', value: '142.252.99.144', mono: true, note: '1131 ms'},
-          {label: 'Location', value: 'Los Angeles, California, US',
+          {label: 'Exit', value: '142.252.99.144', icon: 'globe', mono: true, note: '1131 ms'},
+          {label: 'Location', value: 'Los Angeles, California, US', icon: 'mapPin',
             note: 'checked 4 min ago'},
-          {label: 'Timezone', value: 'America/Los_Angeles', mono: true,
+          {label: 'Timezone', value: 'America/Los_Angeles', icon: 'clock', mono: true,
             note: 'from exit IP'},
-          {label: 'Device', value: 'Windows 11 · 1920x1080'},
+          {label: 'Device', value: 'Windows 11 · 1920x1080', icon: 'monitor'},
         ],
       },
       recheckable: true,
@@ -104,6 +104,146 @@ const FIXTURES = {
       {domain: '.instagram.com', name: 'sessionid'},
       {domain: '.google.com', name: 'SID'},
     ],
+    // The live workspace list, which replaces the snapshot's two rows a moment
+    // after the panel opens. The point of this fixture is the sort and the
+    // badges: `a1` is this profile's own, `a2` is pinned for everyone, and the
+    // three below are a teammate's -- invisible from inside the browser until
+    // this route existed, and the whole reason it does.
+    workspaceAutomations: {
+      ok: true,
+      available: true,
+      automations: [
+        {id: 'z9', name: 'Zip through the archive', description: '', pinned: false,
+          assigned: false, icon: '', color: 'violet'},
+        {id: 'a2', name: 'Check the inbox and mark read', description: 'Opens each unread thread.',
+          pinned: true, assigned: false, icon: '', color: 'blue'},
+        {id: 'b4', name: 'Amazon order export', description: 'Rachel’s. Runs weekly.',
+          pinned: false, assigned: false, icon: '', color: 'amber'},
+        {id: 'a1', name: 'Warm up the feed', description: 'Scrolls, likes, waits.',
+          pinned: true, assigned: true, icon: '', color: 'green'},
+        {id: 'c7', name: 'Bulk-follow from a CSV', description: '', pinned: false,
+          assigned: false, icon: '', color: ''},
+      ],
+    },
+    // The library the picker offers. `set_1` is assigned; the rest are the
+    // team's, and picking one of them is a one-shot load.
+    cookieSets: {
+      ok: true,
+      available: true,
+      assignedId: 'set_1',
+      sets: [
+        {id: 'set_1', name: 'Sophia Bennett 2026-08-07', count: 148, folder_id: null,
+          tags: [], updated_at: '2026-08-07T09:12:00.000Z'},
+        {id: 'set_2', name: 'Client B — Amazon', count: 214, folder_id: null,
+          tags: [], updated_at: '2026-08-08T14:30:00.000Z'},
+        {id: 'set_3', name: 'Rachel — LinkedIn', count: 61, folder_id: null,
+          tags: [], updated_at: '2026-08-05T11:02:00.000Z'},
+      ],
+    },
+  },
+
+  // The state the one-shot picker creates, and the one worth looking hardest
+  // at: this window is holding "Client B — Amazon", which the profile is not
+  // assigned. Nothing is being saved anywhere, the card says so and names the
+  // set, "Save to Launcher now" is gone, and the two ways out are in its place.
+  //
+  // Without the suppression this is the six-second bug: the jar holds set B,
+  // the push loop is aimed at set A, and A -- the set this profile launches
+  // with -- gets overwritten with B's cookies.
+  loaded: {
+    session: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      proxy: {
+        ok: true,
+        title: 'Anti-detect proxy active',
+        detail: '142.252.99.144:64455 · Los Angeles, California, US · 131 ms',
+        fields: [{label: 'Exit', value: '142.252.99.144', icon: 'globe', mono: true, note: '131 ms'}],
+      },
+      recheckable: true,
+      automations: [{id: 'a1', name: 'Warm up the feed'}],
+    },
+    status: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      sync: {
+        available: true, paused: false, inSync: false, reachable: true,
+        pushedAt: 0, pushedCount: 0, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: 'Client B — Amazon',
+        pushSuppressed: true, loadedSetId: 'set_2', loadedSetName: 'Client B — Amazon',
+      },
+      seed: {imported: true, seededAt: 0, seededCount: 64},
+      counts: {total: 214, site: 31, siteDomain: 'amazon.com'},
+    },
+    cookieSets: {
+      ok: true,
+      available: true,
+      assignedId: 'set_1',
+      sets: [
+        {id: 'set_1', name: 'Sophia Bennett 2026-08-07', count: 148, folder_id: null,
+          tags: [], updated_at: '2026-08-07T09:12:00.000Z'},
+        {id: 'set_2', name: 'Client B — Amazon', count: 214, folder_id: null,
+          tags: [], updated_at: '2026-08-08T14:30:00.000Z'},
+      ],
+    },
+    jar: [{domain: '.amazon.com', name: 'session-id'}],
+  },
+
+  // A workspace with nothing in it, on the tab that says so. The empty state
+  // used to read "pin a workflow and it will appear here on the next launch",
+  // which was right while this list was the launch snapshot and is wrong now --
+  // reaching this screen means the workspace itself is empty.
+  noworkspace: {
+    session: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      proxy: {ok: true, title: 'Anti-detect proxy active', detail: '131 ms', fields: []},
+      recheckable: true,
+      automations: [],
+    },
+    status: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 12, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: '',
+      },
+      seed: {imported: false, seededAt: 0, seededCount: 0},
+      counts: {total: 12, site: 0, siteDomain: ''},
+    },
+    openTab: 'automations',
+    workspaceAutomations: {ok: true, available: true, automations: []},
+    cookieSets: {ok: true, available: true, assignedId: null, sets: []},
+  },
+
+  // The launcher answered neither list, and the panel has to say so instead of
+  // painting the same empty state a genuinely empty workspace gets.
+  //
+  // 'Unknown message' is background.js's own reply for a message type its
+  // switch does not have, which means this profile is running a service worker
+  // from before these routes existed -- Chrome caches an unpacked extension's
+  // worker against its directory path, so a profile that has already launched
+  // can keep the old one after an upgrade. It is the likeliest reason either
+  // list is empty right after a release, and until this fixture existed the
+  // screen for it was indistinguishable from "your team has no workflows".
+  stale: {
+    session: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      proxy: {ok: true, title: 'Anti-detect proxy active', detail: '131 ms', fields: []},
+      recheckable: true,
+      automations: [],
+    },
+    status: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 184, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false,
+        lastSet: 'IG · Maraneng Jam (live).json',
+      },
+      seed: {imported: false, seededAt: 0, seededCount: 0},
+      counts: {total: 184, site: 22, siteDomain: 'instagram.com'},
+    },
+    openTab: 'automations',
+    workspaceAutomations: {ok: false, available: true, error: 'Unknown message'},
+    cookieSets: {ok: false, available: true, error: 'Unknown message'},
   },
 
   // A run in flight, on the tab it belongs to. The row for the running workflow
@@ -117,7 +257,7 @@ const FIXTURES = {
         ok: true,
         title: 'Anti-detect proxy active',
         detail: '142.252.99.144:64455 · Los Angeles, California, US · 131 ms',
-        fields: [{label: 'Exit', value: '142.252.99.144', mono: true, note: '131 ms'}],
+        fields: [{label: 'Exit', value: '142.252.99.144', icon: 'globe', mono: true, note: '131 ms'}],
       },
       recheckable: true,
       automations: [
@@ -302,11 +442,11 @@ const FIXTURES = {
         // check -- and here it fails. Note also a stale reading, which the
         // Location row now says out loud.
         fields: [
-          {label: 'Exit', value: '91.208.14.22', mono: true, note: '88 ms'},
-          {label: 'Location', value: 'Frankfurt, Hesse, DE', note: 'checked 6 d ago'},
-          {label: 'Timezone', value: 'America/New_York', mono: true,
+          {label: 'Exit', value: '91.208.14.22', icon: 'globe', mono: true, note: '88 ms'},
+          {label: 'Location', value: 'Frankfurt, Hesse, DE', icon: 'mapPin', note: 'checked 6 d ago'},
+          {label: 'Timezone', value: 'America/New_York', icon: 'clock', mono: true,
             note: '≠ Europe/Berlin', noteTone: 'bad'},
-          {label: 'Device', value: 'macOS 15 · 2560x1440'},
+          {label: 'Device', value: 'macOS 15 · 2560x1440', icon: 'monitor'},
         ],
       },
       recheckable: true,
@@ -419,6 +559,16 @@ window.chrome = {
       // the panel reads as "there will never be a run to report here".
       if (message.type === 'automation-status') {
         return fixture.automation || {ok: false, available: false};
+      }
+      // The two live workspace lists. Both absent means the launcher is closed:
+      // the panel keeps the launch snapshot's automations and shows no picker,
+      // which is a real state and the one every fixture written before these
+      // routes existed now exercises for free.
+      if (message.type === 'list-automations') {
+        return fixture.workspaceAutomations || {ok: false, available: false};
+      }
+      if (message.type === 'list-launcher-cookie-sets') {
+        return fixture.cookieSets || {ok: false, available: false};
       }
       return {ok: true};
     },

@@ -6,7 +6,8 @@
     "cdp": ["Page"],
     "fields": [
       {"key": "url", "kind": "text", "label": "URL", "required": true, "interpolate": true,
-       "placeholder": "https://example.com"},
+       "placeholder": "https://example.com",
+       "hint": "Supports {{profile.login_url}}, so one workflow can sign each profile in at its own address."},
       {"key": "waitUntil", "kind": "select", "label": "Wait until", "default": "load",
        "options": ["load", "domcontentloaded"]}
     ]
@@ -48,7 +49,7 @@
       {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
        "interpolate": true, "check": "selector"},
       {"key": "text", "kind": "text", "label": "Text", "required": true, "interpolate": true,
-       "hint": "Supports {{profile.email}} and {{profile.password}}."},
+       "hint": "Supports {{profile.email}}, {{profile.password}} and {{profile.login_url}}."},
       {"key": "clear", "kind": "boolean", "label": "Clear the field first", "default": true},
       {"key": "delayMs", "kind": "number", "label": "Per-key delay (ms)", "min": 0, "max": 1000,
        "hint": "Set this to send real key events instead of one paste-shaped insert."},

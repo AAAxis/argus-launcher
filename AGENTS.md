@@ -213,15 +213,55 @@ Get-CimInstance Win32_Process |
 - **A titled block of a form is `components/ui/FormGroup.tsx`, and there is only one card
   style for it.** `.form-section` — the same card one level louder, with a 15px `h3` — is
   gone; two card styles in one dialog read as two kinds of thing rather than as sections
-  of one form. `FormGroup` takes a `title`, a required one-line `hint`, and an optional
-  `info` for an `InfoHint` beside the title. The hint is required on purpose: a section
-  whose purpose cannot be said in a line has been drawn around the wrong fields.
-  `ProfileModal` is six of them — **Account, Proxy, Fingerprint, Cookies, Launch,
-  Notes** — and the order is the order the questions get asked. Fingerprint stays directly
-  after Proxy for the reason above: those two cells are the only way into the fingerprint
-  editor, so the platform it names has to be visible near the top. Notes renders only when
-  `draft.saved`; a note is a row keyed on a profile id and a profile being created has
-  none yet.
+  of one form. `FormGroup` takes a `title`, a required one-line `hint`, an optional `icon`
+  (a 14px lucide glyph on the heading's line), an optional `info` for an `InfoHint` beside
+  the title, and an optional `id` for a caller that needs to scroll the reader back to it.
+  The hint is required on purpose: a section whose purpose cannot be said in a line has
+  been drawn around the wrong fields.
+  A group is drawn as **a frame holding an inset card** — the heading rides `--frame`, the
+  fields sit in a `--frame-card` body — which is the automations grid's card
+  (`.automation-card-framed` / `-body`) at form scale. Use that token pair and not
+  `--paper`/`--raised`: the two swap places between light and dark, and a frame draws no
+  border. Its only other consumer is `FingerprintFields`, so a change here shows up in
+  both dialogs.
+  `ProfileModal` is seven of them — **Account, Credentials, Proxy, Fingerprint, Cookies,
+  Launch, Notes** — and the order is the order the questions get asked. Credentials was
+  split out of Account so the block that Argus itself never acts on could carry a heading
+  and a hint saying so. Fingerprint stays directly after Proxy for the reason above: those
+  two cells are the only way into the fingerprint editor, so the platform it names has to
+  be visible near the top. Notes renders only when `draft.saved`; a note is a row keyed on
+  a profile id and a profile being created has none yet.
+- **The two full-size editors share one header, `components/ui/EditorHead.tsx`, and
+  neither has a footer.** A clickable mark, the name as a click-to-rename heading
+  (`ui/TitleField.tsx`), a line of context, and every action the dialog has — in one
+  sticky bar. The host passes `editor-modal` in its Modal `className`; that class carries
+  the sticky rule and lifts Modal's close X out of the flex flow
+  (`styles/features/editor-head.css`, which must stay **last** in the `styles.css` barrel
+  because its rules only beat `features/profile-editor.css` on source order).
+  `ProfileModal`'s name, avatar and colour live there, not in the Account card. Anything
+  else that sticks inside the same scroll box must clear the bar: `EditorHead` publishes
+  its measured height as `--editor-head-h`, and the summary column's `top` reads it.
+- **A form field that picks a thing with a mark uses `components/ui/FieldPicker.tsx`, not
+  a `<select>`.** Assigned-to, Folder and Run-on-launch each draw the teammate's avatar,
+  the folder's glyph or the automation's brand mark, in the trigger *and* in the option
+  rows — a native select can hold nothing but text, so the assignee read as a name in the
+  editor and as an avatar in the table. It is `CellPickerList` (exported from
+  `ui/CellControls.tsx`) behind a select-shaped trigger; the list owns the search
+  threshold, the pinned unfilterable "none" row and the empty states, so do not
+  reimplement them. Every caller needs `group` on its `<Field>` — the trigger is a
+  `<button>`, and a `<label>` around one fires its implicit activation on the wrong
+  control. `AssigneeSelect` survives as a plain select for `ImportProfilesModal` only.
+- **`profiles.email` / `password` / `login_url` are a memo, and the UI has to keep saying
+  so.** Argus fills nothing in: no launch payload carries them (`LaunchProfilePayload` in
+  `src/native.ts`), and the browser never sees them. The only consumer is the automation
+  runner, which puts all three in the template context (`electron/automation/runner.cjs`)
+  so a Type step can write `{{profile.password}}` and a Go-to step `{{profile.login_url}}`.
+  They are stored in **plaintext** and `argus_get_profile` hands the password to an agent,
+  so the Credentials card's `InfoHint` is the only place a user can learn any of this — do
+  not trim it. `loginUrl` is writable over MCP and the other two deliberately are not: it
+  records *where* a credential is used, not what it is. `login_url` arrived in
+  `20260818000000`; if the drift check in `src/db/rows.schema-check.ts` fails, regenerate
+  `database.types.ts`.
 - **A profile's notes are a thread, not a field.** `profiles.notes` was a scalar column
   that nothing ever read or wrote, and both `tools.cjs` and `routes.json` carried comments
   about an agent reporting success on a write that never happened; `20260807000000` drops
@@ -248,7 +288,8 @@ Get-CimInstance Win32_Process |
   `accept_handoff` RPCs alone — otherwise an edit from a session that had not seen a
   reassignment would carry its stale value back and silently unassign the row. That is
   why `ProfileModal` keeps the picker in the draft and applies it in a *second* call
-  after `profiles.save()` succeeds, never as a field on the save.
+  after `profiles.save()` succeeds, never as a field on the save. The control it does
+  that through is a `FieldPicker` showing the Assigned column's own avatar chip.
   Note `docs/schema-changes/2026-08-06-handoffs.sql` describes a model that no longer
   holds: it made assigning to anybody but yourself impossible, requiring an offer the
   recipient accepted. **`2026-08-07-assign-directly.sql` replaced that** — assignment to

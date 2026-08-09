@@ -61,6 +61,39 @@ describe('classifySync branch order', () => {
     expect(classifySync(live({paused: true, lastErrorKind: kind})).title).toBe('Sync paused');
   });
 
+  // The suppressed state: this window loaded a cookie set the profile is not
+  // assigned to, so pushing would write the loaded set's cookies into the
+  // assigned one. Same lifetime argument as `paused` -- there will be no next
+  // attempt to disprove an old error kind -- so it outranks every kind for the
+  // same reason, and outranks `paused` itself because it is the surprising one.
+  it.each(ERROR_KINDS)('reports the suppressed state, not %s, while suppressed', (kind) => {
+    const state = classifySync(live({pushSuppressed: true, lastErrorKind: kind}));
+    expect(state.title).toBe('Sync paused');
+    expect(String(state.detail)).toMatch(/isn’t assigned|aren’t being saved/);
+  });
+
+  it('names the loaded set, so the card says which one took the window', () => {
+    const state = classifySync(live({pushSuppressed: true, loadedSetName: 'Client B'}));
+    expect(String(state.detail)).toContain('Client B');
+    // Amber, not red: nothing is broken. The engine is declining to guess where
+    // these cookies should go, and a red card would send someone looking for a
+    // fault that does not exist.
+    expect(state.tone).toBe('warn');
+  });
+
+  it('says something usable even with no set name to show', () => {
+    const state = classifySync(live({pushSuppressed: true}));
+    expect(String(state.detail)).toMatch(/aren’t being saved/);
+    expect(String(state.detail)).not.toContain('undefined');
+  });
+
+  // Reachability still wins: an unreachable launcher is a live measurement, and
+  // "changes aren't being saved" would be true but beside the point.
+  it('still puts an unreachable launcher above a suppressed push', () => {
+    expect(classifySync(live({pushSuppressed: true, reachable: false})).title)
+        .toBe('Launcher not reachable');
+  });
+
   it('still reports each error kind when sync is not paused', () => {
     const titles = ERROR_KINDS.map((kind) => classifySync(live({lastErrorKind: kind})).title);
     expect(titles).toEqual([

@@ -1,0 +1,312 @@
+/* The full-size editors' header: components/ui/EditorHead.tsx and its
+ * TitleField, shared by the automation editor and the profile editor.
+ *
+ * Was styles/automations.css:815-995 and :1017-1069, scoped to .automation-modal
+ * and named for it. It moved here, and the names lost the word "automation",
+ * when the profile editor took the same header -- the rules never had anything
+ * to do with automations, and a profile dialog wearing a class called
+ * .automation-head is a lie the next reader has to check.
+ *
+ * Last in the barrel, which is what makes this work: .profile-modal header in
+ * features/profile-editor.css sets the flex row this bar sits in, and
+ * .profile-modal header > .icon-button parks the close X 4px high. Both are the
+ * same specificity as the rules below, so only source order decides -- these
+ * must stay after that file, and after anything else that writes to
+ * `.profile-modal header`. Do not move this import up the list.
+ *
+ * The flex row from profile-editor.css is load-bearing rather than an obstacle:
+ * .editor-head takes `flex: 1` against it. Only the X needs overriding. */
+
+/* Save, Cancel and Delete were a footer and Run was the top of the settings
+ * column. They are one row under the name now, and the header is sticky, which
+ * is the whole reason the move is safe: a footer on a dialog this tall is
+ * always reachable and a header that scrolled away would not be.
+ *
+ * The negative margins cancel .profile-modal's own 18px padding on three sides
+ * so the bar's background reaches the panel's edges, and the padding pays it
+ * back. The fourth number, margin-bottom: -14px, cancels the panel grid's gap:
+ * without it the first 14px of the body would scroll through the strip between
+ * the header's border and the content, in full view.
+ *
+ * top: -18px, not 0. Sticky measures against the scroll container's PADDING
+ * box, and the negative top margin has already lifted this to the border box
+ * 18px above it -- so 0 would shove the bar down by that much and park it over
+ * the body from the first frame. */
+.editor-modal > header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  margin: -18px -18px -14px;
+  padding: 18px 18px 14px;
+  position: sticky;
+  top: -18px;
+  /* Over the body, and under .popover-panel's 90 -- which is a DOM child of
+     this bar, so it is inside this stacking context and clears it anyway. */
+  z-index: 2;
+}
+
+/* The gap the header's margin-bottom just cancelled, paid back on the body's
+   side of the border where it scrolls away under the bar instead of showing
+   content through it. Without it the first thing in the body sits flush
+   against the rule. */
+.editor-modal .profile-editor-layout {
+  padding-top: 18px;
+}
+
+/* Modal's close X, out of the flex flow.
+ *
+ * As a flex sibling it held a column of its own down the full height of a
+ * two-row header, and the action row stopped 46px short of the panel's edge to
+ * clear a control that is only on the title line. Absolute against the sticky
+ * bar (which is a positioned ancestor already), so Save now ends where the
+ * body's right edge is and the X keeps its place on the first line.
+ *
+ * The title row pays for it with padding-right instead -- see below -- because
+ * that IS the row the X shares. */
+.editor-modal > header > .icon-button {
+  margin-top: 0;
+  position: absolute;
+  right: 18px;
+  top: 18px;
+}
+
+.editor-head {
+  display: grid;
+  flex: 1;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* flex-start, not center. The mark is a single-row object -- the size the grid
+   card draws it at -- and centring it against a two-row block floated it in the
+   gutter between the name and the line under it, belonging to neither. It sits
+   on the name's line and that second line gets a mark of its own. */
+.editor-head-title {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  /* Clears the absolutely positioned X above. Only this row needs it. */
+  padding-right: 40px;
+}
+
+/* min-width: 0 twice over: the h2 ellipsises a long name, and a grid item will
+   not shrink below its content without being told it may. */
+.editor-head-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Optically on the h2's cap line: a 34px mark against a 28px line box is 3px
+   taller each side, and 1px of that goes back to the heading's own leading. */
+.editor-mark-trigger {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  margin-top: -2px;
+  min-height: 0;
+  padding: 3px;
+}
+
+.editor-mark-trigger:hover,
+.editor-mark-trigger[aria-expanded="true"] {
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.editor-mark-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A mark with no pickers behind it. Same box as the trigger minus the
+   affordance, so a dialog that cannot change its mark still lines its heading
+   up with one that can. */
+.editor-mark-static {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  margin-top: -2px;
+  padding: 3px;
+}
+
+/* The context line -- a step count, a status and a folder. It rides the ACTION
+   row, at its leading edge, rather than sitting under the name: one short
+   phrase does not earn a row of its own, and the actions are pinned right, so
+   the row it would have needed was already there and empty.
+   .editor-head-actions-end takes margin-left: auto, which is what keeps the two
+   apart without this needing a width. */
+.editor-head-meta {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+/* Two pickers stacked, on the panel's own padding. .icon-choices is a
+   grid of 38px cells, so 320 lands seven to a row without a partial column. */
+.editor-mark-pop {
+  display: grid;
+  gap: 14px;
+}
+
+.editor-head-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Delete, Cancel and Save travel together at the trailing edge, away from the
+   affirmative one. margin-left: auto rather than justify-content on the parent,
+   so the group still sits right when there is nothing to push against -- a
+   draft automation has no Run button, and a profile has none at all. */
+.editor-head-actions-end {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Flat, in .filter-trigger's vocabulary -- the silhouette every header action
+   in this app takes. Three bordered boxes in a row under the title read as a
+   form's footer that had floated to the top; the header is a place for actions,
+   not a place for controls. Run now keeps its fill: it is the one thing that
+   screen is for, and the only filled thing on the bar. */
+.editor-head-actions-end > button {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  /* --ink-soft is the base here and Save steps up to --ink below. Cancel is
+     the quietest of the three: it is the one that throws work away without
+     asking, and nothing should draw the eye to it. */
+  color: var(--ink-soft);
+  font-weight: 500;
+  min-height: 0;
+  padding: 6px 10px;
+}
+
+.editor-head-actions-end > button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Save is still the affirmative one, and weight plus ink level is the only way
+   left to say so: --accent in this system is INK, not a hue -- near-black in
+   light and near-white in dark -- so accent-coloured text lands within seven
+   RGB points of --ink on a dark bar and the distinction disappears exactly
+   half the time. Weight and ink level survive both themes. */
+.editor-head-actions-end > button:not(.ghost) {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.editor-head-actions-end > button:disabled {
+  color: var(--ink-faint);
+}
+
+/* The profile editor's Save is FILLED, and the automation editor's is not.
+ *
+ * Not an inconsistency: the two bars have different numbers of affirmative
+ * actions in them. The automation bar already carries Run now, the thing that
+ * screen is for, and it is filled -- a second filled button beside it would
+ * make the bar ask two questions at once. The profile editor has no Run, so its
+ * bar has nothing filled at all, and Save distinguished by weight alone was the
+ * quietest primary action in the app.
+ *
+ * --accent is ink here, so this is near-black on white in light and near-white
+ * on near-black in dark; --accent-ink is whatever stays legible on top of it.
+ * Disabled drops the fill entirely rather than dimming it: a greyed-out slab is
+ * heavier than the two flat buttons beside it while saying it cannot be
+ * pressed. */
+.profile-editor-modal .editor-head-actions-end > button:not(.ghost) {
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent-ink);
+  font-weight: 650;
+  min-height: var(--control-h-sm);
+  padding: 0 14px;
+}
+
+.profile-editor-modal .editor-head-actions-end > button:not(.ghost):not(:disabled):hover {
+  background: var(--accent-strong);
+  color: var(--accent-ink);
+}
+
+.profile-editor-modal .editor-head-actions-end > button:not(.ghost):disabled {
+  background: var(--paper);
+  color: var(--ink-faint);
+}
+
+.editor-head-actions-end > .ghost.danger {
+  background: none;
+  color: var(--danger);
+}
+
+.editor-head-actions-end > .ghost.danger:not(:disabled):hover {
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+
+/* ── The dialog's editable title ── */
+
+/* flex, not inline-flex. An inline-flex box shrink-wraps its contents, which
+   is fine for the read state (text plus a pencil) and useless for the edit
+   one: `width: 100%` against a shrink-to-fit parent resolves to the content's
+   own width, so the input sized itself to the name instead of to the row. */
+.editor-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.editor-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The heading in an editable state, not an input parked where the heading was.
+ *
+ * It inherited the app's text-input rule -- a 999px pill, 16px of side padding
+ * and the 36px --control-h floor -- which around a 20px heading read as a
+ * search box someone had dropped into the title line, shrink-wrapped to 269px
+ * with the name jumping 16px right the moment you clicked the pencil.
+ *
+ * So: the radius comes down to the panel's own scale, the padding down to
+ * something a heading can carry, and a negative margin cancels what is left so
+ * the first character stays exactly where it was rendered a moment ago.
+ * --paper rather than transparent, because an editable field that looks like
+ * static text is its own problem.
+ *
+ * Two classes deep on purpose. `input[type="text"]` is specificity 0-1-1 --
+ * a type selector AND an attribute selector -- so a single class loses to it
+ * and every one of these declarations was being thrown away. (font-size got
+ * through only because the base rule does not set it; `input { font: inherit }`
+ * is 0-0-1 and does lose.) */
+.editor-modal .editor-title-input {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Fills the title row instead of sizing to its own text, so a long name has
+     the width the heading had and nothing below it moves. */
+  flex: 1;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  /* -7px: the 6px of padding plus the 1px border. */
+  margin-left: -7px;
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 6px;
+}

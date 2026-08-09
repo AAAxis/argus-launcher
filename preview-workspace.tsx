@@ -5,6 +5,7 @@
 import {createContext, useContext, useState} from 'react';
 import type {ReactNode} from 'react';
 import {defaultCloudState} from './src/data/statuses';
+import {previewCsvImport} from './src/workspace/csvImport';
 import type {
   ArgusAutomation, ArgusFolder, ArgusNotification, ArgusProfile, CloudState, OrgMember,
 } from './src/types';
@@ -18,6 +19,37 @@ const MEMBERS: OrgMember[] = [
   {user_id: 'v', email: 'vlad@simnetiq.com', display_name: 'Vlad',
     role: 'member', avatar_url: null, created_at: iso(500000)} as OrgMember,
 ];
+
+// For the profile-editor harness: a marked set and an unmarked one, so the
+// colour fallback (set colour, else its folder's) is visible both ways.
+const COOKIE_FOLDERS = [
+  {id: 'cf-1', name: 'Rental portals', kind: 'cookie', color: 'violet', icon: 'folder'},
+] as unknown as ArgusFolder[];
+
+const COOKIES = [
+  {id: 'c1', name: 'is24-session.json', url: '', count: 42, color: 'green', folder_id: 'cf-1'},
+  {id: 'c2', name: 'cookies.txt', url: '', count: 17, folder_id: 'cf-1'},
+  {id: 'c3', name: 'unfiled.json', url: '', count: 3, folder_id: null},
+] as unknown as CloudState['cookies'];
+
+// For the import harnesses (preview-imports.tsx): a small proxy library, so
+// the review tables have something to call a duplicate and the destination step
+// has a folder to offer.
+const PROXY_FOLDERS = [
+  {id: 'pf-1', name: 'Residential EU', kind: 'proxy', color: 'blue', icon: 'globe'},
+] as unknown as ArgusFolder[];
+
+const PROXIES = [
+  {id: 'x1', name: '198.51.100.10:1080', type: 'socks5', host: '198.51.100.10', port: 1080,
+    username: 'proxy-user', password: 'proxy-pass', folder_id: 'pf-1',
+    country: 'Germany', country_code: 'DE', ping_ms: 118},
+  {id: 'x2', name: '203.0.113.20:8080', type: 'http', host: '203.0.113.20', port: 8080,
+    username: '', folder_id: null},
+] as unknown as CloudState['proxies'];
+
+const PROFILE_FOLDERS = [
+  {id: 'f-social', name: 'Social', kind: 'profile', icon: 'users', color: 'violet'},
+] as unknown as ArgusFolder[];
 
 const PROFILES = [
   {id: 'p1', name: 'Renter DE-1', deleted_at: null, automation_id: 'a2',
@@ -143,6 +175,7 @@ type Ctx = {
       CloudState['notifications']) => void};
   };
   shared: {
+    setAssignee: (...args: unknown[]) => Promise<boolean>;
     pending: typeof PENDING;
     accept: (...args: unknown[]) => Promise<boolean>;
     decline: (...args: unknown[]) => Promise<void>;
@@ -168,17 +201,46 @@ type Ctx = {
   };
   // The folder rail's Delete button. Nothing behind it here -- the dialog that
   // creates and renames folders is mounted from App, which this harness is not.
-  library: {removeFolder: (folderId: string) => Promise<boolean>};
+  library: {
+    removeFolder: (folderId: string) => Promise<boolean>;
+    createFolder: (fields: {name: string; kind: string}) => Promise<ArgusFolder | null>;
+  };
   // Enough of the two action bundles for RunAutomationModal, which reads
   // profiles.update (the "save these values" checkbox) and proxies.checkMany
   // (its opening sweep). Both are no-ops here -- this harness renders, it does
   // not run anything.
-  profiles: {update: (...args: unknown[]) => Promise<boolean>};
-  proxies: {checkMany: (...args: unknown[]) => Promise<void>};
+  profiles: {
+    update: (...args: unknown[]) => Promise<boolean>;
+    uploadAvatar: (...args: unknown[]) => Promise<string>;
+    // The profile importer's two engine calls. Both are the real pure
+    // functions -- previewCsvImport mints no ids and planCsvImport is only
+    // reached through importFromCsv, which this fixture stubs.
+    previewImport: (parsed: never[]) => unknown;
+    importFromCsv: (...args: unknown[]) => Promise<unknown>;
+  };
+  proxies: {
+    checkMany: (...args: unknown[]) => Promise<void>;
+    importList: (entries: unknown[]) => Promise<{created: number; failed: never[]}>;
+    testConnection: (...args: unknown[]) => Promise<unknown>;
+    testConnectionAndRecord: (...args: unknown[]) => Promise<unknown>;
+    update: (...args: unknown[]) => Promise<boolean>;
+  };
+  cookies: {
+    addCookieSet: (...args: unknown[]) => Promise<unknown>;
+  };
+  cookieTagOptions: never[];
   selectedProfileId: string | null;
   checkingProxyIds: Set<string>;
-  toast: {setMessage: (text: string) => void; notify: (text: string) => void};
+  toast: {
+    setMessage: (text: string) => void;
+    notify: (text: string) => void;
+    fail: (title: string, detail: string) => void;
+  };
   tagOptions: never[];
+  // Added for the profile-editor harness (preview-profile.tsx). Additive: the
+  // automations harness reads the same fixture and must keep working.
+  statusOptions: string[];
+  profileNotes: {list: (...args: unknown[]) => Promise<never[]>};
 };
 
 const WorkspaceContext = createContext<Ctx | null>(null);
@@ -208,6 +270,11 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
     automations,
     automation_folders: automationFolders,
     profiles: PROFILES,
+    folders: PROFILE_FOLDERS,
+    cookies: COOKIES,
+    cookie_folders: COOKIE_FOLDERS,
+    proxies: PROXIES,
+    proxy_folders: PROXY_FOLDERS,
     members: MEMBERS,
     notifications,
     automation_stars: stars,
@@ -216,6 +283,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   const value: Ctx = {
     data: {state, patch: {notifications: (fn) => setNotifications(fn)}},
     shared: {
+      setAssignee: async () => true,
       pending,
       accept: async (id) => {
         setPending((list) => list.filter((item) => item.id !== id));
@@ -256,6 +324,7 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
       },
     },
     library: {
+      createFolder: async (fields) => ({id: 'f-new', name: fields.name} as ArgusFolder),
       removeFolder: async (folderId) => {
         setAutomationFolders((list) => list.filter((item) => item.id !== folderId));
         // Mirrors the FK's ON DELETE SET NULL, which is what the real
@@ -265,12 +334,36 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
         return true;
       },
     },
-    profiles: {update: async () => true},
-    proxies: {checkMany: async () => {}},
+    profiles: {
+      update: async () => true,
+      uploadAvatar: async () => '',
+      // The real pure preview, so the harness's review table is the one the
+      // app draws rather than a hand-built lookalike.
+      previewImport: (parsed) => previewCsvImport(parsed, {
+        profiles: PROFILES, proxies: PROXIES, folders: PROFILE_FOLDERS,
+      }),
+      importFromCsv: async () => ({
+        created: 4, updated: 1, proxiesCreated: 3, proxiesReused: 1, foldersCreated: 1,
+        proxiesUpdated: 0, tagsTrimmed: 0, skipped: [], createdIds: [], partial: false,
+      }),
+    },
+    proxies: {
+      checkMany: async () => {},
+      importList: async (entries) => ({created: entries.length, failed: []}),
+      testConnection: async () => ({ok: true, pingMs: 118, country: 'Germany',
+        countryCode: 'DE'}),
+      testConnectionAndRecord: async () => ({ok: true, pingMs: 118, country: 'Germany',
+        countryCode: 'DE'}),
+      update: async () => true,
+    },
+    cookies: {addCookieSet: async () => ({id: 'new', name: 'imported'})},
+    cookieTagOptions: [],
     selectedProfileId: 'p1',
     checkingProxyIds: new Set<string>(),
-    toast: {setMessage: () => {}, notify: () => {}},
+    toast: {setMessage: () => {}, notify: () => {}, fail: () => {}},
     tagOptions: [],
+    statusOptions: ['Ready', 'Active', 'Warmup', 'Banned', 'Review'],
+    profileNotes: {list: async () => []},
   };
   return (
     <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>

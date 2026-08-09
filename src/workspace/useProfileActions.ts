@@ -7,6 +7,7 @@ import {resolveCallTree} from '../automations/callGraph';
 import {
   describeMissingParams, resolveRunVars, secretVarNames,
 } from '../automations/parameters';
+import {buildRunTile} from '../lib/runTile';
 import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
 import {fingerprintFromDraftPatch} from '../drafts';
@@ -244,25 +245,11 @@ export function useProfileActions(
       // the profile's stored values. A tile the profile cannot satisfy ships
       // with the sentence saying so, and the run route refuses with it rather
       // than opening a browser that fails on an unresolved {{vars.x}}.
-      const tiles = startPageAutomations(state.automations, target).map((tile) => {
-        const tree = resolveCallTree(tile, state.automations);
-        const calleeParameters = Object.keys(tree.resolved).map((id) =>
-          state.automations.find((entry) => entry.id === id)?.parameters || []);
-        const vars = resolveRunVars({
-          parameters: tile.parameters,
-          calleeParameters,
-          profileValues: target.automation_vars?.[tile.id],
-        });
-        const missing = describeMissingParams(tile.parameters, vars);
-        return {
-          ...tile,
-          ...(tree.problems.length === 0 && Object.keys(tree.resolved).length > 0 ?
-            {resolvedAutomations: tree.resolved} : {}),
-          vars,
-          secretVarNames: secretVarNames(tile.parameters, ...calleeParameters),
-          ...(missing ? {paramsBlocked: `${target.name} ${missing}.`} : {}),
-        };
-      });
+      // buildRunTile does both resolutions, and is shared with the side panel's
+      // run-any route so a workflow run from inside the browser resolves
+      // exactly the way one run from here does.
+      const tiles = startPageAutomations(state.automations, target)
+          .map((tile) => buildRunTile(tile, target, state.automations));
 
       // The debugging port is opened ONLY when something might drive this
       // session. An always-on --remote-debugging-port would be a real

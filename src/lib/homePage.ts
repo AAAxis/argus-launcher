@@ -97,9 +97,16 @@ function checkAgeNote(checkedAt?: string | null): string {
 // timezone's verdict -- and `noteTone` colours it, since "matches exit" and
 // "≠ America/Chicago" are the same slot carrying opposite news. A note with no
 // tone is neutral, which is what a fact rather than a verdict should be.
+//
+// `icon` names an entry in the side panel's own icon table
+// (extensions/cookie-manager/icons.js), not a path -- this object is serialized
+// into argus-session.json and handed to a document with no bundler, so the
+// glyph has to be looked up on the other side. Optional because a panel loading
+// a session snapshot written by an older launcher must still draw its rows.
 export type SessionField = {
   label: string;
   value: string;
+  icon?: string;
   mono?: boolean;
   note?: string;
   noteTone?: 'ok' | 'bad';
@@ -198,11 +205,17 @@ export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null)
     return {note: 'not resolved — re-check', noteTone: 'bad' as const};
   })();
 
+  // The glyphs are the four facts, not decoration: a globe for where the
+  // traffic leaves, a pin for where that lands, a clock for the zone the
+  // profile claims and a monitor for the machine it claims to be. Same job the
+  // start page's rowIcon does one section down -- four rows of uppercase labels
+  // in one weight are told apart by shape before they are read.
   const fields: SessionField[] = [
-    {label: 'Exit', value: egressIp || proxyLabel, mono: true, note: latency},
+    {label: 'Exit', value: egressIp || proxyLabel, icon: 'globe', mono: true, note: latency},
     {
       label: 'Location',
       value: proxyLocationLabel(proxy) || 'Unknown',
+      icon: 'mapPin',
       // When this reading was taken. The row is composed at launch from the
       // stored columns of whatever check ran last, which can be days old and
       // from a different exit if the proxy rotates -- and the panel gave no
@@ -212,10 +225,11 @@ export function homeProxyStatus(profile: ArgusProfile, proxy: ArgusProxy | null)
     {
       label: 'Timezone',
       value: effectiveTimezone || 'Not set',
+      icon: 'clock',
       mono: true,
       ...timezoneNote,
     },
-    {label: 'Device', value: machine || 'Default'},
+    {label: 'Device', value: machine || 'Default', icon: 'monitor'},
   ];
   return {
     ok: true,
@@ -290,17 +304,21 @@ function labelInfo(note: string) {
   return `<button type="button" class="label-info" data-tip="${safe}" aria-label="${safe}">${INFO_ICON}</button>`;
 }
 
-// One per session-card row, so the four facts are scannable by shape before
-// they are read. Lucide's Globe, Activity, Monitor and Cookie, at the same
-// 15px and the same stroke, drawn in --ink-faint beside their label.
+// One per session-card row, so the three facts are scannable by shape before
+// they are read. Lucide's Globe, Monitor and Cookie, at the same 15px and the
+// same stroke, drawn in --ink-faint beside their label.
 //
-// The launcher's Start page tab renders the same four as lucide-react
+// Activity used to be here as `status`. The status is now a chip in the card's
+// head rather than a row in its grid -- it is a verdict on the session, not one
+// of the facts being compared -- and the chip carries its own tone dot, so the
+// glyph had nothing left to label.
+//
+// The launcher's Start page tab renders the same three as lucide-react
 // components at the same size (StartPageTab.tsx). Two copies of one set, for
 // the reason every icon in this file exists twice: a file:// document has no
 // icon font and no module graph, so the paths have to travel inside it.
 const ROW_ICONS: Record<string, string> = {
   proxy: '<circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path>',
-  status: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>',
   platform: '<rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path>',
   cookies: '<path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path><path d="M8.5 8.5v.01"></path><path d="M16 15.5v.01"></path><path d="M12 12v.01"></path><path d="M11 17v.01"></path><path d="M7 14v.01"></path>',
 };
@@ -476,9 +494,9 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
 .brand svg{height:72px;width:auto;display:block}
 
 /* ── Session card ───────────────────────────────────────────────────────────
-   What this window actually is: which proxy it is coming out of, what the
-   profile is marked as, what machine it claims to be, and which cookie set
-   seeded it. Four facts, always on screen, the full width of the column.
+   What this window actually is: what the profile is marked as, which proxy it
+   is coming out of, what machine it claims to be, and which cookie set seeded
+   it. Always on screen, the full width of the column.
 
    This replaces a card that was pinned to the top-right corner and only
    appeared when the proxy was failing. That was the right call while the page
@@ -496,18 +514,48 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
    Its heading sits above it rather than inside it, the way Bookmarks and
    Automations do -- so the page reads as three labelled blocks and not as two
    blocks and a card that names itself. 10px, matching .auto-grid: the 26px that
-   separates one section from the last is on .section-label now. */
-.session{margin-top:10px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--raised);box-shadow:var(--shadow-xs);transition:border-color .12s var(--ease),background .12s var(--ease)}
-.session[data-tone=bad]{border-color:var(--danger);background:var(--danger-bg)}
-/* A two-column grid of labelled rows, the same dt/dd shape the side panel's
-   Session card uses. Proxy spans both columns because its value is a sentence
-   and the other three are a word each. */
-.session-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;margin:0}
+   separates one section from the last is on .section-label now.
+
+   Two layers, not one, and the split is what the automation cards one section
+   up already do with .auto-run's plate: a --paper surround holding a --raised
+   card. The surround is where this session's CONTROLS live -- what it is
+   (Status), how to take a fresh reading (Re-check), and where to check it
+   against someone else's opinion (ip.me). The card inside is the READING. They
+   used to share one box, which put a status chip in the same grid as the value
+   it was a verdict on, and stranded the two controls up in the section heading
+   several centimetres from the thing they act on.
+
+   No border of its own, and 2px of side padding rather than 10. The card inside
+   carries the only outline -- the same 1px --border on --raised that .auto-card
+   one section up carries -- and what is left of the shell beside it reads as a
+   thin grey frame around that card. At 10px with a border of its own it was a
+   second box: two outlines a centimetre apart, drawn around one object. */
+.session-shell{margin-top:10px;padding:0 2px 2px;border:0;border-radius:var(--radius-lg);background:var(--paper)}
+/* Status on the left, the two controls hard right. min-height is the icon
+   buttons' own, so a session that cannot be re-checked does not sit at a
+   different height from one that can. Its own horizontal padding, because the
+   shell has almost none: the controls need clearing from the edge, and the card
+   below does not. */
+.session-head{display:flex;align-items:center;gap:8px;min-height:26px;padding:6px 8px 8px}
+.session-actions{margin-left:auto;display:flex;align-items:center;gap:4px}
+/* No outline of its own. The shell behind it and its own fill already separate
+   it from the page, and the 1px rule on top of that was a second edge 2px
+   inside the first. The failure state still draws one, as an inset shadow
+   rather than a border, so a card that goes bad gains a line instead of every
+   card carrying one -- and the swap costs no layout shift. */
+.session{padding:14px;border:0;border-radius:var(--radius);background:var(--raised);transition:box-shadow .12s var(--ease),background .12s var(--ease)}
+.session[data-tone=bad]{box-shadow:inset 0 0 0 1px var(--danger);background:var(--danger-bg)}
+/* One column, not two. It was a 1fr 1fr grid while Status shared it with the
+   other three facts; with Status moved up to the head there are three rows
+   left, and three in a two-column grid is two rows and an orphan. Full-width
+   rows also let the values line up as one column, which is the comparison this
+   block exists to make easy. */
+.session-fields{display:grid;gap:9px;margin:0}
 /* center, not baseline: every label now leads with a 15px glyph, and a
    baseline row hangs the icon off the text's baseline instead of centring it
    on the cap height. */
 .field{display:flex;align-items:center;gap:10px;min-width:0}
-.field.wide{grid-column:1 / -1;align-items:flex-start}
+.field.wide{align-items:flex-start}
 /* A fixed label column, so the four values line up as a column rather than
    starting wherever their own label happened to end. */
 .field dt{flex:0 0 88px;display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:var(--ink-faint)}
@@ -593,19 +641,12 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
    above saying the same sentence twice -- and saying it about the wrong noun. A
    heading's mark should name what is under it, not who drew the window.
 
-   The trailing .section-actions slot pushes to the right edge, so a section can
-   carry its own controls on the label row rather than inside the block it
-   heads. Only Session uses it. */
+   All three headings are a mark, a word and an (i), and nothing else. Session
+   used to carry Re-check and the ip.me link out here on a trailing
+   .section-actions slot; they now sit in the session shell's own head row,
+   inside the block they act on. */
 .section-label{display:flex;align-items:center;gap:8px;margin:26px 0 0;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft)}
 .label-mark{display:flex;color:var(--ink-soft)}
-/* -4px on the right pulls the 26px hit targets back level with the label they
-   sit beside, without shrinking the targets themselves. The two type resets
-   are because a label is uppercase and letter-spaced and a button on it is
-   neither -- .pill inherits the font on purpose, which is what carries them in.
-   min-height keeps the row at the hit targets' own size whether the re-check
-   button is there or not, so a session that cannot be re-checked does not sit
-   at a different height from one that can. */
-.section-actions{margin-left:auto;margin-right:-4px;display:flex;align-items:center;gap:4px;min-height:26px;letter-spacing:0;text-transform:none}
 /* The rounded (i) that carries a section's one explanatory sentence, and the
    bubble it opens on hover or keyboard focus.
 
@@ -689,18 +730,20 @@ ${bookmarkItems ? `<h2 class="section-label"><span class="label-mark">${BOOKMARK
 <section class="grid">${bookmarkItems}</section>` : '<p class="empty">No shared bookmarks yet.</p>'}
 ${automationCards ? `<h2 class="section-label"><span class="label-mark">${WORKFLOW_ICON}</span>Automations${labelInfo(AUTOMATIONS_NOTE)}</h2>
 <section class="auto-grid">${automationCards}</section>` : ''}
-<h2 class="section-label"><span class="label-mark">${SHIELD_ICON}</span>Session<span class="section-actions">${run && recheckable ?
+<h2 class="section-label"><span class="label-mark">${SHIELD_ICON}</span>Session</h2>
+<section class="session-shell">
+<div class="session-head">${statusChip}<span class="session-actions">${run && recheckable ?
   `<button type="button" class="pill" id="recheck">${REFRESH_ICON}<span id="recheck-label">Re-check</span></button>` :
-  ''}<a class="icon-button" href="https://ip.me/" title="Check this session on ip.me" aria-label="Check this session on ip.me">${EXTERNAL_ICON}</a></span></h2>
-<section class="session" id="session" data-tone="${proxyStatus.ok ? 'ok' : 'bad'}">
+  ''}<a class="icon-button" href="https://ip.me/" title="Check this session on ip.me" aria-label="Check this session on ip.me">${EXTERNAL_ICON}</a></span></div>
+<div class="session" id="session" data-tone="${proxyStatus.ok ? 'ok' : 'bad'}">
 <dl class="session-fields">
 <div class="field wide"><dt>${rowIcon('proxy')}Proxy</dt><dd class="sentence" id="proxy-line">${proxyStatus.ok ?
   escapeHtml(proxyStatus.detail) :
   `<strong>${escapeHtml(proxyStatus.title)}</strong>${escapeHtml(proxyStatus.detail)}`}</dd></div>
-<div class="field"><dt>${rowIcon('status')}Status</dt><dd>${statusChip}</dd></div>
 <div class="field"><dt>${rowIcon('platform')}Platform</dt><dd>${platform}</dd></div>
 <div class="field wide"><dt>${rowIcon('cookies')}Cookies</dt><dd>${cookieLabel}</dd></div>
 </dl>
+</div>
 </section>
 </main>
 <script>
@@ -793,7 +836,21 @@ ${run ? `(function () {
       post('/v1/proxies/recheck-from-page', {runToken: RUN.token})
         .then(function (result) {
           if (!result.ok || !result.body.status) {
-            throw new Error('refused');
+            /* The launcher's own words, not a sentence invented here. Every
+               refusal on this route already carries one -- "Argus Launcher is
+               not open", "Too many requests", "That profile is no longer in
+               this workspace" -- and each names something the person reading
+               this page can act on. They used to be thrown away and replaced
+               with the generic line below, which is why a re-check that failed
+               for a knowable reason looked exactly like one that failed for an
+               unknowable one. */
+            var refusal = new Error(result.body.msg ||
+                'The launcher refused the check without saying why.');
+            /* Marks this as an answer rather than a transport failure. Without
+               it the catch below cannot tell our sentence from fetch()'s own
+               "Failed to fetch", and would print that at the reader. */
+            refusal.fromLauncher = true;
+            throw refusal;
           }
           sessionCard.dataset.tone = result.body.proxyOk ? 'ok' : 'bad';
           line.textContent = '';
@@ -804,12 +861,18 @@ ${run ? `(function () {
           }
           line.appendChild(document.createTextNode(result.body.detail || ''));
         })
-        .catch(function () {
+        .catch(function (error) {
           /* Deliberately not painted as a failing proxy: the check did not
              finish, which is not the same as the proxy being dead, and saying
-             so would be the page inventing a verdict. */
+             so would be the page inventing a verdict.
+
+             The fallback sentence is for the one case with nothing to report --
+             fetch() itself rejecting, i.e. the launcher's server not answering
+             at all. It used to cover every failure here, including ones the
+             launcher had explained in full. */
           sessionCard.dataset.tone = 'bad';
-          line.textContent = 'The check did not complete. Try again from the Argus panel.';
+          line.textContent = error && error.fromLauncher ? error.message :
+            'The check did not complete. Try again from the Argus panel.';
         })
         .then(function () {
           recheck.disabled = false;

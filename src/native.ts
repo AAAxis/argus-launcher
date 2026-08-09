@@ -534,6 +534,9 @@ type ArgusNative = {
     callback: (payload: {key: string; receivedBytes: number; totalBytes: number}) => void,
   ): () => void;
   selectCookieFile?(): Promise<CookieFileSelection | null>;
+  // Several at once, for the cookie import dialog. Null when the picker was
+  // cancelled; never an empty array.
+  selectCookieFiles?(): Promise<CookieFileSelection[] | null>;
   selectCookieFolder?(): Promise<string | null>;
   matchCookieFiles?(
     folderPath: string,
@@ -569,11 +572,17 @@ type ArgusNative = {
   // `orgId` is the workspace the run token was minted under, forwarded off the
   // token entry by main.cjs. Empty for a token minted before it was carried, so
   // the handler treats absence as "the active workspace" and behaves as before.
+  //
+  // The six page-route pairs below take a fourth `status` argument the rest do
+  // not. Their callers act on the code -- 409 means "switch workspace back",
+  // 403 means "not in this workspace", 500 means the launcher broke -- and
+  // without it every refusal reached the panel as a 500. main.cjs defaults a
+  // missing status to 500, so it stays optional.
   onCookieSyncPushRequest?(
     callback: (
       payload: {
         requestId: string; profileId: string; orgId?: string;
-        cookies: unknown[]; saveAs?: string;
+        cookies: unknown[]; saveAs?: string; saveToSetId?: string;
       },
     ) => void,
   ): () => void;
@@ -581,19 +590,27 @@ type ArgusNative = {
     requestId: string,
     result?: {saved: number; set?: string},
     error?: string,
+    status?: number,
   ): void;
+  // `setId` picks a set this profile is not assigned to. Optional: absent means
+  // the assigned set, which is what every caller before the panel's picker did.
   onCookieSyncPullRequest?(
-    callback: (payload: {requestId: string; profileId: string; orgId?: string}) => void,
+    callback: (payload: {
+      requestId: string; profileId: string; orgId?: string; setId?: string;
+    }) => void,
   ): () => void;
   // Read-only inspection: what the launcher holds for this profile, without
   // applying it. Metadata only -- see the handler for why `value` is not here.
   onCookieListRequest?(
-    callback: (payload: {requestId: string; profileId: string; orgId?: string}) => void,
+    callback: (payload: {
+      requestId: string; profileId: string; orgId?: string; setId?: string;
+    }) => void,
   ): () => void;
   sendCookieListResult?(
     requestId: string,
     result?: {
       set: string | null;
+      setId: string | null;
       count: number;
       cookies: Array<{
         domain: string; name: string; path: string;
@@ -602,11 +619,73 @@ type ArgusNative = {
       }>;
     },
     error?: string,
+    status?: number,
   ): void;
   sendCookieSyncPullResult?(
     requestId: string,
-    result?: {cookies: unknown[]; set: string | null},
+    result?: {
+      cookies: unknown[]; set: string | null; setId: string | null; assigned: boolean;
+    },
     error?: string,
+    status?: number,
+  ): void;
+  // Every cookie set in the launch's workspace, metadata only, so the panel can
+  // offer a picker rather than one "Load from Launcher" button.
+  onCookieSetsRequest?(
+    callback: (payload: {requestId: string; profileId: string; orgId?: string}) => void,
+  ): () => void;
+  sendCookieSetsResult?(
+    requestId: string,
+    result?: {
+      assignedId: string | null;
+      sets: Array<{
+        id: string; name: string; count: number;
+        folder_id: string | null; tags: string[]; updated_at: string;
+      }>;
+    },
+    error?: string,
+    status?: number,
+  ): void;
+  // Every automation in the launch's workspace, for the panel's list.
+  //
+  // No `steps`, no `variables`, no `parameters`: steps carry selectors, urls
+  // and typed values, and parameters can carry resolved secrets. This payload
+  // lands in a document that goes on to visit arbitrary sites.
+  onPanelAutomationsRequest?(
+    callback: (payload: {requestId: string; profileId: string; orgId?: string}) => void,
+  ): () => void;
+  sendPanelAutomationsResult?(
+    requestId: string,
+    result?: {
+      automations: Array<{
+        id: string; name: string; description: string;
+        pinned: boolean; assigned: boolean;
+        icon: string; color: string;
+      }>;
+    },
+    error?: string,
+    status?: number,
+  ): void;
+  // Resolves one workspace automation into a runnable tile -- steps, called
+  // automations, variables and the names of the secret ones -- for a panel run
+  // of a workflow this launch was not handed. The answer goes to the main
+  // process and the runner, never to the panel.
+  onPanelResolveAutomationRequest?(
+    callback: (payload: {
+      requestId: string; profileId: string; orgId?: string; automationId: string;
+    }) => void,
+  ): () => void;
+  sendPanelResolveAutomationResult?(
+    requestId: string,
+    result?: {
+      automation: Record<string, unknown>;
+      resolvedAutomations?: Record<string, unknown>;
+      vars?: Record<string, unknown>;
+      secretVarNames?: string[];
+      paramsBlocked?: string;
+    },
+    error?: string,
+    status?: number,
   ): void;
   onReimportProxiesRequest?(
     callback: (payload: {requestId: string; proxies: Array<Record<string, unknown>>}) => void,
@@ -712,7 +791,7 @@ type ArgusNative = {
       profileId: string;
       fields: Partial<Pick<ArgusProfile,
         'name' | 'tags' | 'status' | 'color' | 'avatar' | 'folder_id' | 'email' | 'password' |
-        'proxy_mode' | 'proxy_id' | 'start_url' | 'automation_id'>>;
+        'login_url' | 'proxy_mode' | 'proxy_id' | 'start_url' | 'automation_id'>>;
       // null grants every folder; an array is the allow-list this key may
       // write to. Both ends of a folder move are checked against it.
       allowedFolders: string[] | null;

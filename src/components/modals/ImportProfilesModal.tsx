@@ -13,10 +13,12 @@
 // inferred from the file -- see the destination step.
 import {useEffect, useMemo, useState} from 'react';
 import {
-  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Download, FolderPlus, Globe,
-  KeyRound, Link2, Tags, TriangleAlert, Upload, UserPlus, UserRoundCog, Wand2,
+  ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Download, FileSpreadsheet, Filter, FolderPlus,
+  Globe, KeyRound, Link2, Table2, Tags, TriangleAlert, Upload, UserPlus, UserRound, UserRoundCog,
+  Users, Wand2,
 } from 'lucide-react';
 import {Modal} from '../ui/Modal';
+import {FormGroup} from '../ui/FormGroup';
 import {BusyButton} from '../ui/BusyButton';
 import {Checkbox} from '../ui/Checkbox';
 import {Field} from '../ui/Field';
@@ -57,7 +59,11 @@ import {
   setDuplicateAction,
 } from '../../workspace/importReview';
 import {summarize} from '../../workspace/csvImport';
-import type {ClipboardEvent, KeyboardEvent, ReactNode} from 'react';
+import {
+  CredentialBanner, DestinationCards, ImportDone, ImportHead, ImportStats, saveExampleFile,
+} from './importParts';
+import type {ImportStat} from './importParts';
+import type {ClipboardEvent, KeyboardEvent} from 'react';
 import type {DuplicateAction, ReviewRow} from '../../workspace/importReview';
 import type {FolderDecision, ImportLibrary, ImportResult} from '../../workspace/csvImport';
 import type {OrgMember} from '../../types';
@@ -351,87 +357,122 @@ export function ImportProfilesModal({onClose}: {onClose: () => void}) {
   }
 
   const stepIndex = step === 'source' ? 0 : step === 'review' ? 1 : 2;
+  const fileName = path.split('/').pop() || '';
 
   if (result) {
     return (
       <Modal
-        className="import-panel"
+        className="editor-modal import-panel"
         onClose={onClose}
-        title="Import finished"
-        subtitle={path.split('/').pop()}
-        footer={<button onClick={onClose}>Done</button>}
+        header={
+          <ImportHead
+            mark={<span className="import-mark"><FileSpreadsheet size={18} /></span>}
+            // The dialog still says what it IS. What HAPPENED is the hero
+            // below, which is where the eye lands -- printing "Import
+            // finished" in both places said one thing twice and named the
+            // file nowhere.
+            title="Import profiles"
+            meta={fileName && <span>{fileName}</span>}
+            actions={<button onClick={onClose}>Done</button>}
+          />
+        }
       >
-        <ImportSummary result={result} />
+        <div className="import-body">
+          <ImportDone outcome={importOutcome(result)} />
+        </div>
       </Modal>
     );
   }
 
   return (
     <Modal
-      className={step === 'review' ? 'import-panel import-review-panel' : 'import-panel'}
+      className={step === 'review' ?
+        'editor-modal import-panel import-review-panel' :
+        'editor-modal import-panel'}
       onClose={onClose}
-      title="Import profiles"
-      subtitle={`Step ${stepIndex + 1} of 3 · ${
-        step === 'source' ? 'Choose a file' :
-        step === 'review' ? 'Check the data' :
-        'Choose a folder'}`}
-      footer={
-        <>
-          <span className="import-dots" aria-hidden="true">
-            {[0, 1, 2].map((index) => (
-              <i key={index} className={index === stepIndex ? 'on' : ''} />
-            ))}
-          </span>
-          {step === 'review' && (
+      header={
+        <ImportHead
+          mark={<span className="import-mark"><FileSpreadsheet size={18} /></span>}
+          title="Import profiles"
+          steps={3}
+          step={stepIndex}
+          meta={
             <>
-              <span className="import-footer-count">
-                {importable} {importable === 1 ? 'profile' : 'profiles'} ready
-                {rows.length - importable > 0 &&
-                  ` · ${rows.length - importable} will be skipped`}
-              </span>
-              <button className="ghost" onClick={() => setStep('source')}>
-                <ArrowLeft size={16} /> Back
-              </button>
-              <button disabled={!importable} onClick={() => setStep('destination')}>
-                Save · choose folder <ArrowRight size={16} />
-              </button>
+              <span>{
+                step === 'source' ? 'Choose a file' :
+                step === 'review' ? 'Check the data' :
+                'Choose a folder'
+              }</span>
+              {fileName && <span className="import-head-file">{fileName}</span>}
+              {step !== 'source' && (
+                <span className="import-head-count">
+                  {importable} {importable === 1 ? 'profile' : 'profiles'} ready
+                  {rows.length - importable > 0 &&
+                    ` · ${rows.length - importable} skipped`}
+                </span>
+              )}
             </>
-          )}
-          {step === 'destination' && (
+          }
+          actions={
             <>
-              <button className="ghost" onClick={() => setStep('review')}>
-                <ArrowLeft size={16} /> Back
-              </button>
-              <BusyButton
-                busy={isPending('run-import')}
-                busyLabel="Importing…"
-                icon={<FolderPlus size={18} />}
-                disabled={!destinationReady(destination)}
-                onClick={() => void run('run-import', () => {
-                  const {decision, folderNames} = folderDecisionFor(destination);
-                  return commit(decision, folderNames ?
-                    applyFolderMapping(rows, folderNames, library) :
-                    rows);
-                })}
-              >
-                Import {importable} {importable === 1 ? 'profile' : 'profiles'}
-              </BusyButton>
+              {step === 'review' && (
+                <>
+                  <button className="ghost" onClick={() => setStep('source')}>
+                    <ArrowLeft size={16} /> Back
+                  </button>
+                  <button disabled={!importable} onClick={() => setStep('destination')}>
+                    Choose folder <ArrowRight size={16} />
+                  </button>
+                </>
+              )}
+              {step === 'destination' && (
+                <>
+                  <button className="ghost" onClick={() => setStep('review')}>
+                    <ArrowLeft size={16} /> Back
+                  </button>
+                  <BusyButton
+                    busy={isPending('run-import')}
+                    busyLabel="Importing…"
+                    disabled={!destinationReady(destination)}
+                    onClick={() => void run('run-import', () => {
+                      const {decision, folderNames} = folderDecisionFor(destination);
+                      return commit(decision, folderNames ?
+                        applyFolderMapping(rows, folderNames, library) :
+                        rows);
+                    })}
+                  >
+                    Import {importable} {importable === 1 ? 'profile' : 'profiles'}
+                  </BusyButton>
+                </>
+              )}
+              {step === 'source' && (
+                <button className="ghost" onClick={onClose}>Cancel</button>
+              )}
             </>
-          )}
-        </>
+          }
+        />
       }
     >
+      <div className="import-body">
       {step === 'source' && <SourceStep path={path} onPick={() => void pickCsv()} toast={toast} />}
 
       {step === 'review' && (
         <>
-          <div className="import-summary">
-            <div className="summary-item"><span>To create</span><strong>{summary.createCount}</strong></div>
-            <div className="summary-item"><span>To update</span><strong>{summary.updateCount}</strong></div>
-            <div className="summary-item"><span>Need attention</span><strong>{attention.length}</strong></div>
-            <div className="summary-item"><span>New proxies</span><strong>{summary.newProxyCount}</strong></div>
-            <div className="summary-item"><span>Reused proxies</span><strong>{summary.reusedProxyCount}</strong></div>
-          </div>
+          <FormGroup
+            title="What this file will do"
+            icon={<Table2 size={14} />}
+            hint="Counted from the rows below, and recounted as you edit them."
+          >
+            <div className="form-group-full">
+              <ImportStats stats={[
+                {label: 'To create', value: summary.createCount, icon: <UserPlus size={15} />},
+                {label: 'To update', value: summary.updateCount, icon: <UserRoundCog size={15} />},
+                {label: 'Need attention', value: attention.length, icon: <TriangleAlert size={15} />},
+                {label: 'New proxies', value: summary.newProxyCount, icon: <Globe size={15} />},
+                {label: 'Reused proxies', value: summary.reusedProxyCount, icon: <Link2 size={15} />},
+              ]} />
+            </div>
+          </FormGroup>
 
           {credentialFix.proxyCount > 0 && (
             <CredentialBanner
@@ -563,6 +604,7 @@ export function ImportProfilesModal({onClose}: {onClose: () => void}) {
           onChange={(patch) => setDestination((current) => ({...current, ...patch}))}
         />
       )}
+      </div>
     </Modal>
   );
 }
@@ -572,56 +614,53 @@ function SourceStep(
     {path: string; onPick: () => void; toast: {setMessage: (message: string) => void}}) {
   return (
     <>
-      <p className="import-lead">
-        Import profiles in bulk from an inventory CSV. Nothing is written until you have seen
-        the rows and chosen a folder — a file this app exported can be fed straight back in,
-        and updates the profiles it came from rather than duplicating them.
-      </p>
-      <div className="import-actions">
-        <button className="ghost" onClick={onPick}>
-          <Upload size={18} /> Choose CSV file
-        </button>
-        <button
-          className="ghost"
-          onClick={() => void saveExample(toast.setMessage)}
-        >
-          <Download size={18} /> Download example
-        </button>
-        {path && <span className="import-file-label">{path.split('/').pop()}</span>}
-      </div>
-      <dl className="import-columns">
-        {importColumns.map((column) => (
-          <div key={column.name}>
-            <dt>
-              <code>{column.name}</code>
-              {column.required && <em>required</em>}
-            </dt>
-            <dd>{column.note}</dd>
+      <FormGroup
+        title="The file"
+        icon={<FileSpreadsheet size={14} />}
+        hint="Nothing is written until you have seen the rows and chosen a folder."
+      >
+        <div className="form-group-full">
+          <p className="import-lead">
+            Import profiles in bulk from an inventory CSV. A file this app exported can be fed
+            straight back in, and updates the profiles it came from rather than duplicating them.
+          </p>
+          <div className="import-actions">
+            <button className="ghost" onClick={onPick}>
+              <Upload size={18} /> Choose CSV file
+            </button>
+            <button
+              className="ghost"
+              onClick={() => void saveExampleFile('argus-profiles-example.csv',
+                  profileImportExampleCsv(), toast.setMessage, native?.saveTextFile)}
+            >
+              <Download size={18} /> Download example
+            </button>
+            {path && <span className="import-file-label">{path.split('/').pop()}</span>}
           </div>
-        ))}
-      </dl>
+        </div>
+      </FormGroup>
+
+      <FormGroup
+        title="Columns"
+        icon={<Table2 size={14} />}
+        hint="Matched by name, in any order. Anything missing falls back to a default."
+      >
+        <div className="form-group-full">
+          <dl className="import-columns">
+            {importColumns.map((column) => (
+              <div key={column.name}>
+                <dt>
+                  <code>{column.name}</code>
+                  {column.required && <em>required</em>}
+                </dt>
+                <dd>{column.note}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </FormGroup>
     </>
   );
-}
-
-// The example round-trips through the importer unchanged, which is the only way
-// "here is the format" is verifiable rather than a claim.
-async function saveExample(say: (message: string) => void) {
-  const content = profileImportExampleCsv();
-  if (native?.saveTextFile) {
-    const savedPath = await native.saveTextFile('argus-profiles-example.csv', content);
-    if (savedPath) {
-      say(`Saved example CSV to ${savedPath.split('/').pop()}`);
-    }
-    return;
-  }
-  const url = URL.createObjectURL(new Blob([content], {type: 'text/csv'}));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'argus-profiles-example.csv';
-  link.click();
-  URL.revokeObjectURL(url);
-  say('Downloaded example CSV');
 }
 
 function BulkBar({count, statusOptions, onPatch, onClear}: {
@@ -871,63 +910,6 @@ function ReviewTableRow({
         </tr>
       )}
     </>
-  );
-}
-
-// One username and password for every credential-less proxy in the file.
-//
-// Above the table rather than inside a row, because it is one answer to N rows:
-// a file exported from another tool names hosts and ports and no logins, and all
-// of them are the same provider account. Autocomplete is off -- these are a
-// proxy provider's credentials, not the user's own, and offering their browser
-// password here would be wrong.
-function CredentialBanner({count, busy, onApply}: {
-  count: number;
-  busy: boolean;
-  onApply: (username: string, password: string) => void;
-}) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const ready = Boolean(username || password);
-
-  return (
-    <form
-      className="import-credential-banner"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (ready && !busy) {
-          onApply(username, password);
-        }
-      }}
-    >
-      <div className="import-credential-copy">
-        <strong>
-          {count} {count === 1 ? 'proxy has' : 'proxies have'} no username or password
-        </strong>
-        <span>
-          They will fail their check and block launch. Most exports leave credentials
-          out — enter your provider&apos;s login once to apply it to all of them.
-        </span>
-      </div>
-      <input
-        aria-label="Proxy username"
-        autoComplete="off"
-        onChange={(event) => setUsername(event.target.value)}
-        placeholder="Username"
-        value={username}
-      />
-      <input
-        aria-label="Proxy password"
-        autoComplete="off"
-        onChange={(event) => setPassword(event.target.value)}
-        placeholder="Password"
-        type="password"
-        value={password}
-      />
-      <BusyButton busy={busy} busyLabel="Applying…" disabled={!ready} type="submit">
-        Apply to {count}
-      </BusyButton>
-    </form>
   );
 }
 
@@ -1270,155 +1252,146 @@ function DestinationStep({rows, library, folders, members, destination, onChange
 
   return (
     <>
-      <p className="import-lead">
-        Where should {count} {count === 1 ? 'profile' : 'profiles'} go? Nothing has been
-        created yet — including folders.
-      </p>
-
-      <div className="destination-cards" role="radiogroup" aria-label="Folder destination">
-        {requests.length > 0 && (
-          <DestinationCard
-            checked={kind === 'per-row'}
-            onSelect={() => setKind('per-row')}
-            title="Keep the folders from the file"
-            body={`${requests.length} folder ${requests.length === 1 ? 'name' : 'names'} in this file`}
+      <FormGroup
+        title="Folder"
+        icon={<FolderPlus size={14} />}
+        hint={`Where ${count} ${count === 1 ? 'profile goes' : 'profiles go'}. Nothing has been created yet — including folders.`}
+      >
+        <div className="form-group-full">
+          <DestinationCards
+            label="Folder destination"
+            value={kind}
+            onSelect={setKind}
+            options={[
+              ...(requests.length > 0 ? [{
+                kind: 'per-row' as const,
+                title: 'Keep the folders from the file',
+                body: `${requests.length} folder ${requests.length === 1 ? 'name' : 'names'} in this file`,
+              }] : []),
+              {
+                kind: 'new' as const,
+                title: 'One new folder',
+                body: 'Everything in this import goes into a folder you name',
+              },
+              {
+                kind: 'existing' as const,
+                title: 'An existing folder',
+                body: profileFolders.length ?
+                  'Add them to a folder you already have' :
+                  'You have no folders yet',
+                disabled: !profileFolders.length,
+              },
+              {
+                kind: 'unfiled' as const,
+                title: 'No folder',
+                body: 'Leave them under All profiles',
+              },
+            ]}
           />
-        )}
-        <DestinationCard
-          checked={kind === 'new'}
-          onSelect={() => setKind('new')}
-          title="One new folder"
-          body="Everything in this import goes into a folder you name"
-        />
-        <DestinationCard
-          checked={kind === 'existing'}
-          onSelect={() => setKind('existing')}
-          title="An existing folder"
-          body={profileFolders.length ? 'Add them to a folder you already have' : 'You have no folders yet'}
-          disabled={!profileFolders.length}
-        />
-        <DestinationCard
-          checked={kind === 'unfiled'}
-          onSelect={() => setKind('unfiled')}
-          title="No folder"
-          body="Leave them under All profiles"
-        />
-      </div>
-
-      {kind === 'new' && (
-        <Field
-          label="Folder name"
-          wide
-          hint="Left empty on purpose — a folder name is a decision, not a default."
-        >
-          <input
-            autoFocus
-            value={newName}
-            placeholder={requests[0]?.name || 'e.g. Facebook warmup'}
-            onChange={(event) => onChange({newName: event.target.value})}
-          />
-        </Field>
-      )}
-
-      {kind === 'existing' && (
-        <Field label="Folder" wide>
-          <select
-            value={existingId}
-            onChange={(event) => onChange({existingId: event.target.value})}
-          >
-            {profileFolders.map((folder) => (
-              <option key={folder.id} value={folder.id}>{folder.name}</option>
-            ))}
-          </select>
-        </Field>
-      )}
-
-      {kind === 'per-row' && (
-        <div className="folder-mapping">
-          {requests.map((request) => (
-            <div className="folder-mapping-row" key={request.name}>
-              <span className="folder-mapping-source">
-                <FolderGlyph
-                  color={undefined}
-                  icon={undefined}
-                  size={13}
-                  small
-                />
-                {request.name}
-                <i>{request.rowCount} {request.rowCount === 1 ? 'profile' : 'profiles'}</i>
-              </span>
-              <ArrowRight size={14} aria-hidden="true" />
-              <input
-                value={mapping.get(request.name.toLowerCase()) ?? ''}
-                placeholder="Leave empty for no folder"
-                onChange={(event) => onChange({
-                  mapping: new Map(mapping).set(
-                      request.name.toLowerCase(), event.target.value),
-                })}
-              />
-              {request.existingFolderId && (
-                <span className="proxy-badge assigned">Existing folder</span>
-              )}
-            </div>
-          ))}
-          <p className="field-hint">
-            A name that already exists adds to that folder. An empty name leaves those
-            profiles unfiled.
-          </p>
         </div>
-      )}
+
+        {kind === 'new' && (
+          <Field
+            label="Folder name"
+            wide
+            hint="Left empty on purpose — a folder name is a decision, not a default."
+          >
+            <input
+              autoFocus
+              value={newName}
+              placeholder={requests[0]?.name || 'e.g. Facebook warmup'}
+              onChange={(event) => onChange({newName: event.target.value})}
+            />
+          </Field>
+        )}
+
+        {kind === 'existing' && (
+          <Field label="Folder" wide>
+            <select
+              value={existingId}
+              onChange={(event) => onChange({existingId: event.target.value})}
+            >
+              {profileFolders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        {kind === 'per-row' && (
+          <div className="form-group-full">
+            <div className="folder-mapping">
+              {requests.map((request) => (
+                <div className="folder-mapping-row" key={request.name}>
+                  <span className="folder-mapping-source">
+                    <FolderGlyph
+                      color={undefined}
+                      icon={undefined}
+                      size={13}
+                      small
+                    />
+                    {request.name}
+                    <i>{request.rowCount} {request.rowCount === 1 ? 'profile' : 'profiles'}</i>
+                  </span>
+                  <ArrowRight size={14} aria-hidden="true" />
+                  <input
+                    value={mapping.get(request.name.toLowerCase()) ?? ''}
+                    placeholder="Leave empty for no folder"
+                    onChange={(event) => onChange({
+                      mapping: new Map(mapping).set(
+                          request.name.toLowerCase(), event.target.value),
+                    })}
+                  />
+                  {request.existingFolderId && (
+                    <span className="proxy-badge assigned">Existing folder</span>
+                  )}
+                </div>
+              ))}
+              <p className="field-hint">
+                A name that already exists adds to that folder. An empty name leaves those
+                profiles unfiled.
+              </p>
+            </div>
+          </div>
+        )}
+      </FormGroup>
 
       {/* Only on a team, matching the profile editor and the Assigned column.
           Placed after the folder decision because it is the smaller of the two
           questions and has a working default -- the folder does not. */}
       {members.length > 1 && (
-        <Field
-          label="Assign these profiles to"
-          wide
-          hint={createCount === 0 ?
-            'Nothing new to assign — every row in this file updates a profile that already exists, and those keep whoever is looking after them.' :
-            `Applies to the ${createCount} new ${createCount === 1 ? 'profile' : 'profiles'}. Rows that update an existing profile keep their current assignee. This is a label, not a lock — everyone on the team can open them either way.`}
+        <FormGroup
+          title="Assignment"
+          icon={<Users size={14} />}
+          hint="Who these profiles show up under in the Assigned column."
         >
-          <AssigneeSelect
-            members={members}
-            onChange={(next) => onChange({assignTo: next})}
-            unassignedLabel="Nobody"
-            value={assignTo}
-          />
-        </Field>
+          <Field
+            label="Assign these profiles to"
+            icon={<UserRound size={14} />}
+            wide
+            hint={createCount === 0 ?
+              'Nothing new to assign — every row in this file updates a profile that already exists, and those keep whoever is looking after them.' :
+              `Applies to the ${createCount} new ${createCount === 1 ? 'profile' : 'profiles'}. Rows that update an existing profile keep their current assignee. This is a label, not a lock — everyone on the team can open them either way.`}
+          >
+            <AssigneeSelect
+              members={members}
+              onChange={(next) => onChange({assignTo: next})}
+              unassignedLabel="Nobody"
+              value={assignTo}
+            />
+          </Field>
+        </FormGroup>
       )}
     </>
   );
 }
 
-function DestinationCard({checked, onSelect, title, body, disabled}: {
-  checked: boolean;
-  onSelect: () => void;
-  title: string;
-  body: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      role="radio"
-      aria-checked={checked}
-      disabled={disabled}
-      className={checked ? 'destination-card on' : 'destination-card'}
-      onClick={onSelect}
-    >
-      <strong>{title}</strong>
-      <span>{body}</span>
-    </button>
-  );
-}
-
-// A stat gets its glyph here rather than at the call site so the list below
-// stays one row per number. Icons repeat across the two proxy stats and the two
-// profile stats on purpose: the pairs are the same noun counted twice, and
-// giving each its own mark made five tiles read as five unrelated things.
-type ImportStat = {label: string; value: number; icon: ReactNode};
-
-function ImportSummary({result}: {result: ImportResult}) {
+// What the finished screen says, as the shared ImportDone wants it.
+//
+// Icons repeat across the two proxy stats and the two profile stats on purpose:
+// the pairs are the same noun counted twice, and giving each its own mark made
+// five tiles read as five unrelated things.
+function importOutcome(result: ImportResult) {
   const stats: ImportStat[] = [
     {label: 'Profiles created', value: result.created, icon: <UserPlus size={15} />},
     {label: 'Profiles updated', value: result.updated, icon: <UserRoundCog size={15} />},
@@ -1445,56 +1418,7 @@ function ImportSummary({result}: {result: ImportResult}) {
       `${result.proxiesCreated} ${result.proxiesCreated === 1 ? 'proxy' : 'proxies'} added`,
     result.foldersCreated &&
       `${result.foldersCreated} ${result.foldersCreated === 1 ? 'folder' : 'folders'} created`,
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean).join(' \u00b7 ');
 
-  return (
-    <div className="import-done">
-      {/* Green only when the write actually completed. A partial import is not a
-          success and must not be dressed as one -- its own banner says so
-          below, and this mark goes amber to match rather than contradicting it
-          from two inches above. */}
-      <div className={result.partial ? 'import-done-hero partial' : 'import-done-hero'}>
-        <span className="import-done-mark">
-          {result.partial ? <TriangleAlert size={20} /> : <CheckCircle2 size={20} />}
-        </span>
-        <div className="import-done-copy">
-          <strong>{result.partial ? 'Import stopped partway' : 'Import finished'}</strong>
-          {headline && <i>{headline}</i>}
-        </div>
-      </div>
-
-      {result.partial && (
-        <p className="import-done-note">
-          The counts below are what this import planned, not what reached the server.
-          Reload to see what actually landed.
-        </p>
-      )}
-
-      <div className="import-stats">
-        {stats.map((stat) => (
-          // Dimmed at zero: five tiles of equal weight made "0 updated" as loud
-          // as "10 created", and the whole point of this screen is what changed.
-          <div className={stat.value ? 'import-stat' : 'import-stat zero'} key={stat.label}>
-            <span className="import-stat-mark">{stat.icon}</span>
-            <span className="import-stat-label">{stat.label}</span>
-            <strong className="import-stat-value">{stat.value}</strong>
-          </div>
-        ))}
-      </div>
-
-      {result.skipped.length > 0 && (
-        <div className="import-skipped">
-          <span className="import-skipped-head">
-            <TriangleAlert size={14} />
-            Skipped ({result.skipped.length})
-          </span>
-          <div className="summary-lines">
-            {result.skipped.map((item, index) => (
-              <i key={index}>{item.name}: {item.reason}</i>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return {headline, stats, partial: result.partial, skipped: result.skipped};
 }

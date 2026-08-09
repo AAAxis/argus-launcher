@@ -268,6 +268,37 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
     return resolve(payload);
   }
 
+  // Running a workflow this launch was NOT handed.
+  //
+  // This is the one authorizer that deliberately does less than authorize()
+  // above, and it is worth being explicit about what that costs. authorize()
+  // checks the named automation against entry.automations, so a leaked token
+  // could only ever re-run something a person had already pinned or assigned to
+  // this profile. This one checks nothing but the token, so it can run anything
+  // in the workspace the token was minted under -- including workflows carrying
+  // connector credentials and secret parameter values.
+  //
+  // That widening is the deliberate product decision behind the side panel's
+  // team-wide automations list; it is not an oversight, and it is not a
+  // property to give away again by accident. What is NOT widened:
+  //
+  //   - The workspace. orgId still comes off the entry, stamped at mint time.
+  //     A caller cannot reach another org's workflows by naming one.
+  //   - The profile. It comes off the entry too, so the run still happens in
+  //     the window this token was minted for.
+  //   - The refusal. An unknown token and an expired one are still the same
+  //     403 as everything else on this file.
+  //
+  // The id itself is validated in the renderer, against the token's own
+  // workspace -- see the panel-resolve-automation handler in
+  // useAutomationBridge.ts. It is request DATA here, exactly like `saveAs`.
+  //
+  // Ordinary bucket rather than the status one: this is a button someone
+  // presses, and it costs a browser automation run.
+  function authorizeRunAny(payload) {
+    return resolve(payload);
+  }
+
   // Raising the launcher window may name one of this launch's automations, or
   // nothing at all -- "just show me the Automations tab for this profile", which
   // is the only thing the side panel's empty state can usefully offer. Naming
@@ -290,6 +321,7 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
     authorizeCookieSync,
     authorizeOpen,
     authorizeRecheck,
+    authorizeRunAny,
     authorizeStatus,
     clear: () => {
       tokens.clear();
@@ -313,9 +345,17 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
 // the proxy checker, nor Electron.
 function handlePageRequest({req, res, tokens, sendJson, authorizeWith, work, maxBodyBytes = MAX_BODY_BYTES}) {
   // A cross-origin <form> POST cannot set this, so requiring it means a hostile
-  // page has to send a preflight -- which this server does not answer for these
-  // routes. The loopback API sets Access-Control-Allow-Origin: * on its keyed
-  // routes, so without this the wildcard would effectively reach here too.
+  // page has to send a preflight first. That is a speed bump and not a wall:
+  // the loopback server answers OPTIONS for every path with
+  // Access-Control-Allow-Origin: *, so the preflight passes. This comment used
+  // to claim the opposite -- that the preflight went unanswered -- and reading
+  // it that way is how the real gate got left implicit.
+  //
+  // The real gate is the run token below. It is minted per launch, written only
+  // into that profile's own user-data-dir at 0600, and names nothing the caller
+  // may choose: every one of these routes takes its profile off the token's
+  // entry rather than off the request body. A page that cannot read that file
+  // cannot reach any of this, however cleanly its preflight is answered.
   const contentType = String(req.headers['content-type'] || '');
   if (!contentType.includes('application/json')) {
     sendJson(res, 403, {status: false, msg: 'Not allowed'});
@@ -387,11 +427,85 @@ function handleRunFromPage({req, res, tokens, sendJson, startRun}) {
   });
 }
 
+// Every automation in the workspace this launch was minted under, for the side
+// panel's Automations tab.
+//
+// The panel's list used to be the launch snapshot -- org-pinned workflows plus
+// the profile's own -- frozen in a JSON file before the browser process even
+// existed. A teammate's workflow created mid-session never appeared, and
+// neither did anything nobody had thought to pin.
+//
+// Body is `{runToken}` and nothing else: no profile id, no org id, no filter.
+// Both come off the entry, which is the property that makes these routes safe
+// to expose to a keyless document. This route widens WHAT is listed; it does
+// not widen who gets to ask.
+//
+// What comes back is decided in the renderer, not here, and it is metadata:
+// name, description, whether it is pinned or assigned, icon and colour. Steps,
+// variables and parameters never travel -- they carry selectors, urls, typed
+// values and resolved secrets, and this answer lands in a document that goes on
+// to visit arbitrary sites.
+//
+// On the status bucket (150/token/min) rather than the ordinary one: the panel
+// refetches this whenever its Automations tab is opened, and it must not be
+// able to starve the run button.
+function handleAutomationListFromPage({req, res, tokens, sendJson, listAutomations}) {
+  handlePageRequest({
+    req,
+    res,
+    tokens,
+    sendJson,
+    authorizeWith: 'authorizeStatus',
+    work: async ({entry}) => await listAutomations(entry),
+  });
+}
+
+// Runs a workflow this launch was NOT handed -- the other half of the list
+// above, since a list you cannot act on is a tease.
+//
+// Kept as its own route rather than loosening handleRunFromPage, so the narrow
+// path stays narrow and keeps working with the launcher window closed: it needs
+// nothing but the token entry, while this one cannot resolve an automation
+// without a renderer round trip (the entry holds no steps, no called
+// automations, no variables and no secret names for anything that was not in
+// it). See authorizeRunAny for exactly what this widens and what it does not.
+//
+// `automationId` is request DATA, type-checked here and validated for real in
+// the renderer against the token's own workspace -- the same division of labour
+// `saveAs` has on the cookie push route.
+function handleRunAnyFromPage({req, res, tokens, sendJson, startAnyRun}) {
+  handlePageRequest({
+    req,
+    res,
+    tokens,
+    sendJson,
+    authorizeWith: 'authorizeRunAny',
+    work: async ({entry}, payload) => {
+      const automationId =
+        typeof payload.automationId === 'string' ? payload.automationId : '';
+      if (!automationId) {
+        throw Object.assign(new Error('No automation named'), {status: 400});
+      }
+      return {runId: await startAnyRun(entry, automationId)};
+    },
+  });
+}
+
 // Raises the launcher window with one of this launch's automations open.
 //
-// Same authorization as the run route, deliberately: naming an automation this
-// launch does not offer is refused identically to holding a token that was
-// never valid, so this cannot be used to probe which workflows an org has.
+// Same authorization as the narrow run route, deliberately: naming an
+// automation this launch does not offer is refused identically to holding a
+// token that was never valid.
+//
+// This used to be justified as "so this cannot be used to probe which workflows
+// an org has". That is no longer the property being defended, and pretending
+// otherwise would leave a comment guarding a door that
+// handleAutomationListFromPage below now opens on purpose: the side panel lists
+// every workflow in the launch's workspace, because a panel that can only show
+// what one launch was handed cannot show a team anything. What is still true,
+// and is what this refusal is for, is that the SHAPE of the check does not vary
+// with the reason it failed -- an unknown token, an expired one and a valid one
+// naming something outside its workspace are one 403 with one body.
 //
 // `open` does not wait for the launcher's renderer to acknowledge anything.
 // The window is raised by the main process either way, and the caller is a
@@ -477,15 +591,21 @@ function handleRecheckFromPage({req, res, tokens, sendJson, recheck}) {
 // the token entry's own -- the payload names no profile, so a leaked token can
 // only ever write to the launch it was minted for.
 //
-// `saveAs`, when present, is the one optional field this route accepts: a
-// user-chosen name that turns this push into a library save (a new, named
-// set) instead of the default live-set sync. It is request DATA, not an
-// authorization input -- same as `cookies` -- so it gets the same treatment:
-// type-checked here (a string, or dropped), never trusted as anything more.
-// The actual sanitize-or-reject (trim, length cap, control-character strip)
-// happens once, in useAutomationBridge.ts via sanitizeSetName, which is also
-// where the set gets created -- so there is exactly one place that decides
-// what a valid name is, and it is not this file.
+// `saveAs` and `saveToSetId` are the two optional fields this route accepts,
+// and they are alternatives:
+//
+//   - `saveAs` is a user-chosen NAME, turning this push into a library save (a
+//     new, named set) instead of the default live-set sync.
+//   - `saveToSetId` is an existing set's id, turning it into an overwrite of
+//     that set. Behind a confirmation in the panel, never reachable from the
+//     automatic push loop, and with no undo once it lands.
+//
+// Both are request DATA, not authorization inputs -- same as `cookies` -- so
+// both get the same treatment: type-checked here (a string, or dropped), never
+// trusted as anything more. The real validation happens once, in
+// useAutomationBridge.ts: sanitizeSetName decides what a valid name is, and the
+// workspace's own set list decides what a reachable id is. Neither decision
+// belongs in this file, which knows about tokens and refusals and nothing else.
 function handleCookiePushFromPage({req, res, tokens, sendJson, pushCookies}) {
   handlePageRequest({
     req, res, tokens, sendJson,
@@ -494,43 +614,80 @@ function handleCookiePushFromPage({req, res, tokens, sendJson, pushCookies}) {
     work: async ({entry}, payload) => {
       const cookies = Array.isArray(payload.cookies) ? payload.cookies : [];
       const saveAs = typeof payload.saveAs === 'string' ? payload.saveAs : undefined;
-      return await pushCookies(entry, cookies, saveAs);
+      const saveToSetId =
+        typeof payload.saveToSetId === 'string' ? payload.saveToSetId : undefined;
+      return await pushCookies(entry, cookies, saveAs, saveToSetId);
     },
   });
 }
 
-// Hands the profile's assigned cookie set back to its running browser, for
-// "Load from Launcher" without a relaunch. Read-only; carries nothing but the
-// token, so there is nothing in the request for a caller to choose.
+// Hands a cookie set back to this launch's running browser, for "Load from
+// Launcher" without a relaunch.
+//
+// `setId`, when present, picks a set the profile is NOT assigned to -- the side
+// panel's picker over the workspace's whole library. Absent means the assigned
+// set, which is what every caller before that picker did.
+//
+// This is the field that breaks the old rule these routes were written under,
+// and the break is deliberate rather than accidental, so it is worth writing
+// down what replaced it. The rule was: the body is `{runToken}` and nothing
+// else, so there is nothing in a request for a caller to CHOOSE. A picker is
+// exactly a choice. What makes it safe is not the token layer -- an id is
+// type-checked here and no more -- but the renderer, which resolves the id
+// against the set list of the workspace the token was minted under and refuses
+// anything else. Not RLS: RLS would also refuse another org's set, but only
+// because the signed-in user is not a member of it, so a bug in orgId plumbing
+// would become a cross-org read the moment they belonged to both.
 function handleCookiePullFromPage({req, res, tokens, sendJson, pullCookies}) {
   handlePageRequest({
     req, res, tokens, sendJson,
     authorizeWith: 'authorizeCookieSync',
-    work: async ({entry}) => await pullCookies(entry),
+    work: async ({entry}, payload) => {
+      const setId = typeof payload.setId === 'string' ? payload.setId : undefined;
+      return await pullCookies(entry, setId);
+    },
   });
 }
 
-// Read-only: what the launcher holds for this profile, WITHOUT applying it.
+// Read-only: what the launcher holds, WITHOUT applying it.
 //
 // The pull route above answers the same question but the panel can only ask it
 // by taking the answer -- it imports the set into the live jar. So a user who
 // wanted to know what "Load from Launcher" was about to do had to do it and
 // find out, on a button whose own hint says it replaces this browser's cookies.
-// This is the look-before-you-leap half.
+// This is the look-before-you-leap half, and with a picker it matters more, not
+// less: the set about to be applied may be one this profile has never used.
 //
-// Deliberately the pull route's twin in every other respect: the request body
-// is `{runToken}` and nothing else -- no profile id, no set id, no filter. The
-// profile comes off the entry. That is the property that makes these routes
-// safe to expose to a keyless document, and a new one must not be the first to
-// break it.
+// Takes the same optional `setId` as the pull, validated the same way in the
+// renderer. Metadata only either way -- never cookie values.
 //
 // The default body cap applies rather than the 10 MB cookie one: this request
-// carries a token and no payload. Only pushes need the large cap.
+// carries a token and an id. Only pushes need the large cap.
 function handleCookieListFromPage({req, res, tokens, sendJson, listCookies}) {
   handlePageRequest({
     req, res, tokens, sendJson,
     authorizeWith: 'authorizeCookieSync',
-    work: async ({entry}) => await listCookies(entry),
+    work: async ({entry}, payload) => {
+      const setId = typeof payload.setId === 'string' ? payload.setId : undefined;
+      return await listCookies(entry, setId);
+    },
+  });
+}
+
+// Every cookie set in the workspace this launch was minted under, so the panel
+// can offer a picker rather than one button wired to one set.
+//
+// Body is `{runToken}` and nothing else -- this is the route that TELLS the
+// caller what ids exist, so it has nothing to choose from yet. Metadata only:
+// names, counts, filing and timestamps, never a payload and never a cookie
+// value. The renderer reads it straight from the database rather than the
+// window's cached state, because the launcher window is by definition not
+// focused while someone is looking at a browser side panel.
+function handleCookieSetsFromPage({req, res, tokens, sendJson, listSets}) {
+  handlePageRequest({
+    req, res, tokens, sendJson,
+    authorizeWith: 'authorizeCookieSync',
+    work: async ({entry}) => await listSets(entry),
   });
 }
 
@@ -542,12 +699,15 @@ module.exports = {
   STATUS_RATE,
   TTL_MS,
   createRunTokens,
+  handleAutomationListFromPage,
   handleCancelRunFromPage,
   handleCookieListFromPage,
   handleCookiePullFromPage,
   handleCookiePushFromPage,
+  handleCookieSetsFromPage,
   handleOpenInLauncherFromPage,
   handleRecheckFromPage,
+  handleRunAnyFromPage,
   handleRunFromPage,
   handleRunStatusFromPage,
 };

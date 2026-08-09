@@ -6,13 +6,13 @@
 // inline WITHOUT clobbering the step list -- you keep editing the text until it
 // is right, rather than losing it the moment you mistype a brace.
 import {useState} from 'react';
-import {Folder, Pencil, Play, Send, Trash2, Workflow} from 'lucide-react';
+import {Folder, Play, Send, Trash2, Workflow} from 'lucide-react';
 import {Modal} from '../ui/Modal';
+import {EditorHead} from '../ui/EditorHead';
 import {Field} from '../ui/Field';
 import {BrandIconPicker} from '../ui/BrandIconPicker';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
-import {Popover} from '../ui/Popover';
 import {TagInput} from '../ui/TagInput';
 import {AutomationMark} from '../automations/AutomationMark';
 import {ParametersCard} from '../automations/ParametersCard';
@@ -74,75 +74,6 @@ function validate(steps: unknown, path = 'steps', depth = 0): string[] {
     }
   });
   return problems;
-}
-
-// The automation's name, as the dialog's heading.
-//
-// It was a labelled input in the sidebar, below the Steps/JSON toggle and above
-// four settings -- so the one thing that identifies what you are editing sat
-// fifth in a column of equals, while the header said "New automation" no matter
-// what you had typed. Same call as StatusChip: the name is the value, the
-// pencil is the way to change it.
-function TitleField({value, onChange}: {
-  value: string;
-  onChange: (name: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  // Held locally while editing so Escape has something to revert to, and so an
-  // empty box mid-retype does not disable Save on every keystroke.
-  const [text, setText] = useState(value);
-
-  if (!editing) {
-    return (
-      <span className="automation-title">
-        <span className="automation-title-text">{value.trim() || 'Untitled automation'}</span>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Rename this automation"
-          title="Rename"
-          onClick={() => {
-            setText(value);
-            setEditing(true);
-          }}
-        ><Pencil size={14} /></button>
-      </span>
-    );
-  }
-
-  function commit() {
-    setEditing(false);
-    const next = text.trim();
-    // An empty name blocks Save, and silently keeping the old one would hide
-    // that the rename did not take. Empty is allowed through and the footer
-    // says why.
-    onChange(next);
-  }
-
-  return (
-    <span className="automation-title">
-      <input
-        type="text"
-        className="automation-title-input"
-        autoFocus
-        value={text}
-        placeholder="Name this automation"
-        onChange={(event) => setText(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            commit();
-          }
-          if (event.key === 'Escape') {
-            // Stops the dialog closing as well -- Modal listens for Escape.
-            event.stopPropagation();
-            setText(value);
-            setEditing(false);
-          }
-        }}
-      />
-    </span>
-  );
 }
 
 // The run budget, in seconds.
@@ -488,7 +419,9 @@ export function AutomationModal({
   return (
     <Modal
       onClose={requestClose}
-      className="automation-modal"
+      // `editor-modal` is what carries the sticky header and the repositioned
+      // close X; `automation-modal` is this dialog's own width and columns.
+      className="automation-modal editor-modal"
       // One header instead of a header and a footer.
       //
       // The four things you can do to an automation used to be in three
@@ -499,19 +432,15 @@ export function AutomationModal({
       // this an improvement rather than a move -- a footer is always reachable
       // on a dialog this tall, and a header that scrolled away would not be.
       header={
-        <div className="automation-head">
-          <div className="automation-head-title">
-            {/* The icon was a picker in the settings column, five fields down,
-                and the mark it produced was only ever visible back in the
-                grid -- so you chose it blind. It is the heading's own glyph
-                now, and clicking it is how you change it. */}
-            <Popover
-              label={`Change the icon and colour for ${draft.name.trim() || 'this automation'}`}
-              panelClassName="automation-icon-pop"
-              triggerClassName="automation-icon-trigger"
-              trigger={<AutomationMark icon={draft.icon} color={draft.color} size={28} />}
-              width={320}
-            >
+        <EditorHead
+          /* The icon was a picker in the settings column, five fields down, and
+             the mark it produced was only ever visible back in the grid -- so
+             you chose it blind. It is the heading's own glyph now, and clicking
+             it is how you change it. */
+          mark={<AutomationMark icon={draft.icon} color={draft.color} size={28} />}
+          markLabel={`Change the icon and colour for ${draft.name.trim() || 'this automation'}`}
+          markPop={
+            <>
               <Field label="Icon" group>
                 <BrandIconPicker
                   value={draft.icon || ''}
@@ -532,65 +461,58 @@ export function AutomationModal({
                   onChange={(color) => setDraft({...draft, color})}
                 />
               </Field>
-            </Popover>
-            <div className="automation-head-name">
-              <h2>
-                <TitleField
-                  value={draft.name}
-                  onChange={(name) => setDraft({...draft, name})}
-                />
-              </h2>
-              {/* Its own mark, so the second line reads as a line of its own
-                  rather than as a caption hanging off the name. It is also
-                  what lets the brand mark stay on the title's line at the size
-                  the grid card draws it -- see .automation-head-title. */}
-              <p className="automation-head-steps">
-                <Workflow size={13} strokeWidth={2} aria-hidden="true" />
-                {draft.steps.length} step{draft.steps.length === 1 ? '' : 's'}
-              </p>
-            </div>
-          </div>
-
-          <div className="automation-head-actions">
-            {/* Primary, and first, for the reason it was primary in the
-                sidebar: it is the thing you came here to do. Everything else
-                in this dialog is configuration. */}
-            {onRun && exists && (
-              <button
-                type="button"
-                className="primary"
-                onClick={() => onRun(draft)}
-                disabled={problems.length > 0}
-                title={problems.length > 0 ?
-                  'Fix the problems listed under the steps first.' :
-                  'Pick profiles and run'}
-              ><Play size={16} /> Run now</button>
-            )}
-            {/* Grouped away from Run so the destructive one is not adjacent to
-                the one people reach for. Delete only for an automation that
-                exists: there is nothing to delete about a draft, and Cancel
-                already discards one. */}
-            <div className="automation-head-actions-end">
-              {onDelete && exists && (
-                <button type="button" className="ghost danger" onClick={onDelete}>
-                  <Trash2 size={16} /> Delete
-                </button>
+            </>
+          }
+          noun="automation"
+          name={draft.name}
+          onNameChange={(name) => setDraft({...draft, name})}
+          /* Its own mark, so the second line reads as a line of its own rather
+             than as a caption hanging off the name. */
+          meta={
+            <>
+              <Workflow size={13} strokeWidth={2} aria-hidden="true" />
+              {draft.steps.length} step{draft.steps.length === 1 ? '' : 's'}
+            </>
+          }
+          actions={
+            <>
+              {/* Primary, and first, for the reason it was primary in the
+                  sidebar: it is the thing you came here to do. Everything else
+                  in this dialog is configuration. */}
+              {onRun && exists && (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => onRun(draft)}
+                  disabled={problems.length > 0}
+                  title={problems.length > 0 ?
+                    'Fix the problems listed under the steps first.' :
+                    'Pick profiles and run'}
+                ><Play size={16} /> Run now</button>
               )}
-              <button type="button" className="ghost" onClick={requestClose}>Cancel</button>
-              <BusyButton
-                busy={saving}
-                busyLabel="Saving"
-                disabled={!canSave}
-                title={!blocked && exists && !dirty ? 'No changes to save' : undefined}
-                onClick={() => void save()}
-              >Save</BusyButton>
-            </div>
-          </div>
-
-          {/* Under the button that failed, rather than at the bottom of a
-              dialog that scrolls. */}
-          {saveError && <p className="settings-error">{saveError}</p>}
-        </div>
+              {/* Grouped away from Run so the destructive one is not adjacent to
+                  the one people reach for. Delete only for an automation that
+                  exists: there is nothing to delete about a draft, and Cancel
+                  already discards one. */}
+              <div className="editor-head-actions-end">
+                {onDelete && exists && (
+                  <button type="button" className="ghost danger" onClick={onDelete}>
+                    <Trash2 size={16} /> Delete
+                  </button>
+                )}
+                <button type="button" className="ghost" onClick={requestClose}>Cancel</button>
+                <BusyButton
+                  busy={saving}
+                  busyLabel="Saving"
+                  disabled={!canSave}
+                  title={!blocked && exists && !dirty ? 'No changes to save' : undefined}
+                  onClick={() => void save()}
+                >Save</BusyButton>
+              </div>
+            </>
+          }
+          error={saveError && <p className="settings-error">{saveError}</p>}
+        />
       }
     >
       <div className="profile-editor-layout">

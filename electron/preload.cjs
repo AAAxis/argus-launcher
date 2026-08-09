@@ -126,6 +126,7 @@ contextBridge.exposeInMainWorld('argusNative', {
     return () => ipcRenderer.removeListener('argus:built-in-download-progress', listener);
   },
   selectCookieFile: () => ipcRenderer.invoke('argus:select-cookie-file'),
+  selectCookieFiles: () => ipcRenderer.invoke('argus:select-cookie-files'),
   selectCookieFolder: () => ipcRenderer.invoke('argus:select-cookie-folder'),
   matchCookieFiles: (folderPath, profileNames) =>
     ipcRenderer.invoke('argus:match-cookie-files', {folderPath, profileNames}),
@@ -153,22 +154,50 @@ contextBridge.exposeInMainWorld('argusNative', {
     ipcRenderer.on('argus:cookie-sync-push-request', listener);
     return () => ipcRenderer.removeListener('argus:cookie-sync-push-request', listener);
   },
-  sendCookieSyncPushResult: (requestId, result, error) =>
-    ipcRenderer.send('argus:cookie-sync-push-result', {requestId, result, error}),
+  // The page-route pairs carry a fourth `status` argument the others do not:
+  // their callers are the side panel and the start page, which act on the code
+  // (409 means "switch workspace", 403 means "not yours", 500 means "we broke").
+  // main.cjs defaults a missing one to 500, so an omitted status is the old
+  // behaviour rather than a crash.
+  sendCookieSyncPushResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:cookie-sync-push-result', {requestId, result, error, status}),
   onCookieSyncPullRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:cookie-sync-pull-request', listener);
     return () => ipcRenderer.removeListener('argus:cookie-sync-pull-request', listener);
   },
-  sendCookieSyncPullResult: (requestId, result, error) =>
-    ipcRenderer.send('argus:cookie-sync-pull-result', {requestId, result, error}),
+  sendCookieSyncPullResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:cookie-sync-pull-result', {requestId, result, error, status}),
   onCookieListRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:cookie-list-request', listener);
     return () => ipcRenderer.removeListener('argus:cookie-list-request', listener);
   },
-  sendCookieListResult: (requestId, result, error) =>
-    ipcRenderer.send('argus:cookie-list-result', {requestId, result, error}),
+  sendCookieListResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:cookie-list-result', {requestId, result, error, status}),
+  onCookieSetsRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:cookie-sets-request', listener);
+    return () => ipcRenderer.removeListener('argus:cookie-sets-request', listener);
+  },
+  sendCookieSetsResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:cookie-sets-result', {requestId, result, error, status}),
+  onPanelAutomationsRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:panel-automations-request', listener);
+    return () => ipcRenderer.removeListener('argus:panel-automations-request', listener);
+  },
+  sendPanelAutomationsResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:panel-automations-result', {requestId, result, error, status}),
+  onPanelResolveAutomationRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('argus:panel-resolve-automation-request', listener);
+    return () =>
+      ipcRenderer.removeListener('argus:panel-resolve-automation-request', listener);
+  },
+  sendPanelResolveAutomationResult: (requestId, result, error, status) =>
+    ipcRenderer.send('argus:panel-resolve-automation-result',
+        {requestId, result, error, status}),
   onReimportProxiesRequest: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('argus:reimport-proxies-request', listener);

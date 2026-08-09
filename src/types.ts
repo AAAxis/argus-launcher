@@ -98,6 +98,16 @@ export type ArgusProfile = {
   // separate encrypted store, consistent with the rest of this app's model.
   email?: string;
   password?: string;
+  // Where those two go. Reference only, like the pair above: nothing in the
+  // launcher or the browser fills a login form, and this does not make it. What
+  // it does is make the pair legible -- a colleague picking the profile up can
+  // see which site it signs into -- and give an automation one place to read
+  // the address from, as {{profile.login_url}}.
+  //
+  // Deliberately separate from start_url, which is where a launch lands. The
+  // two are often the same page and just as often are not: a warmed profile
+  // opens a feed and signs in from a different address entirely.
+  login_url?: string;
   folder_id?: string | null;
   proxy_id?: string | null;
   proxy_mode?: ProxyMode;

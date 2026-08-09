@@ -4,10 +4,105 @@ import path from 'node:path';
 import {describe, expect, it} from 'vitest';
 // CJS interop: the same table main.cjs materializes extensions from.
 // @ts-expect-error CJS module without types
-import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId, unpinRetiredExtensions} from '../../electron/built-in-extensions.cjs';
+import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId, unpinRetiredExtensions, versionServiceWorker} from '../../electron/built-in-extensions.cjs';
 
 const deps = {parseCookieUrl: async () => [], parseCookieFile: () => []};
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'argus-ext-'));
+
+// Chromium caches an unpacked extension's service worker script against its
+// script PATH, independently of the manifest -- so copying a new background.js
+// over the old one at the same path ships bytes the browser will not read. That
+// is not a hypothetical: it is why the side panel's workspace lists answered
+// "Unknown message" from a profile whose background.js on disk implemented
+// them, through a relaunch and a full launcher restart.
+//
+// These assert the two halves that make the fix safe: the worker's name follows
+// its content, and NOTHING else moves -- particularly not the directory, which
+// is what the extension id, the toolbar button and chrome.storage.local are all
+// derived from.
+describe('service worker versioning', () => {
+  const extensionDir = (worker = 'background.js', body = 'self.x = 1;') => {
+    const dir = tempDir();
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+      manifest_version: 3,
+      name: 'Argus Helper',
+      version: '3.1.0',
+      background: {service_worker: worker},
+    }));
+    fs.writeFileSync(path.join(dir, worker), body);
+    return dir;
+  };
+  const workerName = (dir: string) =>
+    JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'))
+        .background?.service_worker;
+
+  it('renames the worker and points the manifest at the new name', () => {
+    const dir = extensionDir();
+    versionServiceWorker(dir);
+    const named = workerName(dir);
+    expect(named).toMatch(/^background\.[0-9a-f]{12}\.js$/);
+    expect(fs.existsSync(path.join(dir, named))).toBe(true);
+    // Exactly one worker on disk: leaving background.js beside it would be a
+    // dead file that still looks like the entry point to anyone reading the
+    // directory.
+    expect(fs.existsSync(path.join(dir, 'background.js'))).toBe(false);
+  });
+
+  it('gives the same content the same name, so an unchanged build keeps its cache', () => {
+    const a = extensionDir();
+    const b = extensionDir();
+    versionServiceWorker(a);
+    versionServiceWorker(b);
+    expect(workerName(a)).toBe(workerName(b));
+  });
+
+  it('gives changed content a different name, which is the whole point', () => {
+    const a = extensionDir('background.js', 'self.x = 1;');
+    const b = extensionDir('background.js', 'self.x = 2;');
+    versionServiceWorker(a);
+    versionServiceWorker(b);
+    expect(workerName(a)).not.toBe(workerName(b));
+  });
+
+  // The worker importScripts() its siblings and their bodies are cached with
+  // it, so a change to cookie-format.js alone still has to move the name.
+  it('follows the sibling scripts the worker imports, not just the worker', () => {
+    const a = extensionDir();
+    const b = extensionDir();
+    fs.writeFileSync(path.join(a, 'cookie-format.js'), 'A');
+    fs.writeFileSync(path.join(b, 'cookie-format.js'), 'B');
+    versionServiceWorker(a);
+    versionServiceWorker(b);
+    expect(workerName(a)).not.toBe(workerName(b));
+  });
+
+  // The directory is the extension's identity: its id is a hash of this path
+  // (unpackedExtensionId), the browser is handed that id on the command line,
+  // and chrome.storage.local -- the seed watermark and the sync watermark --
+  // hangs off it. Versioning the SCRIPT is only worth doing because it leaves
+  // all of that alone.
+  it('does not move the directory, so the extension id is unchanged', () => {
+    const dir = extensionDir();
+    const before = unpackedExtensionId(dir);
+    versionServiceWorker(dir);
+    expect(unpackedExtensionId(dir)).toBe(before);
+  });
+
+  it('is idempotent: running it twice does not re-stamp an already-stamped name', () => {
+    const dir = extensionDir();
+    versionServiceWorker(dir);
+    const once = workerName(dir);
+    versionServiceWorker(dir);
+    expect(workerName(dir)).toBe(once);
+  });
+
+  it('leaves an extension with no service worker alone', () => {
+    const dir = tempDir();
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({name: 'x', version: '1'}));
+    expect(() => versionServiceWorker(dir)).not.toThrow();
+    expect(workerName(dir)).toBeUndefined();
+  });
+});
 
 describe('cookie_manager configure', () => {
   it('writes argus-launch.json when the launch carries a run token', async () => {

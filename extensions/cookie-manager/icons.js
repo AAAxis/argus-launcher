@@ -38,11 +38,19 @@ const ArgusIcons = (() => {
     cookie: '<path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>' +
       '<path d="M8.5 8.5v.01"/><path d="M16 15.5v.01"/><path d="M12 12v.01"/>' +
       '<path d="M11 17v.01"/><path d="M7 14v.01"/>',
-    // The header mark. A shield reads as "this window is wearing a disguise",
-    // which is what the panel is about, and it is legible at 18px in a way the
-    // Argus helmet artwork is not -- that was tried as a 32px PNG scaled down
-    // and read as a broken-image smudge.
-    shield: '<path d="M12 3l7.5 3v5.5c0 4.3-3 8-7.5 9.5-4.5-1.5-7.5-5.2-7.5-9.5V6Z"/>',
+    // The Session tab's four rows, named by what the row states rather than by
+    // the drawing: where the traffic leaves, where that lands, the clock the
+    // profile claims, the machine it claims to be. `clock` above is the third.
+    //
+    // Lucide's Globe, MapPin and Monitor, path-for-path -- the start page draws
+    // the same four rows from ROW_ICONS in src/lib/homePage.ts, and two
+    // hand-redrawn sets is how one surface quietly stops matching the other.
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/>' +
+      '<path d="M12 3a13 13 0 0 1 0 18 13 13 0 0 1 0-18"/>',
+    mapPin: '<path d="M20 10c0 5.5-8 12-8 12s-8-6.5-8-12a8 8 0 0 1 16 0Z"/>' +
+      '<circle cx="12" cy="10" r="3"/>',
+    monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/>' +
+      '<path d="M8 21h8"/><path d="M12 17v4"/>',
     // Automations. Solid, unlike everything else here: at 14px an outlined
     // triangle is three strokes meeting at sharp corners and turns to mush.
     play: '<path d="M8 5.2v13.6l11.5-6.8z" fill="currentColor" stroke="none"/>',

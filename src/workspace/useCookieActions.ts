@@ -14,6 +14,7 @@ import * as db from '../db';
 import {
   cookieFileToBase64,
   cookiesFromJsonValue,
+  decodeCookieBase64,
   parseCookieContent,
   toCookieJson,
   toNetscapeCookies,
@@ -115,7 +116,7 @@ export function useCookieActions({data, toast}: WorkspaceCore) {
     // selection.base64 is the same bytes that were just uploaded, so parsing it
     // cannot disagree with what a launch will later fetch.
     const parsed = selection.base64 ?
-      parseCookieContent(decodeBase64(selection.base64)) :
+      parseCookieContent(decodeCookieBase64(selection.base64)) :
       [];
     const entry: ArgusCookie = {
       id,
@@ -483,10 +484,3 @@ export function useCookieActions({data, toast}: WorkspaceCore) {
   };
 }
 
-// The selection payload is base64 of the file's bytes; decode it back to the
-// UTF-8 text the parser wants. Same shape as cookieRawFromDataUrl's base64 arm,
-// kept here because this one is not reading a data: URL.
-function decodeBase64(base64: string): string {
-  const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}

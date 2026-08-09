@@ -53,6 +53,24 @@
   --status-warmup-bg: #fff7e6;
   --status-warmup-ink: #92600f;
 
+  /* The six automation/profile colours, ink only.
+   *
+   * An automation carries a colour the same way a profile does: one of six
+   * preset KEYS, or a custom hex. A key is not a colour until it is resolved,
+   * and it resolves differently per theme -- which is why the panel takes the
+   * ink and nothing else. The bg/border halves of each triple would be a plate
+   * behind a 14px glyph in a 320px column, and that plate is what makes this
+   * expensive to carry (see native.ts on why a profile swatch was left out
+   * entirely: thirty-six values for a 10px square).
+   *
+   * A custom hex is applied inline instead, since it needs no resolution. */
+  --profile-slate-ink: #565656;
+  --profile-blue-ink: #2f5bb7;
+  --profile-green-ink: #2c7a52;
+  --profile-violet-ink: #5c3fb0;
+  --profile-red-ink: #a8443d;
+  --profile-amber-ink: #8a6318;
+
   /* Themeless: declared once here and never overridden in the dark block, the
    * same way styles.css declares them. */
   --shadow-md: 0 8px 24px rgba(24, 24, 24, 0.10), 0 2px 6px rgba(24, 24, 24, 0.05);
@@ -91,6 +109,13 @@
   --status-warmup-bg: #2b2214;
   --status-warmup-ink: #e0b062;
 
+  --profile-slate-ink: #b3b3b3;
+  --profile-blue-ink: #8fb0e8;
+  --profile-green-ink: #7cc39a;
+  --profile-violet-ink: #b9a6e8;
+  --profile-red-ink: #e0908b;
+  --profile-amber-ink: #d3a768;
+
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50), 0 2px 6px rgba(0, 0, 0, 0.32);
 }
 
@@ -125,6 +150,13 @@
     --status-active-ink: #6cd396;
     --status-warmup-bg: #2b2214;
     --status-warmup-ink: #e0b062;
+
+    --profile-slate-ink: #b3b3b3;
+    --profile-blue-ink: #8fb0e8;
+    --profile-green-ink: #7cc39a;
+    --profile-violet-ink: #b9a6e8;
+    --profile-red-ink: #e0908b;
+    --profile-amber-ink: #d3a768;
 
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50), 0 2px 6px rgba(0, 0, 0, 0.32);
   }
@@ -181,15 +213,11 @@ body {
   background: var(--paper);
   border-bottom: 1px solid var(--border-soft);
   display: flex;
-  gap: 6px;
   padding: 0 12px;
   position: sticky;
   top: 0;
   z-index: 20;
 }
-.head-mark { align-items: center; color: var(--ink-soft); display: flex; flex: none; }
-.head-mark svg { display: block; }
-
 .tabs { display: flex; flex: 1; gap: 2px; min-width: 0; }
 
 /* Written element+class AND scoped under .tabs, so this is (0,2,1) against the
@@ -298,6 +326,78 @@ main { align-content: start; display: grid; flex: 1 0 auto; gap: 10px; padding: 
 .section-head { align-items: center; display: flex; justify-content: flex-end; }
 .section-actions { display: flex; flex: none; gap: 2px; margin: -2px -5px 0 0; }
 
+/* ---- grouped card ------------------------------------------------------------
+ * The panel's section container, built to the start page's session block
+ * (.session-shell / .session in homePage.ts) rather than to something new --
+ * this panel sits inside the window that page opens in, and the two should not
+ * be two opinions about one object.
+ *
+ * Three surfaces in a row, and the RELATIONSHIP is what matters, not the token
+ * names. On the start page it is body --surface, shell --paper, card --raised
+ * with a 1px --border: each step lifts, and the card carries the only outline
+ * so what shows of the shell beside it reads as a thin frame around it rather
+ * than as a second box drawn a centimetre outside the first.
+ *
+ * The panel's body is already --paper, one step further along that ramp, so
+ * the shell here is --surface -- the same relationship, shifted. That shift is
+ * the whole fix for the first version of this, which reached for the launcher
+ * form-groups' --frame: in the light theme --frame and --paper hold the SAME
+ * value, so the frame was the same colour as the page behind it and simply did
+ * not exist. It looked correct in dark (where the two differ) and like plain
+ * white cards on grey in light, which is exactly how it was reported.
+ *
+ * Padding 0 2px 2px, from .session-shell: 0 at the top because the heading
+ * owns that space and has to seat two lines, 2px on the other three because
+ * they are only an edge.
+ *
+ * Why the panel needed grouping at all: it was a flat stack of eleven controls
+ * and four notes on one background, with nothing saying which hint belonged to
+ * which button. */
+.group { background: var(--surface); border-radius: var(--radius-lg); padding: 0 2px 2px; }
+
+/* On the shell, outside the card, with its own horizontal padding because the
+ * shell has almost none -- the same reason .session-head carries its own. */
+.group-head { display: grid; gap: 2px; padding: 7px 9px 7px; }
+.group-head h2 {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+/* A step quieter than the label above it: a column of four of these down a
+ * narrow panel should read as a spine, not as four headlines. */
+.group-head h2 { color: var(--ink-faint); }
+.group-head p { color: var(--ink-soft); font-size: 11px; line-height: 1.35; margin: 0; }
+
+/* .session, at panel width. --raised on a --surface shell.
+ *
+ * No outline. The fill and the shell around it already separate the card from
+ * the page, and a 1px rule on top of that is a third edge in the same 2px --
+ * on a 320px column, four stacked cards each ringed by a line read as a form
+ * with every field boxed rather than as sections of one panel. The shell IS
+ * the edge; that is what it is for.
+ *
+ * 12px rather than the start page's 14: this is a 320px column, not a 640px
+ * card. */
+.group-body:not([hidden]) {
+  background: var(--raised);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+/* A status card sitting directly inside a group is already on a surface, so it
+ * drops its own: two nested filled boxes with 1px between them is the "two
+ * kinds of thing in one dialog" the launcher's form groups were rebuilt to
+ * avoid. A TONED card keeps its fill -- that fill is the verdict, not
+ * decoration -- which is why this only unsets the untoned default. */
+.group-body > .card { background: none; padding: 0; }
+.group-body > .card.tone-ok,
+.group-body > .card.tone-bad,
+.group-body > .card.tone-warn { padding: 10px; }
+
 /* ---- status card ------------------------------------------------------------
  * Shared by the session's proxy verdict and the cookie sync state. One
  * component, because they are the same thing twice: a tone, a glyph, a title,
@@ -337,15 +437,26 @@ main { align-content: start; display: grid; flex: 1 0 auto; gap: 10px; padding: 
  * the four values line up and can be read straight down; 70px fits TIMEZONE,
  * the longest of them, at the eyebrow's tracking. */
 .fields:not([hidden]) { display: grid; gap: 8px; margin: 0; padding: 2px 2px 0; }
-.field { align-items: baseline; display: grid; gap: 10px; grid-template-columns: 70px minmax(0, 1fr); }
+/* 92px, up from 70px, and the extra 22 are the glyph plus its gap -- the label
+ * column has to hold "TIMEZONE" beside an icon at the panel's 320px floor
+ * without wrapping, which is the width that decides this number. */
+.field { align-items: baseline; display: grid; gap: 10px; grid-template-columns: 92px minmax(0, 1fr); }
+/* align-items: center against the row's own baseline alignment: a 13px glyph
+ * sitting on a 10px label's baseline hangs below it. The row stays
+ * baseline-aligned so the VALUE lines up with the label, which is the alignment
+ * a reader is actually comparing across. */
 .field dt {
+  align-items: center;
   color: var(--ink-faint);
+  display: flex;
   font-size: 10px;
   font-weight: 700;
+  gap: 6px;
   letter-spacing: 0.06em;
   line-height: 1.5;
   text-transform: uppercase;
 }
+.field dt svg { flex: none; }
 .field dd {
   align-items: baseline;
   color: var(--ink);
@@ -438,6 +549,22 @@ main { align-content: start; display: grid; flex: 1 0 auto; gap: 10px; padding: 
 }
 .stat-number { display: block; font-size: 17px; font-weight: 700; line-height: 1.2; }
 .stat small { color: var(--ink-soft); display: block; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Inside a group the tiles drop their fill and take a rule between them
+ * instead. The plate existed to lift them off the flat page; on a card that is
+ * already lifted it is a third surface in 40px of vertical space, and three
+ * greys stacked is where a panel starts looking like a receipt. The divider
+ * does the one job the plates were doing that still needs doing -- saying the
+ * two numbers are separate readings, not one number and a caption. */
+.group-body > .stats { gap: 0; grid-template-columns: 1fr 1px 1fr; }
+.group-body > .stats > .stat { background: none; padding: 2px 10px; }
+.group-body > .stats > .stat:first-child { padding-left: 0; }
+.group-body > .stats::before {
+  background: var(--border-soft);
+  content: '';
+  grid-column: 2;
+  grid-row: 1;
+}
 
 /* ---- buttons -------------------------------------------------------------------
  * Every variant below is written as element+class (`button.ghost`, not
@@ -541,6 +668,85 @@ button.icon-button:disabled:hover { background: transparent; color: var(--ink-so
 /* Why a disabled control is disabled, in the card that owns the state. */
 .blocked-note { color: var(--ink-soft); font-size: 11.5px; line-height: 1.35; margin: 0; }
 
+/* Which set this profile launches with, above the picker.
+ *
+ * It has to be said out loud once the picker exists. Before, "Load from
+ * Launcher" and "the assigned set" were the same thing and neither needed a
+ * name; now the thing you load and the thing you launch with can differ, and a
+ * user who cannot see which is which cannot tell whether they are about to do
+ * something permanent. (They are not -- loading is one-shot -- but a control
+ * that leaves you guessing is one you stop trusting.) */
+.assigned-line {
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+/* An id, not prose. Monospace and selectable, because the only thing anyone
+ * does with one is copy it. Wraps rather than truncating: half an id is worse
+ * than an id on two lines. */
+.mono-id {
+  color: var(--ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* Picker and its Load button on one line. The select takes the slack: set names
+ * are long and arbitrary, "Load" is two syllables forever.
+ *
+ * min-width: 0 twice, and both are load-bearing. A <select> takes its intrinsic
+ * width from its WIDEST option, not its selected one, so one set named
+ * "Sophia Bennett 2026-08-07 · 148 cookies · assigned" pushed the whole panel
+ * to 437px inside a 320px column -- the row scrolled sideways and every control
+ * under it went with it. The inner one lets the select shrink below that
+ * intrinsic width; the outer one is needed because .picker-row is a grid item
+ * of .action, and a grid item's min-width defaults to `auto`, which means "as
+ * wide as my contents" and would have re-inflated the row anyway. */
+.picker-row { display: flex; gap: 6px; min-width: 0; }
+.picker-row > select { flex: 1; min-width: 0; }
+.picker-row > button { flex: 0 0 auto; }
+
+select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 8px;
+}
+select:disabled { color: var(--ink-faint); cursor: not-allowed; opacity: .7; }
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The two ways out of a suppressed sync, in the card that reports it. Stacked
+ * rather than side by side: both labels name a cookie set, and a set name
+ * truncated to half a 320px column is not a label. */
+.suppressed-actions:not([hidden]) { display: grid; gap: 6px; }
+
+/* The one control here that can destroy something. Ink and border only -- a
+ * filled red button in a 320px column reads as an error state rather than as a
+ * choice, and this sits under a warning that has already said the hard part. */
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+button.danger:hover:not(:disabled) { background: var(--danger-bg); }
+
+/* Labels that exist for a screen reader and not for the eye -- the picker's,
+ * which is described visually by the line above it. */
+.sr-only {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 /* ---- export / import pair -------------------------------------------------------- */
 .row { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 .menu-wrap { position: relative; }
@@ -581,6 +787,43 @@ button.icon-button:disabled:hover { background: transparent; color: var(--ink-so
 button.automation { justify-content: flex-start; text-align: left; }
 button.automation .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.automation[data-state="running"] { cursor: progress; }
+
+/* The automation's own colour, on its glyph.
+ *
+ * Ink only, and only the glyph: the launcher draws a filled plate behind a mark
+ * for these, which at 320px with a 14px triangle would be a smudge. What the
+ * colour is FOR is telling one row from another at a glance in a list that is
+ * now the whole workspace rather than two pinned workflows, and a tinted glyph
+ * does that at a fraction of the weight.
+ *
+ * Falls through to the inherited ink for an automation with no colour set --
+ * which is most of them, and must look deliberate rather than broken. */
+button.automation[data-color="slate"] .icon { color: var(--profile-slate-ink); }
+button.automation[data-color="blue"] .icon { color: var(--profile-blue-ink); }
+button.automation[data-color="green"] .icon { color: var(--profile-green-ink); }
+button.automation[data-color="violet"] .icon { color: var(--profile-violet-ink); }
+button.automation[data-color="red"] .icon { color: var(--profile-red-ink); }
+button.automation[data-color="amber"] .icon { color: var(--profile-amber-ink); }
+
+/* Assigned / pinned, at the end of the row.
+ *
+ * The list is every workflow in the workspace now, so the two that this launch
+ * would have offered on its own have to stay findable in it -- they sort first
+ * AND say why, because sort order alone is invisible once you have scrolled.
+ *
+ * Text, not a dot: "Assigned" and "Pinned" are different facts, and two colours
+ * of dot would need a legend the panel has no room for. Uppercase micro-caps
+ * rather than a filled pill, so a row with a badge is not visually louder than
+ * one without -- these mark the ordinary case, not an alarm. */
+button.automation .badge {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+button.automation .badge[data-kind="assigned"] { color: var(--status-active-ink); }
 /* No done/failed tint on the row any more. The row used to carry the verdict
  * because nothing else could -- the panel was never told how a run ended, so a
  * four-second green flash was the only feedback available. The card above now

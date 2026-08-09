@@ -28,9 +28,15 @@
   //
   //   1. not available     -- there is no launcher session to describe at all
   //   2. not reachable     -- re-measured on every attempt, so it is always live
-  //   3. paused            -- see below
-  //   4. every lastErrorKind
-  //   5. pending / in sync / never synced
+  //   3. suppressed        -- see below
+  //   4. paused            -- see below
+  //   5. every lastErrorKind
+  //   6. pending / in sync / never synced
+  //
+  // `pushSuppressed` outranks lastErrorKind for the same reason `paused` does
+  // -- there will be no next attempt to disprove an old failure -- and outranks
+  // `paused` itself because it is the more surprising of the two and the one
+  // with something to do about it. A user who paused sync knows they paused it.
   //
   // lastErrorKind outranks pending/inSync so a real unresolved failure never
   // hides behind a stale-looking green state -- the badge can stay green while
@@ -55,6 +61,22 @@
       return {
         tone: 'bad', icon: 'alertTriangle', title: 'Launcher not reachable',
         detail: sync.lastError || 'Argus Launcher did not answer. Cookies stay local until it is back.',
+      };
+    }
+    // This window loaded a cookie set the profile is not assigned to, so the
+    // jar and the sync target disagree. Saving now would write the loaded set's
+    // cookies into the assigned one -- set B applied, set A overwritten -- so
+    // nothing is saved anywhere until the user chooses where they should go.
+    //
+    // Amber rather than red, and the wording avoids "failed": nothing is
+    // broken, this is the engine declining to guess.
+    if (sync.pushSuppressed) {
+      return {
+        tone: 'warn', icon: 'pause', title: 'Sync paused',
+        detail: sync.loadedSetName ?
+          `Holding “${sync.loadedSetName}”, which isn’t assigned to this profile. ` +
+              'Changes aren’t being saved.' :
+          'Holding a cookie set this profile isn’t assigned. Changes aren’t being saved.',
       };
     }
     if (sync.paused) {

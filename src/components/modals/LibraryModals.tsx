@@ -8,15 +8,12 @@ import {Download, Upload} from 'lucide-react';
 import {BusyButton} from '../ui/BusyButton';
 import {CookieSetLabel} from '../ui/CookieSetLabel';
 import {Modal} from '../ui/Modal';
-import {proxyImportExampleList} from '../../data/importTemplate';
 import {parseBookmarkFile} from '../../lib/bookmarkImport';
 import {parseWebstoreExtensionId} from '../../lib/extensions';
-import {parseProxyList} from '../../lib/proxyList';
 import {native} from '../../native';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ParsedBookmark} from '../../lib/bookmarkImport';
-import type {ParsedProxyLine} from '../../lib/proxyList';
 import type {ArgusCookie} from '../../types';
 
 export function CookiePickerModal({search, onSearch, selectedId, onSelect, onClose}: {
@@ -210,143 +207,14 @@ async function saveExample(
   say(`Downloaded example ${kind}`);
 }
 
-// Bulk-adds proxies from a vendor list file. Deliberately separate from the
-// profile importer (components/modals/ImportProfilesModal.tsx): that one reads
-// a structured CSV with named columns, this one takes a bare list of connection
-// strings, which needs a different preview (per-line status) and has a
-// different failure mode (a bad line, not a bad column).
-export function ProxyImportModal({onClose}: {onClose: () => void}) {
-  const {data, toast, proxies} = useWorkspace();
-  const [file, setFile] = useState<{path: string; lines: ParsedProxyLine[]} | null>(null);
-  // Vendor lists are bare host:port:user:pass with no scheme, so the type is a
-  // property of the file, not of any line in it -- one selector for the lot.
-  const [type, setType] = useState<'http' | 'socks5'>('socks5');
-  const {run, isPending} = useAsyncAction();
-
-  // Same bargain as the profile importer: the button that opens this dialog
-  // raises the picker straight away, and cancelling leaves the dialog up with
-  // its own Choose file button.
-  useEffect(() => {
-    void pickFile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function pickFile() {
-    if (!native?.selectProxyFile) {
-      toast.setMessage('Native file picker is not available. Restart Argus Launcher and try again.');
-      return;
-    }
-    const picked = await native.selectProxyFile();
-    if (!picked) {
-      return;
-    }
-    setFile({path: picked.path, lines: parseProxyList(picked.content, data.state.proxies)});
-  }
-
-  const importable = file?.lines.filter((entry) => entry.proxy && !entry.duplicate) || [];
-  const duplicates = file?.lines.filter((entry) => entry.duplicate).length || 0;
-  const invalid = file?.lines.filter((entry) => !entry.proxy) || [];
-
-  async function runImport() {
-    if (!importable.length) {
-      return;
-    }
-    const result = await proxies.importList(importable.map((entry) => ({
-      ...entry.proxy as NonNullable<ParsedProxyLine['proxy']>,
-      type: entry.explicitType ? entry.proxy?.type : type,
-    })));
-    setFile(null);
-    // The country column stays empty for a moment on purpose: the rows land
-    // unchecked and useBackgroundProxyChecks fills in country, IP and ping a
-    // few at a time, rather than firing one curl per proxy at import.
-    toast.setMessage(result.failed.length ?
-      `Imported ${result.created} ${result.created === 1 ? 'proxy' : 'proxies'} · ${result.failed.length} failed · checking countries in the background` :
-      `Imported ${result.created} ${result.created === 1 ? 'proxy' : 'proxies'} · checking countries in the background`);
-    if (!result.failed.length) {
-      onClose();
-    }
-  }
-
-  return (
-    <Modal
-      className="import-panel proxy-import-panel"
-      onClose={onClose}
-      title="Import proxies from a file"
-      subtitle={
-        <>
-          One proxy per line, in the form <code>host:port:username:password</code> — the format
-          every vendor hands out. Lines starting with <code>#</code> are ignored, each proxy is
-          named after its host and port, and the country is filled in automatically once the
-          background check has run.
-        </>
-      }
-    >
-      <div className="import-actions">
-        <button className="ghost" onClick={() => void pickFile()}>
-          <Upload size={18} /> Choose proxy file
-        </button>
-        <button
-          className="ghost"
-          onClick={() => void saveExample('argus-proxies-example.txt',
-              proxyImportExampleList(), 'text/plain', toast.setMessage)}
-        >
-          <Download size={18} /> Download example
-        </button>
-        <label className="field inline-field">
-          <span>Type</span>
-          <select value={type} onChange={(event) => setType(event.target.value as 'http' | 'socks5')}>
-            <option value="socks5">SOCKS5</option>
-            <option value="http">HTTP</option>
-          </select>
-        </label>
-        {file && (
-          <span className="import-file-label">
-            {file.path.split('/').pop()} — {file.lines.length} line{file.lines.length === 1 ? '' : 's'}
-          </span>
-        )}
-      </div>
-
-      {file && (
-        <>
-          <div className="import-summary">
-            <div className="summary-item"><span>Ready to import</span><strong>{importable.length}</strong></div>
-            <div className="summary-item"><span>Already in your list</span><strong>{duplicates}</strong></div>
-            <div className="summary-item"><span>Unreadable lines</span><strong>{invalid.length}</strong></div>
-          </div>
-          <div className="proxy-import-preview">
-            {file.lines.map((entry) => (
-              <div className="proxy-import-row" key={entry.line}>
-                <span className="proxy-import-line">{entry.line}</span>
-                <span className="proxy-import-target">
-                  {entry.proxy ? `${entry.proxy.host}:${entry.proxy.port}` : entry.raw}
-                </span>
-                <span className={entry.proxy && !entry.duplicate ?
-                  'proxy-badge assigned' :
-                  'proxy-badge unassigned'}
-                >
-                  {!entry.proxy ? entry.error : entry.duplicate ? 'Already added' : 'New'}
-                </span>
-              </div>
-            ))}
-          </div>
-          <BusyButton
-            busy={isPending('run-proxy-import')}
-            busyLabel="Importing…"
-            disabled={!importable.length}
-            onClick={() => void run('run-proxy-import', runImport)}
-          >
-            Import {importable.length} {importable.length === 1 ? 'proxy' : 'proxies'}
-          </BusyButton>
-        </>
-      )}
-    </Modal>
-  );
-}
-
-// Bulk-adds bookmarks from a browser's exported HTML file. Same shape as
-// ProxyImportModal above -- pick a file, see what is in it, confirm -- because
-// the failure the user needs to see is the same: which rows are new, and which
-// are already here.
+// Bulk-adds bookmarks from a browser's exported HTML file. Pick a file, see
+// what is in it, confirm -- because the failure the user needs to see is which
+// rows are new and which are already here.
+//
+// The proxy importer used to sit above this and be its twin. It moved to
+// ImportProxiesModal.tsx when it grew a review table and a destination step;
+// this one stays here because one screen is genuinely all a bookmark file
+// needs -- there is nothing about a bookmark to review.
 export function BookmarkImportModal({onClose}: {onClose: () => void}) {
   const {data, toast, library} = useWorkspace();
   const [file, setFile] = useState<{path: string; entries: ParsedBookmark[]} | null>(null);

@@ -47,6 +47,7 @@ export function useEditors() {
   const [extensionAddOpen, setExtensionAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [proxyImportOpen, setProxyImportOpen] = useState(false);
+  const [cookieImportOpen, setCookieImportOpen] = useState(false);
   const [bookmarkImportOpen, setBookmarkImportOpen] = useState(false);
 
   return {
@@ -141,6 +142,8 @@ export function useEditors() {
     setImportOpen,
     proxyImportOpen,
     setProxyImportOpen,
+    cookieImportOpen,
+    setCookieImportOpen,
     bookmarkImportOpen,
     setBookmarkImportOpen,
 
@@ -160,6 +163,7 @@ export function useEditors() {
       setExtensionAddOpen(false);
       setImportOpen(false);
       setProxyImportOpen(false);
+      setCookieImportOpen(false);
       setBookmarkImportOpen(false);
     },
   };

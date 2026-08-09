@@ -144,7 +144,12 @@ export function CellPicker({
   );
 }
 
-function CellPickerList({options, value, onPick, label, searchPlaceholder, noneLabel, empty}: {
+// Exported for ui/FieldPicker.tsx, which is this list behind a form-shaped
+// trigger rather than a cell-shaped one. Only the trigger differs, and the four
+// things this owns -- the search threshold, the pinned unfilterable clear row,
+// the two distinct empty states and the tick -- are exactly what a second
+// implementation would get subtly wrong.
+export function CellPickerList({options, value, onPick, label, searchPlaceholder, noneLabel, empty}: {
   options: CellOption[];
   value: string;
   onPick: (value: string) => void;

@@ -9,6 +9,8 @@ import {useAutomationRuns} from '../hooks/useAutomationRuns';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {mapWithConcurrency} from '../lib/concurrency';
+import {buildRunTile} from '../lib/runTile';
+import {startPageAutomations} from '../lib/startPageAutomations';
 import {botDeepLink, mintLinkCode, sendTelegram} from '../lib/telegram';
 import {native} from '../native';
 import {useOrg} from '../org';
@@ -475,8 +477,32 @@ export function useAutomationActions(
         if (proxy === 'blocked') {
           return {ok: false, error: `${profile.name}'s proxy failed its check.`};
         }
+        // Minted here for the same reason the Launch button and the local API
+        // both mint one: without it built-in-extensions.cjs writes neither
+        // argus-launch.json nor argus-session.json, and the Argus Helper in the
+        // window this run opens answers every question with "This window was not
+        // launched from Argus Launcher" -- no proxy card, no automations, and,
+        // the part that actually costs something, no cookie sync. A run that
+        // logs a profile in would leave those cookies in the local jar and never
+        // push them to the launcher or the cloud.
+        //
+        // The tiles are this profile's own start-page list, not the automation
+        // being run: the run itself is driven over CDP from the main process and
+        // needs no token. The token's list only authorizes what someone can
+        // start from inside the browser, which is the same set a hand-launched
+        // window offers. buildRunTile resolves it exactly as useProfileActions
+        // does, so a panel run started during an automation run behaves the way
+        // one started after a manual launch does.
+        const tiles = startPageAutomations(state.automations, profile)
+            .map((tile) => buildRunTile(tile, profile, state.automations));
+        const runToken = await bridge.mintRunToken?.(
+            profile.id, profile.name, orgId || '', cdpPort, tiles) || '';
+        // From the running server rather than a second copy of the constant --
+        // AUTOMATION_API_PORT lives in main.cjs.
+        const apiPort = runToken ? (await bridge.getApiStatus?.())?.port : 0;
         return bridge.launchProfile(
-            buildLaunchPayload(profile, proxy, state),
+            buildLaunchPayload(profile, proxy, state,
+                runToken && apiPort ? {port: apiPort, token: runToken} : null),
             [`--remote-debugging-port=${cdpPort}`]);
       },
     });

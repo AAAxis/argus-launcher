@@ -10,34 +10,70 @@
 
 /* ── Form groups ────────────────────────────────────────────────────────────
  * components/ui/FormGroup.tsx -- one titled block of a form. The fingerprint
- * dialog's three, and the profile editor's six.
+ * dialog's three, and the profile editor's seven.
  *
- * Same surface recipe as .panel -- raised, one hairline, --radius, --shadow-xs
- * -- rather than a card style of its own; what makes them a group is the
- * heading, not the box. Each spans the host .profile-form grid so they stack.
+ * The frame carries the heading, with the field grid inset in it on all four
+ * sides -- the automations grid's card (.automation-card-framed /
+ * .automation-card-body) at form scale. The heading is what the app says ABOUT
+ * the block and rides the frame; the fields are the block and sit in the card.
+ *
+ * It was a single --raised box with a hairline and a rule under the heading.
+ * Seven of those stacked in one dialog read as one undifferentiated run: the
+ * only thing separating a section from the next was 14px of gap, so finding
+ * "where do I change the proxy" still meant reading every heading top to
+ * bottom. The surface step does in one move what the rule under the heading
+ * was failing to do.
+ *
+ * --frame and --frame-card, NOT --paper and --raised: the two swap places
+ * between light and dark, and a rule written against the ladder would have to
+ * branch on the theme to say the one thing this means -- the card inside is the
+ * *other* surface from the frame around it, whichever way round that falls.
+ * tokens.css owns that inversion; see the note there.
+ *
+ * A frame draws no border. The surface step is the whole of it; a hairline on
+ * top of it reads as a third object between the two.
  *
  * This replaced .form-section, which was the same card one level louder (an
  * h3 at 15px) and is now gone. Two card styles in one dialog is what the
- * profile editor had, and it read as two kinds of thing rather than as six
- * sections of one form. */
+ * profile editor had, and it read as two kinds of thing rather than as sections
+ * of one form. */
 .form-group {
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-xs);
-  display: grid;
-  gap: 14px;
+  background: var(--frame);
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  /* Spans the host .profile-form grid so groups stack rather than pairing up. */
   grid-column: 1 / -1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 16px;
+  /* Asymmetric, and the same 3px .automation-card-framed uses. The top opens
+     far enough to seat the heading -- that edge is a place, and it holds two
+     lines of text. The other three are only an edge: thin enough to read as a
+     surface behind the card rather than as a slightly thick border. The top's
+     own spacing lives in .form-group-head, which is why this is 0 up there. */
+  padding: 0 3px 3px;
 }
 
+/* On the frame, outside the card. The horizontal padding puts the heading on
+   the card's own text rules: 3 + 13 lands the first glyph at 16px, where the
+   fields' labels start. */
 .form-group-head {
-  border-bottom: 1px solid var(--border-soft);
   display: grid;
   gap: 4px;
-  grid-column: 1 / -1;
-  padding-bottom: 12px;
+  padding: 9px 13px 10px;
+}
+
+/* The card proper. --radius-sm because the frame is 14px on the outside and
+   3px thick: an inner corner has to lose the frame's width or the two arcs
+   stop being concentric and the gap pinches at the corners. */
+.form-group-body {
+  background: var(--frame-card);
+  /* The only line left, now that the frame draws none -- and what makes the
+     inset read as inset rather than as a patch of a second colour. */
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 16px;
 }
 
 /* 13px/800, not the 15px an h3 would be: these head a block inside a dialog
@@ -54,6 +90,14 @@
   gap: 6px;
   letter-spacing: 0;
   margin: 0;
+}
+
+/* The section's glyph, at the ink level `.field > span > svg` gives a field's
+   own -- a step quieter than the words beside it, so a column of seven marks
+   down the left of the form reads as a spine rather than as seven icons. */
+.form-group-head h4 > svg {
+  color: var(--ink-faint);
+  flex: none;
 }
 
 .form-group-head p {

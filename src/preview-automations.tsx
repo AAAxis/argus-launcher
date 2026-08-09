@@ -7,6 +7,8 @@
 //   open http://127.0.0.1:5199/preview-automations.html
 import {StrictMode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
+import {AutomationModal} from './components/modals/AutomationModal';
+import type {ArgusAutomation} from './types';
 import {AutomationsTab} from './components/tabs/AutomationsTab';
 import {WorkspaceProvider} from './workspace/WorkspaceProvider';
 import './styles.css';
@@ -17,6 +19,9 @@ function Preview() {
   // of looking at this tab, and both are unreachable if clicking a card does
   // nothing.
   const [folderId, setFolderId] = useState('');
+  // The editor itself, so the header EditorHead draws gets exercised on this
+  // side too -- it is the dialog that pattern came from.
+  const [editing, setEditing] = useState<ArgusAutomation | null>(null);
   return (
     <WorkspaceProvider>
       <main style={{padding: 24}}>
@@ -25,7 +30,7 @@ function Preview() {
           onFolderId={setFolderId}
           onNewFolder={() => {}}
           onEditFolder={() => {}}
-          onEdit={() => {}}
+          onEdit={(automation) => setEditing(automation)}
           onNew={() => {}}
           onLoadExample={() => {}}
           onCreateDemoProfile={() => {}}
@@ -42,6 +47,16 @@ function Preview() {
           newIds={new Set(['a3'])}
         />
       </main>
+      {editing && (
+        <AutomationModal
+          automation={editing}
+          exists
+          onDelete={() => {}}
+          onRun={() => {}}
+          onClose={() => setEditing(null)}
+          onSave={async () => null}
+        />
+      )}
     </WorkspaceProvider>
   );
 }

@@ -218,3 +218,88 @@
   min-height: var(--control-h);
 }
 
+/* ── The form's own dropdown ─────────────────────────────────────────────────
+ * components/ui/FieldPicker.tsx -- the cell picker's list behind a trigger
+ * shaped like the <select> it replaces, so a field that picks a teammate, a
+ * folder or an automation can show that thing's mark instead of its name.
+ *
+ * Everything here is written against the canonical `select` rule in
+ * controls/inputs.css and has to keep matching it: this control sits in the
+ * same column as the plain selects and inputs that are still native, and the
+ * one thing it must never look like is a different kind of field.
+ *
+ * A <button>, so the base `button` rule has already filled it with --accent and
+ * given it 700 weight and a hover shadow. All of that is undone below; the
+ * hover rule needs :not(:disabled) to outrank `button:not(:disabled):hover`. */
+.field-picker {
+  /* --raised, the same fill the canonical `select` and every text input take.
+     The temptation is --frame-card, on the grounds that --raised and --frame are
+     the same colour in dark -- but this control sits INSIDE the card, on
+     --frame-card, not on the frame. A --raised control there is a step lighter
+     than the surface behind it, which is exactly what the inputs beside it do;
+     filling it with --frame-card would paint it its own card's colour and leave
+     a bare outline where every neighbour has a filled box. */
+  background-color: var(--raised);
+  background-image: var(--chevron);
+  background-position: right 13px center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink);
+  display: flex;
+  font-weight: 500;
+  justify-content: flex-start;
+  min-height: var(--control-h);
+  /* The select's numbers, less one pixel each side for the border this draws
+     and the native control does not count in the same place. */
+  padding: 0 37px 0 12px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+  width: 100%;
+}
+
+/* No lift, no fill change -- a form control is not a button, and the only thing
+   hover should say is that this one can be opened. */
+.field-picker:not(:disabled):hover {
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+/* The select's focus, not the button's outline: base/elements.css gives every
+   button a squared-off 2px outline, which around a 999px pill draws a rectangle
+   through the corners. */
+.field-picker:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.field-picker[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+/* A mark and a name on one line, for the picker rows and triggers that have no
+   chip component of their own -- an automation's. The folder and the assignee
+   bring .folder-label and .assignee, which already do this. */
+.picker-mark-row {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* min-width: 0 so a long name ellipsizes inside the pill rather than pushing
+   the chevron out of it. */
+.field-picker-value {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

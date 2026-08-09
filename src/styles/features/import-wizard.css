@@ -23,6 +23,89 @@
   width: min(1240px, calc(100vw - 56px));
 }
 
+/* ── The editor language ────────────────────────────────────────────────────
+ * All three importers are `editor-modal` dialogs now: the same sticky header
+ * the profile and automation editors wear, and framed FormGroup cards in the
+ * body. Everything in this block exists to seat those two things.
+ *
+ * They used to be a title, a subtitle, a body and a footer -- which is a fine
+ * arrangement and a different one from the rest of the app. What made it worth
+ * changing is that the three of them were three DIFFERENT fine arrangements: a
+ * three-step wizard with footer dots, a one-screen preview with the confirm
+ * under a list, and for cookies no dialog at all. A confirm that moves between
+ * dialogs is one the eye has to re-find.
+ *
+ * The rules that make `editor-modal` work -- the sticky bar, the negative
+ * margins that let it reach the panel's edges, the repositioned close X -- are
+ * all in features/editor-head.css and are inherited untouched. */
+
+/* Back to the panel's own grid. .import-panel makes the panel a flex column
+   with a 16px gap, which was right when a dialog was a header, a paragraph and
+   a footer -- but .editor-modal > header cancels the gap below itself with
+   `margin-bottom: -14px`, and 14 is the number .profile-modal's grid uses. Left
+   flexed at 16, the bar under-cancels by 2px and the body's first card scrolls
+   through a two-pixel strip under the header's border, in full view. */
+.editor-modal.import-panel {
+  display: grid;
+  gap: 14px;
+}
+
+/* The body's side of the header's cancelled gap, exactly as
+   .editor-modal .profile-editor-layout pays it back in the editors. Without
+   it the first card sits flush against the bar's rule.
+
+   The gap is the FormGroup gap: an importer's body is a stack of framed
+   sections and, on the review steps, a table under them. */
+.import-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding-top: 18px;
+}
+
+/* The dialog's glyph, in the box .editor-mark-static reserves for a profile's
+   avatar or an automation's mark. An importer has no object to show -- there is
+   nothing yet -- so it shows what KIND of import this is, which is the one
+   thing distinguishing three dialogs that are otherwise the same shape. */
+.import-mark {
+  align-items: center;
+  background: var(--frame-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+/* The two facts the header carries beside the step rail. The file name is
+   monospace because it is a name from the filesystem, not prose; the count is
+   the number the footer used to hold. */
+.import-head-file {
+  color: var(--ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-head-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* Separators between the meta line's phrases, drawn rather than typed so the
+   markup stays a list of spans. Not before the step rail, which is a mark
+   rather than a phrase. */
+.editor-head-meta > span + span::before {
+  color: var(--ink-faint);
+  content: '·';
+  margin-right: 8px;
+}
+
 .import-lead {
   color: var(--ink-soft);
   font-size: 13px;
@@ -30,12 +113,38 @@
   margin: 0 0 14px;
 }
 
+/* The proxy importer's format reference. Stacked rather than two-column: the
+   term is a connection string, not a column name, and at thirty monospace
+   characters it does not fit .import-columns' 182px gutter -- it overflowed it
+   and printed straight through the description beside it. */
+.import-formats > div {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.import-formats dt {
+  min-width: 0;
+}
+
+.import-formats dt code {
+  overflow-wrap: anywhere;
+}
+
+/* The last thing in a card's full-width slot has nothing under it, so the
+   lead's trailing margin would show as the card being bottom-heavy. */
+.form-group-full > .import-lead:last-child {
+  margin-bottom: 0;
+}
+
 /* The step rail, same shape as the intro dialog's. Ornamental, so it is hidden
-   from assistive tech -- the subtitle already says "Step 2 of 3" in words. */
+   from assistive tech -- the meta line beside it says which step this is in
+   words. It rode the footer with `margin-right: auto` pushing everything else
+   right; on the header's meta line it is just the first item. */
 .import-dots {
+  align-items: center;
   display: inline-flex;
   gap: 6px;
-  margin-right: auto;
 }
 
 .import-dots i {
@@ -49,12 +158,6 @@
 .import-dots i.on {
   background: var(--accent);
   width: 18px;
-}
-
-.import-footer-count {
-  color: var(--ink-soft);
-  font-size: 12px;
-  margin-right: 4px;
 }
 
 /* ── The credential banner ──────────────────────────────────────────────────
@@ -77,7 +180,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 12px;
   padding: 12px 14px;
 }
 
@@ -105,12 +207,61 @@
   min-width: 110px;
 }
 
+/* No vertical margin any more: .import-body is a grid with a 14px gap, so a
+   margin here would stack on top of it. */
 .import-review-toolbar {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 12px 0;
+}
+
+/* A sentence in the toolbar rather than a control -- the proxy importer's
+   "3 lines could not be read". Amber, because it is a thing to look at and not
+   a thing that has gone wrong: the import still runs. */
+.import-toolbar-note {
+  align-items: center;
+  color: var(--status-warmup-ink);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* The proxy importer's file-wide Type selector. Same inline shape the label
+   takes in .import-actions -- see the note on that rule -- because it is the
+   same control doing the same job on a different row. */
+.import-review-toolbar .inline-field {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin: 0;
+}
+
+.import-review-toolbar .inline-field select {
+  height: var(--control-h-sm);
+  width: auto;
+}
+
+/* The same note with room to breathe, for the cookie importer's expiry
+   warning: it is one answer to the whole file rather than a toolbar aside, so
+   it takes the banner's tinted plate. */
+.import-warning-note {
+  align-items: center;
+  background: var(--status-warmup-bg);
+  border-radius: var(--radius-xs);
+  color: var(--status-warmup-ink);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.import-warning-note > svg {
+  flex: none;
 }
 
 .filter-chips {
@@ -482,19 +633,101 @@
   color: var(--status-ban-ink);
 }
 
+/* ── The proxy and cookie review tables ─────────────────────────────────────
+ * Both take .import-review-table's cell metrics -- every cell is a control,
+ * the header steps in to meet the value -- and only differ in how wide they
+ * need to be. Sharing that rather than restating it is the point: three review
+ * tables that measure their cells differently is exactly the drift this whole
+ * change is about.
+ */
+
+/* Nine columns, four of them credentials-width. Narrower than the profile
+   importer's 1020 because none of these columns holds a name a user chose. */
+.proxy-review-table table {
+  min-width: 940px;
+}
+
+/* The column the whole table is about, and the one that was losing. Every cell
+   here is an input at width: 100%, so a column with no stated width collapses
+   to whatever the header text needs -- "ADDRESS" is six characters and
+   "gate.example-proxies.test:7000" is thirty. */
+.proxy-review-table td:nth-child(5) {
+  min-width: 240px;
+}
+
+/* Six columns and no editable credentials, so it fits the 720px panel the
+   cookie importer keeps -- there is no reason to widen a dialog for a file
+   name, a count and two domains. Full width rather than min-width, so the two
+   text columns share the panel instead of shrink-wrapping in the middle of it. */
+.cookie-review-table table {
+  min-width: 0;
+  width: 100%;
+}
+
+/* Same reasoning as the proxy table's address column: the name is an input, and
+   an input takes the width its column is given rather than asking for one. */
+.cookie-review-table td.cookie-name-cell {
+  min-width: 220px;
+  width: 40%;
+}
+
+/* The domain list is `white-space: nowrap` from the inspector's own rule, which
+   is right in a table that scrolls and wrong in one that must not: a set for
+   two long domains pushed the Expired column and the remove button off the end
+   of a 720px dialog. Capped and ellipsised -- the full list is the cell's
+   title, and the count beside it is what the column is actually for. */
+.cookie-review-table td.cookie-domain-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 60%;
+}
+
+/* The file's own line number. Right-aligned tabular figures so a hundred rows
+   read as a column rather than as a ragged edge. */
+.import-line-cell {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 52px;
+}
+
+/* A count, on the same figures. Padded to the value inset by hand for the same
+   reason .import-folder-cell is: it is text where its neighbours are controls,
+   and without it the number sits 9px left of its own header. */
+.import-review-table td.import-count-cell {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding-left: calc(var(--cell-x) + var(--value-inset));
+  white-space: nowrap;
+}
+
+.import-count-cell > i {
+  color: var(--ink-faint);
+  font-style: normal;
+}
+
 /* Destination step. Cards rather than radios because the choice is between
-   four different shapes of outcome, and each needs a line of explanation that
-   a radio label cannot carry. */
+   several different shapes of outcome, and each needs a line of explanation
+   that a radio label cannot carry.
+
+   No bottom margin: these sit in a FormGroup's full-width slot now, and the
+   card's own 14px grid gap is what separates them from the field below. */
 .destination-cards {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  margin-bottom: 16px;
 }
 
+/* --frame, not --raised. These sit inside a FormGroup's card now, and --raised
+   IS --frame-card in light -- a white card on a white card, distinguished only
+   by its hairline. --frame is the one token guaranteed to be a step away from
+   --frame-card in both themes, because tokens.css swaps the pair rather than
+   sliding it: see the note there. */
 .destination-card {
   align-items: flex-start;
-  background: var(--raised);
+  background: var(--frame);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   display: flex;
@@ -635,9 +868,13 @@
 
 /* Glyph in its own column spanning both rows, so the label and the number stack
    beside it and every tile's number starts at the same x. */
+/* --frame and --frame-card below, for the reason .destination-card is: these
+   tiles now appear both inside a FormGroup's card and, on the finished screen,
+   directly on the panel. --frame is a step away from BOTH surfaces in both
+   themes; --raised is identical to --frame-card in light. */
 .import-stat {
   align-items: center;
-  background: var(--raised);
+  background: var(--frame);
   border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   box-shadow: var(--shadow-xs);
@@ -652,7 +889,7 @@
 
 .import-stat-mark {
   align-items: center;
-  background: var(--paper);
+  background: var(--frame-card);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--ink-soft);

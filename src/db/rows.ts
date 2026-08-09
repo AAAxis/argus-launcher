@@ -146,6 +146,10 @@ export type ProfileRow = {
   // the editor had both fields and the mappers silently dropped them.
   email: string | null;
   password: string | null;
+  // The sign-in page those two belong to. Added 2026-08-09 (20260818000000);
+  // null on every row written before then. Reference only -- nothing fills a
+  // login form; see ArgusProfile.login_url.
+  login_url: string | null;
   // The automation to run when this profile launches. Added 2026-08-05.
   automation_id: string | null;
   // This profile's parameter values, keyed by automation id:

@@ -51,6 +51,9 @@ export type ProfileDraft = {
   // credentials into the agent's own prompt each time.
   email: string;
   password: string;
+  // Where the pair above signs in. Reference only, exactly like them -- see
+  // ArgusProfile.login_url. Also reaches automations as {{profile.login_url}}.
+  login_url: string;
   proxy_id: string;
   proxy_mode: ProxyMode;
   proxy_search: string;
@@ -163,6 +166,7 @@ export function newProfileDraft(selfId = ''): ProfileDraft {
     assigned_to: selfId,
     email: '',
     password: '',
+    login_url: '',
     proxy_id: '',
     proxy_mode: 'assigned',
     proxy_search: '',
@@ -225,6 +229,7 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     assigned_to: profile.assigned_to || '',
     email: profile.email || '',
     password: profile.password || '',
+    login_url: profile.login_url || '',
     proxy_id: profile.proxy_id || '',
     proxy_mode: profile.proxy_mode || 'assigned',
     proxy_search: '',
@@ -353,6 +358,7 @@ export function profileFromDraft(draft: ProfileDraft, createdAt?: string): Argus
     folder_id: draft.folder_id.trim() || null,
     email: draft.email.trim() || undefined,
     password: draft.password || undefined,
+    login_url: draft.login_url.trim() || undefined,
     proxy_id: draft.proxy_mode === 'assigned' ? (draft.proxy_id || null) : null,
     proxy_mode: draft.proxy_mode,
     // Normalized rather than merely split: a draft loaded from a row that an

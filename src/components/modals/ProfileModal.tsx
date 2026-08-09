@@ -1,42 +1,54 @@
 import {useRef, useState} from 'react';
 import {
-  Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, Network, Palette,
-  SlidersHorizontal, Tag, Terminal, Trash2, UserCheck, UserRound, UserRoundCog, Workflow,
+  Activity, AtSign, Cookie, Fingerprint, Folder, Globe, KeyRound, Link2, LogIn, Network,
+  Rocket, SlidersHorizontal, StickyNote, Tag, Terminal, Trash2, UserCheck, UserRound, Workflow,
 } from 'lucide-react';
-import {AssigneeSelect} from '../ui/AssigneeSelect';
+import {Assignee} from '../ui/Assignee';
 import {AvatarPicker} from '../ui/AvatarPicker';
 import {BookmarkFavicon} from '../ui/BookmarkFavicon';
 import {BusyButton} from '../ui/BusyButton';
 import {ColorPicker} from '../ui/ColorPicker';
 import {CookieSetLabel} from '../ui/CookieSetLabel';
+import {EditorHead} from '../ui/EditorHead';
 import {Field} from '../ui/Field';
+import {FieldPicker} from '../ui/FieldPicker';
+import {FolderLabel} from '../ui/FolderLabel';
 import {FormGroup} from '../ui/FormGroup';
 import {NotesPanel} from '../ui/NotesPanel';
 import {InfoHint} from '../ui/InfoHint';
 import {Modal} from '../ui/Modal';
+import {ProfileAvatar} from '../ui/ProfileAvatar';
 import {RotateButton} from '../ui/RotateButton';
-import {StatusPicker} from '../ui/StatusChip';
+import {SecretInput} from '../ui/SecretInput';
+import {StatusChip, StatusPicker} from '../ui/StatusChip';
 import {TagInput} from '../ui/TagInput';
+import {AutomationMark} from '../automations/AutomationMark';
 import {ProfileAutomationValues} from '../automations/ProfileAutomationValues';
 import {FingerprintDatalists, FingerprintFields} from './FingerprintFields';
 import {TimezoneOverrideModal} from './ConfirmModals';
 import {ProfileSummary} from './ProfileSummary';
+import {assigneeName} from '../../lib/assignees';
 import {randomFingerprintPatch} from '../../lib/fingerprintPresets';
 import {normalizeBookmarkUrl} from '../../lib/bookmarks';
 import {proxyOptionLabel, parseProxyLink} from '../../lib/proxies';
 import {timezoneMismatch} from '../../lib/proxyGeo';
 import {MAX_PROFILE_TAGS} from '../../lib/tags';
-import {profileFromDraft, tagsFromDraft} from '../../drafts';
+import {draftFromProfile, profileFromDraft, tagsFromDraft} from '../../drafts';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
+import type {CellOption} from '../ui/CellControls';
 import type {SummaryTarget} from './ProfileSummary';
 import type {ProfileDraft, ProxyDraft} from '../../drafts';
 import type {TimezoneOverrideRequest} from './ConfirmModals';
 
-// Stable ids so the Summary panel's per-group Edit actions can put the caret in
-// the field they describe. The proxy field already needed one for its datalist.
-const NAME_FIELD_ID = 'profile-name-input';
+// Stable ids so the Summary panel's per-group Edit actions can lead back to the
+// block they describe. The proxy field already needed one for its datalist.
+//
+// The Profile group lands on the Account card rather than on a single control:
+// the name it used to focus is in the sticky header now, which is on screen
+// whatever the form is scrolled to and so cannot be scrolled back to.
+const ACCOUNT_GROUP_ID = 'profile-account-group';
 const PROXY_FIELD_ID = 'profile-proxy-input';
 
 export type ProfileModalProps = {
@@ -84,6 +96,27 @@ export function ProfileModal({
   const set = (patch: Partial<ProfileDraft>) => onChange({...draft, ...patch});
   const rotate = () => set(randomFingerprintPatch(draft.fingerprint_os));
 
+  // Whether Save has anything to do. A new profile always does -- there is no
+  // stored row to be identical to -- so this only answers the question for one
+  // that exists.
+  //
+  // Compared draft-to-draft rather than draft-to-profile: profileFromDraft
+  // trims, defaults and drops empty fields, so a draft that has not been touched
+  // does not round-trip to something equal to itself. Rebuilding the draft the
+  // dialog would have opened with puts both sides in the same shape.
+  //
+  // proxy_search and proxy_link are excluded because they are not the profile:
+  // one holds what is being typed into the combobox and the other is a paste
+  // buffer for creating a proxy, and neither is saved.
+  function dirty() {
+    const stored = state.profiles.find((item) => item.id === draft.id);
+    if (!draft.saved || !stored) {
+      return true;
+    }
+    const strip = ({proxy_search, proxy_link, ...rest}: ProfileDraft) => rest;
+    return JSON.stringify(strip(draftFromProfile(stored))) !== JSON.stringify(strip(draft));
+  }
+
   // A timezone that contradicts the proxy is confirmed once, then remembered for
   // as long as this dialog is open, so re-picking a zone the user already stood
   // behind does not ask again. Keyed by zone and proxy together: change either
@@ -93,6 +126,69 @@ export function ProfileModal({
 
   function assignedProxy() {
     return state.proxies.find((item) => item.id === draft.proxy_id) || null;
+  }
+
+  // The three pickers' rows. Each renders the thing's own mark, so the option
+  // list and the closed control show the same object -- which is the whole
+  // reason these are not <select>s any more.
+
+  // Yourself first and named "You", the word the Assignee chip uses. Mirrors
+  // assigneeOptions() in tables/profileColumns.tsx, and deliberately: a profile
+  // must not read "Anna" in the table and "anna.k" in its own editor.
+  function assigneeOptions(): CellOption[] {
+    const rows = state.members.map((member) => ({
+      value: member.user_id,
+      // The || is unreachable -- assigneeName only returns undefined for a
+      // missing id, and this one came out of the roster -- but the signature
+      // allows it because the sort comparators depend on that.
+      label: member.user_id === org.userId ?
+        'You' :
+        assigneeName(member.user_id, state.members) || member.email,
+      searchText: `${member.display_name || ''} ${member.email}`.toLowerCase(),
+      render: <Assignee key={member.user_id} userId={member.user_id} />,
+      hint: member.email,
+    }));
+    return [
+      ...rows.filter((row) => row.value === org.userId),
+      ...rows.filter((row) => row.value !== org.userId),
+    ];
+  }
+
+  function folderOptions(): CellOption[] {
+    return state.folders.map((folder) => ({
+      value: folder.id,
+      label: folder.name,
+      render: <FolderLabel key={folder.id} folder={folder} fallback="All profiles" />,
+    }));
+  }
+
+  function automationOptions(): CellOption[] {
+    return automations.map((automation) => ({
+      value: automation.id,
+      label: automation.name,
+      render: (
+        <span className="picker-mark-row" key={automation.id}>
+          <AutomationMark icon={automation.icon} color={automation.color} size={18} />
+          {automation.name}
+        </span>
+      ),
+    }));
+  }
+
+  // The attached automation, drawn the way the option row draws it. A plain
+  // word when nothing is attached: "Nothing" is the absence of a choice and
+  // should not arrive wearing a mark.
+  function automationTrigger() {
+    const attached = automations.find((item) => item.id === draft.automation_id);
+    if (!attached) {
+      return <span className="cell-muted">Nothing</span>;
+    }
+    return (
+      <span className="picker-mark-row">
+        <AutomationMark icon={attached.icon} color={attached.color} size={18} />
+        {attached.name}
+      </span>
+    );
   }
 
   function requestTimezone(value: string) {
@@ -163,13 +259,37 @@ export function ProfileModal({
     });
   }
 
+  // Trashed sets are not offerable: assigning one would put a profile back on
+  // cookies the user has already thrown away, and the launch path refuses to
+  // resolve it anyway. Same filter CookiePickerModal applies.
+  function cookieOptions(): CellOption[] {
+    return state.cookies.filter((cookie) => !cookie.deleted_at).map((cookie) => {
+      const folder = state.cookie_folders.find((item) => item.id === cookie.folder_id);
+      return {
+        value: cookie.id,
+        label: cookie.name,
+        searchText: `${cookie.name} ${folder?.name || ''}`.toLowerCase(),
+        render: (
+          <CookieSetLabel cookie={cookie} folders={state.cookie_folders} key={cookie.id} />
+        ),
+        // The folder, because two sets called "cookies.txt" are only told apart
+        // by where they were filed -- the same line the library dialog shows.
+        hint: [folder?.name, cookie.count ? `${cookie.count} cookies` : '']
+            .filter(Boolean).join(' · '),
+      };
+    });
+  }
+
   // The attached set, with its mark and the count it has always shown. A set
   // the workspace no longer holds falls back to the bare id: the profile still
   // points at something, and blanking the field would read as "no cookies".
-  function cookieLabel(cookieId: string) {
-    const cookie = state.cookies.find((item) => item.id === cookieId);
+  function cookieTrigger() {
+    if (draft.cookie_mode !== 'saved' || !draft.cookie_id) {
+      return <span className="cell-muted">No cookies</span>;
+    }
+    const cookie = state.cookies.find((item) => item.id === draft.cookie_id);
     if (!cookie) {
-      return <span>{cookieId}</span>;
+      return <span>{draft.cookie_id}</span>;
     }
     return (
       <CookieSetLabel
@@ -181,17 +301,23 @@ export function ProfileModal({
   }
 
   // Where a Summary group's Edit button lands. The fingerprint group opens the
-  // dialog that owns those values; the other two put the caret in the first
-  // field of the block they summarize.
+  // dialog that owns those values; the proxy group puts the caret in the first
+  // field of the block it summarizes; the profile group scrolls to the Account
+  // card, because what it summarizes is now spread across that card and the
+  // header above it rather than sitting in one control.
   function editSummaryGroup(target: SummaryTarget) {
     if (target === 'fingerprint') {
       setFingerprintOpen(true);
       return;
     }
-    const field = document.getElementById(
-        target === 'proxy' ? PROXY_FIELD_ID : NAME_FIELD_ID);
-    field?.scrollIntoView({block: 'center', behavior: 'smooth'});
-    field?.focus();
+    if (target === 'proxy') {
+      const field = document.getElementById(PROXY_FIELD_ID);
+      field?.scrollIntoView({block: 'center', behavior: 'smooth'});
+      field?.focus();
+      return;
+    }
+    document.getElementById(ACCOUNT_GROUP_ID)
+        ?.scrollIntoView({block: 'start', behavior: 'smooth'});
   }
 
   async function save() {
@@ -246,28 +372,88 @@ export function ProfileModal({
   return (
     <>
       <Modal
-        className=""
+        // `editor-modal` carries the sticky header and the repositioned close
+        // X, shared with the automation editor; `profile-editor-modal` is what
+        // fills this dialog's Save, which the automation bar deliberately does
+        // not do -- see editor-head.css.
+        className="editor-modal profile-editor-modal"
         onClose={onClose}
-        title={draft.saved ? 'Edit profile' : 'Create profile'}
-        subtitle="Cloud-backed profile settings used when Argus Browser launches anonymously."
-        footer={
-          <>
-            {draft.saved && (
-              <button
-                className="danger ghost"
-                onClick={() => onRequestDelete([draft.id], draft.name)}
-              >
-                <Trash2 size={16} /> Delete
-              </button>
-            )}
-            <BusyButton
-              busy={isPending('save-profile')}
-              busyLabel="Saving…"
-              onClick={() => void run('save-profile', save)}
-            >
-              {draft.saved ? 'Save changes' : 'Create profile'}
-            </BusyButton>
-          </>
+        // One header instead of a header and a footer, the arrangement the
+        // automation editor already uses. The avatar and the name were the
+        // third and first fields of the Account card; they are the heading
+        // now, so the thing you are editing is named at the top of the dialog
+        // rather than found halfway down it.
+        header={
+          <EditorHead
+            mark={<ProfileAvatar profile={{name: draft.name, color: draft.color, avatar: draft.avatar}} />}
+            markLabel={`Change the picture and colour for ${draft.name.trim() || 'this profile'}`}
+            markPop={
+              <>
+                <Field
+                  label="Avatar"
+                  hint="A picture or a site's logo, shown beside the name in the profiles list."
+                  group
+                >
+                  <AvatarPicker
+                    color={draft.color}
+                    name={draft.name}
+                    onChange={(avatar) => set({avatar})}
+                    onError={(message) => toast.setMessage(message)}
+                    onUpload={(file) => profiles.uploadAvatar(draft.id, file)}
+                    value={draft.avatar}
+                  />
+                </Field>
+                <Field
+                  label="Colour"
+                  // Says where it lands, because with a picture or a logo set
+                  // it is no longer behind the mark -- the colour is what an
+                  // empty avatar falls back to.
+                  hint="The plate behind the initials, when there is no picture."
+                  group
+                >
+                  <ColorPicker value={draft.color} onChange={(color) => set({color})} />
+                </Field>
+              </>
+            }
+            noun="profile"
+            name={draft.name}
+            onNameChange={(name) => set({name})}
+            // Status and folder: the two things that place a profile, on the
+            // line under its name. Both are still editable in the Account card
+            // -- this is the header saying what it is, not a second control.
+            meta={
+              <>
+                <StatusChip status={draft.status || 'Ready'} />
+                <FolderLabel
+                  folder={state.folders.find((item) => item.id === draft.folder_id)}
+                  fallback="All profiles"
+                />
+              </>
+            }
+            actions={
+              <div className="editor-head-actions-end">
+                {draft.saved && (
+                  <button
+                    className="ghost danger"
+                    type="button"
+                    onClick={() => onRequestDelete([draft.id], draft.name)}
+                  >
+                    <Trash2 size={16} /> Delete
+                  </button>
+                )}
+                <button className="ghost" type="button" onClick={onClose}>Cancel</button>
+                <BusyButton
+                  busy={isPending('save-profile')}
+                  busyLabel="Saving…"
+                  disabled={!dirty()}
+                  title={dirty() ? undefined : 'No changes to save'}
+                  onClick={() => void run('save-profile', save)}
+                >
+                  {draft.saved ? 'Save changes' : 'Create profile'}
+                </BusyButton>
+              </div>
+            }
+          />
         }
       >
         <div className="profile-editor-layout">
@@ -282,18 +468,11 @@ export function ProfileModal({
               * is it carrying, what happens on launch, and what should the next
               * person know. */}
             <FormGroup
-              hint="What this profile is called and how you find it again in a table of forty."
+              hint="How you find this profile again in a table of forty."
+              icon={<UserRound size={14} />}
+              id={ACCOUNT_GROUP_ID}
               title="Account"
             >
-              <Field label="Name" icon={<UserRound size={14} />} wide>
-                <input
-                  type="text"
-                  autoFocus
-                  id={NAME_FIELD_ID}
-                  value={draft.name}
-                  onChange={(event) => set({name: event.target.value})}
-                />
-              </Field>
               <Field label="Status" icon={<Activity size={14} />} wide group>
                 <StatusPicker
                   status={statusOptions.includes(draft.status) ? draft.status : 'Ready'}
@@ -301,31 +480,6 @@ export function ProfileModal({
                   onChange={(status) => set({status})}
                   onNewStatus={onNewStatus}
                 />
-              </Field>
-              {/* Above Colour, because they answer the same question -- how do I
-                  find this row again in a table of forty -- and the colour plate
-                  is what an empty avatar falls back to. */}
-              <Field
-                label="Avatar"
-                icon={<UserRoundCog size={14} />}
-                hint="A picture or a site's logo, shown beside the name in the profiles list."
-                wide
-                // Same reason as Status and Tags: the buttons and the popover
-                // trigger sit inside this field, and a <label> wrapping them
-                // would fire its implicit activation on the wrong control.
-                group
-              >
-                <AvatarPicker
-                  color={draft.color}
-                  name={draft.name}
-                  onChange={(avatar) => set({avatar})}
-                  onError={(message) => toast.setMessage(message)}
-                  onUpload={(file) => profiles.uploadAvatar(draft.id, file)}
-                  value={draft.avatar}
-                />
-              </Field>
-              <Field label="Colour" icon={<Palette size={14} />} wide group>
-                <ColorPicker value={draft.color} onChange={(color) => set({color})} />
               </Field>
               <Field
                 label="Tags"
@@ -346,16 +500,24 @@ export function ProfileModal({
                   onChange={(tags) => set({tags: tags.join(', ')})}
                 />
               </Field>
-              <Field label="Folder" icon={<Folder size={14} />} wide>
-                <select
+              {/* A picker rather than a <select>, so the folder keeps the glyph
+                  and colour it is drawn with everywhere else. Same for the two
+                  below it -- see FieldPicker. */}
+              <Field label="Folder" icon={<Folder size={14} />} wide group>
+                <FieldPicker
+                  label="Move this profile to a folder"
+                  noneLabel="All profiles"
+                  onPick={(folder_id) => set({folder_id})}
+                  options={folderOptions()}
+                  searchPlaceholder="Search folders…"
+                  trigger={
+                    <FolderLabel
+                      folder={state.folders.find((item) => item.id === draft.folder_id)}
+                      fallback="All profiles"
+                    />
+                  }
                   value={draft.folder_id}
-                  onChange={(event) => set({folder_id: event.target.value})}
-                >
-                  <option value="">All profiles</option>
-                  {state.folders.map((folder) => (
-                    <option value={folder.id} key={folder.id}>{folder.name}</option>
-                  ))}
-                </select>
+                />
               </Field>
               {/* Only once there is somebody to assign to. A one-person workspace
                   gets a picker whose every option is "you", which is the same
@@ -366,15 +528,60 @@ export function ProfileModal({
                   icon={<UserCheck size={14} />}
                   hint="Who's looking after this profile. Everyone on the team can still open it — this is a label, not a lock."
                   wide
+                  group
                 >
-                  <AssigneeSelect
-                    members={state.members}
-                    onChange={(assigned_to) => set({assigned_to})}
+                  <FieldPicker
+                    label="Assign this profile to a teammate"
+                    noneLabel="Unassigned"
+                    onPick={(assigned_to) => set({assigned_to})}
+                    options={assigneeOptions()}
+                    searchPlaceholder="Search teammates…"
+                    // The Assigned column's own chip, so the person you picked
+                    // looks the same here as in the table you picked them for.
+                    trigger={<Assignee userId={draft.assigned_to || null} />}
                     value={draft.assigned_to}
                   />
                 </Field>
               )}
-              <Field label="Account email" icon={<AtSign size={14} />} wide>
+            </FormGroup>
+
+            {/* Its own card, not the tail of Account.
+              *
+              * These three are the only fields in this dialog that Argus itself
+              * never acts on, and the only ones that are dangerous to
+              * misunderstand -- so the block needs a heading that says what
+              * they are and a hint that says what they are not. Buried under
+              * Folder and Assigned-to, "Account password" read as though the
+              * app would use it. */}
+            <FormGroup
+              hint="The login this profile is signed into, kept beside it so whoever picks the profile up has it."
+              icon={<KeyRound size={14} />}
+              info={
+                <InfoHint label="Credentials">
+                  <p>
+                    <strong>Argus does not fill these in.</strong> Nothing is typed into a page
+                    when the profile launches, and they are never sent to the browser. They are
+                    here so the login travels with the profile instead of in someone&apos;s head.
+                  </p>
+                  <p>
+                    An <strong>automation</strong> can use them: a Type step resolves{' '}
+                    <code>{'{{profile.email}}'}</code> and <code>{'{{profile.password}}'}</code>,
+                    and a Go-to step resolves <code>{'{{profile.login_url}}'}</code> — so one
+                    sign-in workflow can run against every profile at its own address.
+                  </p>
+                  <p>
+                    Stored with your cloud data <strong>in plaintext</strong> — anyone with
+                    access to the organization can read them, and so can an agent connected over
+                    MCP.
+                  </p>
+                </InfoHint>
+              }
+              title="Credentials"
+            >
+              {/* Side by side, not one per row: they are one credential in two
+                  boxes, and stacked full-width they read as two unrelated
+                  settings that happen to be adjacent. */}
+              <Field label="Account email" icon={<AtSign size={14} />}>
                 <input
                   type="email"
                   placeholder="you@example.com"
@@ -382,34 +589,35 @@ export function ProfileModal({
                   onChange={(event) => set({email: event.target.value})}
                 />
               </Field>
+              {/* Revealable. A write-only box guards nothing here: the profiles
+                  table already shows the email in a column, the value is stored
+                  in plaintext, and the whole point of the field is that whoever
+                  has the profile can read the login. */}
+              <Field label="Account password" icon={<KeyRound size={14} />}>
+                <SecretInput
+                  value={draft.password}
+                  onChange={(password) => set({password})}
+                />
+              </Field>
               <Field
-                label="Account password"
-                icon={<KeyRound size={14} />}
-                info={
-                  <InfoHint label="Account password">
-                    <p>
-                      The login this profile is signed into, kept beside it so whoever picks the
-                      profile up has it.
-                    </p>
-                    <p>
-                      Stored with your cloud data <strong>in plaintext</strong> — anyone with
-                      access to the organization can read it.
-                    </p>
-                  </InfoHint>
-                }
+                label="Login URL"
+                icon={<LogIn size={14} />}
+                hint="The sign-in page these belong to. A note for whoever opens this profile —
+                  and the address an automation reads as {{profile.login_url}}."
                 wide
               >
                 <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={draft.password}
-                  onChange={(event) => set({password: event.target.value})}
+                  type="text"
+                  placeholder="https://example.com/login"
+                  value={draft.login_url}
+                  onChange={(event) => set({login_url: event.target.value})}
                 />
               </Field>
             </FormGroup>
 
             <FormGroup
               hint="How this profile reaches the internet. Everything it opens goes out this way."
+              icon={<Network size={14} />}
               title="Proxy"
             >
               {/* The three modes each needed a sentence of explanation. They used
@@ -535,6 +743,7 @@ export function ProfileModal({
               * has to stay visible near the top of the form. See AGENTS.md. */}
             <FormGroup
               hint="The identity this profile presents to the sites it opens."
+              icon={<Fingerprint size={14} />}
               title="Fingerprint"
             >
               <div className="form-group-row">
@@ -550,6 +759,7 @@ export function ProfileModal({
 
             <FormGroup
               hint="Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches."
+              icon={<Cookie size={14} />}
               info={
                 <InfoHint label="Cookie import">
                   <p>
@@ -568,50 +778,78 @@ export function ProfileModal({
               }
               title="Cookies"
             >
-              <div className="file-row wide">
-                <button className="ghost" type="button" onClick={onPickCookies}>
-                  Select cookies…
-                </button>
-                {draft.cookie_mode === 'saved' && draft.cookie_id ? (
-                  <>
-                    {cookieLabel(draft.cookie_id)}
+              {/* The library as a dropdown, like the other three things this
+                  form picks -- and for the same reason: a cookie-set has a
+                  colour, so choosing one should show the mark it will be
+                  recognised by afterwards rather than a filename. Uploading a
+                  new file is not one of the options, so it rides the footer and
+                  still opens the library dialog, which owns that path. */}
+              <Field label="Cookie set" icon={<Cookie size={14} />} wide group>
+                <FieldPicker
+                  label="Choose the cookies this profile launches with"
+                  noneLabel="No cookies"
+                  empty="No cookie-sets saved yet"
+                  onPick={(cookie_id) => set({
+                    cookie_mode: cookie_id ? 'saved' : 'paste',
+                    cookie_id,
+                    // Clearing the set clears the imported file with it. All
+                    // five fields go together -- see AGENTS.md on cookie
+                    // clearing -- or the card shows a set and a file at once.
+                    ...(cookie_id ? {} : {
+                      cookie_import_path: '',
+                      cookie_import_url: '',
+                      cookie_import_name: '',
+                      cookie_import_count: 0,
+                    }),
+                  })}
+                  options={cookieOptions()}
+                  searchPlaceholder="Search cookie-sets…"
+                  trigger={cookieTrigger()}
+                  value={draft.cookie_mode === 'saved' ? draft.cookie_id : ''}
+                  footer={(close) => (
                     <button
-                      className="icon-button danger-icon"
+                      className="ghost"
                       type="button"
-                      aria-label="Clear selected cookie-set"
-                      onClick={() => set({cookie_mode: 'paste', cookie_id: ''})}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </>
-                ) : draft.cookie_import_path || draft.cookie_import_url ? (
-                  <>
-                    <span>
-                      {draft.cookie_import_count || 0} cookies · {draft.cookie_import_name ||
-                        (draft.cookie_import_url ? 'Cloud cookie file' : draft.cookie_import_path)}
-                    </span>
-                    <button
-                      className="icon-button danger-icon"
-                      type="button"
-                      aria-label="Clear cookie import"
-                      onClick={() => set({
-                        cookie_import_path: '',
-                        cookie_import_url: '',
-                        cookie_import_name: '',
-                        cookie_import_count: 0,
-                      })}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </>
-                ) : (
-                  <span>No cookie file selected</span>
-                )}
-              </div>
+                      onClick={() => {
+                        close();
+                        onPickCookies();
+                      }}
+                    >Upload new…</button>
+                  )}
+                />
+              </Field>
+              {/* A file imported straight into this profile rather than picked
+                  from the library -- what the importer and the older upload
+                  path produce. It is not one of the picker's options, because
+                  it is not in the library to be offered, so it keeps a row of
+                  its own and its own way of being cleared. */}
+              {draft.cookie_mode !== 'saved' &&
+                (draft.cookie_import_path || draft.cookie_import_url) && (
+                <div className="file-row wide">
+                  <span>
+                    {draft.cookie_import_count || 0} cookies · {draft.cookie_import_name ||
+                      (draft.cookie_import_url ? 'Cloud cookie file' : draft.cookie_import_path)}
+                  </span>
+                  <button
+                    className="icon-button danger-icon"
+                    type="button"
+                    aria-label="Clear cookie import"
+                    onClick={() => set({
+                      cookie_import_path: '',
+                      cookie_import_url: '',
+                      cookie_import_name: '',
+                      cookie_import_count: 0,
+                    })}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              )}
             </FormGroup>
 
             <FormGroup
               hint="What happens when you press Launch."
+              icon={<Rocket size={14} />}
               title="Launch"
             >
               <Field label="Start page" icon={<Globe size={14} />} wide>
@@ -630,16 +868,18 @@ export function ProfileModal({
                   'Opens a DevTools port for this launch only, so the workflow can drive it.' :
                   'Runs an automation automatically once this profile is open.'}
                 wide
+                group
               >
-                <select
+                <FieldPicker
+                  label="Choose what runs when this profile launches"
+                  noneLabel="Nothing"
+                  empty="No automations yet"
+                  onPick={(automation_id) => set({automation_id})}
+                  options={automationOptions()}
+                  searchPlaceholder="Search automations…"
+                  trigger={automationTrigger()}
                   value={draft.automation_id}
-                  onChange={(event) => set({automation_id: event.target.value})}
-                >
-                  <option value="">Nothing</option>
-                  {automations.map((automation) => (
-                    <option key={automation.id} value={automation.id}>{automation.name}</option>
-                  ))}
-                </select>
+                />
               </Field>
               {/* Directly under the picker, because the first question after
                   "which automation" is "with what". `group`, not a label: the
@@ -697,6 +937,7 @@ export function ProfileModal({
             {draft.saved && (
               <FormGroup
                 hint="Why this profile exists, and anything worth knowing before using it. Everyone in the workspace can read and add; only the author can change their own."
+                icon={<StickyNote size={14} />}
                 title="Notes"
               >
                 <div className="form-group-full">

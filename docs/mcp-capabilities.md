@@ -211,14 +211,17 @@ to the user's account).
   `3237-3261`).
 - **`argus_update_profile`** — sets `name`, `tags` (capped at 5 by
   `normalizeTags`), `status`, `color`, `folderId`, `avatar`, `proxyMode`,
-  `startUrl`, `automationId` and `automationVars`
+  `startUrl`, `loginUrl`, `automationId` and `automationVars`
   (`electron/main.cjs:3977-3994`, `src/hooks/useAutomationBridge.ts:294-313`).
   `automationVars` is the profile's answers to automations' declared
   parameters, keyed by automation id — `{"flat-search": {"city_name":
   "Dortmund"}}`. It **replaces the whole map**, so read it back with
   `argus_get_profile` and merge rather than sending one automation on its own.
   The tool forwards only its declared fields, so a name it does not advertise
-  (`email`, `password`) cannot be reached through it.
+  (`email`, `password`) cannot be reached through it. `loginUrl` **is**
+  advertised, and deliberately: it records *where* a stored credential is used,
+  not what it is, so an agent writing it cannot lock anybody out. It is also the
+  address a sign-in workflow reads as `{{profile.login_url}}`.
 - **`argus_assign_proxy`** — resolves a proxy by id (or host/port) and writes
   `proxy_id` + `proxy_mode: 'assigned'` (`src/hooks/useAutomationBridge.ts:190-212`).
 - **CDP tools** (`electron/mcp/cdp.cjs`):
@@ -424,11 +427,12 @@ Compared against what the app itself can do, an agent has **no** way to:
   free_proxy). Assigning a specific proxy is still `argus_assign_proxy`; switching
   to direct/free_proxy clears the proxy.
 - **Set the start URL** — **now possible** via `argus_update_profile.startUrl`
-  and `argus_create_profile.startUrl`. **Command-line switches and the profile's
-  account email/password** are still not exposed through any declared tool
-  parameter (editable in the UI at `ProfileModal.tsx:382,392,400,488`), by
-  design: switches are a launch-time code-execution surface and credentials are a
-  deliberately closed write hole. See the caveat in §4c.
+  and `argus_create_profile.startUrl`. The profile's **login URL** is writable
+  too (`argus_update_profile.loginUrl`). **Command-line switches and the
+  profile's account email/password** are still not exposed through any declared
+  tool parameter — they are edited in the UI, in the profile editor's Credentials
+  card — by design: switches are a launch-time code-execution surface and
+  credentials are a deliberately closed write hole. See the caveat in §4c.
 - **Manage account, org, plan, API keys or integrations.** Nothing under
   `src/settings/` is reachable. API keys especially: an agent cannot mint or
   revoke the credential it is itself holding.

@@ -3,6 +3,9 @@
 export function composeFinishMessage() {
   return '';
 }
+export function composeFinishTelegram() {
+  return '';
+}
 export function shouldNotify() {
   return false;
 }

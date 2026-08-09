@@ -913,6 +913,7 @@ export type Database = {
           fingerprint: Json
           folder_id: string | null
           id: string
+          login_url: string | null
           name: string
           notes: string | null
           org_id: string
@@ -944,6 +945,7 @@ export type Database = {
           fingerprint?: Json
           folder_id?: string | null
           id?: string
+          login_url?: string | null
           name: string
           notes?: string | null
           org_id: string
@@ -975,6 +977,7 @@ export type Database = {
           fingerprint?: Json
           folder_id?: string | null
           id?: string
+          login_url?: string | null
           name?: string
           notes?: string | null
           org_id?: string

@@ -139,6 +139,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     tags: undef(row.tags),
     email: undef(row.email),
     password: undef(row.password),
+    login_url: undef(row.login_url),
     folder_id: row.folder_id,
     proxy_id: row.proxy_id,
     proxy_mode: undef(row.proxy_mode) as ProxyMode | undefined,
@@ -196,6 +197,7 @@ export function profileToRow(orgId: string, profile: ArgusProfile): Insert<Profi
     tags: profile.tags ?? [],
     email: profile.email ?? null,
     password: profile.password ?? null,
+    login_url: profile.login_url ?? null,
     start_urls: startUrl ? [startUrl] : [],
     command_line_switches: switchesToArray(profile.command_line_switches),
     color: profile.color ?? null,
@@ -236,6 +238,9 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
   }
   if ('password' in patch) {
     row.password = patch.password ?? null;
+  }
+  if ('login_url' in patch) {
+    row.login_url = patch.login_url ?? null;
   }
   if ('folder_id' in patch) {
     row.folder_id = patch.folder_id ?? null;

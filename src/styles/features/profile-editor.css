@@ -56,10 +56,14 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* 18px, not the 28 it was. The summary's own 24px of padding used to be part of
+   what separated the two columns; the panel is borderless now and has none, so
+   the gap is the whole of the space between a form card's right edge and a
+   summary card's left one -- and at 28 the two columns read as two screens. */
 .profile-editor-layout {
   align-items: start;
   display: grid;
-  gap: 28px;
+  gap: 18px;
   grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
 }
 
@@ -71,18 +75,42 @@
   align-content: start;
 }
 
+/* No border and no shadow of its own: each group inside is a framed card now,
+   and a bordered box full of bordered boxes reads as a container nobody asked
+   for. What separates this column from the form is the gap between them and the
+   fact that it does not scroll with it. */
 .profile-summary {
-  background: var(--raised);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
   display: grid;
   gap: 18px;
   max-height: calc(100vh - 230px);
   overflow: auto;
-  padding: 24px;
+  /* No padding. Each group inside is a framed card with its own inset, so the
+     panel's own 24px was a second margin stacked on the first -- it pushed the
+     summary a full 48px clear of the form beside it. Only the right side keeps
+     any, for the scrollbar this box grows when the fingerprint group is open. */
+  padding: 0 2px 0 0;
   position: sticky;
   top: 0;
+}
+
+/* Below the sticky header, not under it.
+ *
+ * Both this panel and the editor's header stick inside the same scroll box
+ * (.profile-modal). The header wins -- it is painted at z-index 2 -- so at
+ * top: 0 the panel's own heading and its first group's spent the whole scroll
+ * hidden behind the bar. --editor-head-h is the bar's measured height, written
+ * onto the panel by EditorHead; the fallback is a two-row bar, for the frame
+ * before the observer first fires.
+ *
+ * Only `top` -- the panel's resting position is already right, because the
+ * layout's 18px padding puts it level with the form's first card, and it parks
+ * that same 18px below the bar once stuck.
+ *
+ * The max-height above is relative to the viewport and does not know about the
+ * bar either, which is why it loses the same number again. */
+.editor-modal .profile-summary {
+  max-height: calc(100vh - 230px - var(--editor-head-h, 134px));
+  top: var(--editor-head-h, 134px);
 }
 
 .summary-heading {
@@ -101,40 +129,84 @@
   text-transform: uppercase;
 }
 
+/* Borderless, in the flat silhouette every header action in this app takes --
+   see .editor-head-actions-end > button, which this deliberately matches.
+   A bordered pill beside a 16px heading was the loudest thing in a column whose
+   entire job is to be read, and it sat directly above three groups whose own
+   Edit affordance is a bare 24px pencil.
+
+   Not --accent: the accent in this system is ink, so accent-coloured text lands
+   within a few points of --ink in either theme and says nothing. --ink-soft
+   with a --hover plate is what the rest of the app's quiet controls use. */
 .summary-heading button {
-  color: var(--accent);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  color: var(--ink-soft);
   font-size: 12px;
-  min-height: 34px;
+  font-weight: 500;
+  min-height: 0;
+  padding: 6px 8px;
   text-transform: uppercase;
 }
 
-/* The panel's three blocks. Twenty-four rows in one list gave no way to tell
- * which of them a given control was responsible for, and no way back to it --
- * hence the per-group Edit, which is the point of the grouping. */
-.summary-group {
-  display: grid;
-  gap: 12px;
+.summary-heading button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
 }
 
-/* The heading doubles as the group's rule: a hairline under the row rather
-   than a bare label floating above the values, so the three blocks read as
-   blocks at a glance down a narrow column. */
+/* The panel's three blocks. Twenty-odd rows in one list gave no way to tell
+ * which of them a given control was responsible for, and no way back to it --
+ * hence the per-group Edit, which is the point of the grouping.
+ *
+ * A frame holding a card, the same pair .form-group uses -- see the note in
+ * controls/form-groups.css for why it is --frame and not --paper. The two
+ * columns of this dialog are one system, and a summary drawn as a flat list
+ * beside a form drawn as cards read as an afterthought bolted to the side. */
+.summary-group {
+  background: var(--frame);
+  border-radius: var(--radius-lg);
+  padding: 0 3px 3px;
+}
+
+.summary-group-body {
+  background: var(--frame-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+/* On the frame, outside the card -- the same arrangement .form-group-head has
+   in the column beside this one, so a section and its summary are drawn the
+   same way. The hairline that used to separate the heading from the values is
+   gone with it: the surface step does that job now, and a line on top of it
+   reads as a third object between the two. */
 .summary-group-head {
   align-items: center;
-  border-bottom: 1px solid var(--border-soft);
   display: flex;
   gap: 10px;
   justify-content: space-between;
-  padding-bottom: 8px;
+  padding: 7px 11px 8px;
 }
 
 .summary-group-head h4 {
+  align-items: center;
   color: var(--ink-faint);
+  display: inline-flex;
   font-size: 11px;
   font-weight: 800;
+  gap: 6px;
   letter-spacing: 0.08em;
   margin: 0;
   text-transform: uppercase;
+}
+
+/* Already --ink-faint from the heading, so the glyph only needs to stop
+   shrinking; unlike .form-group-head h4 > svg it takes no colour of its own. */
+.summary-group-head h4 > svg {
+  flex: none;
 }
 
 /* Bare pencil, not a bordered button. Needs the parent in the selector to
@@ -169,10 +241,25 @@
   gap: 10px;
 }
 
+/* Three columns now: the glyph gutter, the name, the value. The name column
+   pays for the gutter -- 104 down to 88 -- because the value is the part being
+   read and this is a 320px panel with nothing to spare. */
 .summary-row {
+  align-items: baseline;
   display: grid;
-  gap: 12px;
-  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  grid-template-columns: 16px 88px minmax(0, 1fr);
+}
+
+/* An <i> carrying a 14px lucide glyph. Faint, and a step below the label beside
+   it: nineteen of these run down the fingerprint group alone, and at the label's
+   own weight they would read as a column of decoration competing with the
+   values. translateY lands the glyph on the text's baseline row, which
+   align-items: baseline cannot do for a box with no text in it. */
+.summary-row-icon {
+  color: var(--ink-faint);
+  display: block;
+  transform: translateY(2px);
 }
 
 .summary-row strong {

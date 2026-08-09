@@ -31,9 +31,11 @@ import type {AutomationDeleteRequest} from './components/modals/ConfirmModals';
 import {BookmarkModal, FolderModal, ProxyModal, StatusModal} from './components/modals/EditorModals';
 import {IntegrationModal} from './components/modals/IntegrationModal';
 import {
-  BookmarkImportModal, CookiePickerModal, ExtensionAddModal, ProxyImportModal,
+  BookmarkImportModal, CookiePickerModal, ExtensionAddModal,
 } from './components/modals/LibraryModals';
 import {ImportProfilesModal} from './components/modals/ImportProfilesModal';
+import {ImportProxiesModal} from './components/modals/ImportProxiesModal';
+import {ImportCookiesModal} from './components/modals/ImportCookiesModal';
 import {IntroModal} from './components/modals/IntroModal';
 import {LeaveTeamModal} from './components/modals/LeaveTeamModal';
 import {PersonalWorkspaceModal} from './components/modals/PersonalWorkspaceModal';
@@ -607,7 +609,7 @@ export function App() {
           finishLabel="Add a cookie-set"
           onFinish={() => {
             setCookieIntroOpen(false);
-            void run('add-cookie-set', addCookieSetFromPicker);
+            editors.setCookieImportOpen(true);
           }}
         />
       )}
@@ -616,7 +618,18 @@ export function App() {
       )}
       {editors.importOpen && <ImportProfilesModal onClose={() => editors.setImportOpen(false)} />}
       {editors.proxyImportOpen && (
-        <ProxyImportModal onClose={() => editors.setProxyImportOpen(false)} />
+        <ImportProxiesModal
+          // Trash is a view, not a folder, so it never becomes a destination.
+          folderId={proxyFolderId === TRASH_FOLDER_ID ? null : proxyFolderId || null}
+          onClose={() => editors.setProxyImportOpen(false)}
+        />
+      )}
+      {editors.cookieImportOpen && (
+        <ImportCookiesModal
+          // Trash is a view, not a folder, so it never becomes a destination.
+          folderId={cookieFolderId === TRASH_FOLDER_ID ? null : cookieFolderId || null}
+          onClose={() => editors.setCookieImportOpen(false)}
+        />
       )}
       {editors.bookmarkImportOpen && (
         <BookmarkImportModal onClose={() => editors.setBookmarkImportOpen(false)} />
@@ -922,7 +935,7 @@ export function App() {
             onFolderId={setCookieFolderId}
             onOpenCookieSet={editors.setCookieSetOpen}
             onAssignCookieSet={editors.setAssignCookieSet}
-            onNewCookieSet={() => void run('add-cookie-set', addCookieSetFromPicker)}
+            onNewCookieSet={() => editors.setCookieImportOpen(true)}
             onShowAbout={() => setCookieIntroOpen(true)}
             onNewFolder={() => editors.setFolderDraft({
               kind: 'cookie',
@@ -1130,7 +1143,7 @@ export function App() {
             <BusyButton
               busy={isPending('add-cookie-set')}
               busyLabel="Uploading…"
-              onClick={() => void run('add-cookie-set', addCookieSetFromPicker)}
+              onClick={() => editors.setCookieImportOpen(true)}
             >
               <Plus size={16} /> Cookie-set
             </BusyButton>
@@ -1185,29 +1198,6 @@ export function App() {
     });
     if (await workspace.profiles.save(profile)) {
       toast.setMessage('Created the Demo profile — it browses direct, with no proxy.');
-    }
-  }
-
-  async function addCookieSetFromPicker() {
-    if (!native?.selectCookieFile) {
-      toast.setMessage('Native cookie file picker is not available. Restart Argus Launcher and try again.');
-      return;
-    }
-    try {
-      const selection = await native.selectCookieFile();
-      if (!selection) {
-        return;
-      }
-      // Filed into whichever folder the tab is standing in, so adding a set
-      // from inside a folder does not drop it into All and make the user move
-      // it. Trash is a view, not a folder, so it never becomes a destination.
-      const folderId = cookieFolderId === TRASH_FOLDER_ID ? null : cookieFolderId || null;
-      const entry = await workspace.cookies.addCookieSet(selection, {folderId});
-      if (entry) {
-        toast.setMessage(`Added "${entry.name}" to the cookie library`);
-      }
-    } catch (error) {
-      toast.setMessage(error instanceof Error ? error.message : String(error));
     }
   }
 }

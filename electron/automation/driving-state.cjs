@@ -37,11 +37,29 @@ const FILE_NAME = 'argus-automation.json';
 // orange border that never goes away would teach people to ignore the border,
 // which is worse than one that occasionally clears a few seconds early.
 //
-// 45s, refreshed on every step a run logs. Long enough that a slow step (the
-// 30s navigation timeout is the longest single wait a step can take) does not
-// blink the border off mid-run; short enough that a crash does not leave it up
-// for a minute.
+// 45s, refreshed by the heartbeat below. Short enough that a crash does not
+// leave a border up for a minute.
+//
+// It used to be refreshed only when a run logged a step, and that was wrong:
+// the runner logs AFTER `await this.execute(...)` returns, so the clock only
+// moved BETWEEN steps. The comment here justified 45s by claiming "the 30s
+// navigation timeout is the longest single wait a step can take", which is not
+// true -- step-schema.json allows a `wait` of up to 300s and a per-step
+// timeoutMs has no upper bound. Any step over 45s took the border down in the
+// middle of being driven and brought it back on the next log line, which
+// teaches the user that the border means nothing.
+//
+// Raising the TTL past 300s would have fixed that by breaking the other half:
+// a launcher killed mid-run would leave an orange border up for five minutes.
+// The heartbeat fixes both -- it moves the expiry forward on a wall clock
+// rather than on step boundaries, and it stops the instant this process does.
 const TTL_MS = 45000;
+
+// How often a run in flight rewrites its own expiry.
+//
+// Comfortably under half the TTL, so one missed beat (a busy event loop, a
+// slow disk) still leaves the written expiry ahead of the clock.
+const HEARTBEAT_MS = 15000;
 
 // How long an AI/MCP tool call keeps the border up after it returns.
 //
@@ -72,11 +90,16 @@ function filePathFor(userDataDir) {
 function createDrivingState({resolveUserDataDir, now = () => Date.now()}) {
   // profileId -> timer that clears an AI marker once its idle window passes.
   const idleTimers = new Map();
-  // profileId -> true while a run is in flight. An AI tool call arriving during
-  // a run must not overwrite the run's own label with the vaguer "an AI tool":
-  // the run is the more specific truth about the same fact, and it is the one
-  // with a name worth reading.
-  const runs = new Set();
+  // profileId -> {label, beat} while a run is in flight. An AI tool call
+  // arriving during a run must not overwrite the run's own label with the
+  // vaguer "an AI tool": the run is the more specific truth about the same
+  // fact, and it is the one with a name worth reading.
+  //
+  // `beat` is the interval that keeps the written expiry ahead of the clock for
+  // as long as the run lasts, however long a single step takes. It is the only
+  // thing standing between a 300s `wait` step and a border that goes out in the
+  // middle of it -- see TTL_MS.
+  const runs = new Map();
 
   function write(profileId, state) {
     const dir = resolveUserDataDir(profileId);
@@ -101,7 +124,11 @@ function createDrivingState({resolveUserDataDir, now = () => Date.now()}) {
       clearTimeout(timer);
       idleTimers.delete(profileId);
     }
-    runs.delete(profileId);
+    const run = runs.get(profileId);
+    if (run) {
+      clearInterval(run.beat);
+      runs.delete(profileId);
+    }
     const dir = resolveUserDataDir(profileId);
     if (!dir) {
       return;
@@ -113,16 +140,30 @@ function createDrivingState({resolveUserDataDir, now = () => Date.now()}) {
     }
   }
 
+  // One run-active write, with a fresh expiry. Shared by runActive and the
+  // heartbeat so the two cannot disagree about what a live run's file says.
+  function writeRunState(profileId, label) {
+    write(profileId, {
+      active: true,
+      kind: 'automation',
+      label: String(label || '').slice(0, MAX_LABEL),
+      expiresAt: now() + TTL_MS,
+    });
+  }
+
   return {
     AI_IDLE_MS,
     FILE_NAME,
+    HEARTBEAT_MS,
     TTL_MS,
 
-    // A run started, or logged a step. Idempotent, and called on every log entry
-    // precisely so the expiry above keeps moving forward while the run works.
+    // A run started, or logged a step. Idempotent: still called on every log
+    // entry, but the expiry no longer depends on that -- the heartbeat armed
+    // here keeps it moving while a single step runs for as long as it likes.
+    // What a repeated call does contribute is the label, which changes when a
+    // run's automation name does.
     runActive(profileId, label) {
       if (!profileId) return;
-      runs.add(profileId);
       // A run outranks an AI marker for this profile: drop the pending idle
       // clear so it cannot delete the run's own state eight seconds from now.
       const timer = idleTimers.get(profileId);
@@ -130,12 +171,24 @@ function createDrivingState({resolveUserDataDir, now = () => Date.now()}) {
         clearTimeout(timer);
         idleTimers.delete(profileId);
       }
-      write(profileId, {
-        active: true,
-        kind: 'automation',
-        label: String(label || '').slice(0, MAX_LABEL),
-        expiresAt: now() + TTL_MS,
-      });
+      const existing = runs.get(profileId);
+      if (existing) {
+        existing.label = label;
+      } else {
+        // unref() for the same reason the AI idle timer has one: a repeating
+        // timer that kept the event loop alive would stop the app quitting
+        // while any run was in flight.
+        const beat = setInterval(() => {
+          const run = runs.get(profileId);
+          if (!run) return;
+          writeRunState(profileId, run.label);
+        }, HEARTBEAT_MS);
+        if (typeof beat.unref === 'function') {
+          beat.unref();
+        }
+        runs.set(profileId, {label, beat});
+      }
+      writeRunState(profileId, label);
     },
 
     // An AI/MCP tool touched this profile. Refreshes the idle window; ignored
@@ -183,11 +236,13 @@ function createDrivingState({resolveUserDataDir, now = () => Date.now()}) {
     // behind by a launcher that is no longer running would only come down when
     // its TTL lapsed, and the file would sit in the profile until the next run.
     idleAll() {
-      for (const profileId of new Set([...runs, ...idleTimers.keys()])) {
+      for (const profileId of new Set([...runs.keys(), ...idleTimers.keys()])) {
         clear(profileId);
       }
     },
   };
 }
 
-module.exports = {AI_IDLE_MS, FILE_NAME, MAX_LABEL, TTL_MS, createDrivingState};
+module.exports = {
+  AI_IDLE_MS, FILE_NAME, HEARTBEAT_MS, MAX_LABEL, TTL_MS, createDrivingState,
+};

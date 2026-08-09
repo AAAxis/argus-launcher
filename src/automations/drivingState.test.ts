@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
-  AI_IDLE_MS, FILE_NAME, MAX_LABEL, TTL_MS, createDrivingState,
+  AI_IDLE_MS, FILE_NAME, HEARTBEAT_MS, MAX_LABEL, TTL_MS, createDrivingState,
 } from '../../electron/automation/driving-state.cjs';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'argus-driving-'));
@@ -106,6 +106,72 @@ describe('an automation run', () => {
     h.state.idle('p1');
     expect(h.read('p1')).toBeNull();
     expect(h.read('p2').label).toBe('Two');
+  });
+});
+
+// The bug the heartbeat exists for: the runner logs AFTER a step returns, so
+// nothing refreshed the expiry WHILE a step ran. step-schema.json allows a
+// `wait` of up to 300s and a per-step timeoutMs has no ceiling, so a long step
+// took the border down mid-run and brought it back on the next log line. A
+// window that stops glowing in the middle of being driven is worse than one
+// that never glowed: it teaches the user the border means nothing.
+describe('a run with a step longer than the TTL', () => {
+  it('keeps the border up through a 300s step with no log in between', () => {
+    const h = harness();
+    h.state.runActive('p1', 'Slow scrape');
+    // One runActive, then nothing but wall-clock -- exactly what a `wait: 300`
+    // step looks like from here.
+    for (let elapsed = 0; elapsed < 300_000; elapsed += HEARTBEAT_MS) {
+      h.advance(HEARTBEAT_MS);
+      const state = h.read('p1');
+      expect(state).not.toBeNull();
+      expect(state.expiresAt).toBeGreaterThan(h.at());
+    }
+    expect(h.read('p1')).toMatchObject({kind: 'automation', label: 'Slow scrape'});
+  });
+
+  it('beats often enough that one missed beat still leaves the file believable', () => {
+    expect(HEARTBEAT_MS * 2).toBeLessThan(TTL_MS);
+  });
+
+  it('keeps the run\'s own label while it beats', () => {
+    const h = harness();
+    h.state.runActive('p1', 'Daily login');
+    h.advance(HEARTBEAT_MS * 3);
+    expect(h.read('p1').label).toBe('Daily login');
+  });
+});
+
+// The other half of the same contract, and the reason the fix is a heartbeat
+// rather than a bigger TTL: a launcher that dies mid-run stops beating, and the
+// file it left behind expires on schedule.
+describe('when the run ends or the launcher stops', () => {
+  it('stops beating once the run is idle, so the file stays gone', () => {
+    const h = harness();
+    h.state.runActive('p1', 'Daily login');
+    h.state.idle('p1');
+    h.advance(HEARTBEAT_MS * 4);
+    expect(h.read('p1')).toBeNull();
+  });
+
+  it('stops beating on idleAll, so quit does not resurrect a border', () => {
+    const h = harness();
+    h.state.runActive('p1', 'One');
+    h.state.runActive('p2', 'Two');
+    h.state.idleAll();
+    h.advance(HEARTBEAT_MS * 4);
+    expect(h.read('p1')).toBeNull();
+    expect(h.read('p2')).toBeNull();
+  });
+
+  // The written expiry is always at most TTL_MS out, whatever the heartbeat
+  // does. That is what the browser compares against when nothing is left to
+  // clear the file.
+  it('never writes an expiry further out than the TTL', () => {
+    const h = harness();
+    h.state.runActive('p1', 'Daily login');
+    h.advance(HEARTBEAT_MS * 5);
+    expect(h.read('p1').expiresAt).toBeLessThanOrEqual(h.at() + TTL_MS);
   });
 });
 

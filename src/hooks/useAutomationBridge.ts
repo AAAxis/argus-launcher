@@ -27,6 +27,7 @@ import {useOrg} from '../org';
 import {osPresets, randomFingerprintPatch} from '../lib/fingerprintPresets';
 import {comparable} from '../lib/text';
 import {matchedProxyForProfile, repairProxyAssignments} from '../lib/proxies';
+import {buildRunTile} from '../lib/runTile';
 import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
 import {supabase} from '../supabase';
@@ -84,6 +85,47 @@ class ApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
   }
+}
+
+// useChannel for the page routes, which need the status to survive.
+//
+// The plain useChannel above answers with `respond(requestId, undefined, msg)`
+// and no code, so every failure on those routes arrived as a 500 -- including
+// the 409 the cookie-sync push handler has thrown for a cross-workspace profile
+// since that case was fixed. The panel showed "the launcher broke" for a
+// profile that was fine and a fix that was one argument wide.
+//
+// Reads `.status` off the thrown value rather than requiring ApiError, because
+// the handlers here already use `Object.assign(new Error(...), {status})` and
+// rewriting them to a class would be a bigger diff than the bug.
+function statusOf(error: unknown): number {
+  const status = (error as {status?: unknown} | null)?.status;
+  return typeof status === 'number' && Number.isFinite(status) ? status : 500;
+}
+
+function useStatusChannel<Req extends {requestId: string}, Res>(
+    subscribe: ((callback: (payload: Req) => void) => () => void) | undefined,
+    respond: ((requestId: string, result?: Res, error?: string,
+        status?: number) => void) | undefined,
+    handler: (payload: Req) => Res | Promise<Res>,
+    deps: DependencyList) {
+  useEffect(() => {
+    if (!subscribe || !respond) {
+      return;
+    }
+    return subscribe((payload) => {
+      void (async () => {
+        try {
+          respond(payload.requestId, await handler(payload));
+        } catch (error) {
+          respond(payload.requestId, undefined,
+              error instanceof Error ? error.message : String(error),
+              statusOf(error));
+        }
+      })();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
 }
 
 // A connector's config as the table stores it: a flat object of strings.
@@ -255,10 +297,10 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   // assigned to the profile -- inspectable, exportable, re-assignable --
   // unlike the legacy push-local above, which writes hidden per-profile
   // fields and stays for external API callers.
-  useChannel(
+  useStatusChannel(
       native?.onCookieSyncPushRequest,
       native?.sendCookieSyncPushResult,
-      async ({profileId, cookies: pushed, saveAs, orgId}) => {
+      async ({profileId, cookies: pushed, saveAs, saveToSetId, orgId}) => {
         const {profile, cookies, sameWorkspace} =
           await resolveLaunchProfile(profileId, orgId);
         // Reads can cross workspaces; writes deliberately cannot.
@@ -281,6 +323,38 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
               {status: 409});
         }
         const entries = cookiesFromJsonValue(pushed);
+
+        // "Overwrite «set»" from the panel: the user picked an existing set by
+        // id and confirmed a dialog naming it and both cookie counts.
+        //
+        // This is the only path that writes over a set the user did not create
+        // from this window, so it is deliberately hard to reach by accident.
+        // The panel never routes its automatic push here -- schedulePush has no
+        // saveToSetId to send -- and there is no undo: saveEntries uploads a new
+        // Storage object and savePayload deletes the superseded one, so the
+        // previous contents are gone the moment this succeeds.
+        //
+        // The id is resolved against this launch's own workspace, never trusted
+        // from the body, for the reason the pull route sets out at length.
+        if (saveToSetId !== undefined) {
+          const target = cookies.find((item) =>
+            item.id === saveToSetId && !item.deleted_at);
+          if (!target) {
+            throw Object.assign(
+                new Error('That cookie set is not in this profile\'s workspace.'),
+                {status: 403});
+          }
+          // The same empty-jar guard the two paths below carry, and it matters
+          // most here: this is an overwrite of something that already exists.
+          if (entries.length === 0) {
+            throw new Error('There are no cookies to save.');
+          }
+          if (!await cookieActions.saveEntries(target, entries)) {
+            throw new Error('Could not save these cookies.');
+          }
+          toast.setMessage(`Saved ${entries.length} cookies to "${target.name}"`);
+          return {saved: entries.length, set: target.name};
+        }
 
         // A library save (popup's "Save to Cookies tab…" / editor's dialog),
         // not a sync: `saveAs` diverts the whole request to a NEW named set
@@ -385,28 +459,92 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   // The reverse direction: "Load from Launcher" in the extension popup. Reads
   // whatever set the profile is assigned right now, through the same
   // cache-then-file path the inspector uses.
-  useChannel(
+  useStatusChannel(
       native?.onCookieSyncPullRequest,
       native?.sendCookieSyncPullResult,
-      async ({profileId, orgId}) => {
+      async ({profileId, orgId, setId}) => {
         const {profile, cookies} = await resolveLaunchProfile(profileId, orgId);
-        const assigned = assignedSet(profile, cookies);
-        if (!assigned) {
-          return {cookies: [], set: null};
+        // `setId` is the panel's picker choosing a set this profile is not
+        // assigned to. It is the first thing a from-page route has ever read
+        // out of a request body to decide WHAT to read, so the compensating
+        // control is here rather than at the token layer: resolve it against
+        // this launch's own workspace and refuse anything else.
+        //
+        // Deliberately not left to RLS. RLS would also refuse a set from
+        // another org, but only because the signed-in user is not a member of
+        // it -- which turns a bug in orgId plumbing into a cross-org read the
+        // moment the user happens to belong to both. This list is the token's
+        // workspace, resolved from the entry, and nothing else is reachable.
+        const wanted = typeof setId === 'string' && setId ?
+          cookies.find((item) => item.id === setId && !item.deleted_at) :
+          assignedSet(profile, cookies);
+        if (typeof setId === 'string' && setId && !wanted) {
+          throw Object.assign(
+              new Error('That cookie set is not in this profile\'s workspace.'),
+              {status: 403});
+        }
+        if (!wanted) {
+          return {cookies: [], set: null, setId: null, assigned: true};
         }
         let rows;
         try {
-          rows = await cookieActions.loadEntries(assigned);
+          rows = await cookieActions.loadEntries(wanted);
         } catch (error) {
           // loadEntries throws the raw Postgres/Storage message so the
           // inspector can show *why* a set would not open; over the loopback
           // API that detail is not for the extension, only the console.
-          console.error('cookie-sync pull: could not read the assigned set', error);
-          throw new Error('Could not read the assigned cookie set.');
+          console.error('cookie-sync pull: could not read the cookie set', error);
+          throw new Error('Could not read that cookie set.');
         }
         return {
           cookies: rows.map(({id: _rowId, ...entry}) => entry),
-          set: assigned.name,
+          set: wanted.name,
+          setId: wanted.id,
+          // What the panel needs to decide whether to suppress its push loop:
+          // loading the assigned set leaves the jar and the launcher agreeing,
+          // loading any other one does not.
+          assigned: wanted.id === (assignedSet(profile, cookies)?.id || ''),
+        };
+      },
+      cloud);
+
+  // Every cookie set in this launch's workspace, so the panel can offer a
+  // picker instead of the single "Load from Launcher" button.
+  //
+  // Metadata only, on exactly the same reasoning as the cookie-list route
+  // below: names, counts and filing are what a cookie table shows, and none of
+  // it is a credential. No payload is read here at all -- db.cookieSets.list
+  // omits the `cookies` column by design, so listing two hundred sets costs one
+  // small select.
+  //
+  // Read through db rather than off `state.cookies`, unlike every handler
+  // above. state refreshes on window focus, throttled to once per ten seconds
+  // (WorkspaceProvider), and the launcher window is by definition not focused
+  // while the user is looking at a browser side panel -- so a teammate's set
+  // from five minutes ago would simply not be in the list.
+  useStatusChannel(
+      native?.onCookieSetsRequest,
+      native?.sendCookieSetsResult,
+      async ({profileId, orgId}) => {
+        const resolved = await resolveLaunchProfile(profileId, orgId);
+        let sets;
+        try {
+          sets = await db.cookieSets.list(resolved.orgId);
+        } catch (error) {
+          console.error('cookie sets: could not list the workspace library', error);
+          throw new Error('Could not read this workspace\'s cookie sets.');
+        }
+        const assigned = assignedSet(resolved.profile, sets);
+        return {
+          assignedId: assigned?.id || null,
+          sets: sets.filter((item) => !item.deleted_at).map((item) => ({
+            id: item.id,
+            name: item.name,
+            count: Number(item.count) || 0,
+            folder_id: item.folder_id || null,
+            tags: item.tags || [],
+            updated_at: item.updated_at || '',
+          })),
         };
       },
       cloud);
@@ -425,26 +563,37 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   // this route is reachable by anything on loopback holding the run token, and
   // "show me the list" does not require handing over the sessions themselves.
   // The full-tab editor already shows values, behind the app's own auth.
-  useChannel(
+  useStatusChannel(
       native?.onCookieListRequest,
       native?.sendCookieListResult,
-      async ({profileId, orgId}) => {
+      async ({profileId, orgId, setId}) => {
         const {profile, cookies: sets} = await resolveLaunchProfile(profileId, orgId);
-        const assigned = assignedSet(profile, sets);
-        if (!assigned) {
+        // Same optional `setId` as the pull route, validated the same way and
+        // for the same reason: the picker has to be able to answer "what am I
+        // about to load" about a set that is not the assigned one.
+        const wanted = typeof setId === 'string' && setId ?
+          sets.find((item) => item.id === setId && !item.deleted_at) :
+          assignedSet(profile, sets);
+        if (typeof setId === 'string' && setId && !wanted) {
+          throw Object.assign(
+              new Error('That cookie set is not in this profile\'s workspace.'),
+              {status: 403});
+        }
+        if (!wanted) {
           // Not an error: a profile with no assigned set is an ordinary state,
           // and the panel says so rather than painting a failure.
-          return {set: null, count: 0, cookies: []};
+          return {set: null, setId: null, count: 0, cookies: []};
         }
         let rows;
         try {
-          rows = await cookieActions.loadEntries(assigned);
+          rows = await cookieActions.loadEntries(wanted);
         } catch (error) {
-          console.error('cookie list: could not read the assigned set', error);
-          throw new Error('Could not read the assigned cookie set.');
+          console.error('cookie list: could not read the cookie set', error);
+          throw new Error('Could not read that cookie set.');
         }
         return {
-          set: assigned.name,
+          set: wanted.name,
+          setId: wanted.id,
           count: rows.length,
           cookies: rows.map((entry) => ({
             domain: String(entry.domain || ''),
@@ -459,6 +608,99 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
               Number(entry.expirationDate) :
               null,
           })),
+        };
+      },
+      cloud);
+
+  // Every automation in this launch's workspace, for the side panel's list.
+  //
+  // The panel used to show the launch snapshot -- pinned workflows plus the
+  // profile's own -- frozen into a JSON file before the browser process
+  // existed. A team whose workflows nobody had thought to pin was invisible
+  // from inside the browser, which is the whole point of this route.
+  //
+  // Read through db rather than off state.automations, for the reason the
+  // cookie-sets handler above gives: the launcher window is not focused while
+  // someone is looking at a side panel, and state only refreshes on focus.
+  //
+  // What travels is metadata. `steps` never does -- launch.ts sets out why at
+  // length, and it applies with more force here: the panel is a document
+  // living in a browser that goes on to visit arbitrary sites, and a step tree
+  // carries selectors, urls and typed values. `variables` and `parameters`
+  // never travel either; parameters can hold resolved secret values.
+  useStatusChannel(
+      native?.onPanelAutomationsRequest,
+      native?.sendPanelAutomationsResult,
+      async ({profileId, orgId}) => {
+        const resolved = await resolveLaunchProfile(profileId, orgId);
+        let rows;
+        try {
+          rows = await db.automations.list(resolved.orgId);
+        } catch (error) {
+          console.error('panel automations: could not list the workspace', error);
+          throw new Error('Could not read this workspace\'s automations.');
+        }
+        const attachedId = resolved.profile.automation_id || '';
+        return {
+          automations: rows.filter((item) => !item.deleted_at).map((item) => ({
+            id: item.id,
+            name: item.name,
+            description: item.description || '',
+            pinned: Boolean(item.pinned),
+            assigned: item.id === attachedId,
+            icon: item.icon || '',
+            color: item.color || '',
+          })),
+        };
+      },
+      cloud);
+
+  // Resolves one workspace automation into a runnable tile, for a panel run of
+  // a workflow this launch was not handed.
+  //
+  // The answer goes to the main process and straight into the runner. It is the
+  // one payload on any of these routes that DOES carry steps and resolved
+  // parameter values, including secret ones -- which is exactly why it is
+  // resolved on demand and never written into the run token store, and why the
+  // panel never sees it. main.cjs holds it for the length of one request.
+  //
+  // The id is validated here, against the workspace the token was minted under,
+  // and nowhere else. Not at the token layer, which type-checks it and no more,
+  // and deliberately not by leaning on RLS: RLS refuses another org's rows only
+  // because the signed-in user is not a member, so a bug in orgId plumbing
+  // would turn into a cross-org run the moment they happened to be in both.
+  useStatusChannel(
+      native?.onPanelResolveAutomationRequest,
+      native?.sendPanelResolveAutomationResult,
+      async ({profileId, orgId, automationId}) => {
+        const resolved = await resolveLaunchProfile(profileId, orgId);
+        // The catalogue, not just the one row: resolveCallTree needs every
+        // automation this one might call, and a workflow whose callee is
+        // missing must refuse by name rather than half-run.
+        let rows;
+        try {
+          rows = await db.automations.list(resolved.orgId);
+        } catch (error) {
+          console.error('panel run: could not read the workspace catalogue', error);
+          throw new Error('Could not read this workspace\'s automations.');
+        }
+        const wanted = rows.find((item) => item.id === automationId && !item.deleted_at);
+        if (!wanted) {
+          // A trashed automation is refused rather than run: a profile keeps
+          // its automation_id through a soft delete so restoring is lossless,
+          // which is precisely what makes "trashed means does not run" a rule
+          // this path has to enforce too.
+          throw Object.assign(
+              new Error('That automation is not in this profile\'s workspace.'),
+              {status: 403});
+        }
+        const tile = buildRunTile(wanted, resolved.profile, rows);
+        return {
+          automation: tile,
+          resolvedAutomations: tile.resolvedAutomations,
+          vars: tile.vars,
+          secretVarNames: tile.secretVarNames,
+          paramsBlocked: tile.paramsBlocked,
         };
       },
       cloud);

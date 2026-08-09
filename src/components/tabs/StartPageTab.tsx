@@ -14,7 +14,7 @@
 // search engine choice is per-machine (see lib/searchEngines.ts).
 import {useState} from 'react';
 import {
-  Activity, Bookmark, ChevronDown, Cookie, Globe, Info, Monitor, Pencil, Play, Plus,
+  Bookmark, ChevronDown, Cookie, ExternalLink, Globe, Info, Monitor, Pencil, Play, Plus,
   RefreshCw, Search, Shield, Workflow, X,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
@@ -142,8 +142,11 @@ function SectionLabel({title, note, mark: Mark}: {
 // deciding that without being able to see the block that takes up its bottom
 // third is deciding blind.
 //
-// The four rows, their icons and their order are the same four homePage.ts
-// emits. Changing one means changing both.
+// Two layers, and the split is the point: the gray shell carries the session's
+// CONTROLS -- what it is, how to take a fresh reading, where to check it against
+// someone else's opinion -- and the card inside carries the READING. The three
+// rows, their icons and their order are the same three homePage.ts emits, and
+// so is that split. Changing one means changing both.
 function SessionPreview() {
   return (
     <section className="start-section">
@@ -152,29 +155,34 @@ function SessionPreview() {
         note="Every profile's start page shows its own live session here: the proxy it is coming out of, the profile's status and platform, and the cookie set it launched with."
         title="Session"
       />
-      <div className="start-card start-session-card">
+      <div className="start-session-shell">
         <div className="start-session-head">
+          <StatusChip status="Ban" />
           <span className="start-session-tag">Preview</span>
-          <span className="pill-static"><RefreshCw size={13} />Re-check</span>
+          {/* Both drawn, neither pressable -- same argument as the automation
+              card's missing Run button: there is no session here to re-check
+              and no window to send to ip.me. */}
+          <span className="start-session-actions">
+            <span className="pill-static"><RefreshCw size={13} />Re-check</span>
+            <span className="icon-static"><ExternalLink size={14} /></span>
+          </span>
         </div>
-        <dl className="start-session-fields">
-          <div className="start-field wide">
-            <dt><Globe size={15} />Proxy</dt>
-            <dd>142.252.99.144:64455 · Los Angeles, California, US · 1126 ms</dd>
-          </div>
-          <div className="start-field">
-            <dt><Activity size={15} />Status</dt>
-            <dd><StatusChip status="Ban" /></dd>
-          </div>
-          <div className="start-field">
-            <dt><Monitor size={15} />Platform</dt>
-            <dd>Windows 11</dd>
-          </div>
-          <div className="start-field wide">
-            <dt><Cookie size={15} />Cookies</dt>
-            <dd>Lisa Martinez (live).json</dd>
-          </div>
-        </dl>
+        <div className="start-session-card">
+          <dl className="start-session-fields">
+            <div className="start-field wide">
+              <dt><Globe size={15} />Proxy</dt>
+              <dd>142.252.99.144:64455 · Los Angeles, California, US · 1126 ms</dd>
+            </div>
+            <div className="start-field">
+              <dt><Monitor size={15} />Platform</dt>
+              <dd>Windows 11</dd>
+            </div>
+            <div className="start-field wide">
+              <dt><Cookie size={15} />Cookies</dt>
+              <dd>Lisa Martinez (live).json</dd>
+            </div>
+          </dl>
+        </div>
       </div>
     </section>
   );

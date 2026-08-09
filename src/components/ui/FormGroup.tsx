@@ -11,10 +11,21 @@
 // head a block inside a dialog that already carries a title, so they are
 // subordinate to it rather than peers of it. Spans its host `.profile-form`
 // grid, so groups stack rather than sitting side by side.
+//
+// A group is two objects, not one box: a frame carrying the heading, and the
+// field grid inset in it. That is the automations grid's card drawn at form
+// scale (.automation-card-framed / .automation-card-body), and it is here for
+// the same reason it is there -- what the app says ABOUT a block sits outside
+// the block, so the sections read as sections at a glance instead of as one
+// undifferentiated run of boxes. See styles/controls/form-groups.css.
 import type {ReactNode} from 'react';
 
-export function FormGroup({title, hint, info, children}: {
+export function FormGroup({title, icon, hint, info, id, children}: {
   title: string;
+  // A lucide glyph sized 14, on the heading's line. Same size and the same
+  // --ink-soft the field labels' icons take, so a section's mark and its
+  // fields' marks are one family rather than two.
+  icon?: ReactNode;
   // Not optional. A section whose purpose cannot be said in a line is a section
   // that has been drawn around the wrong fields -- which is how the ungrouped
   // version of this form came to be ungrouped.
@@ -23,15 +34,20 @@ export function FormGroup({title, hint, info, children}: {
   // line above -- where the cookies go, and what "plaintext" means. Same slot
   // Field.info fills for a single field.
   info?: ReactNode;
+  // A scroll target, for a caller that needs to send the reader back to this
+  // block -- the profile summary's per-group Edit does exactly that.
+  id?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="form-group">
+    <section className="form-group" id={id}>
       <div className="form-group-head">
-        <h4>{title}{info}</h4>
+        <h4>{icon}{title}{info}</h4>
         <p>{hint}</p>
       </div>
-      {children}
+      {/* The fields' own surface. The frame above is the section's chrome and
+          draws no border of its own; this is the card inside it. */}
+      <div className="form-group-body">{children}</div>
     </section>
   );
 }

@@ -138,7 +138,7 @@ const TOOLS = [
     // write that never happened.
     description:
       'Change a profile\'s name, status, tags, colour, avatar, folder, proxy mode, ' +
-      'start URL or launch automation. Assigning a specific proxy is a separate ' +
+      'start URL, login URL or launch automation. Assigning a specific proxy is a separate ' +
       'call (argus_assign_proxy); setting proxyMode to direct or free_proxy here ' +
       'clears whatever proxy the profile was on.',
     inputSchema: {
@@ -161,6 +161,11 @@ const TOOLS = [
             'free_proxy clear it.'},
         startUrl: {type: 'string',
           description: 'URL the profile opens on launch. "" to clear.'},
+        loginUrl: {type: 'string',
+          description: 'The sign-in page this profile\'s stored email/password belong ' +
+            'to. A note, not an action — nothing fills the form in; an automation reads ' +
+            'it as {{profile.login_url}}. "" to clear. Distinct from startUrl, which is ' +
+            'where a launch lands.'},
         automationId: {type: 'string',
           description: 'Automation to run on every launch (argus_list_automations). ' +
             '"" to detach.'},
@@ -180,10 +185,14 @@ const TOOLS = [
     // that guessed those names could rewrite a profile's stored credentials
     // through a tool whose schema never mentions them. Anything undeclared is
     // dropped here rather than relied on being rejected downstream.
+    //
+    // `loginUrl` is deliberately on the list while those two stay off it: it
+    // records where a credential is used, not what it is, so an agent setting it
+    // cannot lock anybody out of anything.
     run: async ({api, args}) => {
       const patch = {profileId: args.profileId};
       for (const field of ['name', 'status', 'tags', 'color', 'avatar', 'folderId',
-        'proxyMode', 'startUrl', 'automationId', 'automationVars']) {
+        'proxyMode', 'startUrl', 'loginUrl', 'automationId', 'automationVars']) {
         if (args[field] !== undefined) {
           patch[field] = args[field];
         }

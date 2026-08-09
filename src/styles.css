@@ -63,3 +63,7 @@
 @import './styles/features/notifications.css';
 @import './styles/features/plans.css';
 @import './styles/features/onboarding.css';
+/* Last on purpose, and it must stay last: its rules tie with the ones
+ * features/profile-editor.css writes to `.profile-modal header`, so only source
+ * order decides which of the two draws the editors' sticky bar. */
+@import './styles/features/editor-head.css';

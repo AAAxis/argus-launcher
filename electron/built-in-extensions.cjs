@@ -224,6 +224,116 @@ function pruneStaleCopies(userDataDir, prefix) {
 // Returns a ready-to-load directory for one enabled entry, or '' -- never
 // throws and never blocks. A profile launching without an extension is always
 // preferable to a profile that will not launch.
+// Gives the service worker a filename derived from what is in it, so a new
+// build cannot be served from the cache of an old one.
+//
+// The bug this closes, in full, because it has now cost two separate rounds of
+// "the feature shipped and the panel says it does not exist":
+//
+// Chromium caches an unpacked extension's service worker script body against
+// its SCRIPT PATH. The directory is copied fresh on every launch (four lines
+// up: rmSync then copyDirectoryContents), so the bytes on disk are always
+// current -- and it does not matter. `ArgusPanel/background.js` is the same
+// path it was last launch, so a profile that has ever run the old worker keeps
+// running it: relaunching does not help, quitting the launcher does not help,
+// and the panel answers every new message type with "Unknown message" while
+// sitting next to a file on disk that implements all of them. Bumping
+// manifest.json's version does not help either -- the cache is keyed
+// independently of the manifest, which is the CDP-confirmed finding recorded
+// against `placement` in the table above.
+//
+// The fix the table's comment describes -- a new directory -- works because it
+// is a new path, but it costs a new extension ID: the toolbar button, the
+// browser's --argus-panel-extension-id switch, and every profile's
+// chrome.storage.local (the seed watermark and the sync watermark) all hang off
+// the directory. Renaming to ship a code change would be paying that once per
+// release.
+//
+// A new SCRIPT path costs none of it. The ID is derived from the directory
+// (see unpackedExtensionId below), so the button, the switch and the storage
+// are all untouched; only the cache key moves. The name is a content hash, so
+// an unchanged extension keeps its filename and Chromium's cache keeps working
+// exactly as intended -- this defeats the cache only when the code has actually
+// changed, which is the only time it is wrong.
+//
+// Hashed over every file in the copied directory, not just the worker: the
+// worker importScripts() its siblings, and those bodies are cached with it.
+// Called before configure(), so the per-launch files it writes (argus-launch
+// .json, argus-session.json, seed-cookies.json) are not in the digest -- they
+// change every launch and would defeat the cache every launch.
+function versionServiceWorker(extensionDir) {
+  const manifestPath = path.join(extensionDir, 'manifest.json');
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return;
+  }
+  const worker = manifest.background && manifest.background.service_worker;
+  if (typeof worker !== 'string' || !worker) {
+    return;
+  }
+  const workerPath = path.join(extensionDir, worker);
+  if (!fs.existsSync(workerPath)) {
+    return;
+  }
+  // The name this worker has when it is NOT stamped. Everything below works
+  // from this rather than from whatever is on disk, which is what makes the
+  // function idempotent: without it a second call hashes a file whose name
+  // already contains a hash, gets a different answer, and produces
+  // background.<a>.<b>.js -- a name that grows a segment every time anyone
+  // calls this, and never matches the one an unchanged build should keep.
+  const STAMP = /\.[0-9a-f]{12}\.js$/;
+  const canonical = worker.replace(STAMP, '.js');
+  const digest = crypto.createHash('sha256');
+  for (const name of fs.readdirSync(extensionDir).sort()) {
+    const full = path.join(extensionDir, name);
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    // Top-level files only. The one subdirectory here is icons/, which the
+    // worker does not load and whose contents cannot change its behaviour.
+    if (!stat.isFile()) {
+      continue;
+    }
+    // Under its canonical name, for the same reason: a stamped filename in the
+    // digest would make the digest depend on itself.
+    digest.update(name === worker ? canonical : name);
+    if (name === 'manifest.json') {
+      // The manifest is hashed with the worker name normalized back, and this
+      // is the second half of the same self-reference problem: this function
+      // REWRITES the manifest to point at the stamped name, so hashing it
+      // verbatim would mean a second call digests a file the first call
+      // changed and lands on a different answer. Everything else in the
+      // manifest -- permissions, host permissions, the panel path -- still
+      // counts, so a real manifest change still moves the name.
+      digest.update(JSON.stringify({
+        ...manifest,
+        background: {...manifest.background, service_worker: canonical},
+      }));
+      continue;
+    }
+    digest.update(fs.readFileSync(full));
+  }
+  const stamped = `${canonical.replace(/\.js$/, '')}.${digest.digest('hex').slice(0, 12)}.js`;
+  if (stamped === worker) {
+    return;
+  }
+  try {
+    fs.renameSync(workerPath, path.join(extensionDir, stamped));
+    manifest.background.service_worker = stamped;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  } catch (error) {
+    // A worker that could not be renamed is the behaviour this function was
+    // added to improve on, not a reason to fail a launch: the extension still
+    // loads and still works, it just may be served from cache.
+    console.error('Could not version the service worker for', extensionDir, error);
+  }
+}
+
 async function materializeBuiltIn(payload, entry, deps) {
   // Web Store entries are never copied per profile and are never downloaded
   // here: launch uses whatever is already in the shared machine cache and
@@ -253,6 +363,7 @@ async function materializeBuiltIn(payload, entry, deps) {
   const extensionDir = destinationFor(payload.userDataDir, entry);
   fs.rmSync(extensionDir, {recursive: true, force: true});
   deps.copyDirectoryContents(sourceDir, extensionDir);
+  versionServiceWorker(extensionDir);
   if (!deps.isLoadableExtensionDir(extensionDir)) {
     console.warn(
         `Skipping built-in extension "${entry.key}": copy to ${extensionDir} did not ` +
@@ -471,4 +582,5 @@ module.exports = {
   seedPinnedExtensions,
   unpackedExtensionId,
   unpinRetiredExtensions,
+  versionServiceWorker,
 };

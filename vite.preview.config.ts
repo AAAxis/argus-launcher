@@ -27,6 +27,16 @@ export default defineConfig({
       find: /^.*electron\/automation\/notify\.cjs$/,
       replacement: fileURLToPath(new URL('./preview-notify-stub.ts', import.meta.url)),
     }, {
+      // The import harness (preview-imports.tsx) hands the dialogs fixture
+      // files. Without this each one raises a picker that is not there and
+      // stops on its source step -- the one step that did not need looking at.
+      // Anchored the same way the notify stub is, and for the same reason.
+      find: /^(.*)\/src\/native$/,
+      replacement: fileURLToPath(new URL('./preview-native', import.meta.url)),
+    }, {
+      find: /^(?:\.\.\/)+native$/,
+      replacement: fileURLToPath(new URL('./preview-native', import.meta.url)),
+    }, {
       // The Automations-tab harness swaps the whole workspace for a fixture --
       // the tab and its children (Assignee, the cards) read useWorkspace().
       find: /^(.*)\/workspace\/WorkspaceProvider$/,

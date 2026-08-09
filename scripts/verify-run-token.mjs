@@ -19,7 +19,9 @@ const require = createRequire(import.meta.url);
 const {
   createRunTokens, handleRecheckFromPage, handleRunFromPage,
   handleOpenInLauncherFromPage, handleRunStatusFromPage, handleCancelRunFromPage,
-  handleCookiePushFromPage, handleCookiePullFromPage, COOKIE_MAX_BODY_BYTES,
+  handleCookiePushFromPage, handleCookiePullFromPage, handleCookieListFromPage,
+  handleCookieSetsFromPage, handleAutomationListFromPage, handleRunAnyFromPage,
+  COOKIE_MAX_BODY_BYTES,
 } = require('../electron/automation/run-token.cjs');
 
 const PORT = 38998;
@@ -42,6 +44,11 @@ let started = 0;
 // Every page route on one server, told apart by path exactly as main.cjs does.
 const rechecked = [];
 const pushed = [];
+const pulled = [];
+const listed = [];
+const setsListed = [];
+const automationsListed = [];
+const anyRuns = [];
 const opened = [];
 const statused = [];
 const cancelled = [];
@@ -103,12 +110,15 @@ const server = createServer((req, res) => {
   if (req.url === '/cookie-push') {
     handleCookiePushFromPage({
       req, res, tokens, sendJson,
-      pushCookies: async (entry, cookies, saveAs) => {
+      pushCookies: async (entry, cookies, saveAs, saveToSetId) => {
         // `cookies` is kept, not just its length, so a chunk-boundary
         // corruption test can inspect the actual value that arrived.
-        // `saveAs` is kept too, so the type-gate below (a string survives, a
-        // non-string is dropped to undefined) can be asserted directly.
-        pushed.push({profileId: entry.profileId, count: cookies.length, cookies, saveAs});
+        // `saveAs` and `saveToSetId` are kept too, so their type-gates below (a
+        // string survives, a non-string is dropped to undefined) can be
+        // asserted directly.
+        pushed.push({
+          profileId: entry.profileId, count: cookies.length, cookies, saveAs, saveToSetId,
+        });
         return {saved: cookies.length, set: saveAs};
       },
     });
@@ -117,7 +127,50 @@ const server = createServer((req, res) => {
   if (req.url === '/cookie-pull') {
     handleCookiePullFromPage({
       req, res, tokens, sendJson,
-      pullCookies: async (entry) => ({cookies: [{name: 'sid', value: 'v', domain: entry.profileId}]}),
+      pullCookies: async (entry, setId) => {
+        pulled.push({profileId: entry.profileId, setId});
+        return {cookies: [{name: 'sid', value: 'v', domain: entry.profileId}], setId};
+      },
+    });
+    return;
+  }
+  if (req.url === '/cookie-list') {
+    handleCookieListFromPage({
+      req, res, tokens, sendJson,
+      listCookies: async (entry, setId) => {
+        listed.push({profileId: entry.profileId, setId});
+        return {set: 'Work', setId: setId || null, count: 0, cookies: []};
+      },
+    });
+    return;
+  }
+  if (req.url === '/cookie-sets') {
+    handleCookieSetsFromPage({
+      req, res, tokens, sendJson,
+      listSets: async (entry) => {
+        setsListed.push(entry.profileId);
+        return {assignedId: 'set_1', sets: [{id: 'set_1', name: 'Work', count: 3}]};
+      },
+    });
+    return;
+  }
+  if (req.url === '/automation-list') {
+    handleAutomationListFromPage({
+      req, res, tokens, sendJson,
+      listAutomations: async (entry) => {
+        automationsListed.push({profileId: entry.profileId, orgId: entry.orgId});
+        return {automations: [{id: 'other_org_workflow', name: 'Teammate flow'}]};
+      },
+    });
+    return;
+  }
+  if (req.url === '/run-any') {
+    handleRunAnyFromPage({
+      req, res, tokens, sendJson,
+      startAnyRun: async (entry, automationId) => {
+        anyRuns.push({profileId: entry.profileId, orgId: entry.orgId, automationId});
+        return `run_any_${anyRuns.length}`;
+      },
     });
     return;
   }
@@ -590,6 +643,121 @@ check('the previous launch\'s token stops working',
 lifetime.dropForProfile('p1');
 check('dropForProfile clears it (called when the session is killed)',
     lifetime.size() === 0);
+
+// ── The team-reach routes ────────────────────────────────────────────────────
+// The side panel lists, and can run, every automation in the launch's
+// WORKSPACE -- not just the ones the launch was handed. That is a deliberate
+// widening of what a run token authorizes, and these checks pin down which
+// properties survived it.
+//
+// What did NOT change, and is what the checks below are for: the profile and
+// the org still come off the entry, so a body cannot aim any of this at another
+// window or another workspace; and every refusal is still the same 403 with the
+// same body.
+const teamToken = tokens.mint({
+  profileId: 'p-team',
+  profileName: 'Team',
+  orgId: 'org-team',
+  cdpPort: 4321,
+  // Empty on purpose: this launch was handed nothing, which is exactly the case
+  // the old routes refused outright and these are built to serve.
+  automations: [],
+});
+const postAt = (path) => (body, headers) =>
+  post(body, headers || {'Content-Type': 'application/json'}, path);
+const postList = postAt('/automation-list');
+const postRunAny = postAt('/run-any');
+const postSets = postAt('/cookie-sets');
+const postList2 = postAt('/cookie-list');
+const postPull = postAt('/cookie-pull');
+
+const listOk = await postList({runToken: teamToken});
+check('a launch handed no automations can still list its workspace',
+    listOk.status === 200 && automationsListed.length === 1, listOk.text);
+check('the listed workspace comes off the entry, not the request',
+    automationsListed[0].orgId === 'org-team' && automationsListed[0].profileId === 'p-team');
+const listDecoy = await postList({runToken: teamToken, orgId: 'org-attacker', profileId: 'p-other'});
+check('a decoy org/profile in a list body is ignored',
+    listDecoy.status === 200 &&
+      automationsListed[1].orgId === 'org-team' && automationsListed[1].profileId === 'p-team');
+const listUnknown = await postList({runToken: 'f'.repeat(64)});
+check('listing with an unknown token is refused', listUnknown.status === 403);
+
+// The widening itself: an id this launch was never handed now runs. The narrow
+// route refuses the same id in the same breath, which is the pair worth seeing
+// together -- run-from-page did not get looser, a second route got added.
+const anyOk = await postRunAny({runToken: teamToken, automationId: 'not-in-this-launch'});
+check('a workflow this launch was not handed runs through run-any',
+    anyOk.status === 200 && anyRuns.length === 1, anyOk.text);
+check('and the id it was given is passed through verbatim',
+    anyRuns[0].automationId === 'not-in-this-launch');
+check('while the narrow run route still refuses that same id',
+    (await post({runToken: teamToken, automationId: 'not-in-this-launch'})).status === 403);
+check('the profile and org still come off the entry, not the body',
+    anyRuns[0].profileId === 'p-team' && anyRuns[0].orgId === 'org-team');
+const anyDecoy = await postRunAny({
+  runToken: teamToken, automationId: 'x', profileId: 'p1', orgId: 'org-attacker',
+});
+check('a decoy profile/org on a run-any body is ignored',
+    anyDecoy.status === 200 &&
+      anyRuns[1].profileId === 'p-team' && anyRuns[1].orgId === 'org-team');
+const anyNamed = await postRunAny({runToken: teamToken});
+check('run-any naming no automation is a 400, not a run',
+    anyNamed.status === 400 && anyRuns.length === 2, anyNamed.text);
+const anyNonString = await postRunAny({runToken: teamToken, automationId: {id: 'x'}});
+check('a non-string automationId is dropped rather than forwarded',
+    anyNonString.status === 400 && anyRuns.length === 2, anyNonString.text);
+const anyUnknown = await postRunAny({runToken: 'f'.repeat(64), automationId: 'x'});
+check('run-any with an unknown token is refused', anyUnknown.status === 403);
+check('and that refusal is byte-identical to the narrow route\'s',
+    anyUnknown.status === unknown.status && anyUnknown.text === unknown.text, anyUnknown.text);
+check('non-JSON content type refused on run-any too',
+    (await postRunAny({runToken: teamToken, automationId: 'x'},
+        {'Content-Type': 'application/x-www-form-urlencoded'})).status === 403);
+
+// The cookie half. `setId` is the first field on these routes that chooses WHAT
+// to read, so the type gate is the thing to pin: a string reaches the handler,
+// anything else becomes undefined and the handler falls back to the assigned
+// set. The id is not validated here on purpose -- that happens in the renderer,
+// against the entry's own workspace.
+const setsOk = await postSets({runToken: teamToken});
+check('the workspace cookie-set list answers for a valid token',
+    setsOk.status === 200 && setsListed.length === 1, setsOk.text);
+check('its profile comes off the entry', setsListed[0] === 'p-team');
+check('listing sets with an unknown token is refused',
+    (await postSets({runToken: 'f'.repeat(64)})).status === 403);
+
+// Counted from here, not from zero: the cookie-route checks earlier in this
+// file drive the same handler and have already recorded pulls of their own.
+const pullBase = pulled.length;
+await postPull({runToken: teamToken});
+check('a pull with no setId asks for the assigned set',
+    pulled.length === pullBase + 1 && pulled[pullBase].setId === undefined);
+await postPull({runToken: teamToken, setId: 'set_other'});
+check('a string setId reaches the handler unchanged',
+    pulled.length === pullBase + 2 && pulled[pullBase + 1].setId === 'set_other');
+await postPull({runToken: teamToken, setId: {id: 'set_other'}});
+check('a non-string setId is dropped, not forwarded',
+    pulled.length === pullBase + 3 && pulled[pullBase + 2].setId === undefined);
+await postList2({runToken: teamToken, setId: 'set_other'});
+check('the read-only cookie list takes the same setId',
+    listed.length === 1 && listed[0].setId === 'set_other');
+await postList2({runToken: teamToken, setId: 7});
+check('and drops a non-string one the same way',
+    listed.length === 2 && listed[1].setId === undefined);
+
+// saveToSetId, the overwrite field, gated exactly like saveAs beside it.
+const pushToken = tokens.mint({profileId: 'p-push', orgId: 'org-team', automations: []});
+const postPush = postAt('/cookie-push');
+await postPush({runToken: pushToken, cookies: [{name: 'a'}], saveToSetId: 'set_1'});
+const lastPush = () => pushed[pushed.length - 1];
+check('a string saveToSetId reaches the handler', lastPush().saveToSetId === 'set_1');
+await postPush({runToken: pushToken, cookies: [{name: 'a'}], saveToSetId: ['set_1']});
+check('a non-string saveToSetId is dropped rather than forwarded',
+    lastPush().saveToSetId === undefined);
+await postPush({runToken: pushToken, cookies: [{name: 'a'}]});
+check('an absent saveToSetId stays undefined (an ordinary live sync)',
+    lastPush().saveToSetId === undefined && lastPush().saveAs === undefined);
 
 // Org scoping. The entry carries the workspace the launch was composed under so
 // the renderer can resolve the profile against the org it belongs to rather

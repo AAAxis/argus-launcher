@@ -78,17 +78,29 @@ for (const match of mainSource.matchAll(/pathname === '(\/v1\/[^']+)'/g)) {
 // These page routes authenticate with a per-launch run token instead of a key
 // and sit above the bearer gate on purpose -- they are not part of the keyed
 // surface and must never be advertised as one. run-from-page runs one of the
-// launch's own automations; status-from-page and cancel-from-page report and
-// stop whatever is running against that launch's own profile;
-// open-in-launcher raises the launcher window, with one of those same
-// automations showing or just on the Automations tab; recheck-from-page
-// re-checks that launch's own proxy; push-from-profile/pull-for-profile/
-// list-for-profile sync the cookie-manager extension's jar with that launch's
-// profile. Every one of them takes its profile id from the token's entry rather
-// than from the request, which is what makes them safe to open to a file://
-// document (or, for the panel routes, the bundled extension).
+// launch's own automations; run-any-from-page runs any automation in that
+// launch's WORKSPACE, resolved on demand by the launcher's renderer;
+// list-from-page lists that workspace's automations for the side panel;
+// status-from-page and cancel-from-page report and stop whatever is running
+// against that launch's own profile; open-in-launcher raises the launcher
+// window, with one of the launch's own automations showing or just on the
+// Automations tab; recheck-from-page re-checks that launch's own proxy;
+// push-from-profile/pull-for-profile/list-for-profile/list-sets-for-profile
+// sync the cookie-manager extension's jar with that launch's profile and let
+// the panel pick from the workspace's cookie library.
+//
+// Every one of them takes its profile id AND its org id from the token's entry
+// rather than from the request, which is what makes them safe to open to a
+// file:// document (or, for the panel routes, the bundled extension). Three of
+// them do read an id out of the body -- run-any-from-page's automationId,
+// pull/list-for-profile's setId, push-from-profile's saveToSetId -- and every
+// one of those is resolved against the entry's own workspace in the renderer
+// before it is acted on. That is the compensating control; it is not RLS, on
+// purpose. See run-token.cjs.
 const PAGE_ROUTES = new Set([
   '/v1/automations/run-from-page',
+  '/v1/automations/run-any-from-page',
+  '/v1/automations/list-from-page',
   '/v1/automations/status-from-page',
   '/v1/automations/cancel-from-page',
   '/v1/automations/open-in-launcher',
@@ -96,6 +108,7 @@ const PAGE_ROUTES = new Set([
   '/v1/cookies/push-from-profile',
   '/v1/cookies/pull-for-profile',
   '/v1/cookies/list-for-profile',
+  '/v1/cookies/list-sets-for-profile',
 ]);
 
 for (const pathname of served) {
@@ -130,6 +143,32 @@ pass(`${PAGE_ROUTES.size} page routes are served and stay off the keyed table`);
 // and sits above every route dispatch in the file, which would make every
 // route's offset come out larger than the anchor's and fail this check
 // unconditionally, for routes that are in fact correctly positioned.
+// Every from-page handler must answer through sendPageJson, not sendJson.
+//
+// sendPageJson adds `Access-Control-Allow-Origin: *`; sendJson does not, on
+// purpose (the keyed surface must not carry it). A from-page route wired to the
+// wrong one works perfectly from the side panel -- a chrome-extension:// page
+// holding <all_urls> is exempt from CORS -- and is silently unreadable from the
+// file:// start page, where fetch() rejects before the caller sees the status.
+// The page then reports whatever its blanket catch says, which for Re-check is
+// "The check did not complete", a sentence that describes neither the cause nor
+// the fix.
+//
+// That is not hypothetical and it is why this check exists: every start-page
+// POST was broken this way once already, the fix was a one-word change at each
+// of eight call sites, and nothing in the repo would have noticed the ninth.
+// A comment saying "any new from-page route must use sendPageJson" was the only
+// thing holding the invariant, and comments do not fail CI.
+for (const match of mainSource.matchAll(/handle(\w*)FromPage\(\{/g)) {
+  const body = mainSource.slice(match.index, match.index + 700);
+  const end = body.indexOf('\n}');
+  const call = end === -1 ? body : body.slice(0, end);
+  check(/sendJson:\s*sendPageJson\b/.test(call),
+      `main.cjs's handle${match[1]}FromPage call does not pass sendJson: sendPageJson -- ` +
+      'its replies would be unreadable from the file:// start page');
+}
+pass('every from-page handler answers through sendPageJson');
+
 const gateOffset = mainSource.indexOf('const key = resolveAutomationKey(req);');
 check(gateOffset !== -1,
     'main.cjs no longer calls resolveAutomationKey(req) as expected -- update this check');

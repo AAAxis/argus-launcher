@@ -43,8 +43,41 @@ function setStatus(text, isError) {
 // that file's header for why it is a separate script.
 const {classifySync, relativeTime} = ArgusSyncStatus;
 
+// Why a launcher-backed read came back empty, in words, every time.
+//
+// The two workspace lists (automations, cookie sets) both went in reporting
+// their failures as "there is nothing here", which is the single worst thing a
+// list can do: an unreachable launcher, a background script from a previous
+// build and a genuinely empty workspace all painted the same empty state, and
+// the only one of the three the user can act on is the one they could not tell
+// apart from the others.
+//
+// 'Unknown message' is background.js's own answer for a message type its switch
+// does not have, which means exactly one thing: this profile is running a
+// background.js from before these routes existed. Chrome caches an unpacked
+// extension's service worker script against its directory path
+// (built-in-extensions.cjs says so at length), so a profile that has already
+// launched can keep running the old worker even after the launcher ships a new
+// one. It is the single most likely reason either list is empty right after an
+// upgrade, and it is fixed by relaunching the profile -- which nothing on
+// screen would have told anyone.
+const STALE_WORKER_REASON =
+  'This window is running an older version of the Argus Helper background ' +
+  'script, which does not have this feature yet. Close the profile and launch ' +
+  'it again from Argus Launcher.';
+
+function failureReason(result) {
+  const error = (result && result.error) || '';
+  if (error === 'Unknown message') {
+    return STALE_WORKER_REASON;
+  }
+  if (result && result.available === false) {
+    return 'This window was not launched from Argus Launcher.';
+  }
+  return error || 'Argus Launcher did not answer.';
+}
+
 ArgusIcons.hydrate(document, 14);
-$('.head-mark').replaceChildren(ArgusIcons.make('shield', 18));
 
 // The tab strip. Created before any render function runs -- renderSync and
 // renderProxy publish their tone to it, and renderAutomations decides whether
@@ -70,12 +103,25 @@ function renderProxyFields(fields) {
   const list = $('#proxy-fields');
   list.replaceChildren();
   list.hidden = !fields || !fields.length;
+  // The frame follows the rows, for the reason the automations group does: a
+  // heading over an empty inset reads as a load that failed. A failed re-check
+  // has a sentence and no rows, and the card above is where that sentence goes.
+  $('#proxy-fields-group').hidden = list.hidden;
   for (const field of fields || []) {
     const row = document.createElement('div');
     row.className = field.mono ? 'field mono' : 'field';
 
     const label = document.createElement('dt');
-    label.textContent = field.label;
+    // The glyph is looked up by the name the launcher put on the field, never
+    // built from it -- ArgusIcons.make() indexes a fixed table and falls back to
+    // a circle, so a field naming an icon this panel does not carry draws a
+    // placeholder rather than nothing. Guarded on presence because a session
+    // snapshot written by an older launcher has no `icon` at all, and those rows
+    // still have to render.
+    if (field.icon) {
+      label.appendChild(ArgusIcons.make(field.icon, 13));
+    }
+    label.appendChild(document.createTextNode(field.label));
 
     const value = document.createElement('dd');
     const text = document.createElement('span');
@@ -187,9 +233,13 @@ $('#recheck').addEventListener('click', () => {
 // ── Automations ────────────────────────────────────────────────────────────────
 // Two independent things share this tab, and the split matters:
 //
-//   the LIST -- what this launch may start. Fixed at launch, because the run
-//   token authorizes exactly the automations the launcher put in it (the
-//   profile's own plus every pinned one) and nothing else.
+//   the LIST -- every automation in this window's WORKSPACE, not only the ones
+//   this launch was handed. It was the latter for as long as the run token
+//   authorized only what the launcher put in it; the panel now asks the
+//   launcher for the workspace's own list and can start any of it, so a
+//   teammate's workflow is reachable from inside the browser. Painted twice:
+//   once from the launch snapshot, which needs no launcher, then again from the
+//   live answer. Assigned and pinned rows sort first and say so.
 //
 //   the CARD -- what is running against this profile right now, wherever it was
 //   started from: this panel, the launcher's own Run button, a schedule, an MCP
@@ -215,15 +265,77 @@ let runState = {run: null, last: null};
 // nothing.
 let startingId = '';
 
+// The six colour KEYS an automation can carry, and nothing else.
+//
+// A stored colour is one of these or a custom hex. Keys resolve through
+// --profile-*-ink in sidepanel.css, which exists in both themes; a hex needs no
+// resolution and is applied inline. Anything that is neither -- a key this
+// build does not know, a malformed string -- draws in the inherited ink rather
+// than being interpolated into a style, which is the whole reason this list is
+// a fixed allowlist and not a passthrough.
+const COLOR_KEYS = new Set(['slate', 'blue', 'green', 'violet', 'red', 'amber']);
+const HEX_COLOR = /^#[0-9a-f]{3,8}$/i;
+
+// Assigned first, then pinned, then everything else; alphabetical inside each
+// group.
+//
+// The list is the whole workspace now, which for a real team is dozens of rows.
+// The two this launch would have offered on its own are the ones the person in
+// front of this window is most likely to want, so they go to the top -- and
+// they carry a badge as well, because after two scrolls "it was near the top"
+// is not something anyone can see.
+function automationRank(automation) {
+  if (automation.assigned) return 0;
+  if (automation.pinned) return 1;
+  return 2;
+}
+
+function sortAutomations(automations) {
+  return [...automations].sort((a, b) =>
+    automationRank(a) - automationRank(b) ||
+    String(a.name || '').localeCompare(String(b.name || '')));
+}
+
 // Rows, not the start page's tiles: a 320px column fits one tile across, which
 // is a list with extra steps.
+//
+// `automations` is either the launch snapshot ({id, name} only, painted first
+// because it works with the launcher closed) or the live workspace list, which
+// adds pinned/assigned/colour. Both shapes render; the snapshot simply produces
+// rows with no badge and no tint, which is what it has always looked like.
 function renderAutomations(automations) {
   const list = $('#automation-list');
   list.replaceChildren();
-  const offered = automations || [];
+  const offered = sortAutomations(automations || []);
   // The empty state stands in for the list, not for the tab. The card above it is
   // independent and may still have something to show.
   $('#automations-empty').hidden = offered.length > 0;
+  // The frame goes with the list, not with the tab: an empty group is a grey
+  // box with a heading and nothing under it, which reads as something that
+  // failed to load rather than as an absence the empty state below already
+  // explains in words.
+  $('#automation-group').hidden = offered.length === 0;
+  // How many, and how many of those are this launch's own. The count answers
+  // "is this everything?" -- the question a list that used to hold two rows and
+  // now holds forty invites, and the one the rows cannot answer between them.
+  const mine = offered.filter((item) => item.assigned || item.pinned).length;
+  $('#automation-count').textContent = offered.length ?
+    `${offered.length} in this workspace${mine ? ` · ${mine} for this profile` : ''}` :
+    '';
+  // And it says WHICH empty this is. "No automations in this workspace" is a
+  // claim about the workspace, and it is only ours to make when the launcher
+  // actually answered; otherwise the honest statement is that we could not ask.
+  if (!offered.length) {
+    const failed = Boolean(automationsError);
+    $('#automations-empty-title').textContent = failed ?
+      'Could not read this workspace' :
+      'No automations in this workspace';
+    $('#automations-empty-detail').textContent = failed ?
+      automationsError :
+      'Build a workflow in Argus Launcher and it will show up here. Anything your ' +
+        'team creates appears in this list too — pinning one, or setting it as ' +
+        'this profile’s own, just moves it to the top.';
+  }
   for (const automation of offered) {
     const row = document.createElement('button');
     row.type = 'button';
@@ -235,18 +347,79 @@ function renderAutomations(automations) {
     const icon = document.createElement('span');
     icon.className = 'icon';
     ArgusIcons.set(icon, 'play', 14);
+    // Two spellings of the same field, because the launcher stores both. A key
+    // becomes an attribute the stylesheet matches; a hex is set directly. Note
+    // what is NOT done: an unrecognized value is dropped rather than written
+    // into style.color, so nothing off an automation row reaches CSS.
+    const color = String(automation.color || '').trim();
+    if (COLOR_KEYS.has(color)) {
+      row.dataset.color = color;
+    } else if (HEX_COLOR.test(color)) {
+      icon.style.color = color;
+    }
 
     const label = document.createElement('span');
     label.className = 'label';
     label.textContent = automation.name;
 
     row.append(icon, label);
+
+    // Only for the two that mean something. "Assigned" is what this profile
+    // runs on launch; "Pinned" is what the workspace put on every start page.
+    // A row that is both says assigned, which is the stronger and more specific
+    // of the two -- and the sort has already put it above the merely pinned.
+    const kind = automation.assigned ? 'assigned' : (automation.pinned ? 'pinned' : '');
+    if (kind) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.dataset.kind = kind;
+      badge.textContent = kind === 'assigned' ? 'Assigned' : 'Pinned';
+      row.append(badge);
+      row.title = kind === 'assigned' ?
+        `Run ${automation.name} — this profile's own automation` :
+        `Run ${automation.name} — pinned for this workspace`;
+    }
+    // The description is not drawn -- there is no room for a second line at
+    // 320px -- but it is worth having on hover for a list of forty workflows
+    // whose names are all four words long.
+    if (automation.description) {
+      row.title = `${row.title}\n\n${automation.description}`;
+    }
     list.appendChild(row);
   }
   // A row for a run already in flight has to look like one the moment it is
   // drawn, not one poll later: loadSession() builds this list while a run may
   // already be going.
   paintRunCard();
+}
+
+// The live list, replacing the launch snapshot's.
+//
+// Quiet on failure, deliberately. The snapshot is already on screen and is
+// perfectly usable -- it is what this panel showed for its entire life before
+// this route existed -- so a closed launcher or a refused token leaves it
+// standing rather than blanking the tab or painting an error over a list that
+// works. The only visible consequence is that a teammate's workflow is missing,
+// which is the state the panel was permanently in before.
+let liveAutomations = null;
+// Why the live list is not on screen, or '' when it is. Read by the empty
+// state, which must not say "this workspace has no automations" on the strength
+// of a request that never arrived.
+let automationsError = '';
+
+async function loadAutomations() {
+  const result = await send({type: 'list-automations'});
+  if (!result.ok || !Array.isArray(result.automations)) {
+    automationsError = failureReason(result);
+    // The snapshot's rows, if there were any, stay exactly where they are --
+    // they work with the launcher closed and are still true. Only the empty
+    // state changes, and only to stop claiming something it cannot know.
+    renderAutomations(liveAutomations || (session && session.automations) || []);
+    return;
+  }
+  automationsError = '';
+  liveAutomations = result.automations;
+  renderAutomations(liveAutomations);
 }
 
 function paintRunCard() {
@@ -352,7 +525,19 @@ function schedulePoll() {
 // is smaller than a callback tabs.js would have to thread to a single caller.
 $('[role="tablist"]').addEventListener('click', (event) => {
   const tab = event.target.closest('[role="tab"]');
-  if (tab && tab.dataset.tab === 'automations') void pollRun();
+  if (!tab) return;
+  if (tab.dataset.tab === 'automations') {
+    void pollRun();
+    // And the list, for the same reason. It is no longer a launch-time constant
+    // -- a teammate can create a workflow while this window sits open, and
+    // opening the tab is exactly the moment someone asks what exists.
+    void loadAutomations();
+  }
+  if (tab.dataset.tab === 'cookies') {
+    // Same argument, one tab over: the library is shared, and a set saved by
+    // someone else five minutes ago should be in the picker.
+    void loadCookieSets();
+  }
 });
 
 // The clock in the meta line has to move between polls, or a run whose step takes
@@ -415,6 +600,11 @@ const SYNC_BLOCKED_REASON =
   'Relaunch this profile from Argus Launcher to enable these. ' +
   'They each need a credential the Launcher hands out at launch, and this window did not get one.';
 
+// The set this window loaded that it is not assigned to, held so the two
+// suppressed-state buttons can name it and target it by id.
+let suppressedSetId = '';
+let suppressedSetName = '';
+
 function renderSync(sync) {
   const state = classifySync(sync);
   $('#sync-card').className = `card tone-${state.tone}`;
@@ -428,7 +618,44 @@ function renderSync(sync) {
   $('#sync-toggle').checked = !sync.paused;
   $('#sync-toggle').disabled = !sync.available;
   $('#sync-now').disabled = !sync.available;
-  $('#pull').disabled = !sync.available;
+  // Load, Overwrite and the read-only list all act on the picker's selection,
+  // so they need BOTH a launcher credential and a picker with something in it.
+  // Setting #pull straight from sync.available here is what let a refresh
+  // re-enable a Load button over an empty select.
+  syncAvailable = Boolean(sync.available);
+  applyPickerEnabled();
+
+  // While the push loop is suppressed, "Save to Launcher now" is not a control
+  // with nothing to do -- it is a control that would do the WRONG thing, since
+  // the assigned set is exactly where these cookies must not go. Hidden behind
+  // the two explicit choices instead.
+  suppressedSetId = sync.pushSuppressed ? (sync.loadedSetId || '') : '';
+  suppressedSetName = sync.pushSuppressed ? (sync.loadedSetName || '') : '';
+  const suppressed = Boolean(sync.pushSuppressed) && Boolean(sync.available);
+  $('#sync-suppressed').hidden = !suppressed;
+  $('#sync-now').hidden = suppressed;
+  // The overwrite control is only offered once there is a launcher to overwrite
+  // into. It stays available outside the suppressed state too -- "save this
+  // session over that set" is a reasonable thing to want at any time -- but it
+  // is the only way out of the suppressed one, which is why it is beside it.
+  $('#overwrite-wrap').hidden = !sync.available;
+  if (suppressed) {
+    $('#save-to-loaded').disabled = !suppressedSetId;
+    $('#save-to-loaded-label').textContent = suppressedSetName ?
+      `Save this session to “${suppressedSetName}”` :
+      'Save this session to the loaded set';
+    $('#resume-sync-label').textContent = 'Resume syncing to the assigned set';
+    // Named on the button AND explained on hover: pressing this overwrites the
+    // set the profile launches with, using the jar currently on screen, and
+    // there is no undo for either half.
+    $('#resume-sync').title =
+        'Sends this browser’s current cookies to the set assigned to this profile, ' +
+        'replacing what is stored there, and starts syncing again.';
+    $('#save-to-loaded').title = suppressedSetName ?
+      `Replaces the stored contents of “${suppressedSetName}” with this browser’s cookies.` :
+      '';
+    syncPickerToSuppressed();
+  }
   // Save-as goes over the same run-token route as sync, so it needs the same
   // "was this window launched from Argus Launcher" precondition -- unlike
   // sync-now/pull it does not also need inSync/paused, since it is not part of
@@ -543,6 +770,15 @@ async function loadSession() {
   if (session.profile && session.profile.name) {
     $('#profile-name').textContent = session.profile.name;
     document.title = `${session.profile.name} — Argus Helper`;
+    // And the id, on the Session card. Not the name again -- the heading three
+    // lines above already says that, and a second copy would be decoration.
+    // The id is what a person needs when two profiles share a name, which is
+    // legal and happens: it is the directory this window runs out of and the
+    // string an MCP call or a support question names.
+    if (session.profile.id) {
+      $('#session-profile-id').textContent = session.profile.id;
+      $('#session-profile').hidden = false;
+    }
   }
   renderProxy(session.proxy);
   // Direct and free-proxy profiles have no assigned proxy to re-test, so the
@@ -641,9 +877,171 @@ $('#sync-toggle').addEventListener('change', async (event) => {
   }
 });
 
+// ---- the cookie-set picker -------------------------------------------------
+// Every set in the workspace, not just the one this profile is assigned.
+//
+// The single "Load from Launcher" button could only ever apply `cookie_id`,
+// which meant a team's whole cookie library was invisible from inside the
+// browser -- you could see that a set existed only by switching to the launcher
+// and looking. Loading one from here is one-shot: it does NOT re-assign the
+// profile, so what this profile launches with next time is unchanged, and the
+// hint under the button says so in those words.
+//
+// Keyed on id, never on name. Two sets can legally share a name (cookie_sets
+// has no uniqueness constraint), and cookieSync.ts carries a warning about
+// exactly this: a name match is how one profile's action reaches a different
+// profile's set.
+let cookieSets = [];
+let assignedSetId = '';
+// Whether the picker has anything in it. Load and Overwrite both act on the
+// picker's selection, so both are meaningless without one -- and two enabled
+// buttons over an empty select is a panel offering clicks it knows cannot work.
+let cookieSetsUsable = false;
+// Set by renderSync, read here. The two paints are independent round trips and
+// either can land first, so neither can own the enabled state alone: renderSync
+// would re-enable Load after renderCookieSets had just found nothing to load.
+let syncAvailable = false;
+
+function applyPickerEnabled() {
+  const usable = syncAvailable && cookieSetsUsable;
+  $('#pull').disabled = !usable;
+  $('#overwrite-toggle').disabled = !usable;
+  $('#launcher-list-toggle').disabled = !usable;
+}
+
+function renderCookieSets(result) {
+  const picker = $('#set-picker');
+  const line = $('#assigned-set-line');
+  const previous = picker.value;
+  picker.replaceChildren();
+
+  if (!result || !result.ok) {
+    picker.disabled = true;
+    // The REASON, not just the fact. This line used to read "Could not read
+    // this workspace's cookie sets." for every failure alike -- a timed-out
+    // renderer round trip, a launcher that is closed, and a background script
+    // from a previous build all produced the same sentence, and none of them
+    // told anyone what to do next. The one thing a failed read owes the reader
+    // is which of those it was.
+    line.textContent = result && result.available === false ?
+      '' :
+      failureReason(result);
+    cookieSets = [];
+    cookieSetsUsable = false;
+    applyPickerEnabled();
+    // The hint under a dead Load button must not go on describing what a
+    // working one would do.
+    $('#pull-hint').textContent = '';
+    return;
+  }
+
+  cookieSets = result.sets || [];
+  assignedSetId = result.assignedId || '';
+  const assigned = cookieSets.find((item) => item.id === assignedSetId);
+  line.textContent = assigned ?
+    `Launches with “${assigned.name}”` :
+    'No cookie set is assigned to this profile.';
+
+  if (!cookieSets.length) {
+    picker.disabled = true;
+    cookieSetsUsable = false;
+    applyPickerEnabled();
+    const option = document.createElement('option');
+    option.textContent = 'No cookie sets in this workspace';
+    picker.appendChild(option);
+    $('#pull-hint').textContent =
+        'Save this session with “Save to Cookies tab…” to create the first one.';
+    return;
+  }
+
+  // Assigned first, then alphabetical -- the same ranking the automations list
+  // uses, for the same reason: the one this window is actually about should not
+  // need looking for.
+  const sorted = [...cookieSets].sort((a, b) =>
+    (a.id === assignedSetId ? 0 : 1) - (b.id === assignedSetId ? 0 : 1) ||
+    String(a.name || '').localeCompare(String(b.name || '')));
+  for (const set of sorted) {
+    const option = document.createElement('option');
+    option.value = set.id;
+    const count = `${set.count} cookie${set.count === 1 ? '' : 's'}`;
+    // textContent, never innerHTML: a set name is user-supplied and this page
+    // has no framework escaping it.
+    option.textContent = set.id === assignedSetId ?
+      `${set.name} · ${count} · assigned` :
+      `${set.name} · ${count}`;
+    picker.appendChild(option);
+  }
+  picker.disabled = false;
+  // Keep whatever was selected across a refresh; otherwise start on the set
+  // this window is actually holding, and only then on the assigned one.
+  //
+  // The order matters more than it looks. "Overwrite a cookie set…" targets the
+  // picker's selection, so a suppressed window whose picker still pointed at
+  // the ASSIGNED set offered a one-click way to write the loaded set's cookies
+  // into the assigned one -- precisely the destruction the suppression exists
+  // to prevent, reached through a different control. The picker has to name the
+  // set the jar came from.
+  const keep = cookieSets.some((item) => item.id === previous) ? previous : '';
+  picker.value = keep || suppressedSetId || assignedSetId || sorted[0].id;
+  cookieSetsUsable = true;
+  applyPickerEnabled();
+  updatePullHint();
+}
+
+// Called when renderSync learns this window is holding a foreign set, because
+// the two paints are independent: refresh() and loadCookieSets() are separate
+// round trips and either can land first.
+function syncPickerToSuppressed() {
+  if (!suppressedSetId) return;
+  const picker = $('#set-picker');
+  if (!cookieSets.some((item) => item.id === suppressedSetId)) return;
+  if (picker.value === suppressedSetId) return;
+  picker.value = suppressedSetId;
+  updatePullHint();
+}
+
+// The hint has to change with the selection, because the two cases are
+// genuinely different actions. Loading the assigned set restores this window to
+// what it launched with; loading any other one leaves the jar and the launcher
+// disagreeing, which is why the push loop stops afterwards. Saying "replaces
+// this browser's cookies" for both would hide the part that surprises people.
+function updatePullHint() {
+  const picker = $('#set-picker');
+  const chosen = picker.value;
+  const hint = $('#pull-hint');
+  if (!chosen || chosen === assignedSetId) {
+    hint.textContent = 'Replaces this browser’s cookies with the set assigned to this profile.';
+    return;
+  }
+  const set = cookieSets.find((item) => item.id === chosen);
+  hint.textContent = set ?
+    `Replaces this browser’s cookies with “${set.name}”. One-shot — this profile ` +
+        'still launches with its assigned set, and syncing stops until you say where ' +
+        'changes should go.' :
+    'Replaces this browser’s cookies with the selected set.';
+}
+
+$('#set-picker').addEventListener('change', () => {
+  updatePullHint();
+  // The read-only list is about a specific set, so it follows the picker rather
+  // than staying on whatever was expanded first.
+  if (launcherListLoaded) void loadLauncherList();
+});
+
+async function loadCookieSets() {
+  renderCookieSets(await send({type: 'list-launcher-cookie-sets'}));
+}
+
 $('#pull').addEventListener('click', () => withBusy($('#pull'), async () => {
+  const chosen = $('#set-picker').value;
   setStatus('Loading from Launcher…');
-  const result = await send({type: 'pull-from-launcher'});
+  // No setId for the assigned set: the route reads its absence as "the assigned
+  // one", which is the only thing this button could ever do before a picker
+  // existed, and keeps that path byte-identical.
+  const result = await send({
+    type: 'pull-from-launcher',
+    ...(chosen && chosen !== assignedSetId ? {setId: chosen} : {}),
+  });
   const setName = result.set || 'Launcher';
   if (!result.ok) {
     setStatus(result.error || 'Could not load from Launcher', true);
@@ -656,6 +1054,12 @@ $('#pull').addEventListener('click', () => withBusy($('#pull'), async () => {
     // swallowed failure the sync rewrite exists to close.
     setStatus(`Loaded ${result.count} of ${result.count + result.failed} cookies from "${setName}" ` +
         `— ${result.failed} failed to import`);
+  } else if (result.clearFailed) {
+    // The clear half of "replace", reported on the same principle. Cookies that
+    // would not delete are still in the jar, so this is genuinely not the clean
+    // replacement the hint promised.
+    setStatus(`Loaded ${result.count} cookies from "${setName}" — ${result.clearFailed} ` +
+        'old cookie(s) could not be removed first');
   } else {
     setStatus(`Loaded ${result.count} cookies from "${setName}"`);
   }
@@ -663,6 +1067,33 @@ $('#pull').addEventListener('click', () => withBusy($('#pull'), async () => {
   // The "not in this browser yet" marks are now stale by definition -- a pull
   // is exactly the thing that changes them.
   if (launcherListLoaded) void loadLauncherList();
+}));
+
+// ---- the two ways out of a suppressed sync ---------------------------------
+// Both are shown only while the engine is refusing to push, and each says where
+// the cookies would land. Neither is reachable from the automatic loop.
+$('#save-to-loaded').addEventListener('click', () => withBusy($('#save-to-loaded'), async () => {
+  const setId = suppressedSetId;
+  const setName = suppressedSetName;
+  if (!setId) {
+    setStatus('There is no loaded set to save to', true);
+    return;
+  }
+  setStatus(`Saving to "${setName}"…`);
+  const result = await send({type: 'overwrite-set', setId});
+  setStatus(result.ok ?
+    `Saved ${result.saved} cookies to "${result.set || setName}"` :
+    (result.error || 'Could not save to that cookie set'), !result.ok);
+  await refresh();
+}));
+
+$('#resume-sync').addEventListener('click', () => withBusy($('#resume-sync'), async () => {
+  setStatus('Resuming sync…');
+  const result = await send({type: 'resume-sync'});
+  setStatus(result.ok ?
+    `Syncing again — saved ${result.count ?? 0} cookies${result.set ? ` to "${result.set}"` : ''}` :
+    (result.error || 'Could not resume syncing'), !result.ok);
+  await refresh();
 }));
 
 // ---- what the launcher holds, read-only ----------------------------------------
@@ -755,8 +1186,16 @@ async function loadLauncherList() {
   loading.textContent = 'Reading from Launcher…';
   list.appendChild(loading);
 
+  // Follows the picker: the question this list answers is "what am I about to
+  // load", and after a picker existed that stopped always meaning the assigned
+  // set. Omitted for the assigned one so the request stays the bare
+  // {runToken} it has always been.
+  const chosen = $('#set-picker').value;
   const [result, jar] = await Promise.all([
-    send({type: 'list-launcher-cookies'}),
+    send({
+      type: 'list-launcher-cookies',
+      ...(chosen && chosen !== assignedSetId ? {setId: chosen} : {}),
+    }),
     // The live jar, for the "not in this browser yet" marks. Read here rather
     // than taken from the counts already on screen because those are numbers,
     // and this needs the domains.
@@ -777,6 +1216,79 @@ $('#launcher-list-toggle').addEventListener('click', () => {
     void loadLauncherList();
   }
 });
+
+// ---- overwrite an existing set: confirm, in place ---------------------------
+// The one control in this panel that can destroy something a teammate stored.
+//
+// Confirmation is required and it names both counts, because the two numbers
+// are the whole decision: replacing a 214-cookie set with 189 is ordinary,
+// replacing it with 3 means this session has not restored yet and the press is
+// a mistake. window.confirm() is unreliable in an extension page (the same
+// reason the save-as form expands inline rather than prompting), so the
+// confirmation is markup.
+//
+// It targets whatever the picker has selected, which is deliberate: the set you
+// are looking at in the picker and the set you would overwrite must be the same
+// one, or this becomes a second, invisible selection to get wrong.
+function closeOverwriteForm() {
+  $('#overwrite-form').hidden = true;
+  $('#overwrite-toggle').hidden = false;
+  $('#overwrite-hint').hidden = false;
+}
+
+$('#overwrite-toggle').addEventListener('click', () => {
+  void (async () => {
+    const chosen = $('#set-picker').value;
+    const set = cookieSets.find((item) => item.id === chosen);
+    if (!set) {
+      setStatus('Pick a cookie set to overwrite first', true);
+      return;
+    }
+    const jar = await chrome.cookies.getAll({}).catch(() => []);
+    const stored = `${set.count} cookie${set.count === 1 ? '' : 's'}`;
+    const live = `${jar.length} cookie${jar.length === 1 ? '' : 's'}`;
+    $('#overwrite-warning').textContent =
+        `Replace the stored contents of “${set.name}” (${stored}) with this browser’s ` +
+        `${live}? This cannot be undone.` +
+        (set.id === assignedSetId ? ' This is the set this profile launches with.' : '');
+    // The hint goes with the button, the way save-as does it: it describes what
+    // pressing that button opens, and leaving it above a confirmation that has
+    // already said the specific, harder version of the same thing is two
+    // sentences competing to explain one action.
+    $('#overwrite-toggle').hidden = true;
+    $('#overwrite-hint').hidden = true;
+    $('#overwrite-form').hidden = false;
+    $('#overwrite-cancel').focus();
+  })();
+});
+
+$('#overwrite-cancel').addEventListener('click', () => closeOverwriteForm());
+$('#overwrite-form').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeOverwriteForm();
+  }
+});
+
+$('#overwrite-confirm').addEventListener('click', () => withBusy($('#overwrite-confirm'), async () => {
+  const chosen = $('#set-picker').value;
+  const set = cookieSets.find((item) => item.id === chosen);
+  if (!set) {
+    setStatus('That cookie set is no longer in the list', true);
+    closeOverwriteForm();
+    return;
+  }
+  setStatus(`Overwriting "${set.name}"…`);
+  const result = await send({type: 'overwrite-set', setId: set.id});
+  closeOverwriteForm();
+  setStatus(result.ok ?
+    `Overwrote "${result.set || set.name}" with ${result.saved} cookies` :
+    (result.error || 'Could not overwrite that cookie set'), !result.ok);
+  // The set's stored count has changed, and so has what the read-only list
+  // would show for it.
+  await loadCookieSets();
+  if (launcherListLoaded) void loadLauncherList();
+}));
 
 // ---- save-as: inline expanding name field --------------------------------------
 function defaultSaveAsName() {
@@ -922,8 +1434,16 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !$('#export-menu').hidden) closeExportMenu();
 });
 
-void loadSession();
+// The launch snapshot first, because it needs no launcher and cannot fail: the
+// panel is fully usable a frame after it opens. The two live lists replace what
+// the snapshot could say -- the workspace's automations and its cookie sets --
+// and each leaves the snapshot standing if the launcher is closed.
+void (async () => {
+  await loadSession();
+  void loadAutomations();
+})();
 void refresh();
+void loadCookieSets();
 // The first status poll runs at open, not on a timer: a panel opened while a run
 // is already going has to show it immediately rather than up to fifteen seconds
 // later. It schedules the next one itself, at the cadence the answer earns.

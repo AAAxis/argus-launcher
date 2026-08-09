@@ -259,3 +259,15 @@ export function cookieFileToBase64(text: string): string {
   }
   return btoa(binary);
 }
+
+// The bytes a native file picker hands back, as the text the parser wants.
+//
+// The picker's payload is base64 of the file, because that is what survives an
+// IPC boundary intact whatever the encoding turns out to be. Both the library
+// upload path and the import dialog's preview have to decode it, and they must
+// agree about what a file contains -- the dialog says "43 cookies" and the
+// upload is what actually lands.
+export function decodeCookieBase64(base64: string): string {
+  const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}

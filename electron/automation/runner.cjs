@@ -142,6 +142,10 @@ class Run {
         name: this.profile.name,
         email: this.profile.email,
         password: this.profile.password,
+        // Where those two go, so a sign-in workflow can `goto` the profile's
+        // own login page instead of hardcoding one address for every profile
+        // it runs against.
+        login_url: this.profile.login_url,
         status: this.profile.status,
         tags: this.profile.tags,
         folder_id: this.profile.folder_id,

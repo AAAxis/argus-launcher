@@ -1,4 +1,9 @@
-import {Pencil} from 'lucide-react';
+import {
+  Activity, AtSign, Blend, Boxes, Camera, Clock, Cpu, Fingerprint, Folder, Gauge, Globe,
+  Hash, Languages, MapPin, Mic, Monitor, Network, Pencil, Radio, ShieldOff, Signpost,
+  Tag, UserCheck, UserRound, Wifi,
+} from 'lucide-react';
+import {Assignee} from '../ui/Assignee';
 import {RotateButton} from '../ui/RotateButton';
 import {StatusChip} from '../ui/StatusChip';
 import {TagChip} from '../ui/TagChip';
@@ -12,12 +17,20 @@ import type {ProfileDraft} from '../../drafts';
 // panel knows what it is showing; the dialog knows where that lives.
 export type SummaryTarget = 'profile' | 'proxy' | 'fingerprint';
 
-type Row = readonly [string, ReactNode | string | string[]];
+// A row is its glyph, its name and its value. The glyph is the one the field
+// that SETS this value wears in the form -- a summary row and its control are
+// the same thing seen twice, and using two different marks for them would be
+// the panel disagreeing with the form about what it is describing.
+type Row = {
+  icon: ReactNode;
+  label: string;
+  value: ReactNode | string | string[];
+};
 
 // The read-only column beside the profile form: what the browser will actually
 // report, resolved the same way the launch payload resolves it.
 //
-// Grouped rather than one flat list of twenty-four rows. Two-thirds of them are
+// Grouped rather than one flat list of twenty-odd rows. Two-thirds of them are
 // fingerprint values that are only editable two clicks away, and there was no
 // way to get from a value you disagreed with to the control that sets it.
 export function ProfileSummary({draft, onRotate, onEdit}: {
@@ -32,51 +45,71 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
   const profileRows: Row[] = [
     // Real from the moment the dialog opens: the id is minted with the draft,
     // and it is the name of the directory this profile will get on disk.
-    ['ID', draft.id],
-    ['Name', draft.name || '-'],
-    ['Status', <StatusChip status={draft.status || 'Ready'} key="status" />],
-    ['Folder', folder?.name || 'All profiles'],
-    ['Tags', tagsFromDraft(draft.tags)],
+    {icon: <Hash size={14} />, label: 'ID', value: draft.id},
+    {icon: <UserRound size={14} />, label: 'Name', value: draft.name || '-'},
+    {icon: <Activity size={14} />, label: 'Status',
+      value: <StatusChip status={draft.status || 'Ready'} />},
+    {icon: <Folder size={14} />, label: 'Folder', value: folder?.name || 'All profiles'},
+    {icon: <Tag size={14} />, label: 'Tags', value: tagsFromDraft(draft.tags)},
+    // Only on a team. Same gate the form's own field carries, and the same one
+    // that makes the Assigned column teamOnly: on a one-person workspace this
+    // row can only ever say "You".
+    ...(data.state.members.length > 1 ? [{
+      icon: <UserCheck size={14} />,
+      label: 'Assigned',
+      value: <Assignee userId={draft.assigned_to || null} />,
+    }] : []),
+    // The login, so the panel accounts for the Credentials card. The email
+    // only: a password belongs in the field that can hide it, never in a
+    // read-only column somebody might be screen-sharing.
+    {icon: <AtSign size={14} />, label: 'Account', value: draft.email || '-'},
   ];
 
   const proxyRows: Row[] = [
-    ['Mode', draft.proxy_mode === 'assigned' ? 'Assigned proxy' :
-      draft.proxy_mode === 'direct' ? 'Direct' : 'Free Proxy'],
-    ['Proxy', proxy?.name || (draft.proxy_id ? 'Selected proxy' : 'No proxy')],
-    ['Start page', draft.start_url.trim() || 'Shared bookmarks home'],
+    {icon: <Blend size={14} />, label: 'Mode',
+      value: draft.proxy_mode === 'assigned' ? 'Assigned proxy' :
+        draft.proxy_mode === 'direct' ? 'Direct' : 'Free Proxy'},
+    {icon: <Network size={14} />, label: 'Proxy',
+      value: proxy?.name || (draft.proxy_id ? 'Selected proxy' : 'No proxy')},
+    {icon: <Globe size={14} />, label: 'Start page',
+      value: draft.start_url.trim() || 'Shared bookmarks home'},
     // Listed because it changes what Launch does -- and because it is the one
     // setting that makes a launch open a DevTools port, which someone auditing
     // a profile's footprint needs to be able to see without opening a dropdown.
-    ['On launch', data.state.automations.find(
-        (item) => item.id === draft.automation_id)?.name || 'Nothing'],
+    {icon: <Signpost size={14} />, label: 'On launch',
+      value: data.state.automations.find(
+          (item) => item.id === draft.automation_id)?.name || 'Nothing'},
   ];
 
   const fingerprintRows: Row[] = [
-    ['Platform', draft.fingerprint_os],
-    ['UserAgent', draft.fingerprint_user_agent.trim() ||
-      userAgentForFingerprint(draft.fingerprint_os, draft.fingerprint_browser_version)],
-    ['WebRTC', draft.fingerprint_webrtc],
-    ['Canvas', draft.fingerprint_canvas],
-    ['WebGL', draft.fingerprint_webgl],
-    ['WebGL Info', [
+    {icon: <Monitor size={14} />, label: 'Platform', value: draft.fingerprint_os},
+    {icon: <Globe size={14} />, label: 'UserAgent',
+      value: draft.fingerprint_user_agent.trim() ||
+        userAgentForFingerprint(draft.fingerprint_os, draft.fingerprint_browser_version)},
+    {icon: <Wifi size={14} />, label: 'WebRTC', value: draft.fingerprint_webrtc},
+    {icon: <Camera size={14} />, label: 'Canvas', value: draft.fingerprint_canvas},
+    {icon: <Boxes size={14} />, label: 'WebGL', value: draft.fingerprint_webgl},
+    {icon: <Boxes size={14} />, label: 'WebGL Info', value: [
       draft.fingerprint_webgl_vendor || 'Google Inc. (Auto)',
       draft.fingerprint_webgl_renderer || 'ANGLE (Auto renderer)',
-    ]],
-    ['WebGPU', draft.fingerprint_webgpu],
-    ['Client Rects', draft.fingerprint_client_rects],
-    ['Timezone', draft.fingerprint_timezone],
-    ['Language', draft.fingerprint_language],
-    ['Geolocation', draft.fingerprint_geolocation],
-    ['CPU', draft.fingerprint_cpu_model ?
+    ]},
+    {icon: <Boxes size={14} />, label: 'WebGPU', value: draft.fingerprint_webgpu},
+    {icon: <Blend size={14} />, label: 'Client Rects', value: draft.fingerprint_client_rects},
+    {icon: <Clock size={14} />, label: 'Timezone', value: draft.fingerprint_timezone},
+    {icon: <Languages size={14} />, label: 'Language', value: draft.fingerprint_language},
+    {icon: <MapPin size={14} />, label: 'Geolocation', value: draft.fingerprint_geolocation},
+    {icon: <Cpu size={14} />, label: 'CPU', value: draft.fingerprint_cpu_model ?
       `${draft.fingerprint_cpu_model} (${draft.fingerprint_cpu_cores || 'real'} threads)` :
-      draft.fingerprint_cpu_cores ? `${draft.fingerprint_cpu_cores} threads` : 'Real'],
-    ['Memory', draft.fingerprint_memory_gb ? `${draft.fingerprint_memory_gb} GB` : 'Real'],
-    ['MAC address', 'OFF'],
-    ['DeviceName', 'OFF'],
-    ['Audio', draft.fingerprint_audio],
-    ['Screen', draft.fingerprint_screen],
-    ['Media devices', draft.fingerprint_media_devices],
-    ['Do not track', draft.fingerprint_do_not_track ? 'On' : 'Off'],
+      draft.fingerprint_cpu_cores ? `${draft.fingerprint_cpu_cores} threads` : 'Real'},
+    {icon: <Gauge size={14} />, label: 'Memory',
+      value: draft.fingerprint_memory_gb ? `${draft.fingerprint_memory_gb} GB` : 'Real'},
+    {icon: <Network size={14} />, label: 'MAC address', value: 'OFF'},
+    {icon: <Monitor size={14} />, label: 'DeviceName', value: 'OFF'},
+    {icon: <Radio size={14} />, label: 'Audio', value: draft.fingerprint_audio},
+    {icon: <Monitor size={14} />, label: 'Screen', value: draft.fingerprint_screen},
+    {icon: <Mic size={14} />, label: 'Media devices', value: draft.fingerprint_media_devices},
+    {icon: <ShieldOff size={14} />, label: 'Do not track',
+      value: draft.fingerprint_do_not_track ? 'On' : 'Off'},
   ];
 
   return (
@@ -85,9 +118,20 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
         <h3>Summary</h3>
         <RotateButton onRotate={onRotate}>New fingerprint</RotateButton>
       </div>
-      <SummaryGroup title="Profile" rows={profileRows} onEdit={() => onEdit('profile')} />
-      <SummaryGroup title="Proxy" rows={proxyRows} onEdit={() => onEdit('proxy')} />
       <SummaryGroup
+        icon={<UserRound size={14} />}
+        title="Profile"
+        rows={profileRows}
+        onEdit={() => onEdit('profile')}
+      />
+      <SummaryGroup
+        icon={<Network size={14} />}
+        title="Proxy"
+        rows={proxyRows}
+        onEdit={() => onEdit('proxy')}
+      />
+      <SummaryGroup
+        icon={<Fingerprint size={14} />}
         title="Fingerprint"
         rows={fingerprintRows}
         onEdit={() => onEdit('fingerprint')}
@@ -96,7 +140,8 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
   );
 }
 
-function SummaryGroup({title, rows, onEdit}: {
+function SummaryGroup({icon, title, rows, onEdit}: {
+  icon: ReactNode;
   title: string;
   rows: Row[];
   onEdit: () => void;
@@ -104,7 +149,7 @@ function SummaryGroup({title, rows, onEdit}: {
   return (
     <section className="summary-group">
       <div className="summary-group-head">
-        <h4>{title}</h4>
+        <h4>{icon}{title}</h4>
         {/* Icon only: the panel is a 320px column, and three "✎ Edit" buttons
           * down it took as much width as the values they sit above. Same
           * pencil as the status picker's, so the two read as one affordance. */}
@@ -118,9 +163,12 @@ function SummaryGroup({title, rows, onEdit}: {
           <Pencil size={13} />
         </button>
       </div>
-      <div className="summary-list">
-        {rows.map(([label, value]) => (
+      {/* The values' own surface, inset in the frame the heading rides -- the
+          same two objects .form-group draws in the column beside this one. */}
+      <div className="summary-group-body summary-list">
+        {rows.map(({icon: rowIcon, label, value}) => (
           <div className="summary-row" key={label}>
+            <i className="summary-row-icon" aria-hidden="true">{rowIcon}</i>
             <strong>{label}</strong>
             {Array.isArray(value) && label === 'Tags' ? (
               <span className="summary-tags">

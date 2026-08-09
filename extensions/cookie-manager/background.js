@@ -107,10 +107,23 @@ async function sessionData() {
 //                    the time it was scheduled); backs PUSH_MIN_INTERVAL_MS.
 //   lastSet          name of the cookie set the last successful push/pull
 //                    touched, so the popup can say where a push landed.
+//   pushSuppressed   true after this window loaded a set it is NOT assigned
+//                    to. See suppressAfterArbitraryLoad below: the jar now
+//                    holds set B while the push loop is aimed at set A, so
+//                    every push is stopped until the user says where the
+//                    changes should go. Distinct from `paused`, which is the
+//                    user's own switch -- this one is the engine refusing to
+//                    write somewhere it would be wrong, and it is cleared by
+//                    loading the assigned set again or by an explicit resume.
+//   loadedSetId      id of the non-assigned set this window loaded, and
+//   loadedSetName    its name, so the card can say which one and offer to
+//                    save back to it by id. Both '' when nothing arbitrary
+//                    has been loaded.
 const DEFAULT_SYNC = {
   available: false, paused: false, inSync: false, reachable: true,
   pushedAt: 0, pushedCount: 0, lastError: '', lastErrorKind: '', lastErrorSource: '',
   signature: '', pushTokenHash: '', pushPending: false, lastAttemptAt: 0, lastSet: '',
+  pushSuppressed: false, loadedSetId: '', loadedSetName: '',
 };
 
 async function getSyncState() {
@@ -264,10 +277,45 @@ async function pushToLauncher(opts) {
       // longer exists. Keeping them made a healthy relaunch open on "Launcher
       // rejected the request" -- the panel accusing the new session of the old
       // one's failure -- until the first push happened to succeed and clear it.
+      // The suppression goes with the watermark too, and for a stronger
+      // reason than the error fields do: it describes THIS window's jar
+      // holding a set the profile is not assigned to, and a fresh token means
+      // a fresh launch whose jar is whatever that launch seeded. Carrying it
+      // over would leave a new session permanently refusing to sync because
+      // of something the previous one loaded.
       state = await setSyncState({
         inSync: false, signature: '', pushTokenHash: tokenHash,
         lastError: '', lastErrorKind: '', lastErrorSource: '',
+        pushSuppressed: false, loadedSetId: '', loadedSetName: '',
       });
+    }
+
+    // The jar is mid-rewrite: a pull is clearing it and importing a set. A
+    // push now would send a half-applied jar, and in replace mode that can
+    // briefly be an EMPTY one. Requeued rather than dropped, so the real push
+    // still happens once the jar settles.
+    //
+    // In memory rather than in storage on purpose: if this worker is evicted
+    // the import dies with it, so the flag can never be left stuck on.
+    if (jarWriteDepth > 0) {
+      queuePush(PUSH_DEBOUNCE_MS);
+      return {ok: false, error: 'Waiting for the cookie import to finish.'};
+    }
+
+    // Applies to the manual path as well, unlike `paused` below. "Sync now"
+    // while a foreign set is loaded is not an escape hatch -- it is exactly
+    // the bug: it would write set B's jar into set A, which is the profile's
+    // assigned set and what it launches with. The panel disables the button
+    // and offers "save to «B»" or "save as new" instead.
+    if (state.pushSuppressed) {
+      await setSyncState({pushPending: false});
+      return {
+        ok: false,
+        error: state.loadedSetName ?
+          `This window is holding "${state.loadedSetName}", which isn't assigned to ` +
+              'this profile. Changes are not being saved.' :
+          'Syncing is stopped: this window is holding a set it is not assigned.',
+      };
     }
 
     if (!manual && state.paused) {
@@ -412,27 +460,65 @@ function schedulePush() {
 // change, and -- importantly -- no sync state. A failure here is the user
 // looking something up, not the sync engine failing, and writing lastErrorKind
 // from it would make an expanded list repaint the sync card as broken.
-async function listLauncherCookies() {
+async function listLauncherCookies(setId) {
   const config = await launchConfig();
   if (!config) {
     return {ok: false, error: 'This window was not launched from Argus Launcher.'};
   }
   const result = await fetchLauncher(
       `http://127.0.0.1:${config.apiPort}/v1/cookies/list-for-profile`,
-      {runToken: config.token});
+      {runToken: config.token, ...(setId ? {setId} : {})});
   if (!result.ok) {
     return {ok: false, error: result.message, kind: result.kind};
   }
   return {
     ok: true,
     set: result.body.set || null,
+    setId: result.body.setId || null,
     count: Number(result.body.count) || 0,
     cookies: Array.isArray(result.body.cookies) ? result.body.cookies : [],
   };
 }
 
+// Every cookie set in this launch's workspace, metadata only, for the panel's
+// picker. Touches no sync state, for the same reason listLauncherCookies does
+// not: this is the user looking something up, not the sync engine failing.
+async function listLauncherCookieSets() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, available: false,
+      error: 'This window was not launched from Argus Launcher.'};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/cookies/list-sets-for-profile`,
+      {runToken: config.token});
+  if (!result.ok) {
+    return {ok: false, available: true, error: result.message, kind: result.kind};
+  }
+  return {
+    ok: true,
+    available: true,
+    assignedId: result.body.assignedId || null,
+    sets: Array.isArray(result.body.sets) ? result.body.sets : [],
+  };
+}
+
 // ---- pull (launcher -> browser) --------------------------------------------
-async function pullFromLauncher() {
+// `setId` picks a set this profile is not assigned to -- the panel's picker
+// over the workspace's whole library. Absent means the assigned set.
+//
+// Two things this function does that it did not before a picker existed:
+//
+//   1. It REPLACES rather than merges. importCookies only ever calls
+//      chrome.cookies.set, so "Load from Launcher" used to leave everything
+//      already in the jar in place -- despite the button's own hint saying it
+//      replaces this browser's cookies, which had simply been false since it
+//      was written. With one assigned set the difference was mostly invisible;
+//      with a picker it is dangerous, because applying set B over set A leaves
+//      a jar that is neither, and that jar is what gets saved back.
+//   2. It stops the push loop when the loaded set is not the assigned one --
+//      see suppressAfterArbitraryLoad.
+async function pullFromLauncher(setId) {
   try {
     const config = await launchConfig();
     if (!config) {
@@ -440,7 +526,7 @@ async function pullFromLauncher() {
     }
     const result = await fetchLauncher(
         `http://127.0.0.1:${config.apiPort}/v1/cookies/pull-for-profile`,
-        {runToken: config.token});
+        {runToken: config.token, ...(setId ? {setId} : {})});
     if (!result.ok) {
       // Persisted the same way a push failure is (Important 1): closing the
       // popup used to make a 403/429/dead-connection on pull evaporate
@@ -453,15 +539,45 @@ async function pullFromLauncher() {
     }
 
     const cookies = Array.isArray(result.body.cookies) ? result.body.cookies : [];
+    // Whether what arrived is the set this profile launches with. The launcher
+    // decides this, not the panel: `assigned` is computed there against
+    // profiles.cookie_id, and a set with no assignment at all reads as
+    // assigned so an ordinary "Load from Launcher" never suppresses anything.
+    const assigned = result.body.assigned !== false;
+    const loadedName = result.body.set || '';
+    const loadedId = result.body.setId || '';
+
     if (!cookies.length) {
+      // Nothing to apply, so nothing was replaced and the jar is untouched --
+      // which means this is NOT a moment to suppress the push loop either. An
+      // empty set is a set with no cookies in it, not a set that took over
+      // this window.
       await setSyncState({
         reachable: true, lastError: '', lastErrorKind: '', lastErrorSource: '',
-        lastSet: result.body.set || '',
+        lastSet: loadedName,
       });
-      return {ok: true, count: 0, failed: 0, set: result.body.set || null};
+      return {ok: true, count: 0, failed: 0, cleared: 0, set: result.body.set || null,
+        setId: loadedId || null, assigned};
     }
 
-    const imported = await importCookies(cookies);
+    // Clear, then import: the two halves of "replace". Counted separately so a
+    // clear that only half worked is visible rather than folded into the
+    // import's own numbers -- the same discipline `failed` already follows.
+    //
+    // Both are inside jarWriteDepth so the push loop cannot catch the jar
+    // mid-rewrite. The window between the clear and the last set() is the one
+    // moment this browser's jar is genuinely empty, and pushing THAT into a
+    // cookie set would be the worst failure this file can produce.
+    let cleared;
+    let imported;
+    jarWriteDepth++;
+    try {
+      cleared = await clearJar();
+      imported = await importCookies(cookies);
+    } finally {
+      jarWriteDepth--;
+    }
+
     if (imported.count === 0) {
       // Distinct from "the launcher had nothing for you" above: this is
       // "the launcher answered with N cookies and every single one of them
@@ -471,17 +587,37 @@ async function pullFromLauncher() {
       await setSyncState({
         reachable: true, lastError: message, lastErrorKind: 'import-failed', lastErrorSource: 'pull',
       });
-      return {ok: false, count: 0, failed: imported.failed, set: result.body.set || null, error: message};
+      return {ok: false, count: 0, failed: imported.failed, cleared: cleared.count,
+        set: result.body.set || null, setId: loadedId || null, assigned, error: message};
     }
     await setSyncState({
       reachable: true, lastError: '', lastErrorKind: '', lastErrorSource: '',
-      lastSet: result.body.set || '',
+      lastSet: loadedName,
+      // The whole point of the one-shot picker. Loading a set this profile is
+      // not assigned to leaves the jar and the sync target disagreeing: the
+      // jar holds B, the push loop writes to A. Left alone, chrome.cookies
+      // .onChanged fires within three seconds of the import and A -- the set
+      // the profile actually launches with -- gets overwritten with B's
+      // cookies. Set B applied, set A destroyed, six seconds, no warning.
+      //
+      // Suppressed rather than redirected to B: redirecting would silently
+      // start rewriting a teammate's stored set with whatever this window does
+      // next, which is a bigger surprise than "changes aren't being saved".
+      // The panel says which set is loaded and offers both ways out.
+      //
+      // Loading the ASSIGNED set is the opposite -- it makes the jar and the
+      // launcher agree again -- so it clears the suppression.
+      ...(assigned ?
+        {pushSuppressed: false, loadedSetId: '', loadedSetName: ''} :
+        {pushSuppressed: true, loadedSetId: loadedId, loadedSetName: loadedName}),
     });
     // A partial failure (some cookies applied, some did not) is surfaced via
     // `failed` on an otherwise-ok response rather than treated as a state
     // error: the pull did substantially work, unlike the all-failed case
     // above.
-    return {ok: true, count: imported.count, failed: imported.failed, set: result.body.set || null};
+    return {ok: true, count: imported.count, failed: imported.failed,
+      cleared: cleared.count, clearFailed: cleared.failed,
+      set: result.body.set || null, setId: loadedId || null, assigned};
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     console.error('Argus cookie sync: pull crashed', error);
@@ -542,6 +678,69 @@ async function saveAsSet(name, cookies) {
   }
 }
 
+// ---- overwrite an existing set (browser -> launcher) -----------------------
+// The explicit counterpart to saveAsSet: the same route and the same
+// bookkeeping discipline (none), but writing over a set that already exists
+// instead of creating a new one.
+//
+// Manual only, and it must stay that way. The automatic push loop cannot reach
+// this function -- schedulePush calls pushToLauncher, which sends no
+// saveToSetId -- and that separation is what stops a keyless document that
+// browses the open web from quietly rewriting a teammate's stored session.
+// There is no undo: the launcher's savePayload uploads a new object and deletes
+// the superseded one, so the previous contents are gone once this succeeds. The
+// panel confirms, naming the set and both counts, before calling it.
+async function overwriteSet(setId, cookies) {
+  try {
+    if (!setId) {
+      return {ok: false, error: 'No cookie set was named.'};
+    }
+    const config = await launchConfig();
+    if (!config) {
+      return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+    }
+    const jar = Array.isArray(cookies) ? cookies : await chrome.cookies.getAll({});
+    if (!jar.length) {
+      return {ok: false, error: 'There are no cookies to save.'};
+    }
+    const result = await fetchLauncher(
+        `http://127.0.0.1:${config.apiPort}/v1/cookies/push-from-profile`,
+        {runToken: config.token, cookies: jar, saveToSetId: setId});
+    if (!result.ok) {
+      return {ok: false, error: result.message};
+    }
+    const saved = Number(result.body.saved) || 0;
+    if (!saved) {
+      return {ok: false, error: 'Argus Launcher did not recognize any of the cookies to save.'};
+    }
+    return {ok: true, saved, set: result.body.set || ''};
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error('Argus cookie sync: overwrite-set crashed', error);
+    return {ok: false, error: message};
+  }
+}
+
+// Puts the push loop back on the assigned set after an arbitrary load.
+//
+// Deliberately does NOT reload the assigned set first. The user has a jar in
+// front of them -- possibly one they have been working in since the load -- and
+// silently throwing it away to restore coherence would be a worse surprise than
+// the one this whole mechanism exists to prevent. What it does is exactly what
+// it says: from here on, this window's cookies go back to the assigned set, and
+// the first push will overwrite it. The panel warns in those words.
+async function resumeSyncToAssigned() {
+  await setSyncState({
+    pushSuppressed: false, loadedSetId: '', loadedSetName: '',
+    // The watermark cannot be trusted across a suppression: it describes a jar
+    // from before the foreign set was applied, and leaving it would let the
+    // unchanged-shortcut skip the very first push -- the one that makes the
+    // assigned set match what is on screen.
+    inSync: false, signature: '',
+  });
+  return await pushToLauncher({manual: true});
+}
+
 // ---- side panel: proxy re-check and automation runs -------------------------
 // Both spend the same run token the cookie sync engine above spends, and both
 // go through fetchLauncher so a dead token, a throttle and a 5xx are classified
@@ -573,6 +772,44 @@ async function recheckProxy() {
   };
 }
 
+// Every automation in this launch's workspace, for the panel's list.
+//
+// The panel's first paint still comes from argus-session.json -- the launch
+// snapshot, which works with the launcher closed -- and this replaces it. Quiet
+// on failure for the same reason automationStatus is: a window opened outside
+// the launcher, or with the launcher since closed, is an ordinary state and the
+// panel keeps showing the snapshot rather than painting an error over it.
+async function listAutomations() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, available: false};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/automations/list-from-page`,
+      {runToken: config.token});
+  if (!result.ok) {
+    return {ok: false, available: true, error: result.message};
+  }
+  return {
+    ok: true,
+    available: true,
+    automations: Array.isArray(result.body.automations) ? result.body.automations : [],
+  };
+}
+
+// Two routes, one button.
+//
+// An automation this launch was handed goes to run-from-page, which resolves it
+// out of the run token and therefore works with the launcher window closed --
+// which is most of the value of pinning one. Anything else has to go to
+// run-any-from-page, where the launcher's renderer resolves it on demand, and
+// that route answers 503 when the window is shut.
+//
+// The choice is made from the launch snapshot rather than by trying one route
+// and falling back on a 403: a 403 is deliberately the same answer for an
+// unknown token as for an unoffered automation (run-token.cjs), so treating it
+// as "try the other one" would turn every genuinely dead token into two
+// requests and a misleading second error.
 async function runAutomation(automationId) {
   if (!automationId) {
     return {ok: false, error: 'No automation was named.'};
@@ -581,8 +818,12 @@ async function runAutomation(automationId) {
   if (!config) {
     return {ok: false, error: 'This window was not launched from Argus Launcher.'};
   }
+  const session = await sessionData();
+  const offered = (session && Array.isArray(session.automations) ? session.automations : [])
+      .some((item) => item && item.id === automationId);
+  const path = offered ? 'run-from-page' : 'run-any-from-page';
   const result = await fetchLauncher(
-      `http://127.0.0.1:${config.apiPort}/v1/automations/run-from-page`,
+      `http://127.0.0.1:${config.apiPort}/v1/automations/${path}`,
       {runToken: config.token, automationId});
   // The launcher answers identically for every refusal, so there is nothing
   // more specific to say than that it did not start.
@@ -711,6 +952,51 @@ function cookieUrl(cookie) {
   return `${cookie.secure ? 'https' : 'http'}://${domain}${path}`;
 }
 
+// Greater than zero while a pull is rewriting the jar. Read by pushToLauncher,
+// which requeues rather than sending a half-applied -- or, for the moment
+// between the clear and the first set, entirely empty -- jar.
+//
+// Module scope rather than storage: a service worker can be evicted between any
+// two lines, but if it is, the import it was running dies with it, so there is
+// no state left to be stale. A persisted flag could get stuck on and stop
+// syncing until the next launch.
+let jarWriteDepth = 0;
+
+// Empties this browser's jar, so an import can replace rather than merge.
+//
+// chrome.cookies.remove, not chrome.browsingData.removeCookies: browsingData is
+// not in this extension's permissions (and asking for it would be asking for a
+// great deal more than this needs), and it would also clear localStorage,
+// IndexedDB and service worker registrations for every origin -- far past
+// "replace the cookies".
+//
+// partitionKey and storeId are carried through when present. A partitioned
+// cookie removed without its key is not removed at all, and it would survive
+// into the "replaced" jar as a leftover from the previous set.
+async function clearJar() {
+  const existing = await chrome.cookies.getAll({});
+  let removed = 0;
+  let failed = 0;
+  for (const cookie of existing) {
+    try {
+      const details = {url: cookieUrl(cookie), name: cookie.name};
+      if (cookie.storeId) details.storeId = cookie.storeId;
+      if (cookie.partitionKey) details.partitionKey = cookie.partitionKey;
+      const result = await chrome.cookies.remove(details);
+      // remove() resolves with null when nothing matched -- an httpOnly cookie
+      // whose url we reconstructed wrongly, most often. Counted as failed
+      // rather than removed: the caller reports it, and a jar that says it was
+      // replaced when it was not is the thing this whole change is fixing.
+      if (result) removed++;
+      else failed++;
+    } catch (error) {
+      failed++;
+      console.warn('Argus cookie clear failed', cookie.domain, cookie.name, error);
+    }
+  }
+  return {count: removed, failed};
+}
+
 // Returns both how many cookies actually made it into the browser and how
 // many did not (a raw entry that failed to normalize counts the same as one
 // chrome.cookies.set rejected): a caller that only reads `count` must not be
@@ -794,6 +1080,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case 'run-automation':
           sendResponse(await runAutomation(message.automationId));
           return;
+        case 'list-automations':
+          sendResponse(await listAutomations());
+          return;
         case 'automation-status':
           sendResponse(await automationStatus());
           return;
@@ -819,10 +1108,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         }
         case 'pull-from-launcher':
-          sendResponse(await pullFromLauncher());
+          // `setId` omitted -> the assigned set, which is what the single
+          // "Load from Launcher" button always meant. Present -> the panel's
+          // picker chose a set from the workspace library.
+          sendResponse(await pullFromLauncher(message.setId));
           return;
         case 'list-launcher-cookies':
-          sendResponse(await listLauncherCookies());
+          sendResponse(await listLauncherCookies(message.setId));
+          return;
+        case 'list-launcher-cookie-sets':
+          sendResponse(await listLauncherCookieSets());
+          return;
+        case 'overwrite-set':
+          sendResponse(await overwriteSet(message.setId, message.cookies));
+          return;
+        case 'resume-sync':
+          sendResponse(await resumeSyncToAssigned());
           return;
         case 'save-as-set':
           // `message.cookies` omitted -> the whole current jar (popup's
