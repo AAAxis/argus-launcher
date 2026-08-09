@@ -2341,6 +2341,46 @@ function killStaleProfileProcess(profileId) {
   }
 }
 
+// Chromium can't create a GPU context on hosts without a usable GPU (Azure and
+// other VMs, RDP-only servers, headless CI). When that happens the browser
+// process starts but never creates a visible window -- the "launched, but no
+// window" failure. Detect a virtual/basic display adapter once and fall back to
+// software rendering so the window always appears. Machines with a real GPU are
+// left untouched, so their canvas/WebGL fingerprints keep hardware fidelity.
+let cachedGpuFallbackSwitches = null;
+function resolveGpuFallbackSwitches() {
+  if (cachedGpuFallbackSwitches !== null) {
+    return cachedGpuFallbackSwitches;
+  }
+  cachedGpuFallbackSwitches = [];
+  if (process.platform !== 'win32') {
+    return cachedGpuFallbackSwitches;
+  }
+  const softwareSwitches = ['--disable-gpu', '--disable-gpu-compositing'];
+  try {
+    const result = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join '|'",
+    ], {encoding: 'utf8', timeout: 8000});
+    const names = (result.stdout || '').trim();
+    // Fall back when no adapter is reported at all, or every reported adapter is
+    // a software/virtual one that can't give Chromium a hardware GL context.
+    const softwareOnly = !names || names.split('|').every((n) =>
+        /basic display|microsoft (basic|hyper-v)|hyper-?v|virtual|vmware|standard vga|remote display|dameware|citrix|parsec|rdp/i.test(n));
+    if (softwareOnly) {
+      console.log(`GPU fallback: adapters="${names || '(none)'}" -> software rendering (${softwareSwitches.join(' ')})`);
+      cachedGpuFallbackSwitches = softwareSwitches;
+    } else {
+      console.log(`GPU fallback: hardware adapter present ("${names}"); keeping GPU on.`);
+    }
+  } catch (err) {
+    // If detection itself fails, prefer a visible window over hardware GPU.
+    console.warn(`GPU detection failed (${err}); defaulting to software rendering.`);
+    cachedGpuFallbackSwitches = softwareSwitches;
+  }
+  return cachedGpuFallbackSwitches;
+}
+
 function spawnProfileBrowserDirectly(resolved, args, timezone) {
   const env = {...process.env};
   if (timezone) {
@@ -2520,6 +2560,8 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   const hasLangSwitch = switches.some((sw) => sw.startsWith('--lang='));
   const args = [
     '--argus-profile-launch',
+    // Software-rendering fallback for GPU-less/VM hosts (no-op on real GPUs).
+    ...resolveGpuFallbackSwitches(),
     `--argus-profile-id=${payload.id}`,
     `--argus-profile-name=${payload.name}`,
     // The browser retints its own Dock tile from this (argus_dock_icon_mac.mm).
