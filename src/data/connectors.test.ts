@@ -4,7 +4,9 @@
 // the connector form, the IPC push and the masking all key off, so they are
 // tested here rather than through the UI.
 import {describe, expect, it} from 'vitest';
-import {runtimeConnector, secretKeysFor, validateConnectorConfig} from './connectors';
+import {
+  connectorKindsForApi, runtimeConnector, secretKeysFor, validateConnectorConfig,
+} from './connectors';
 
 function connector(overrides: Partial<Parameters<typeof runtimeConnector>[0]> = {}) {
   return {
@@ -130,5 +132,60 @@ describe('secretKeysFor', () => {
 
   it('has no secrets for an unrecognised kind', () => {
     expect(secretKeysFor('carrier-pigeon')).toEqual([]);
+  });
+});
+
+// What GET /v1/connectors serves as its `kinds` block. An agent authoring a
+// connector over MCP has nothing else to read, so a field missing here is a
+// field it cannot know to send.
+describe('connectorKindsForApi', () => {
+  const kinds = connectorKindsForApi();
+  const find = (kind: string) => kinds.find((entry) => entry.kind === kind);
+
+  it('describes telegram the way the form does', () => {
+    expect(find('telegram')).toMatchObject({
+      kind: 'telegram',
+      label: 'Telegram',
+      category: 'message',
+    });
+    expect(find('telegram')?.fields.map((field) => field.key))
+        .toEqual(['botToken', 'chatId']);
+  });
+
+  it('marks required and secret on every field, never undefined', () => {
+    for (const entry of kinds) {
+      for (const field of entry.fields) {
+        expect(typeof field.required).toBe('boolean');
+        expect(typeof field.secret).toBe('boolean');
+      }
+    }
+  });
+
+  it('agrees with secretKeysFor about which fields are credentials', () => {
+    for (const entry of kinds) {
+      const marked = entry.fields.filter((field) => field.secret).map((field) => field.key);
+      expect(marked).toEqual(secretKeysFor(entry.kind));
+    }
+  });
+
+  // The one thing this block must never do. It is catalogue text served to an
+  // LLM transcript, and a stored value reaching it would be the exact leak the
+  // write-only rule exists to prevent -- so the shape is asserted key by key
+  // rather than trusted to stay this way.
+  it('carries only static catalogue keys', () => {
+    const allowed = new Set(['key', 'label', 'required', 'secret', 'hint', 'example', 'options']);
+    for (const entry of kinds) {
+      expect(Object.keys(entry).sort()).toEqual(['category', 'fields', 'kind', 'label']);
+      for (const field of entry.fields) {
+        for (const key of Object.keys(field)) {
+          expect(allowed.has(key)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('covers every messaging kind the send adapters implement', () => {
+    expect(kinds.filter((entry) => entry.category === 'message').map((entry) => entry.kind))
+        .toEqual(['telegram', 'slack', 'discord', 'whatsapp', 'smtp']);
   });
 });

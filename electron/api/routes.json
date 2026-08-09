@@ -102,9 +102,9 @@
         {"key": "name", "type": "string", "required": true,
          "description": "The profile's display name."},
         {"key": "folderId", "type": "string",
-         "description": "Folder to file it in. Omit for the root. Folder ids appear on argus_get_profile output."},
+         "description": "Folder to file it in. Omit for the root. Folder ids come from argus_list_folders."},
         {"key": "status", "type": "string",
-         "description": "Workflow status label. Defaults to Ready."},
+         "description": "Workflow status label. Defaults to Ready. argus_list_statuses has the ones this workspace uses."},
         {"key": "tags", "type": "tags",
          "description": "Free-text labels, at most 5. Extras are dropped."},
         {"key": "color", "type": "string",
@@ -517,6 +517,151 @@
           "type": "number",
           "description": "How many runs, newest first. Default 20, at most 50."
         }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connectors",
+      "group": "Connectors",
+      "label": "The workspace's connectors, and the field list of every kind",
+      "scope": "any",
+      "channel": "argus:list-connectors-request",
+      "mcp": "argus_list_connectors",
+      "mcpDescription": "The message and AI connectors this workspace has, and the catalogue of kinds one can be created from. Call this before writing a notify, aiPrompt or aiCheck step, or setting notifyConnectorId -- those fields take an id from here and there is no other way to learn one. Stored credentials are never returned: a connector's config is write-only over this API.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/create",
+      "group": "Connectors",
+      "label": "Add a connector. Owner-only, like the Connectors view",
+      "scope": "unscoped",
+      "channel": "argus:create-connector-request",
+      "mcp": "argus_create_connector",
+      "mcpDescription": "Add a connector -- a Telegram bot, a Slack or Discord webhook, WhatsApp, SMTP, or an AI provider. Call argus_list_connectors first for the kind's field list. `config` carries the credentials; anything you send here is in this conversation's transcript, and it cannot be read back out afterwards. Returns the connector without its config.",
+      "body": "{ \"name\": \"Ops Telegram\", \"kind\": \"telegram\", \"config\": { \"botToken\": \"...\", \"chatId\": \"-1004281234567\" } }",
+      "fields": [
+        {"key": "name", "type": "string", "required": true,
+         "description": "What the connector is called in the app."},
+        {"key": "kind", "type": "string", "required": true,
+         "description": "telegram, slack, discord, whatsapp, smtp, or an AI kind. See the `kinds` block of argus_list_connectors. The category follows from the kind and cannot be set."},
+        {"key": "config", "type": "object",
+         "description": "The kind's fields, as a flat object of strings. Missing required fields are a 400 naming each one."},
+        {"key": "isDefault", "type": "boolean",
+         "description": "Make this the default for its category, used by steps that name no connector. The first connector in a category is the default whether or not this is sent."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/update",
+      "group": "Connectors",
+      "label": "Rename a connector, change its config or make it the default",
+      "scope": "unscoped",
+      "channel": "argus:update-connector-request",
+      "mcp": "argus_update_connector",
+      "mcpDescription": "Change a connector. `config` merges key by key, so a chat id can be changed without re-sending the bot token, and omitting config entirely leaves every stored credential alone. The kind cannot be changed -- delete and recreate instead.",
+      "body": "{ \"connectorId\": \"<id>\", \"config\": { \"chatId\": \"-1004281234567\" } }",
+      "fields": [
+        {"key": "connectorId", "type": "string", "required": true},
+        {"key": "name", "type": "string"},
+        {"key": "config", "type": "object",
+         "description": "Merged into the stored config. Send only the keys that change; send a key as \"\" to clear it."},
+        {"key": "isDefault", "type": "boolean",
+         "description": "true promotes this connector and demotes the previous default in its category. false is refused -- promote another one instead, so a category is never left without a default."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/delete",
+      "group": "Connectors",
+      "label": "Delete a connector",
+      "scope": "unscoped",
+      "channel": "argus:delete-connector-request",
+      "mcp": "argus_delete_connector",
+      "mcpDescription": "Delete a connector. Steps that still name it start failing with a sentence saying it is gone -- they do not fall back to another connector. Check argus_list_automations first if you are not sure what uses it.",
+      "body": "{ \"connectorId\": \"<id>\" }",
+      "fields": [
+        {"key": "connectorId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/test",
+      "group": "Connectors",
+      "label": "Send a real test message, or a one-word AI completion",
+      "scope": "unscoped",
+      "channel": "argus:test-connector-request",
+      "mcp": "argus_test_connector",
+      "mcpDescription": "Prove a connector works: a message connector sends a real test message, an AI connector asks for a one-word completion. Reports the service's own error text when it fails, which is usually the whole diagnosis. Do this after creating one rather than waiting for a run to fail.",
+      "body": "{ \"connectorId\": \"<id>\" }",
+      "fields": [
+        {"key": "connectorId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/folders",
+      "group": "Workspace",
+      "label": "The folders profiles, proxies and cookie sets are filed in",
+      "scope": "any",
+      "channel": "argus:list-folders-request",
+      "mcp": "argus_list_folders",
+      "mcpDescription": "The workspace's folders, with the id every folderId argument takes. A folder-scoped key sees only the folders it is scoped to. Read-only: folders are created and renamed in the app.",
+      "fields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/statuses",
+      "group": "Workspace",
+      "label": "Every status label a profile, proxy or cookie set can carry",
+      "scope": "any",
+      "channel": "argus:list-statuses-request",
+      "mcp": "argus_list_statuses",
+      "mcpDescription": "The status labels this workspace uses, built-in and custom. argus_update_profile.status takes a free string, so without this an agent can write a status the app never offers and the row lands looking broken. Read-only: custom statuses are created in the app.",
+      "fields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/telegram",
+      "group": "Notifications",
+      "label": "Whether the notification bot is set up, and who is subscribed",
+      "scope": "any",
+      "channel": "argus:telegram-status-request",
+      "mcp": "argus_telegram_status",
+      "mcpDescription": "The state of personal Telegram notifications: whether the workspace has a notification bot, whether the signed-in user has linked their Telegram, and which automations they get messages about. This is separate from telegram connectors -- it is per person, and it is what answers 'why did that run not message me'. Neither the bot token nor the chat id is returned.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/telegram/pref",
+      "group": "Notifications",
+      "label": "Subscribe the signed-in user to one automation's outcomes",
+      "scope": "any",
+      "channel": "argus:set-telegram-pref-request",
+      "mcp": "argus_set_telegram_pref",
+      "mcpDescription": "Turn personal Telegram messages on or off for one automation, for the signed-in user. This is that person's own setting and is independent of the automation's notifyOn, which is the workspace-wide one. Requires a linked Telegram -- check argus_telegram_status first.",
+      "body": "{ \"automationId\": \"<id>\", \"notifyOn\": \"failure\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {"key": "notifyOn", "type": "string",
+         "description": "always or failure. Empty unsubscribes. 'failure' includes a run that finished with a failed step."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/telegram/bot",
+      "group": "Notifications",
+      "label": "Set the workspace's notification bot. Owner-only",
+      "scope": "unscoped",
+      "channel": "argus:set-telegram-bot-request",
+      "mcp": "argus_set_telegram_bot",
+      "mcpDescription": "Point the workspace at a Telegram bot from BotFather, so members can link their own chats to it. Write-only: the token is never returned by any route. Members still have to press Start in Telegram themselves, which only the app can walk them through -- this call does not link anybody.",
+      "body": "{ \"botName\": \"myworkspacebot\", \"botToken\": \"123456789:AA...\" }",
+      "fields": [
+        {"key": "botName", "type": "string", "required": true,
+         "description": "The bot's @username, with or without the @."},
+        {"key": "botToken", "type": "string", "required": true,
+         "description": "The token BotFather issued. Stored for the whole workspace and never read back out over this API."}
       ]
     },
     {

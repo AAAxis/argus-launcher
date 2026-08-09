@@ -1,8 +1,38 @@
 # What an AI agent can do through the Argus MCP server
 
-Scope: the 25 tools in `electron/mcp/tools.cjs`, the loopback automation API in
+Scope: the 39 tools in `electron/mcp/tools.cjs`, the loopback automation API in
 `electron/main.cjs` they call, and the renderer handlers in
 `src/hooks/useAutomationBridge.ts` that actually answer.
+
+## Re-probe this document; do not reason about it from source
+
+The tool count above has been wrong twice, in both directions, and the reason is
+structural rather than clerical.
+
+`~/.claude.json` points the `argus` MCP server at
+`Argus Launcher.app/Contents/Resources/app/electron/mcp/server.cjs`. On a
+development machine that `app` is a **symlink to the repo**, so a new MCP
+process picks up `routes.json` and `tools.cjs` the moment they are saved — no
+build, no reinstall. But three things move at three different speeds:
+
+| Layer | Picks up a change when |
+|---|---|
+| MCP tool list (`tools.cjs`, `routes.json`) | the next MCP process starts |
+| Route dispatch (`electron/main.cjs`) | the launcher app restarts |
+| Bridge handlers (`src/hooks/…`) | `npm run build`, then the window reloads |
+
+And on top of that, **an MCP client caches `tools/list` at connect time.** A
+Claude Code session started before a change never sees the new tools no matter
+what the server would answer. During the connectors work this produced a session
+holding 23 tools against a server serving 29 — the agent in it could not know
+what it was missing.
+
+So the failure mode is not "the doc is stale". It is "the doc, the server, the
+router and the client all disagree, and every one of them answers confidently".
+Before trusting anything below, drive `server.cjs` over stdio with the command
+and env from `~/.claude.json` and read `tools/list` yourself. A route that
+answers `Not found` with a valid token means the launcher has not restarted
+since the route was added.
 
 Everything below is marked either **[verified]** — actually executed against the
 running launcher over stdio JSON-RPC, exactly as an agent client would — or
@@ -49,6 +79,16 @@ were added afterwards and are marked **[read]** in the table.
 | `argus_run_automation` | `POST /v1/automations/run` | read only |
 | `argus_table_columns` | `GET /v1/tables/columns` | read only |
 | `argus_set_table_columns` | `POST /v1/tables/columns` | read only |
+| `argus_list_connectors` | `GET /v1/connectors` | read only |
+| `argus_create_connector` | `POST /v1/connectors/create` | read only |
+| `argus_update_connector` | `POST /v1/connectors/update` | read only |
+| `argus_delete_connector` | `POST /v1/connectors/delete` | read only |
+| `argus_test_connector` | `POST /v1/connectors/test` | read only |
+| `argus_list_folders` | `GET /v1/folders` | read only |
+| `argus_list_statuses` | `GET /v1/statuses` | read only |
+| `argus_telegram_status` | `GET /v1/telegram` | read only |
+| `argus_set_telegram_pref` | `POST /v1/telegram/pref` | read only |
+| `argus_set_telegram_bot` | `POST /v1/telegram/bot` | read only |
 
 Twenty tools are thin wrappers over loopback HTTP routes; five need a running
 browser and speak CDP directly (`electron/mcp/cdp.cjs`).
@@ -239,6 +279,62 @@ which is also the only way to get a run id per profile to poll through
 cannot be read back out through `argus_automation_runs`. It is still stored as
 plain text in the database, like every proxy password and connector credential.
 
+### Connectors — write-only credentials
+
+A `notify`, `aiPrompt` or `aiCheck` step names a connector by id and carries
+nothing else. That is what keeps every bot token, webhook URL and API key out of
+the steps, the vars, the run log and `run.json` — which is what makes it safe for
+a run record to be flushed to Supabase and read by the whole org.
+
+An API that handed those credentials back would put them somewhere strictly
+worse: an agent transcript, which is logged and which the user cannot unsend. So
+the boundary here is not "connectors are hidden" — it is **`config` is
+write-only**:
+
+- `argus_list_connectors` returns `{id, name, kind, category, is_default,
+  configured}` and a `kinds` catalogue. `configured` is the list of config keys
+  that hold a non-empty value — **key names, never values**. Without it, "the
+  send failed" and "the bot token was never saved" are indistinguishable from
+  outside, and the second is the likelier one.
+- `argus_create_connector` and `argus_update_connector` accept `config`. Anything
+  sent that way is in the caller's transcript by definition — that is the
+  caller's decision to make, and it is the only way to set a workspace up from
+  chat. Nothing sent can be read back afterwards.
+- `update` **merges** `config` key by key. A caller changing a chat id must not
+  have to re-send the bot token to keep it, and a caller that omits `config`
+  entirely must not blank every credential on the row.
+- `category` is derived from `kind` via the preset catalogue and is never
+  accepted from the caller — otherwise a Telegram bot could be filed as an AI
+  provider and resolve into an `aiPrompt` step.
+
+Writes are owner-only. RLS enforces it, but an UPDATE or DELETE that RLS filters
+out returns success with no rows, so the bridge checks `org.isOwner` first and
+answers 403 with a sentence — a member's edit must not look like it worked.
+
+The `kinds` block is derived from `CONNECTOR_PRESETS` by `connectorKindsForApi()`
+(`src/data/connectors.ts`), not hand-written in `electron/`. Same reason
+`step-schema.json` is one file: nothing compiles `src/` into `electron/`, so a
+second copy of five messaging shapes and thirteen AI ones is drift by
+construction. `src/data/connectors.test.ts` asserts the block carries only static
+catalogue keys, so a stored value cannot start riding along by accident.
+
+Every write goes through `useConnectorActions` rather than `db.connectors`
+directly, and that is load-bearing rather than stylistic: those actions patch
+cloud state, and the hook's effect pushes the resolved list to the main process
+on every patch. Writing straight to the database would leave
+`electron/automation/connectors.cjs` holding a stale map — so a connector created
+over MCP would exist in Supabase and be unusable by a run until the app
+restarted.
+
+**Telegram appears twice and the two are not the same thing.** A `telegram`
+*connector* is org-shared, carries its own bot token, and is what a `notify` step
+or `notifyConnectorId` sends through. The *personal* path
+(`argus_telegram_status`, `argus_set_telegram_pref`) is the workspace's
+notification bot messaging one member's own chat about runs they subscribed to —
+`organizations.telegram_bot_*` + `user_telegram` + `automation_telegram_prefs`,
+per person, no id. An agent that conflates them will hunt for a connector id that
+does not exist.
+
 ## 4. What an agent CANNOT do
 
 ### 4a. Deliberately omitted
@@ -291,14 +387,18 @@ Compared against what the app itself can do, an agent has **no** way to:
   dialog uses.
 - **Duplicate, restore from Trash, or purge.** (`useProfileActions.ts:117,126`)
 - **Import or export profiles as CSV.** (`useProfileActions.ts:242,319`)
-- **See or manage folders.** No route lists folders — yet
-  `argus_list_profiles.folder` and `argus_update_profile.folderId` both take a
-  folder id. The only way an agent can learn a folder id is by reading
-  `folder_id` off a profile it can already see. Creating, renaming and deleting
-  folders (`src/workspace/useLibraryActions.ts:64,74,90`) are all unreachable.
-- **See or create statuses.** `argus_update_profile.status` is a free string;
-  custom statuses live in `custom_statuses` (`useLibraryActions.ts:115`) and are
-  never listed. An agent can write a status the UI does not offer.
+- **See folders.** ~~No route lists folders.~~ **Now possible** via
+  `argus_list_folders`, which returns the profile, proxy and cookie folder ids
+  the three `folderId` arguments take (profile folders narrowed to the key's
+  scope). **Creating, renaming and deleting** folders
+  (`src/workspace/useLibraryActions.ts:64,74,90`) are still unreachable, on
+  purpose: a folder is how a workspace is organised, not a side effect of a
+  script.
+- **See statuses.** ~~`custom_statuses` is never listed.~~ **Now possible** via
+  `argus_list_statuses`, which returns the built-in labels per table plus the
+  workspace's custom ones. `argus_update_profile.status` is still a free string,
+  so an agent *can* still write a label the pickers do not offer — it just no
+  longer has to guess. Creating a custom status stays app-only.
 - **Touch cookies at all.** The whole cookie library — upload a set, edit
   entries, duplicate, trash, assign a set to profiles, export JSON/Netscape
   (`src/workspace/useCookieActions.ts:100,131,168,249,358`) — has no MCP
@@ -320,7 +420,16 @@ Compared against what the app itself can do, an agent has **no** way to:
   design: switches are a launch-time code-execution surface and credentials are a
   deliberately closed write hole. See the caveat in §4c.
 - **Manage account, org, plan, API keys or integrations.** Nothing under
-  `src/settings/` is reachable.
+  `src/settings/` is reachable. API keys especially: an agent cannot mint or
+  revoke the credential it is itself holding.
+- **Link a member's Telegram.** `argus_telegram_status` reports whether the
+  signed-in user is linked and `argus_set_telegram_pref` changes what they are
+  subscribed to, but the link itself stays in the app. It needs a human to press
+  Start in the bot, and `electron/telegram-link.cjs` watches the bot's
+  `getUpdates` feed for up to 120 s — four times the MCP HTTP client's 30 s cap
+  (`electron/mcp/api.cjs:11`), so the call could not survive the wait even if the
+  human were instant. The tool says so in its `linked: false` reply rather than
+  leaving a model to invent a reason.
 - **Control tabs.** `argus_list_tabs` returns tab ids, but no tool accepts one.
   There is no open-tab, close-tab or switch-tab. Every CDP tool silently targets
   whatever `pageTarget()` picks — the first `http(s)` page in `/json/list`, else

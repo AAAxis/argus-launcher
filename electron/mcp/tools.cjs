@@ -482,6 +482,16 @@ function compactSchema(steps) {
       if (field.kind === 'steps') {
         parts.push('nested steps');
       }
+      // The `connector` kind is the one place `key: kind` says nothing usable.
+      // Its category is what decides which connectors are even legal here -- a
+      // notify step must not name a model and an aiPrompt must not name a bot
+      // -- and leaving it empty is a real choice, not an omission. Dropping
+      // both left an agent knowing the field exists and nothing about what
+      // goes in it, which is how five invented ids got tried in a row.
+      if (field.kind === 'connector') {
+        parts.push(`${field.category || 'any'} connector id from argus_list_connectors`);
+        parts.push('blank uses the workspace default for that category');
+      }
       return parts.join(', ');
     }),
   }));
@@ -506,7 +516,9 @@ const AUTOMATION_TOOLS = apiRoutes
         steps: compactSchema(answer.steps),
         note: 'Every step also takes id (required, unique), label, enabled, ' +
           'timeoutMs, onError (stop|continue|retry) and retries. Full field ' +
-          'specs: GET /v1/automations/schema.',
+          'specs: GET /v1/automations/schema. The notify, aiPrompt and aiCheck ' +
+          'steps name a connector by id -- call argus_list_connectors for the ' +
+          'ids this workspace has, and argus_create_connector if it has none.',
         // Declared here rather than left to the create tool's field
         // description, because an agent calls this BEFORE authoring anything --
         // which is the whole reason this tool exists. Without it, parameters

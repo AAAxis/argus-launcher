@@ -16,6 +16,14 @@ import {assigneeName} from '../lib/assignees';
 import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
 import {normalizeTags, tagPresetFor} from '../lib/tags';
 import {newProfileDraft, profileFromDraft, withFingerprintOs} from '../drafts';
+import {
+  CONNECTOR_PRESETS, connectorKindsForApi, presetFor, runtimeConnector,
+  validateConnectorConfig,
+} from '../data/connectors';
+import {
+  baseCookieStatuses, baseProfileStatuses, baseProxyStatuses,
+} from '../data/statuses';
+import {useOrg} from '../org';
 import {osPresets, randomFingerprintPatch} from '../lib/fingerprintPresets';
 import {comparable} from '../lib/text';
 import {matchedProxyForProfile, repairProxyAssignments} from '../lib/proxies';
@@ -38,7 +46,7 @@ import {isCustomHex, resolveProfileColor} from '../lib/profileColors';
 import type {AutomationParam} from '../automations/parameters';
 import type {AutomationSchedule} from '../automations/schedule';
 import type {AutomationStep, AutomationVars} from '../automations/types';
-import type {ArgusAutomation, ArgusProxy} from '../types';
+import type {ArgusAutomation, ArgusConnector, ArgusProxy} from '../types';
 
 // One subscribe/respond pair, with the try/catch every handler needs. Fifteen
 // copies of that boilerplate is where the two handlers that forgot to answer on
@@ -78,6 +86,28 @@ class ApiError extends Error {
   }
 }
 
+// A connector's config as the table stores it: a flat object of strings.
+//
+// Coerced rather than rejected because JSON has types and this column does not:
+// an agent sending `{"port": 587}` for an SMTP port means the same thing the
+// form's number input produces, and refusing it would be a 400 about a
+// distinction the app itself does not draw. Nested objects and arrays ARE
+// refused -- there is no field kind they could belong to, so one is a mistake
+// worth naming rather than a shape to flatten into "[object Object]".
+function stringConfig(config: Record<string, unknown> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(config || {})) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    if (typeof value === 'object') {
+      throw new ApiError(`config.${key} must be a string, number or boolean`, 400);
+    }
+    out[key] = String(value);
+  }
+  return out;
+}
+
 // The table-driven equivalent of useChannel: one shared channel pair for every
 // route declared in electron/api/routes.json, rather than a named on*/send*
 // pair per route.
@@ -112,7 +142,17 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
     data, toast, automations: automationActions, profiles: profileActions,
     profileNotes: profileNoteActions,
     proxies: proxyActions, cookies: cookieActions,
+    // Every connector write goes through these rather than db.connectors
+    // directly, and that is load-bearing: they patch cloud state, and
+    // useConnectorActions' effect pushes the new list to the main process on
+    // every such patch. Writing straight to the database would leave the
+    // runner's in-memory map stale, so a connector created over this API would
+    // not be usable by a run until the app restarted.
+    connectors: connectorActions,
   } = workspace;
+  // The workspace's notification bot rides the org row rather than CloudState,
+  // and `isOwner` is what the connector writes gate on.
+  const org = useOrg();
   const state = data.state;
   const {withDb, patch, setState} = data;
   const cloud = [state] as const;
@@ -160,7 +200,8 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           count: cookies.length,
           base64: btoa(unescape(encodeURIComponent(raw))),
         };
-        const fields = await cloudCookieFromSelection(profile.id, selection);
+        const fields = await cloudCookieFromSelection(
+            profile.id, selection, profile.cookie_import_url);
         if (!await withDb((orgId) => db.profiles.update(orgId, profile.id, fields))) {
           throw new Error('Failed to save to cloud state.');
         }
@@ -1463,6 +1504,330 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           throw new ApiError(result?.error || 'The run did not start.', 409);
         }
         return {runId: result.runId, automationId: automation.id, profileId: profile.id};
+      },
+      cloud);
+
+  // ── Connectors ─────────────────────────────────────────────────────────────
+  //
+  // The rule these five are written against: a step stores a connector id and
+  // nothing else, which is what keeps every credential out of the steps, the
+  // vars, the run log and run.json. An API that handed the credentials back
+  // would put them somewhere worse -- an agent transcript, which is logged and
+  // which the user cannot unsend. So `config` is write-only here: settable,
+  // mergeable, never returned. Not masked; absent.
+  //
+  // This is the same line useAutomationBridge already draws around proxy
+  // passwords, drawn one step further because a connector's whole purpose is
+  // to be named by id rather than carried by value.
+  function connectorSummary(connector: ArgusConnector) {
+    return {
+      id: connector.id,
+      name: connector.name,
+      category: connector.category,
+      kind: connector.kind,
+      is_default: Boolean(connector.is_default),
+      // Which credentials this row actually has, by key -- never their values.
+      // Without it "the send failed" and "the bot token was never saved" look
+      // identical from the outside, and the second is the likelier one.
+      configured: Object.keys(connector.config || {})
+          .filter((key) => (connector.config[key] || '').trim()),
+    };
+  }
+
+  // Writes are owner-only, enforced in Postgres. An UPDATE or DELETE that RLS
+  // filters out returns success with no rows, so a member's edit would look
+  // like it worked -- checked here first so the refusal is a sentence with a
+  // 403 rather than a lie with a 200.
+  function requireConnectorOwner() {
+    requireSignedIn();
+    if (!org.isOwner) {
+      throw new ApiError(
+          'Only the workspace owner can change connectors.', 403);
+    }
+  }
+
+  function requireConnector(connectorId: string): ArgusConnector {
+    const found = state.connectors.find((item) => item.id === connectorId);
+    if (!found) {
+      throw new ApiError(`No connector with id ${connectorId}`, 404);
+    }
+    return found;
+  }
+
+  useApiChannel(
+      'argus:list-connectors-request',
+      () => ({
+        connectors: state.connectors.map(connectorSummary),
+        // The catalogue travels with the list rather than living behind its own
+        // tool: an agent that has the ids but not the field shapes still cannot
+        // create one, and two calls to answer one question is two chances to
+        // skip the second.
+        kinds: connectorKindsForApi(),
+      }),
+      cloud);
+
+  useApiChannel(
+      'argus:create-connector-request',
+      async (payload: {
+        requestId: string;
+        name: string;
+        kind: string;
+        config?: Record<string, unknown>;
+        isDefault?: boolean;
+      }) => {
+        requireConnectorOwner();
+        const preset = presetFor(payload.kind);
+        if (!preset) {
+          throw new ApiError(
+              `No connector kind called ${payload.kind}. There are: ` +
+              `${CONNECTOR_PRESETS.map((item) => item.kind).join(', ')}.`, 400);
+        }
+        const config = stringConfig(payload.config);
+        const problems = validateConnectorConfig(preset.kind, config);
+        if (problems.length > 0) {
+          throw new ApiError(`This connector is not valid: ${problems.join('; ')}`, 400);
+        }
+        // blank() decides both the category (from the preset, never from the
+        // caller) and whether this is the first of its category and so the
+        // default by definition. Overriding either here would be re-deriving
+        // what the Connectors view already derives.
+        const connector: ArgusConnector = {
+          ...connectorActions.blank(preset.kind),
+          name: payload.name.trim(),
+          config,
+        };
+        const error = await connectorActions.save(connector, false);
+        if (error) {
+          throw new ApiError(error, 400);
+        }
+        // Promotion is its own two statements (demote, then promote) and cannot
+        // ride the insert -- the partial unique index would collide with the
+        // incumbent. Skipped when blank() already made it the default.
+        if (payload.isDefault && !connector.is_default) {
+          await connectorActions.setDefault(connector.id);
+        }
+        toast.setMessage(`Added ${connector.name}`);
+        return {connector: connectorSummary({
+          ...connector,
+          is_default: connector.is_default || Boolean(payload.isDefault),
+        })};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:update-connector-request',
+      async (payload: {
+        requestId: string;
+        connectorId: string;
+        name?: string;
+        config?: Record<string, unknown>;
+        isDefault?: boolean;
+      }) => {
+        requireConnectorOwner();
+        const existing = requireConnector(payload.connectorId);
+        if (payload.isDefault === false) {
+          throw new ApiError(
+              'A category cannot be left without a default. Promote another ' +
+              'connector instead, which demotes this one.', 400);
+        }
+        // Merged, not replaced. A caller changing a chat id must not have to
+        // re-send the bot token to keep it -- and a caller that omits config
+        // entirely must not blank every credential on the row.
+        const config = payload.config === undefined ?
+          existing.config :
+          {...existing.config, ...stringConfig(payload.config)};
+        const problems = validateConnectorConfig(existing.kind, config);
+        if (problems.length > 0) {
+          throw new ApiError(`This connector is not valid: ${problems.join('; ')}`, 400);
+        }
+        const connector: ArgusConnector = {
+          ...existing,
+          name: payload.name === undefined ? existing.name : payload.name.trim(),
+          config,
+        };
+        if (!connector.name) {
+          throw new ApiError('name cannot be empty', 400);
+        }
+        const error = await connectorActions.save(connector, true);
+        if (error) {
+          throw new ApiError(error, 400);
+        }
+        if (payload.isDefault && !existing.is_default) {
+          await connectorActions.setDefault(connector.id);
+        }
+        toast.setMessage(`Updated ${connector.name}`);
+        return {connector: connectorSummary({
+          ...connector,
+          is_default: connector.is_default || Boolean(payload.isDefault),
+        })};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:delete-connector-request',
+      async ({connectorId}: {requestId: string; connectorId: string}) => {
+        requireConnectorOwner();
+        const existing = requireConnector(connectorId);
+        // Steps naming it are left pointing at a dead id on purpose -- see
+        // db/connectors.remove. Said out loud here because the caller is the
+        // one who has to go fix them.
+        const naming = state.automations
+            .filter((automation) => automation.notify_connector_id === connectorId)
+            .map((automation) => automation.name);
+        if (!await connectorActions.remove(connectorId)) {
+          throw new Error('Failed to delete the connector.');
+        }
+        toast.setMessage(`Deleted ${existing.name}`);
+        return {
+          deleted: connectorId,
+          // Only the automation-level setting can be checked cheaply; a step
+          // naming it sits inside the steps tree and is found by running it.
+          notifyOnFinishBroken: naming,
+        };
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:test-connector-request',
+      async ({connectorId}: {requestId: string; connectorId: string}) => {
+        requireConnectorOwner();
+        const connector = requireConnector(connectorId);
+        if (!native?.testConnector) {
+          throw new ApiError('Testing a connector needs the desktop app.', 503);
+        }
+        // The same resolved shape a run gets, so a test that passes proves the
+        // thing a run would actually send with -- not a second code path.
+        const result = await native.testConnector(runtimeConnector(connector));
+        if (!result.ok) {
+          // The service's own words. "chat not found" is the whole diagnosis;
+          // "the test failed" is none of it.
+          throw new ApiError(result.error || 'The test failed.', 502);
+        }
+        return {ok: true, connectorId, kind: connector.kind};
+      },
+      cloud);
+
+  // ── Workspace vocabulary ───────────────────────────────────────────────────
+  //
+  // Two read-only lists that exist because other tools already take their
+  // values. folderId is settable on three routes and status is a free string on
+  // two, and until now neither could be discovered from outside the app -- so an
+  // agent either guessed or left them alone. Read-only because creating a folder
+  // or inventing a status is a workspace decision, not a side effect of a script.
+  useApiChannel(
+      'argus:list-folders-request',
+      (payload: {requestId: string; allowedFolders?: string[] | null}) => {
+        const visible = (folders: typeof state.folders) => (payload.allowedFolders ?
+          folders.filter((folder) => payload.allowedFolders!.includes(folder.id)) :
+          folders);
+        const shape = (folder: {id: string; name: string}) =>
+          ({id: folder.id, name: folder.name});
+        return {
+          // Scope applies to profile folders only: it is a gate on profiles,
+          // and the proxy and cookie libraries it does not cover are listed
+          // whole rather than filtered by an id set that means nothing to them.
+          profiles: visible(state.folders).map(shape),
+          proxies: state.proxy_folders.map(shape),
+          cookies: state.cookie_folders.map(shape),
+        };
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:list-statuses-request',
+      () => ({
+        // Built-ins differ per table (a proxy is never in Warmup); custom
+        // labels are org-wide and offered by all three pickers, which is why
+        // they are listed once rather than folded into each list.
+        profiles: baseProfileStatuses,
+        proxies: baseProxyStatuses,
+        cookies: baseCookieStatuses,
+        custom: state.custom_statuses,
+      }),
+      cloud);
+
+  // ── Personal Telegram ──────────────────────────────────────────────────────
+  //
+  // Not connectors, and the confusion between the two is worth naming: a
+  // telegram CONNECTOR is org-shared, carries its own bot token and is what a
+  // notify step sends through. This is the per-person channel -- the workspace's
+  // notification bot messaging the member's own chat when a run they subscribed
+  // to finishes. Separate table, separate opt-in, no id.
+  //
+  // Neither the bot token nor the chat id leaves through here. The token is a
+  // workspace credential and the chat id identifies a person's Telegram account;
+  // an agent needs neither to answer "am I set up" or to change a subscription.
+  useApiChannel(
+      'argus:telegram-status-request',
+      () => ({
+        botConfigured: Boolean(org.org?.telegram_bot_token),
+        botName: org.org?.telegram_bot_name || null,
+        linked: Boolean(state.telegram_link),
+        telegramUsername: state.telegram_link?.telegram_username || null,
+        linkedAt: state.telegram_link?.linked_at || null,
+        prefs: state.telegram_prefs.map((pref) => ({
+          automationId: pref.automation_id,
+          notifyOn: pref.notify_on,
+        })),
+        // Linking needs a human to press Start in Telegram, and the launcher
+        // watches the bot's getUpdates feed for up to two minutes waiting for
+        // it -- four times this API's own request timeout. So it stays in the
+        // app, and this says so rather than leaving a caller to invent a reason.
+        ...(state.telegram_link ? {} : {
+          howToLink: 'Open Argus → Automations → Notification bot and press ' +
+            'Link Telegram. It needs someone to press Start in the bot, so it ' +
+            'cannot be done over this API.',
+        }),
+      }),
+      [state, org.org]);
+
+  useApiChannel(
+      'argus:set-telegram-pref-request',
+      async (payload: {requestId: string; automationId: string; notifyOn?: string}) => {
+        requireSignedIn();
+        if (!state.automations.some((item) => item.id === payload.automationId)) {
+          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
+        }
+        const wanted = (payload.notifyOn || '').trim();
+        if (wanted && wanted !== 'always' && wanted !== 'failure') {
+          throw new ApiError('notifyOn must be always, failure, or empty to unsubscribe', 400);
+        }
+        // Refused rather than stored: a subscription with nowhere to send is a
+        // setting that reads as on and does nothing, which is the failure this
+        // whole route exists to make diagnosable.
+        if (wanted && !state.telegram_link) {
+          throw new ApiError(
+              'This user has not linked their Telegram. Open Argus → Automations → ' +
+              'Notification bot and press Link Telegram first.', 409);
+        }
+        await automationActions.setTelegramPref(
+            payload.automationId, wanted ? (wanted as 'always' | 'failure') : null);
+        return {automationId: payload.automationId, notifyOn: wanted || null};
+      },
+      cloud);
+
+  useApiChannel(
+      'argus:set-telegram-bot-request',
+      async (payload: {requestId: string; botName: string; botToken: string}) => {
+        requireSignedIn();
+        const name = payload.botName.trim().replace(/^@/, '');
+        const token = payload.botToken.trim();
+        if (!name || !token) {
+          throw new ApiError('botName and botToken are both required', 400);
+        }
+        // db.orgs.setTelegramBot turns RLS's success-with-no-rows back into a
+        // sentence, so the owner check is already honest there -- no second one
+        // here. withDbError rather than withDb: withDb toasts and returns
+        // false, which would answer this call 200 after saving nothing.
+        const error = await data.withDbError(
+            (activeOrgId) => db.orgs.setTelegramBot(activeOrgId, token, name));
+        if (error) {
+          throw new ApiError(error, 403);
+        }
+        await org.reload({quiet: true});
+        toast.setMessage(`Notification bot set to @${name}`);
+        // The token is not echoed. It never is, from anywhere in this file.
+        return {botName: name, botConfigured: true};
       },
       cloud);
 

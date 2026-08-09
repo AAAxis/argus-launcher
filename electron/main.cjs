@@ -5088,7 +5088,19 @@ function startAutomationApiServer() {
       if (tableRoute.local) {
         // Answered here: the step catalogue is a static file in this process,
         // and a renderer round trip for it would only add a way to fail.
-        sendJson(res, 200, {status: true, steps: stepSchema});
+        //
+        // Keyed on the path rather than assumed. There is one local route today
+        // and this used to answer every one of them with the step catalogue, so
+        // a second `local: true` route would have returned the wrong body with
+        // a 200 -- the failure mode nothing catches, because nothing errored.
+        if (tableRoute.path === '/v1/automations/schema') {
+          sendJson(res, 200, {status: true, steps: stepSchema});
+          return;
+        }
+        sendJson(res, 500, {
+          status: false,
+          msg: `${tableRoute.path} is declared local but nothing answers it here`,
+        });
         return;
       }
       // The calling key's own identity, forwarded alongside its folder scope.

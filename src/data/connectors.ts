@@ -398,6 +398,53 @@ export function secretKeysFor(kind: string): string[] {
   return (preset?.fields || []).filter((field) => field.secret).map((field) => field.key);
 }
 
+// The catalogue as GET /v1/connectors serves it, so an agent authoring a
+// connector learns the same field list the form generates itself from.
+//
+// Derived rather than written out for the reason the whole preset table exists:
+// electron/ compiles nothing from src/, and a second hand-kept copy of five
+// messaging shapes and thirteen AI ones is drift by construction. The bridge
+// calls this and forwards the result.
+//
+// `kind` is dropped from each field on purpose -- 'password' is a rendering
+// instruction for a form, and `secret` already carries the only part of it an
+// API caller can act on. Everything kept here is static catalogue text: no
+// stored value of any kind passes through this function.
+export type ConnectorKindSummary = {
+  kind: string;
+  label: string;
+  category: ConnectorCategory;
+  fields: {
+    key: string;
+    label: string;
+    required: boolean;
+    secret: boolean;
+    hint?: string;
+    example?: string;
+    options?: string[];
+  }[];
+};
+
+export function connectorKindsForApi(): ConnectorKindSummary[] {
+  return CONNECTOR_PRESETS.map((preset) => ({
+    kind: preset.kind,
+    label: preset.label,
+    category: preset.category,
+    fields: preset.fields.map((field) => ({
+      key: field.key,
+      label: field.label,
+      required: Boolean(field.required),
+      secret: Boolean(field.secret),
+      ...(field.hint ? {hint: field.hint} : {}),
+      // The form's placeholder, renamed: to a caller filling this in from a
+      // chat it is an example value, not grey text in a box. It is the one
+      // thing that says a Telegram chat id looks like -1004281234567.
+      ...(field.placeholder ? {example: field.placeholder} : {}),
+      ...(field.options ? {options: field.options} : {}),
+    })),
+  }));
+}
+
 // A connector's config as stored: string values under the keys the preset
 // declares. Number fields hold the digits as text -- everything arrives from a
 // form input, and the send adapters coerce where a number is genuinely needed.
