@@ -1,3 +1,13 @@
+/* The API tab: the two ways in, the endpoint reference and its groups, the key
+ * form, and the key rows.
+ *
+ * Ends with .toast and @keyframes toast-in. They sat here in styles.css and did
+ * not move -- the toast stack itself is in layout/overlays.css.
+ *
+ * Was styles.css:5283-6014, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── The reference ───────────────────────────────────────────────────────────
  *
  * Two levels of disclosure over one list. The flat version rendered every group

@@ -1,3 +1,14 @@
+/* The Run automation dialog, and the CSV import panels: the column reference,
+ * the per-line preview and the summary.
+ *
+ * Ends with .api-note, which belongs to the API tab. It sat here in styles.css
+ * and did not move. The base .team-tab rule is in here too, for the same reason
+ * -- the Team tab itself is in features/team.css.
+ *
+ * Was styles.css:4852-5282, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Run automation dialog ──────────────────────────────────────────────── */
 
 /* Its own measure rather than .small-modal's 520px. These rows carry four

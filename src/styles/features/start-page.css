@@ -1,3 +1,9 @@
+/* The Start page tab and its automation cards.
+ *
+ * Was styles.css:8503-8879, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Start page tab ─────────────────────────────────────────────────────────
  * Deliberately a narrow centred column rather than the full-width .card-grid
  * the other tabs use. Those are worklists you scan; this is a launchpad you

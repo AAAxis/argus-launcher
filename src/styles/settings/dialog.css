@@ -1,3 +1,10 @@
+/* The settings dialog: its own rail, the header, the row/label/control grid its
+ * sections are built from, and the account identity block.
+ *
+ * Was styles.css:1748-2053, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Settings dialog ────────────────────────────────────────────────────────
  * Two panes: a category rail on sunken paper, and one section at a time on the
  * modal surface. Sized to fit the window's own 980x620 minimum (see

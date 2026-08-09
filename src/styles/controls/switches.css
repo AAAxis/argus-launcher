@@ -1,3 +1,11 @@
+/* Controls that state or confirm something: the error modal and its detail
+ * block, the field warning, the confirm checkbox, and the switch. Named for the
+ * switch because that is the one most often reached for.
+ *
+ * Was styles.css:7510-7624, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .error-modal {
   border-color: var(--danger);
 }

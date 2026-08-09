@@ -1,3 +1,12 @@
+/* The Profiles walkthrough -- the first-run tour over an empty table.
+ *
+ * Ends with .check-field, a labelled checkbox used across the forms. It sat
+ * here in styles.css and did not move.
+ *
+ * Was styles.css:9669-9793, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Profiles walkthrough ───────────────────────────────────────────────────
  * A single column: a figure, then the paragraph it illustrates. Sized between
  * small-modal and the default so three sentences do not run to one line. */

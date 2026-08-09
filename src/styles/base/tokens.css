@@ -1,3 +1,10 @@
+/* The design tokens: the light block, then the dark override. Every colour in
+ * the app resolves through one of these, and nothing anywhere may hardcode one.
+ *
+ * Was styles.css:1-334, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* Design tokens. Neutral grey in light, neutral charcoal in dark. The accent is
  * ink rather than a hue, so it inverts with the theme (see --accent below). The
  * surface ladder is paper (sunken: sidebar, code blocks) < surface (the app

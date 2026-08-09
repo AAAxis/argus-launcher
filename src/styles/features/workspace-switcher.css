@@ -1,3 +1,12 @@
+/* The workspace switcher panel and the create flow inside it.
+ *
+ * Ends with .info-hint-trigger, whose panel is in controls/form-groups.css.
+ * Both sat where they sit now.
+ *
+ * Was styles.css:8310-8466, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Workspace switcher panel ───────────────────────────────────────────────
  * components/WorkspaceSwitcher.tsx.
  *

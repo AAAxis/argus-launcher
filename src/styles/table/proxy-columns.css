@@ -1,3 +1,11 @@
+/* The Profiles table's two proxy columns and its other optional ones, plus the
+ * Proxies table's own cells: the check chip, the re-checking state, the failure
+ * panel and the Assigned to holders.
+ *
+ * Was styles.css:3696-4097, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* The Profiles table's proxy columns -- two of them.
  *
  * The address and its check were briefly one cell, which put "which proxy is

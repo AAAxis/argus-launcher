@@ -1,3 +1,10 @@
+/* The folder row and its cards -- marks, flags, counts, the add tile -- and the
+ * Move profiles dialog.
+ *
+ * Was styles.css:4531-4851, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Folder row ─────────────────────────────────────────────────────────────
  * The folders, above the table, the way a file manager shows them. auto-fill
  * rather than a scroller: a workspace tends to have a handful of folders and

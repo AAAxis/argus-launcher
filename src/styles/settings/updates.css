@@ -1,3 +1,10 @@
+/* The Updates page. Two programs described identically -- what you have, how
+ * old it is, and the control that changes it.
+ *
+ * Was styles.css:1220-1496, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* The Updates page. Two programs, described identically -- see
  * UpdatesSection.tsx for why that symmetry is the whole point. Everything here
  * is built from the same tokens as the rest of Settings; the only new idea is

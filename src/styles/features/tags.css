@@ -1,3 +1,11 @@
+/* Tag chips, the suggestions row, the picker panel, and how tags render inside
+ * a profiles-table cell. Ends with the folder suggestions, which borrow the
+ * same chip.
+ *
+ * Was styles.css:9267-9668, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Tag chips ──────────────────────────────────────────────────────────────
  * Looks like the canonical text input from the outside -- same fill, border,
  * radius and focus ring -- but it is a wrapper around a borderless input, so

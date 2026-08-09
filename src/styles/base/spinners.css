@@ -1,3 +1,10 @@
+/* The full-page loading state and the three spinners: the standalone disc, the
+ * inline .btn-spin, and RotateButton's single turn.
+ *
+ * Was styles.css:934-977, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .loading-state {
   align-self: center;
   display: grid;

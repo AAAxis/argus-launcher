@@ -1,3 +1,10 @@
+/* The sign-in form: the email step, the OTP step, the Google button, and the
+ * failure message.
+ *
+ * Was styles.css:812-916, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .login-panel input:focus-visible {
   border-color: var(--accent);
   box-shadow: var(--focus-ring);

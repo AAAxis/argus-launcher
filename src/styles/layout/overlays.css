@@ -1,3 +1,13 @@
+/* What renders above the page: the toast stack, the modal backdrop,
+ * .profile-modal, the changelog, and the cookie-set picker.
+ *
+ * Opens with .message and .status, two muted text tones used app-wide. They sat
+ * here in styles.css and did not move.
+ *
+ * Was styles.css:7210-7509, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .message,
 .status {
   color: var(--ink-soft);

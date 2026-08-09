@@ -1,3 +1,13 @@
+/* The platform picker and the folder icon picker, including the country flags
+ * proxy folders can wear.
+ *
+ * Ends with .select-action, a field-and-button pair used outside the editor
+ * too. It sat here in styles.css and did not move.
+ *
+ * Was styles.css:7949-8158, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Platform picker ────────────────────────────────────────────────────────
  * Six cards instead of the dropdown this replaces. auto-fit rather than a fixed
  * six columns: the same control renders in the 1380px profile dialog and in the

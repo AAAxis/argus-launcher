@@ -1,3 +1,11 @@
+/* Row states (checked, selected, arrived-since-last-look), the Launch button,
+ * the per-row actions, and the card grid and pagination bar the same data takes
+ * when it is not a table. Ends with the empty states.
+ *
+ * Was styles.css:4098-4530, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* 10% of a cyan accent read clearly against white; 10% of ink reads as a barely
  * visible grey, so the checked row needs a deeper mix now that the accent is
  * ink. Still a tint rather than --hover, so a checked row stays distinguishable

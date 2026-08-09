@@ -1,3 +1,13 @@
+/* The welcome dialog and workspace setup.
+ *
+ * Ends with three .settings-plan-* overrides that sat at the very end of
+ * styles.css and did not move -- the rest of that section is in
+ * settings/plan.css.
+ *
+ * Was styles.css:11622-11910, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── The welcome dialog ─────────────────────────────────────────────────────*/
 
 /* Replaces the shared header's row layout: this one is a centred block with the

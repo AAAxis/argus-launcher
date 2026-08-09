@@ -1,3 +1,12 @@
+/* The Start page's session card and its bookmark chips.
+ *
+ * Ends with .modal-actions, which every dialog uses. It sat here in styles.css
+ * and did not move.
+ *
+ * Was styles.css:8880-9266, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Session card ───────────────────────────────────────────────────────────
  * The block that takes up the bottom third of every profile's start page,
  * previewed here with fixed sample values.

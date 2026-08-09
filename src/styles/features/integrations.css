@@ -1,3 +1,10 @@
+/* The Integrations tab: the card grid, the status bar across the top, the guide
+ * that answers how the keys work, the search, and the provider strip.
+ *
+ * Was styles.css:6015-6583, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .integration-grid {
   display: grid;
   gap: 12px;

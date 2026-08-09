@@ -1,3 +1,10 @@
+/* The canonical text input and the canonical select. Every field in the app
+ * inherits from these two.
+ *
+ * Was styles.css:482-593, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* One canonical text input, the same way `select` below is canonical.
  *
  * These six properties used to be copy-pasted into .field input, .login-panel

@@ -1,3 +1,10 @@
+/* The frame every tab renders into: .content, the topbar, the panel, the table
+ * wrap and the table toolbar.
+ *
+ * Was styles.css:2416-2537, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .content {
   display: flex;
   flex-direction: column;

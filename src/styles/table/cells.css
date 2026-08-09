@@ -1,3 +1,10 @@
+/* Cell controls: the trigger a cell becomes at rest, the picker panels it
+ * opens, and the colour swatch.
+ *
+ * Was styles.css:2704-2964, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Cell controls ──────────────────────────────────────────────────────────
  * components/ui/CellControls.tsx -- the Profiles table's editable cells.
  *

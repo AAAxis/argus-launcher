@@ -1,3 +1,10 @@
+/* What a cell opens into: the inline text editor, the tag set, the notes thread
+ * and its composer, and copy-on-hover.
+ *
+ * Was styles.css:2965-3265, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── The inline text editor ─────────────────────────────────────────────── */
 
 .cell-edit {

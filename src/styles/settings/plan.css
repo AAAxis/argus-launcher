@@ -1,3 +1,9 @@
+/* The plan plate, what the plan includes, and the usage meters.
+ *
+ * Was styles.css:2054-2257, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Plan ──
  *
  * A plan surface, so this block and .settings-included below are two of the

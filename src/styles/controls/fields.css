@@ -1,3 +1,10 @@
+/* The .field -- a label, its control, and whatever hint, echo or suffix hangs
+ * off it. The unit every form in the app is laid out from.
+ *
+ * Was styles.css:7831-7948, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .field {
   display: grid;
   gap: 7px;

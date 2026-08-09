@@ -1,3 +1,10 @@
+/* The Extensions tab: the Installed and Discover grids, the card states, and
+ * the add tile at the end of the grid.
+ *
+ * Was styles.css:6975-7209, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Extensions tab ─────────────────────────────────────────────────────────
  * Cards, on the .integration-card vocabulary next door -- same raised surface,
  * same 1px border, same hairline shadow. The two tabs are adjacent in the rail

@@ -1,3 +1,10 @@
+/* Bare-element defaults: body, the scrollbars, textarea, and the global button
+ * rule every control in the app starts from.
+ *
+ * Was styles.css:335-437, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 body {
   margin: 0;
 }

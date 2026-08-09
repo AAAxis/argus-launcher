@@ -1,3 +1,10 @@
+/* The page title and the muted paragraph under it, shared by the login panel,
+ * the loading state and the topbar.
+ *
+ * Was styles.css:917-933, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* The browser default (2em) is far heavier than anything else on the page once
  * the base size stepped down, so the page title is set explicitly. */
 .login-panel h1,

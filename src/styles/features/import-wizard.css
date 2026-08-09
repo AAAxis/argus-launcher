@@ -1,3 +1,11 @@
+/* The profile CSV importer, end to end: the wide review panel, the credential
+ * banner, the review table and its per-row states, the proxy picker, the
+ * destination cards, folder mapping, and the done screen.
+ *
+ * Was styles.css:9888-10590, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ---------------------------------------------------------------------------
    Profile CSV import: the review table and the destination step.
 

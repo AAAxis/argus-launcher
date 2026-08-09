@@ -1,3 +1,10 @@
+/* The column picker, the folder cell, the sortable header, shrink-to-fit
+ * columns, and the checkbox selector every table and dialog list uses.
+ *
+ * Was styles.css:3266-3695, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── The column picker ──────────────────────────────────────────────────────
  * components/ui/ColumnsButton.tsx. Deliberately the same rows as the status and
  * platform pickers -- label left, tick at the far edge, 7px radius -- because a

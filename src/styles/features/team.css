@@ -1,3 +1,13 @@
+/* The Team tab: the member list, the invite dialog, sharing to a teammate, and
+ * the inbox.
+ *
+ * The base .team-tab rule is in features/bulk-dialogs.css, where it sat in
+ * styles.css.
+ *
+ * Was styles.css:10591-10876, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Team ─────────────────────────────────────────────────────────────────
  *
  * The roster shares the app's table rules; everything below is the parts a

@@ -1,3 +1,9 @@
+/* The Plans tab: the plan cards and the comparison under them.
+ *
+ * Was styles.css:11333-11621, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Plan surfaces ──────────────────────────────────────────────────────────
  *
  * The Plans tab, the plan welcome dialog and the plan half of Settings. These

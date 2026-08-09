@@ -1,3 +1,10 @@
+/* Run notifications in the bell, the Shared view in the Team tab, and the
+ * Assigned column.
+ *
+ * Was styles.css:10877-11332, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Run notifications in the bell ──
  * The second kind. A notification row is quieter than a handoff -- it reports
  * a decision rather than demanding one -- so it carries no action buttons,

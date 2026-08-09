@@ -1,3 +1,10 @@
+/* The sign-in shell, the panel it centres, and the Argus mark at its head. The
+ * form inside the panel is in sign-in-form.css.
+ *
+ * Was styles.css:438-481, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .login-shell {
   background: radial-gradient(circle at 50% 0%, var(--paper) 0%, var(--surface) 55%);
   display: grid;

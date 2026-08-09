@@ -1,3 +1,11 @@
+/* The app shell's grid and the sidebar rail: the brand mark, the collapse
+ * toggle, the nav buttons, and the per-tab count of rows that arrived since
+ * this machine last looked.
+ *
+ * Was styles.css:978-1219, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .app-shell {
   display: grid;
   grid-template-columns: 236px 1fr;

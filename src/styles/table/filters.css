@@ -1,3 +1,10 @@
+/* The toolbar's filter dropdowns -- the trigger, its panel, and the tag rows
+ * inside it.
+ *
+ * Was styles.css:2538-2703, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Filter dropdowns ───────────────────────────────────────────────────────
  * components/ui/TableFilters.tsx -- the status filter, the tag filter and the
  * selection bar's assign-to-folder.

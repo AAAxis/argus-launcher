@@ -1,3 +1,10 @@
+/* The foot of the rail: the account row, the workspace switcher trigger, and
+ * the avatar and initials plates both of them use.
+ *
+ * Was styles.css:1497-1747, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* Pinned to the bottom of the rail. A hairline is all it needs -- the row below
  * reads as one more nav item, so giving it a deep padded band of its own was
  * what made it look bolted on. */

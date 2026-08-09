@@ -1,3 +1,13 @@
+/* The platform picker's trigger and panel.
+ *
+ * Ends with .status-pop-new, the Status picker's footer button. It sat here in
+ * styles.css and did not move -- the rest of that picker is in
+ * status-chips.css.
+ *
+ * Was styles.css:721-811, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── The platform dropdown ──────────────────────────────────────────────────
  * components/ui/PlatformSelect.tsx. Deliberately the same panel geometry as the
  * status picker above -- two pickers in one row of the import table should not be

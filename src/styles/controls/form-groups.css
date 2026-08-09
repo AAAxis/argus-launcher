@@ -1,3 +1,13 @@
+/* Form groups -- a headed block of fields inside a dialog -- and the popover
+ * panel.
+ *
+ * Ends with .info-pop, the InfoHint's panel. Its trigger is in
+ * features/workspace-switcher.css, where it sat in styles.css.
+ *
+ * Was styles.css:8159-8309, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Form groups ────────────────────────────────────────────────────────────
  * components/ui/FormGroup.tsx -- one titled block of a form. The fingerprint
  * dialog's three, and the profile editor's six.

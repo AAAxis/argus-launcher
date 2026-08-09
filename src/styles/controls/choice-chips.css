@@ -1,3 +1,10 @@
+/* The choice chip row: a small segmented picker for where a select would weigh
+ * more than the choice does.
+ *
+ * Was styles.css:8467-8502, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Choice chips ───────────────────────────────────────────────────────────
  * The proxy-mode selector. It was a .segmented control -- three unlabelled
  * buttons in a shared tray -- which read as a toolbar rather than as one

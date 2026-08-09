@@ -1,3 +1,10 @@
+/* The profile editor: the fingerprint modal, the modal header and actions, the
+ * form layout, and the summary panel's groups and rows.
+ *
+ * Was styles.css:7625-7830, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 .profile-modal.fingerprint-modal {
   max-width: 920px;
   width: min(920px, calc(100vw - 56px));

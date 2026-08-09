@@ -1,3 +1,10 @@
+/* The Cookies tab: the cookie set table, its domain and value cells, the flags,
+ * and the assign row.
+ *
+ * Was styles.css:9794-9887, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Cookies tab ────────────────────────────────────────────────────────────
  * The Cookies tab reuses the profiles vocabulary wholesale -- .table-toolbar,
  * .selection-toolbar, .folder-row, .table-wrap, .pagination-bar are all the

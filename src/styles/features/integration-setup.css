@@ -1,3 +1,13 @@
+/* The connect dialog: its header, the one-time secret, the setup steps and the
+ * facts they refer to, and the snippet block.
+ *
+ * Opens with .proxy-test-result, the proxy editor's connection check. It sat
+ * here in styles.css and did not move.
+ *
+ * Was styles.css:6584-6974, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* The result of "Test connection" in the proxy editor, spanning both form
  * columns under the fields it describes. Shaped like .api-note; the state
  * carries in the colour rather than an extra icon-plus-label row. */

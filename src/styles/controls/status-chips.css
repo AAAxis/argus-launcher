@@ -1,3 +1,10 @@
+/* A profile's status pill, the Badge that borrows its shape for other labels,
+ * and the picker that changes it.
+ *
+ * Was styles.css:594-720, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
 /* ── Status chips ───────────────────────────────────────────────────────────
  * A profile's status, everywhere it is shown. This replaced a colour-tinted
  * <select>: a control that looked like a filled tag but behaved like a
