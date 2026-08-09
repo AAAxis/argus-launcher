@@ -1,5 +1,5 @@
 // SCRATCH — not part of the app. The Automations tab with fixture state: a
-// starred brand card, a failed run, an agent-created card mid-glow, schedule
+// starred brand card, a failed run, an agent-created card marked new, schedule
 // badges. Mounts the REAL AutomationsTab; only the workspace behind it is
 // invented (preview-workspace.tsx via vite.preview.config.ts).
 //
@@ -27,6 +27,11 @@ function Preview() {
           onOpenSite={() => {}}
           onNewConnector={() => {}}
           onEditConnector={() => {}}
+          // Named outright, where the app derives it from a watermark: a3 is
+          // the MCP-authored fixture in preview-workspace.tsx, and a harness
+          // whose green depended on what localStorage happened to hold would
+          // show something different on every machine that opened it.
+          newIds={new Set(['a3'])}
         />
       </main>
     </WorkspaceProvider>

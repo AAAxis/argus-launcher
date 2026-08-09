@@ -164,6 +164,13 @@ const STATES: {title: string; why: string; update: UpdateState; resource: Resour
     update: update({status: 'disabled', canCheck: false, provider: 'disabled', lastCheckedAt: ''}),
     resource: resource(),
   },
+  {
+    title: 'Nothing checked yet',
+    why: 'The first seconds after launch, before either feed answers. Must not show a ' +
+      'green tick or claim to be up to date -- no check has run to stand behind it.',
+    update: update({status: 'idle', lastCheckedAt: ''}),
+    resource: resource(),
+  },
 ];
 
 function noop() {

@@ -366,6 +366,7 @@ export type Database = {
           cookies: Json
           count: number | null
           created_at: string
+          created_by: string | null
           deleted_at: string | null
           folder_id: string | null
           id: string
@@ -382,6 +383,7 @@ export type Database = {
           cookies?: Json
           count?: number | null
           created_at?: string
+          created_by?: string | null
           deleted_at?: string | null
           folder_id?: string | null
           id?: string
@@ -398,6 +400,7 @@ export type Database = {
           cookies?: Json
           count?: number | null
           created_at?: string
+          created_by?: string | null
           deleted_at?: string | null
           folder_id?: string | null
           id?: string
@@ -1012,6 +1015,7 @@ export type Database = {
         Row: {
           assigned_to: string | null
           created_at: string
+          created_by: string | null
           folder_id: string | null
           host: string | null
           id: string
@@ -1037,6 +1041,7 @@ export type Database = {
         Insert: {
           assigned_to?: string | null
           created_at?: string
+          created_by?: string | null
           folder_id?: string | null
           host?: string | null
           id?: string
@@ -1062,6 +1067,7 @@ export type Database = {
         Update: {
           assigned_to?: string | null
           created_at?: string
+          created_by?: string | null
           folder_id?: string | null
           host?: string | null
           id?: string

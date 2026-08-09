@@ -53,6 +53,9 @@ export type ProxiesTabProps = {
   // Raises the share sheet. Hosted by App, like the delete confirmations, since
   // four tabs open the same dialog.
   onShare: (request: ShareRequest) => void;
+  // Which rows arrived since this machine last looked at this tab. See
+  // ProfilesTabProps.newIds and src/lib/newSince.ts.
+  newIds: ReadonlySet<string>;
 };
 
 export function ProxiesTab({
@@ -67,6 +70,7 @@ export function ProxiesTab({
   onFillCountryDone,
   onRequestDelete,
   onShare,
+  newIds,
 }: ProxiesTabProps) {
   const {data, toast, library, proxies, checkingProxyIds, proxyStatusOptions} = useWorkspace();
   const org = useOrg();
@@ -375,8 +379,19 @@ export function ProxiesTab({
           <tbody>
             {items.map((proxy) => {
               const label = proxy.name || proxy.host;
+              const isNew = newIds.has(proxy.id);
+              const rowClass = [
+                selection.has(proxy.id) ? 'row-checked' : '',
+                isNew ? 'is-new' : '',
+              ].filter(Boolean).join(' ');
               return (
-                <tr key={proxy.id} className={selection.has(proxy.id) ? 'row-checked' : ''}>
+                <tr
+                  key={proxy.id}
+                  className={rowClass}
+                  // So the green is never the only thing saying so. See the same
+                  // title on the Profiles row.
+                  title={isNew ? 'Added since you last looked' : undefined}
+                >
                   <td className="checkbox-cell">
                     <Checkbox
                       label={`Select ${proxy.name || proxy.host}`}

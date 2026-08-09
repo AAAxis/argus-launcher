@@ -1164,6 +1164,52 @@ nav button.active svg {
   padding: 0;
 }
 
+/* How many rows on this tab arrived since this machine last looked -- see
+ * useNewArrivals. Built from .inbox-count's measurements (10px/750, 15px tall,
+ * a 999px pill) so the two badges in the chrome read as one idea, but green
+ * rather than the bell's --danger: a colleague adding profiles is news, not an
+ * alarm, and the green ties it to the row tint the tab is about to show.
+ *
+ * pointer-events: none so the badge cannot swallow a click meant for the tab
+ * it is sitting on. */
+.nav-count {
+  align-items: center;
+  background: var(--success);
+  border-radius: 999px;
+  color: var(--paper);
+  display: flex;
+  flex: none;
+  font-size: 10px;
+  font-weight: 750;
+  height: 15px;
+  justify-content: center;
+  margin-left: auto;
+  min-width: 15px;
+  padding: 0 4px;
+  pointer-events: none;
+}
+
+/* Collapsed, the number goes and a dot stays. There is no room for one beside a
+ * centred 16px icon in a 40px button, and pinning the pill to the corner anyway
+ * puts "9+" squarely on top of the glyph the rail has left to identify the tab
+ * with -- which is a worse trade than dropping the count, because the count is
+ * one click away and the icon is the only thing naming the tab.
+ *
+ * font-size: 0 rather than removing the digits: they stay in the DOM, and more
+ * to the point they stay in the button's aria-label, which is where the number
+ * is actually read out either way. nav button is already position: relative. */
+.rail-collapsed .nav-count {
+  font-size: 0;
+  height: 8px;
+  margin-left: 0;
+  min-width: 0;
+  padding: 0;
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 8px;
+}
+
 /* The Updates page. Two programs, described identically -- see
  * UpdatesSection.tsx for why that symmetry is the whole point. Everything here
  * is built from the same tokens as the rest of Settings; the only new idea is
@@ -1187,6 +1233,16 @@ nav button.active svg {
   color: var(--ink-faint);
   font-size: 12px;
   margin: 3px 0 0;
+}
+
+/* A manual check that came back clean. The same green as the "Up to date"
+ * pill, because it is answering the same question -- the button needs to be
+ * seen doing something when the honest answer is that nothing changed. */
+.updates-header-text p.updates-checked {
+  align-items: center;
+  color: var(--success);
+  display: flex;
+  gap: 4px;
 }
 
 .updates-header-actions {
@@ -4031,6 +4087,36 @@ tr.selected {
  * from the merely hovered one above it. */
 tr.row-checked {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* A row that arrived since this machine last looked at the tab, and that
+ * somebody else added -- see src/lib/newSince.ts. It holds for the whole visit
+ * rather than decaying, so the rows can be sorted, scanned and acted on; the
+ * watermark advances on arrival, so the next visit opens on a clean table.
+ *
+ * The bar rides on the first cell, NOT on the tr. Under border-collapse:
+ * collapse (see the table rule above) Chromium does not paint box-shadow on a
+ * table row at all, and the bar is the half of this signal that does not depend
+ * on colour.
+ *
+ * --profile-green-* rather than --success: the same pair .automation-card.is-new
+ * has always used for exactly this meaning, already tuned for dark, and
+ * deliberately not --status-active-*, which means a profile whose STATUS is
+ * Active. */
+tbody tr.is-new > td:first-child {
+  box-shadow: inset 3px 0 0 var(--profile-green-border);
+}
+
+/* Guarded rather than ordered, so the two states cannot fight: checked and
+ * selected are about what you are doing to a row, new is about what you have yet
+ * to read, and doing wins. Ordering alone would leave whichever rule came second
+ * winning by accident. */
+tbody tr.is-new:not(.row-checked):not(.selected) {
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, transparent);
+}
+
+tbody tr.is-new:not(.row-checked):not(.selected):hover {
+  background: var(--profile-green-bg);
 }
 
 /* --control-h-sm, matching the .row-action squares beside it: a 36px Launch

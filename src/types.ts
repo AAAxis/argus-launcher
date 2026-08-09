@@ -234,6 +234,15 @@ export type ArgusProxy = {
   check_error?: string;
   // Who is on the hook for this proxy. See ArgusProfile.assigned_to.
   assigned_to?: string | null;
+  // When it arrived, and who put it there. Read-only in both cases: the row
+  // carries created_at from the moment of insert and created_by from the
+  // column's DEFAULT auth.uid(), and proxyToRow sends neither back.
+  //
+  // created_by is null for every proxy added before
+  // 20260815000000_created_by_attribution.sql, and for anyone who has since
+  // left the workspace. Both read as "no known author" -- see newSince.ts.
+  created_at?: string;
+  created_by?: string | null;
 };
 
 // A shared, reusable cookie-set in the Cookies tab library. A set is attached
@@ -285,6 +294,9 @@ export type ArgusCookie = {
   // Trashing a set also unassigns every profile using it, because a trashed set
   // that could still seed a launch would be a lie.
   deleted_at?: string | null;
+  // Who added it. Same shape, same nullability and same reasoning as
+  // ArgusProxy.created_by.
+  created_by?: string | null;
 };
 
 export type SharedExtension = {

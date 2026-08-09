@@ -7,7 +7,7 @@
 // for everyone. What it needs from the app is passed in as props; what it needs
 // from the session it reads itself through useOrg()/useTheme(), which are
 // mounted above App.
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useRef} from 'react';
 import type {ReactNode} from 'react';
 import {
   CreditCard, PackageOpen, Palette, SlidersHorizontal, User, X,
@@ -66,12 +66,24 @@ export type SettingsDialogProps = {
   onCheckBrowser: () => void;
   onInstallBrowser: () => void;
   releaseNotes: ReleaseNotes | null;
+  // Which tab is showing, owned by App rather than held here.
+  //
+  // This dialog is mounted under App's startup gate, so anything that re-blocks
+  // that gate unmounts it and a tab kept in local state comes back as Account.
+  // That used to happen on every browser check -- the Check for updates button
+  // and a four-hour timer both -- which lib/startup.ts now excludes. What is
+  // left is the honest cases: the local API dying, a workspace switch. The tab
+  // should survive those too, and this is what makes losing it impossible
+  // rather than merely unlikely.
+  section: SettingsSectionId;
+  onSectionChange: (section: SettingsSectionId) => void;
 };
 
 export function SettingsDialog(props: SettingsDialogProps) {
   const org = useOrg();
   const {data, toast} = useWorkspace();
-  const [active, setActive] = useState<SettingsSectionId>('account');
+  const active = props.section;
+  const setActive = props.onSectionChange;
   const railRef = useRef<HTMLDivElement | null>(null);
 
   // Focus starts on the rail so the dialog is immediately keyboard-navigable and

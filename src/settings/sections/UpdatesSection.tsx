@@ -13,7 +13,7 @@
 // So: one page, and the two programs described identically. Same facts in the
 // same order, same status vocabulary, one button that checks both. Whatever is
 // true of one is legible for the other.
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import type {ReactNode} from 'react';
 import {
   AppWindow, Check, ChevronDown, Download, FileText, FolderOpen, Globe, RefreshCw, RotateCcw,
@@ -35,6 +35,10 @@ type ComponentView = {
   icon: ReactNode;
   version: string;
   installedAt: string;
+  // What the Released row says when there is no date to show. 'Unknown' is the
+  // honest default, but it is the wrong word for a build that was never
+  // released at all -- see the 'disabled' branch.
+  releasedFallback?: string;
   availableVersion: string;
   status: string;
   tone: Tone;
@@ -120,11 +124,15 @@ function launcherView(
     case 'disabled':
       return {
         ...base,
-        status: 'Updates run in packaged builds only',
+        status: 'Development build',
         tone: 'neutral',
         unknown: true,
         percent: null,
-        note: 'This is a development build, so there is no release to compare against.',
+        // Not 'Unknown'. A date is missing here because this build was never
+        // released, which is a fact we have rather than one we are missing --
+        // and saying "Unknown" next to a version number reads as a fault.
+        releasedFallback: 'Never released',
+        note: 'Updates run in packaged builds only, so there is no release to compare against.',
       };
     case 'checking':
       return {...base, status: 'Checking…', tone: 'busy', percent: null};
@@ -175,12 +183,25 @@ function launcherView(
         primary: {label: 'Try again', icon: <RefreshCw size={15} />, onClick: () => act('check')},
       };
     case 'not-available':
-      return {...base, status: 'Up to date', tone: 'ok', percent: null};
+      return {
+        ...base,
+        status: 'Up to date',
+        tone: 'ok',
+        percent: null,
+        // main routes "the feed has nothing published" through not-available
+        // too (applyUpdateError), and that is a different sentence from "we
+        // asked and you already have the newest one". Say which happened.
+        note: state.error || undefined,
+      };
     default:
+      // Nothing has been checked yet, so this is not 'ok' -- a green tick here
+      // claims a check ran and passed. `unknown` also keeps the page headline
+      // from folding an unchecked component into "everything is up to date".
       return {
         ...base,
         status: busy ? 'Checking…' : 'Not checked yet',
-        tone: busy ? 'busy' : 'ok',
+        tone: busy ? 'busy' : 'neutral',
+        unknown: !busy,
         percent: null,
       };
   }
@@ -326,7 +347,7 @@ function ComponentCard({view}: {view: ComponentView}) {
         </div>
         <div>
           <dt>Released</dt>
-          <dd>{formatDate(view.installedAt) || 'Unknown'}</dd>
+          <dd>{formatDate(view.installedAt) || view.releasedFallback || 'Unknown'}</dd>
         </div>
         {view.availableVersion && view.availableVersion !== view.version && (
           <div>
@@ -408,6 +429,17 @@ export function UpdatesSection({
       .filter(Boolean)
       .sort()
       .pop() || '';
+  // The lastChecked value at the moment the user asked, held until it moves.
+  // null means nobody is waiting on an answer.
+  const [pendingSince, setPendingSince] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  useEffect(() => {
+    if (pendingSince !== null && lastChecked && lastChecked !== pendingSince) {
+      setPendingSince(null);
+      setConfirmed(true);
+    }
+  }, [pendingSince, lastChecked]);
+
   const views = [launcher, browser];
   const stale = views.filter((view) => view.primary && view.tone === 'attention' && !view.missing);
   const missing = views.filter((view) => view.missing);
@@ -423,12 +455,29 @@ export function UpdatesSection({
     failed.length > 0 ? 'Could not check for updates' :
     stale.length > 1 ? 'Updates are available for both' :
     stale.length === 1 ? `An update is available for ${stale[0].name}` :
+    // Neither feed has been reached, so there is nothing to be up to date
+    // against. Before `unknown` covered this state the page opened on a green
+    // "Everything is up to date" that no check stood behind.
+    known.length === 0 ? 'Not checked for updates yet' :
     // Only the components we actually checked. In a dev build the launcher is
     // not one of them, and "everything" would be covering for that.
     known.length < views.length ? `${known.map((view) => view.name).join(' and ')} is up to date` :
     'Everything is up to date';
 
+  // A check that came back with no work to do. Drives the confirmation tick.
+  const nothingToDo = missing.length === 0 && failed.length === 0 && stale.length === 0;
+
+  // Confirming a manual check is the whole point of the button when the answer
+  // is "nothing changed": without it the spinner runs, the page comes back
+  // looking identical, and the only evidence anything happened is a relative
+  // timestamp that already said "just now" a minute ago.
+  //
+  // Keyed on lastChecked moving rather than on the busy flag going false. Busy
+  // is still false for the render immediately after the click, so watching it
+  // would confirm a check that had not started.
   function checkBoth() {
+    setConfirmed(false);
+    setPendingSince(lastChecked);
     onUpdaterAction('check');
     onCheckBrowser();
   }
@@ -438,7 +487,13 @@ export function UpdatesSection({
       <div className="updates-header">
         <div className="updates-header-text">
           <h4>{headline}</h4>
-          <p>Last checked {timeAgo(lastChecked)}.</p>
+          {/* Only a check that came back clean gets the tick. If it turned
+            * something up, the headline above already changed and a green
+            * "checked" line underneath would be arguing with it. */}
+          <p className={confirmed && nothingToDo ? 'updates-checked' : undefined}>
+            {confirmed && nothingToDo && <Check size={13} />}
+            Last checked {timeAgo(lastChecked)}.
+          </p>
         </div>
         <div className="updates-header-actions">
           {stale.length > 1 && (

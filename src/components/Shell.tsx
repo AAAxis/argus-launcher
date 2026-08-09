@@ -10,7 +10,7 @@ import type {TabId} from '../data/tabs';
 import type {ResourceState, UpdateState} from '../native';
 
 export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorkspace, onLeaveWorkspace,
-  collapsed, onToggleCollapsed}: {
+  collapsed, onToggleCollapsed, newCounts}: {
   activeTab: TabId;
   onTab: (tab: TabId) => void;
   onSettings: () => void;
@@ -19,6 +19,15 @@ export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorksp
   onLeaveWorkspace: () => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  // How many rows on each tab arrived since this machine last looked at it --
+  // see useNewArrivals. Only the four list tabs ever have an entry, and only
+  // when the number is above zero, so the badge below is a plain truthiness
+  // check rather than a roster of which tabs are allowed one.
+  //
+  // Optional because preview-sidebar.tsx mounts this component with fixtures,
+  // and a rail with no arrivals is a state the real app spends most of its time
+  // in anyway.
+  newCounts?: Partial<Record<TabId, number>>;
 }) {
   const org = useOrg();
   // `org.ready ? … : undefined` rather than `org.org?.plan` alone: an unresolved
@@ -69,23 +78,38 @@ export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorksp
         )}
       </div>
       <nav>
-        {rail.map((tab) => (
-          <button
-            aria-current={activeTab === tab.id ? 'page' : undefined}
-            // Unconditional, not `collapsed && …`: .nav-label is hidden with
-            // display: none, which takes the label out of the accessibility tree
-            // along with it. The title is conditional because a tooltip
-            // repeating a label you can already read is noise.
-            aria-label={tab.label}
-            className={activeTab === tab.id ? 'active' : ''}
-            key={tab.id}
-            onClick={() => onTab(tab.id)}
-            title={collapsed ? tab.label : undefined}
-          >
-            <tab.icon size={16} strokeWidth={1.75} />
-            <span className="nav-label">{tab.label}</span>
-          </button>
-        ))}
+        {rail.map((tab) => {
+          const added = newCounts?.[tab.id] || 0;
+          return (
+            <button
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              // Unconditional, not `collapsed && …`: .nav-label is hidden with
+              // display: none, which takes the label out of the accessibility tree
+              // along with it. The title is conditional because a tooltip
+              // repeating a label you can already read is noise.
+              //
+              // The count joins the label rather than the title, for both of the
+              // same reasons: a title would not be read out, and collapsed the
+              // title is the only thing naming the tab at all.
+              aria-label={added ? `${tab.label}, ${added} added since you last looked` : tab.label}
+              className={activeTab === tab.id ? 'active' : ''}
+              key={tab.id}
+              onClick={() => onTab(tab.id)}
+              title={collapsed ? tab.label : undefined}
+            >
+              <tab.icon size={16} strokeWidth={1.75} />
+              <span className="nav-label">{tab.label}</span>
+              {/* Outside .nav-label deliberately: that span is display: none in
+                * the collapsed rail, and a count that vanished with the label
+                * would go missing exactly when the icon is all there is to read.
+                * aria-hidden because the button's own aria-label already says
+                * the number in a sentence. */}
+              {added > 0 && (
+                <span aria-hidden="true" className="nav-count">{added > 9 ? '9+' : added}</span>
+              )}
+            </button>
+          );
+        })}
       </nav>
       {/* Was a row that opened Settings and showed who you were signed in as.
           It is now the workspace switcher, and Settings is one entry inside it

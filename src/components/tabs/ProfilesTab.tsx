@@ -59,6 +59,11 @@ export type ProfilesTabProps = {
   // confirmation is: four tabs open the one dialog.
   onShare: (request: ShareRequest) => void;
   onShowIntro: () => void;
+  // Which rows arrived since this machine last looked at this tab, frozen for
+  // the length of the visit so they cannot un-highlight under the cursor. Owned
+  // by useNewArrivals in App, because the sidebar has to count the same
+  // arrivals on tabs nobody is standing on. See src/lib/newSince.ts.
+  newIds: ReadonlySet<string>;
 };
 
 export function ProfilesTab({
@@ -75,6 +80,7 @@ export function ProfilesTab({
   onRequestDelete,
   onShare,
   onShowIntro,
+  newIds,
 }: ProfilesTabProps) {
   const {
     data, toast, library, profiles, proxies, checkingProxyIds, selectedProfileId,
@@ -531,12 +537,23 @@ export function ProfilesTab({
               // Still read here, by the row's check-proxy button. The Proxy and
               // Proxy check cells look it up themselves, through the context.
               const proxy = profiles.proxyFor(profile);
+              const isNew = newIds.has(profile.id);
               const rowClass = [
                 profile.id === selectedProfileId ? 'selected' : '',
                 selection.has(profile.id) ? 'row-checked' : '',
+                isNew ? 'is-new' : '',
               ].filter(Boolean).join(' ');
               return (
-                <tr key={profile.id} className={rowClass} onClick={() => setSelectedProfileId(profile.id)}>
+                <tr
+                  key={profile.id}
+                  className={rowClass}
+                  onClick={() => setSelectedProfileId(profile.id)}
+                  // So the green is never the only thing saying so. There is no
+                  // column to hang a "New" chip off -- the registry is the
+                  // user's to arrange -- and the row itself is the thing the
+                  // marker is about.
+                  title={isNew ? 'Added since you last looked' : undefined}
+                >
                   <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
                     <Checkbox
                       label={`Select ${profile.name || profile.id}`}

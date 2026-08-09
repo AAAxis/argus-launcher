@@ -20,6 +20,11 @@ function Preview() {
         onSignOut={() => {}}
         onTab={() => {}}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
+        // Fixed rather than derived: the app reads these off a localStorage
+        // watermark, and a harness whose badges depended on that would
+        // screenshot differently on every machine. One single digit, one
+        // double so the 9+ cap is visible, and one tab with none.
+        newCounts={{profiles: 3, cookies: 12, automations: 1}}
       />
       <section className="content">
         <header className="topbar"><h1>Profiles</h1></header>

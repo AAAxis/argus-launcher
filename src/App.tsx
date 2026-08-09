@@ -1,7 +1,7 @@
 // The app shell: which tab is showing, which dialog is open, and the startup
 // gate in front of both. Everything with real logic behind it lives in
 // workspace/ (data and mutations), hooks/ (effects) or components/.
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import type {ArgusAutomation, ArgusConnector} from './types';
 import {BookOpen, CircleAlert, CircleCheck, Plus, Upload, UserPlus} from 'lucide-react';
 import {CopyButton} from './components/ui/CopyButton';
@@ -46,6 +46,8 @@ import {
   ChangelogModal, OAuthApprovalModal, RevealedKeyModal,
 } from './components/modals/SettingsModal';
 import {SettingsDialog} from './settings/SettingsDialog';
+import type {SettingsSectionId} from './settings/SettingsDialog';
+import {describeStartup} from './lib/startup';
 import {BusyButton} from './components/ui/BusyButton';
 import {LoadingState} from './components/ui/LoadingState';
 import {RefreshButton} from './components/ui/RefreshButton';
@@ -69,6 +71,7 @@ import {
   useBackgroundProxyChecks, useFaviconWarmer, useOAuthApproval,
 } from './hooks/useBackgroundWork';
 import {useEditors} from './hooks/useEditors';
+import {useNewArrivals} from './hooks/useNewArrivals';
 import {useReleaseNotes, useResourceStatus, useUpdater} from './hooks/useNativeState';
 import {useSignIn} from './hooks/useSignIn';
 import {native} from './native';
@@ -96,6 +99,13 @@ export function App() {
   const {run, isPending} = useAsyncAction();
 
   const [activeTab, setActiveTab] = useState<TabId>('profiles');
+  // What a teammate -- or an agent over MCP -- has added since this machine last
+  // looked at each tab. Called here rather than inside the four tabs that show
+  // it because the sidebar has to count arrivals on the tabs nobody is standing
+  // on, and because the badge clearing and the rows staying green are two reads
+  // of the same watermark that have to disagree for exactly one visit. See
+  // src/lib/newSince.ts.
+  const arrivals = useNewArrivals(activeTab);
   // The two workspace dialogs the sidebar switcher opens. Held here with every
   // other dialog rather than inside the switcher, so the switcher stays a menu
   // and closing it does not unmount what it opened.
@@ -116,6 +126,10 @@ export function App() {
   const [folderFillTag, setFolderFillTag] = useState('');
   const [folderFillCountry, setFolderFillCountry] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which settings tab is showing. Up here rather than inside SettingsDialog so
+  // it outlives that dialog's mount -- the startup gate below can still swap
+  // the whole shell for the loader, and the tab should not be what pays for it.
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('account');
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [introOpen, setIntroOpen] = useState(false);
   // Unlike the profiles one this is never shown unprompted -- there is no
@@ -176,7 +190,18 @@ export function App() {
     signIn.reset();
   }
 
-  const startup = describeStartup(org.ready, resourceState, apiState);
+  // Latched, because "the browser is installed" is not a thing that stops being
+  // true while we ask the feed whether a newer one exists. checkBrowserResource
+  // broadcasts browserStatus 'checking' on every check -- including the manual
+  // one behind Settings → Updates and the automatic one every four hours -- and
+  // without this latch that alone re-blocks the shell, unmounting whatever
+  // dialog was open. See describeStartup.
+  const browserWasReady = useRef(false);
+  if (resourceState?.browserStatus === 'ready') {
+    browserWasReady.current = true;
+  }
+
+  const startup = describeStartup(org.ready, resourceState, apiState, browserWasReady.current);
 
   const orgId = org.orgId;
   const currentPlan = org.org?.plan;
@@ -374,6 +399,7 @@ export function App() {
       <Sidebar
         activeTab={activeTab}
         collapsed={railCollapsed}
+        newCounts={arrivals.counts}
         onCreateWorkspace={() => setCreatingWorkspace(true)}
         onLeaveWorkspace={() => setLeavingWorkspace(true)}
         onSettings={() => setSettingsOpen(true)}
@@ -467,8 +493,10 @@ export function App() {
             setActiveTab('plans');
           }}
           onOpenSite={openAccountPage}
+          onSectionChange={setSettingsSection}
           onSignOut={() => void signOut()}
           resourceState={resourceState}
+          section={settingsSection}
           onUpdaterAction={(action) => void updater.run(action)}
           releaseNotes={releaseNotes}
           updateState={updater.updateState}
@@ -870,6 +898,7 @@ export function App() {
             onFillCountryDone={() => setFolderFillCountry('')}
             onRequestDelete={editors.requestDeleteProxies}
             onShare={setSharing}
+            newIds={arrivals.newIds.proxies}
           />
         );
       case 'cookies':
@@ -895,6 +924,7 @@ export function App() {
               color: normalizeProfileColor(folder.color),
             })}
             onShare={setSharing}
+            newIds={arrivals.newIds.cookies}
           />
         );
       case 'startPage':
@@ -920,6 +950,7 @@ export function App() {
               exists: false,
             })}
             onEditConnector={(connector) => setConnectorDraft({connector, exists: true})}
+            newIds={arrivals.newIds.automations}
           />
         );
       case 'extensions':
@@ -1002,6 +1033,7 @@ export function App() {
             onRequestDelete={editors.requestDeleteProfiles}
             onShare={setSharing}
             onShowIntro={() => setIntroOpen(true)}
+            newIds={arrivals.newIds.profiles}
           />
         );
     }
@@ -1137,32 +1169,3 @@ export function App() {
   }
 }
 
-// Both the browser resource and the local API have to be up before any tab is
-// worth showing: a launch with either missing fails in a way the user cannot
-// act on from inside the app.
-function describeStartup(
-    orgReady: boolean,
-    resourceState: ReturnType<typeof useResourceStatus>['resourceState'],
-    apiState: ReturnType<typeof useResourceStatus>['apiState']) {
-  const browserFailed = resourceState?.browserStatus === 'error';
-  const apiFailed = apiState?.status === 'error';
-  const browserReady = resourceState?.browserStatus === 'ready';
-  const apiReady = apiState?.status === 'ready';
-  const detail = !orgReady ? 'Checking cloud session and loading workspace.' :
-    browserFailed ? resourceState?.error || 'Argus Browser resource failed to install.' :
-      apiFailed ? apiState?.error || 'Local API failed to start.' :
-        !browserReady ? (
-          resourceState?.browserStatus === 'downloading' ?
-            `Downloading Argus Browser ${resourceState.progress?.percent || 0}%` :
-            resourceState?.browserStatus === 'installing' ?
-              'Installing Argus Browser.' :
-              'Checking Argus Browser resource.'
-        ) :
-          !apiReady ? 'Starting local API.' : 'Ready.';
-  return {
-    blocked: !orgReady || !browserReady || !apiReady,
-    failed: browserFailed || apiFailed,
-    canRetryBrowser: browserFailed,
-    detail,
-  };
-}

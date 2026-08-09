@@ -351,9 +351,20 @@ export function rowToProxy(row: ProxyRow): ArgusProxy {
     checked_at: undef(row.last_checked_at),
     check_error: undef(row.last_error),
     assigned_to: row.assigned_to,
+    // Both only ever read. The select has carried created_at since the table
+    // existed; nothing mapped it until the arrivals marker needed to know when
+    // a proxy showed up. See newSince.ts.
+    created_at: undef(row.created_at),
+    created_by: row.created_by,
   };
 }
 
+// `created_at` and `created_by` are deliberately NOT included, on the same
+// grounds as profileToRow above -- and it matters more here, because this is
+// the app's one true upsert: `save` sends every key of this object on the
+// update path too. created_by keeps its DB default, auth.uid(), so a
+// colleague's edit cannot rewrite authorship to themselves, and created_at
+// keeps the moment the proxy actually arrived.
 export function proxyToRow(orgId: string, proxy: ArgusProxy): Insert<ProxyRow> {
   return {
     id: proxy.id,
@@ -413,6 +424,10 @@ export function rowToCookie(row: CookieSetRow): ArgusCookie {
     updated_at: undef(row.updated_at),
     assigned_to: row.assigned_to,
     deleted_at: row.deleted_at,
+    // Read only, and absent from cookieToRow below for the reason profileToRow
+    // gives: the column's DEFAULT auth.uid() is the only authorship that cannot
+    // be forged. See newSince.ts for what reads it.
+    created_by: row.created_by,
   };
 }
 

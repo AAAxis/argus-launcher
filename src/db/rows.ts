@@ -229,6 +229,11 @@ export type ProxyRow = {
   last_latitude: number | null;
   last_longitude: number | null;
   assigned_to: string | null;
+  // Who added it. Null for every row written before
+  // 20260815000000_created_by_attribution.sql, and null forever if they later
+  // leave the workspace -- the FK is ON DELETE SET NULL. Both cases read as
+  // "no known author", which arrivalsSince treats as not-new.
+  created_by: string | null;
 };
 
 export type FolderRow = {
@@ -275,6 +280,8 @@ export type CookieSetRow = {
   // falls back to the folder's tint.
   status: string | null;
   color: string | null;
+  // Who added it. Same shape and same reasoning as ProxyRow.created_by.
+  created_by: string | null;
 };
 
 // Primary key is (org_id, id), not (id): addExtensionFromWebStoreLink uses the

@@ -55,6 +55,9 @@ export type CookiesTabProps = {
   // Raises the share sheet, hosted by App alongside the other cross-tab dialogs.
   onShare: (request: ShareRequest) => void;
   onShowAbout: () => void;
+  // Which rows arrived since this machine last looked at this tab. See
+  // ProfilesTabProps.newIds and src/lib/newSince.ts.
+  newIds: ReadonlySet<string>;
 };
 
 export function CookiesTab({
@@ -67,6 +70,7 @@ export function CookiesTab({
   onEditFolder,
   onShare,
   onShowAbout,
+  newIds,
 }: CookiesTabProps) {
   const {data, toast, library, cookies, cookieTagOptions, cookieStatusOptions} = useWorkspace();
   const org = useOrg();
@@ -482,6 +486,11 @@ export function CookiesTab({
           </thead>
           <tbody>
             {items.map((cookie) => {
+              const isNew = newIds.has(cookie.id);
+              const rowClass = [
+                selection.has(cookie.id) ? 'row-checked' : '',
+                isNew ? 'is-new' : '',
+              ].filter(Boolean).join(' ');
               return (
                 // The row's own click opens the set -- a cookie-set has no
                 // "selected row" concept the way a profile does, so the obvious
@@ -492,8 +501,11 @@ export function CookiesTab({
                 // nothing else.
                 <tr
                   key={cookie.id}
-                  className={selection.has(cookie.id) ? 'row-checked' : ''}
+                  className={rowClass}
                   onClick={cookie.deleted_at ? undefined : () => onOpenCookieSet(cookie)}
+                  // So the green is never the only thing saying so. See the same
+                  // title on the Profiles row.
+                  title={isNew ? 'Added since you last looked' : undefined}
                 >
                   <td className="checkbox-cell" onClick={(event) => event.stopPropagation()}>
                     <Checkbox

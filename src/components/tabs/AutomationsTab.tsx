@@ -53,7 +53,7 @@ type View = 'all' | 'pinned' | 'mine' | 'connectors' | 'bot';
 
 export function AutomationsTab({
   onEdit, onNew, onLoadExample, onCreateDemoProfile, onRun, onHistory, onShare, onOpenSite,
-  onNewConnector, onEditConnector,
+  onNewConnector, onEditConnector, newIds,
 }: {
   onEdit: (automation: ArgusAutomation) => void;
   onNew: () => void;
@@ -79,6 +79,12 @@ export function AutomationsTab({
   // The connector editor, mounted from App like every other modal.
   onNewConnector: () => void;
   onEditConnector: (connector: ArgusConnector) => void;
+  // Which cards arrived since this machine last looked at this tab, frozen for
+  // the length of the visit. This used to be worked out here, from a
+  // localStorage key of its own; it moved to useNewArrivals when Profiles,
+  // Proxies and Cookies needed the same answer and the sidebar needed it for
+  // tabs nobody is standing on. See src/lib/newSince.ts.
+  newIds: ReadonlySet<string>;
 }) {
   const {data, automations} = useWorkspace();
   const org = useOrg();
@@ -92,42 +98,6 @@ export function AutomationsTab({
   const starred = useMemo(
       () => new Set(state.automation_stars), [state.automation_stars]);
 
-  // The "new since you last looked" watermark, per org and user, local to this
-  // machine. Absent on first visit: initialised to now, so a fresh install
-  // never opens onto a wall of green.
-  const seenKey = `argus:automations-seen:${org.orgId || 'none'}:${org.userId || 'anon'}`;
-  const watermark = useMemo(() => {
-    const stored = localStorage.getItem(seenKey);
-    if (!stored) {
-      localStorage.setItem(seenKey, new Date().toISOString());
-      return '';
-    }
-    return stored;
-    // Re-read only when the workspace or user changes -- advancing it below
-    // must NOT recompute this, or the glow would vanish mid-animation.
-  }, [seenKey]);
-  // Advance to the newest card after render, so each new arrival animates on
-  // exactly one visit. The memo above keeps this render's value.
-  useEffect(() => {
-    const newest = state.automations.reduce(
-        (max, automation) =>
-          automation.created_at && automation.created_at > max ? automation.created_at : max,
-        '');
-    const current = localStorage.getItem(seenKey) || '';
-    if (newest > current) {
-      localStorage.setItem(seenKey, newest);
-    }
-  }, [seenKey, state.automations]);
-  // A card glows when it arrived after the user last looked AND someone else
-  // made it -- a teammate on another machine, or an agent over MCP (whose rows
-  // carry this user's uuid in created_by, which is exactly why created_via is
-  // checked first).
-  function isNewToMe(automation: ArgusAutomation): boolean {
-    if (!watermark || !automation.created_at || automation.created_at <= watermark) {
-      return false;
-    }
-    return automation.created_via === 'mcp' || automation.created_by !== org.userId;
-  }
   // UX only, never security: trg_automation_limit is the real gate and
   // describeDbError turns its exception into the same sentence. This just says
   // it before the click rather than after.
@@ -345,7 +315,7 @@ export function AutomationsTab({
             {at: automation.last_run_at, status: automation.last_run_status} : null;
           return (
             <article
-              className={isNewToMe(automation) ? 'automation-card is-new' : 'automation-card'}
+              className={newIds.has(automation.id) ? 'automation-card is-new' : 'automation-card'}
               key={automation.id}
             >
               {/* One flex-wrap row -- mark, name, star, step count -- like
