@@ -1,3 +1,54 @@
+/* ---------------------------------------------------------------------------
+   Profile CSV import: the review table and the destination step.
+
+   The dialog this replaces was a paragraph and a row count, so it fit the
+   shared .import-panel width. A table with ten editable columns does not --
+   .import-review-panel is the one dialog in the app allowed to go wide, because
+   the alternative is horizontal scrolling over data the user is being asked to
+   check.
+   --------------------------------------------------------------------------- */
+
+/* Two classes, because .profile-modal.import-panel above pins the importer to
+   720px and would otherwise win on specificity. */
+.profile-modal.import-review-panel {
+  max-width: min(1240px, calc(100vw - 56px));
+  width: min(1240px, calc(100vw - 56px));
+}
+
+.import-lead {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+
+/* The step rail, same shape as the intro dialog's. Ornamental, so it is hidden
+   from assistive tech -- the subtitle already says "Step 2 of 3" in words. */
+.import-dots {
+  display: inline-flex;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.import-dots i {
+  background: var(--border);
+  border-radius: 999px;
+  height: 6px;
+  transition: background 140ms var(--ease), width 140ms var(--ease);
+  width: 6px;
+}
+
+.import-dots i.on {
+  background: var(--accent);
+  width: 18px;
+}
+
+.import-footer-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
 /* ── The credential banner ──────────────────────────────────────────────────
  * One login for every credential-less proxy in the file. See CredentialBanner in
  * modals/ImportProfilesModal.tsx.

@@ -428,29 +428,3 @@ td.platform-cell {
   font-weight: 650;
 }
 
-/* The Profiles table's proxy columns -- two of them.
- *
- * The address and its check were briefly one cell, which put "which proxy is
- * this" and "does it work" in one column sortable only by the first. They are
- * two questions, and now two columns the user can keep or drop independently:
- * some workspaces run everything direct, and some care only about the check.
- * The import review table (ImportProfilesModal) has always split them this way.
- *
- * No margin between them any more -- the cell padding is the gap. */
-td.profile-proxy-cell,
-td.profile-proxy-status-cell {
-  white-space: nowrap;
-}
-
-.profile-proxy-host {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-}
-
-/* On the row's centre rather than on the text baseline, which is where an
-   inline-flex chip would otherwise sit itself -- a couple of pixels low. */
-.profile-proxy-host,
-td.profile-proxy-status-cell > .proxy-check {
-  vertical-align: middle;
-}
-
