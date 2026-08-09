@@ -1,0 +1,206 @@
+.profile-modal.fingerprint-modal {
+  max-width: 920px;
+  width: min(920px, calc(100vw - 56px));
+}
+
+.nested-backdrop {
+  z-index: 70;
+}
+
+/* The X belongs on the title line, not in the middle of the header. Centred,
+ * it tracked the subtitle instead: one line of prose kept it level with the
+ * title by accident, and three lines (the importers, since they stopped being
+ * 1380px wide) dropped it to the middle of the paragraph, where it read as
+ * floating between the two dialogs' worth of text. */
+.profile-modal header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+/* Top-aligning a 32px control against a 24px title line leaves it 4px low --
+ * this is that half-difference, so the glyph is optically on the title however
+ * many lines follow it. */
+.profile-modal header > .icon-button {
+  margin-top: -4px;
+}
+
+.modal-actions {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.profile-modal h2 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.profile-modal p {
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.profile-form {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-editor-layout {
+  align-items: start;
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+}
+
+.profile-editor-layout.single {
+  grid-template-columns: minmax(0, 760px);
+}
+
+.profile-editor-main {
+  align-content: start;
+}
+
+.profile-summary {
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 18px;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+  padding: 24px;
+  position: sticky;
+  top: 0;
+}
+
+.summary-heading {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.summary-heading h3 {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.summary-heading button {
+  color: var(--accent);
+  font-size: 12px;
+  min-height: 34px;
+  text-transform: uppercase;
+}
+
+/* The panel's three blocks. Twenty-four rows in one list gave no way to tell
+ * which of them a given control was responsible for, and no way back to it --
+ * hence the per-group Edit, which is the point of the grouping. */
+.summary-group {
+  display: grid;
+  gap: 12px;
+}
+
+/* The heading doubles as the group's rule: a hairline under the row rather
+   than a bare label floating above the values, so the three blocks read as
+   blocks at a glance down a narrow column. */
+.summary-group-head {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding-bottom: 8px;
+}
+
+.summary-group-head h4 {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Bare pencil, not a bordered button. Needs the parent in the selector to
+   outrank `button.ghost`-weight rules, and to stay a quiet 24px square: three
+   labelled buttons down a 320px column out-weighed the values under them. */
+.summary-group-head .summary-group-edit {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: 24px;
+}
+
+.summary-group-head .summary-group-edit:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Tighter than it was: the fingerprint group alone is nineteen rows, and at
+   the old 16px they scrolled well past the form beside them. */
+.summary-list {
+  display: grid;
+  gap: 10px;
+}
+
+.summary-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 104px minmax(0, 1fr);
+}
+
+.summary-row strong {
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.summary-row span {
+  color: var(--ink-soft);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* `.summary-row span` softens every value in the panel, and a tag chip is a
+   span inside one -- without this it would out-specify .tag-chip and grey the
+   user's own tags out beside the branded ones, which keep their inline ink. */
+.summary-tags .tag-chip {
+  color: var(--ink);
+}
+
+
+.summary-lines {
+  display: grid;
+  gap: 5px;
+}
+
+.summary-lines i {
+  color: var(--ink-soft);
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+

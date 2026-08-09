@@ -1,0 +1,732 @@
+/* ── The reference ───────────────────────────────────────────────────────────
+ *
+ * Two levels of disclosure over one list. The flat version rendered every group
+ * permanently expanded -- about thirty rows on arrival, and the route table it
+ * reads from is set to grow considerably -- so the tab opened as a wall rather
+ * than an index. Groups collapse; a row inside an open group collapses over its
+ * fields, request body and curl. Nothing is open on a first visit.
+ *
+ * Buttons and aria-expanded rather than <details>, for the reason ApiTab.tsx
+ * gives at EntryRow: a controlled <details> and a search that force-opens its
+ * matches stop agreeing the moment the user clicks one, and the copy button
+ * would have had to nest inside the <summary> that toggles the row.
+ *
+ * `.api-groups` (plural) lived here and is gone with the flat list. `.api-group`
+ * is a different rule and still carries the three task blocks above this one. */
+/* ── The two ways in ─────────────────────────────────────────────────────────
+ *
+ * Side by side and equally weighted, because they are alternatives rather than
+ * steps: an agent user never touches the right-hand card and a script author
+ * never touches the left. Stacking them would have implied an order, and
+ * putting either first would have implied a default. */
+.api-ways {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.api-way {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.api-way header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.api-way header svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+/* The protocol first, what it is for after the dash. Someone scanning for "the
+ * MCP one" is scanning for those three letters and should not have to read a
+ * sentence to find them. */
+.api-way h2 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.api-way p {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.api-way-tools {
+  line-height: 1.9 !important;
+}
+
+.api-way-tools code {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.api-way-tools span {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.api-way-facts {
+  display: grid;
+  gap: 8px;
+}
+
+.api-way-facts > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.api-way-facts span {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.api-way-facts code {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  padding: 7px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pinned to the bottom so the two cards' buttons line up even though the
+ * columns above them are different lengths. */
+.api-way-actions {
+  display: flex;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+/* The legend for the reference's two columns. The protocol names are the whole
+ * point of it, so they take the ink and the rest stays quiet. */
+.api-reference-legend {
+  color: var(--ink-faint);
+  display: flex;
+  font-size: 11px;
+  gap: 16px;
+}
+
+.api-reference-legend em {
+  color: var(--ink-soft);
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+/* The sentence that answers "what am I about to make" before the form that
+ * makes it. Sits between the group's heading and its body, so it takes the
+ * body's padding and stops short of the heading's rule. */
+.api-group-lead {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 78ch;
+  padding: 12px 14px 0;
+}
+
+.api-group-lead + .api-group-lead {
+  padding-top: 8px;
+}
+
+.api-group-lead strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.api-reference {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.api-reference-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.api-reference-title {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.api-reference-title h2 {
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Two counts, not one. Endpoints and tools are different questions and the
+ * second is always the smaller -- see .api-entry-httponly. */
+.api-reference-title span {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.api-refgroup + .api-refgroup {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Every disclosure head in here is a full-bleed row, so it overrides the base
+ * button wholesale: that one is a filled accent control. */
+.api-refgroup-head,
+.api-entry-toggle {
+  background: transparent;
+  border-radius: 0;
+  color: var(--ink);
+  font-weight: 400;
+  justify-content: flex-start;
+  min-height: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.api-refgroup-head:not(:disabled):hover,
+.api-entry-toggle:not(:disabled):hover {
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.api-refgroup-head {
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.api-refgroup-head strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Pushes the badges to the far edge, so a column of groups has its counts
+ * aligned and can be read down rather than across. */
+.api-refgroup-count {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin-right: auto;
+}
+
+.api-refgroup-body {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* The caret is the one thing that moves in this tab. It turns rather than
+ * swapping glyph so the row does not reflow, and it is the same 0.12s the rest
+ * of the chrome uses. */
+.api-entry-caret {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  transition: transform 0.12s var(--ease);
+}
+
+.api-refgroup-head[aria-expanded='true'] .api-entry-caret,
+.api-entry-toggle[aria-expanded='true'] .api-entry-caret {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-entry-caret {
+    transition: none;
+  }
+}
+
+.api-entry + .api-entry {
+  border-top: 1px solid var(--border-soft);
+}
+
+.api-entry.is-open {
+  background: var(--paper);
+}
+
+/* The copy button is a sibling of the toggle, not a child, so the row is a
+ * 1fr + 32px pair rather than a button containing a button. */
+.api-entry-head {
+  align-items: center;
+  display: grid;
+  gap: 0 6px;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  padding-right: 8px;
+}
+
+/* Two rows: the identity of the thing, then what it does. The label used to
+ * share one line with the path and both ellipsized well before they needed to.
+ * Method and caret span both rows so they stay centred against the pair. */
+.api-entry-toggle {
+  align-items: center;
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: 14px 58px minmax(0, 1fr) auto;
+  padding: 9px 0 9px 14px;
+  row-gap: 2px;
+}
+
+.api-entry-toggle .api-entry-caret,
+.api-entry-toggle .method {
+  grid-row: 1 / span 2;
+}
+
+.api-entry-toggle .path {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+/* The MCP name, in the same monospace as the path because it is the same kind
+ * of thing -- an identifier you paste -- just addressed by a different caller. */
+.api-entry-tool {
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  grid-column: 4;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Said out loud rather than left blank. A row with an empty tool slot reads as
+ * one whose tool name failed to render; this is a real and deliberate fact
+ * about the route -- reachable by curl, and by no agent. */
+.api-entry-httponly {
+  color: var(--ink-faint);
+  font-size: 11px;
+  grid-column: 4;
+  grid-row: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.api-entry-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  grid-column: 3 / -1;
+  grid-row: 2;
+  line-height: 1.35;
+}
+
+/* MCP-only rows: neither GET nor POST, and colouring it as either would be a
+ * lie about how it is called. Takes the neutral chrome instead. */
+.method.tool {
+  background: var(--paper);
+  border-color: var(--border);
+  color: var(--ink-soft);
+}
+
+/* Indented to the method chip rather than to the path. Aligning it under the
+ * path would start the body 106px in and spend a sixth of the width on a
+ * gutter; this reads as belonging to the row above without the cost. */
+.api-entry-body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 14px 14px 38px;
+}
+
+.api-entry-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 78ch;
+}
+
+.api-entry-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+/* A definition list, because that is what it is: the field name is the term and
+ * the description defines it. The type and the required flag sit with the name
+ * rather than in columns of their own -- three of the nine routes that have
+ * fields have exactly one, and a table for one row is a table for no reason. */
+.api-entry-fields {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.api-entry-fields dt {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.api-entry-fields dt code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.api-entry-fields dd {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 2px 0 0;
+  max-width: 78ch;
+}
+
+.api-field-type {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+/* Required is a constraint, not a failure, so it takes the accent rather than
+ * --danger: a red flag beside half the fields on a create route reads as an
+ * error state the user is already in. */
+.api-field-required {
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.api-entry-curl {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.api-reference .table-empty {
+  margin: 14px;
+}
+
+/* The search borrows the Integrations tab's field whole. It is the same control
+ * doing the same job on the neighbouring tab, and a second one shaped slightly
+ * differently would be the drift, not the consistency. */
+.api-reference-bar .integration-search {
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+
+.api-group {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.api-group h2 {
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.endpoint {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px;
+}
+
+.endpoint:first-of-type {
+  border-top: 0;
+}
+
+/* Last track is a 32px icon button rather than an `auto` text button. That
+ * returned about 50px to the path and label, both of which ellipsize and were
+ * truncating well before they needed to. */
+.endpoint-head {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 58px minmax(160px, 1fr) minmax(150px, 1.2fr) 32px;
+  min-width: 0;
+}
+
+.method {
+  border-radius: 5px;
+  border-style: solid;
+  border-width: 1px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 5px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.method.get {
+  background: var(--method-get-bg);
+  border-color: var(--method-get-border);
+  color: var(--method-get-ink);
+}
+
+.method.post {
+  background: var(--method-post-bg);
+  border-color: var(--method-post-border);
+  color: var(--method-post-ink);
+}
+
+.method.patch {
+  background: var(--method-patch-bg);
+  border-color: var(--method-patch-border);
+  color: var(--method-patch-ink);
+}
+
+.method.delete {
+  background: var(--method-delete-bg);
+  border-color: var(--method-delete-border);
+  color: var(--method-delete-ink);
+}
+
+.path {
+  background: transparent;
+  border: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sits in the 32px track at the end of an endpoint row. Squared off rather than
+ * the .icon-button default so it reads as part of the row, not a floating
+ * control, and only resolves on hover. */
+.endpoint-copy {
+  color: var(--ink-faint);
+  justify-self: end;
+  min-height: 28px;
+  width: 28px;
+}
+
+.endpoint-copy:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* Copied state: green, and held long enough to be read. */
+.endpoint-copy.copied,
+.endpoint-copy.copied:hover {
+  background: transparent;
+  color: var(--success);
+}
+
+.copy-button {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+/* Revoke, on the API tab: a bordered button in a list, not a dialog's primary,
+ * so it keeps the raised surface and takes the danger in ink only. Spelled out
+ * rather than inherited, because `button.danger` above now fills. */
+.copy-button.danger {
+  background: var(--raised);
+  color: var(--danger);
+}
+
+.copy-button.danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+/* The name field and the scope select share a row; the note and the button each
+ * get their own. Previously the input and the Create button were siblings in a
+ * bare .endpoint, so the button sat flush against the field with no label on
+ * either and no indication of what scope the key would get. */
+.key-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  padding: 14px;
+}
+
+.key-form .field-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  grid-column: 1 / -1;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.key-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+/* Path field and its picker on one row. This borrowed .field-hint at first,
+ * which is a text style with no grid at all, so the button wrapped onto its own
+ * line directly under the input. */
+.path-picker {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.path-picker input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.path-picker button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.agent-prompts {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.agent-prompts p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.agent-prompt-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Mark, name, then the copy/check state on the trailing edge. */
+.agent-prompt-buttons button {
+  min-height: 32px;
+}
+
+.agent-prompt-buttons button svg:last-child {
+  color: var(--ink-faint);
+}
+
+/* Six tracks rather than the endpoint row's four: mark, name, token tail,
+ * scope, last used, revoke. */
+.key-row-head {
+  grid-template-columns:
+    18px minmax(90px, 1fr) 62px minmax(80px, 1fr) minmax(84px, 1fr) auto;
+}
+
+/* Carries the same brand mark the integration card and the connect dialog use,
+ * so a key created by a connection is recognisable as that tool's at a glance.
+ * A hand-made key falls back to a generic key glyph. */
+.key-mark {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.key-name {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Predates keys recording an owner, so it belongs to no account in particular
+ * and never counts as a connection. Flagged rather than hidden: it still grants
+ * access to this machine's API, so it has to remain revocable. */
+.key-legacy {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+.empty-row {
+  color: var(--ink-faint);
+  font-size: 13px;
+  margin: 0;
+}
+
+.endpoint pre {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 10px 0 0 68px;
+  overflow-x: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+/* Inverted against the page rather than accent-filled: a full-width cyan bar
+ * fights the sidebar's accent line for attention, and the toast is transient. */
+.toast {
+  animation: toast-in 0.18s var(--ease);
+  background: var(--ink);
+  border-radius: var(--radius-lg);
+  bottom: 20px;
+  box-shadow: var(--shadow-md);
+  color: var(--surface);
+  font-weight: 800;
+  left: 50%;
+  padding: 10px 14px;
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+/* 300px rather than 260px: a card's head is a mark, a name and up to two chips,
+ * and at 260 -- four columns inside the capped panel -- even "Not connected"
+ * alone was wrapping onto its own line on every card. Three wider columns fit
+ * the common case on one line and leave the wrap for the long states. */

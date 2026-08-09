@@ -1,0 +1,431 @@
+/* ── Run automation dialog ──────────────────────────────────────────────── */
+
+/* Its own measure rather than .small-modal's 520px. These rows carry four
+   things where the move/assign dialogs carry two, and at 520 the check chip --
+   the one thing this screen exists to show -- was pushed out of the panel.
+   Named and sized here, the way .import-panel is, because that is the pattern
+   for a dialog that cannot use the shared width. */
+.profile-modal.run-automation-modal {
+  max-width: 640px;
+  width: min(640px, calc(100vw - 56px));
+}
+
+/* Fixed measures for the two right-hand columns rather than .move-profiles-row's
+   max-content pair. With both sized to their contents, every row's status chip
+   started at a different x -- "Ready", "Warmup" and "Ban" are three widths, and
+   so are "312 ms", "Checking…" and "Already running" -- so a list of six rows
+   zig-zagged down the right-hand side with nothing to read down. Fixed columns
+   give the eye two straight edges: one to scan the statuses, one to scan the
+   verdicts. All the slack still lands on the name, which is the only cell that
+   can ellipsis. */
+.run-profiles-row {
+  grid-template-columns: 18px minmax(0, 1fr) 6.25rem 8.5rem;
+}
+
+.run-profiles-row.is-blocked {
+  cursor: not-allowed;
+}
+
+/* Long custom statuses exist ("Needs review"); the column does not grow for
+   them, so the chip truncates instead of pushing the verdict off the row. */
+.run-profiles-row .status-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The name fades; the verdict does not. Greying the reason along with the row
+   is how a blocked row becomes a dead end -- the whole point of showing it is
+   that it says what to fix. */
+.run-profiles-row.is-blocked .move-profiles-name,
+.run-profiles-row.is-blocked .status-chip {
+  opacity: 0.5;
+}
+
+/* Avatar, name and host on one baseline, and the only cell that gives way.
+   min-width:0 is what lets it: without it a grid item refuses to shrink below
+   its content and the row grows past the panel instead of truncating. */
+.run-profiles-row .move-profiles-name {
+  align-items: baseline;
+  display: flex;
+  font-weight: 500;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-profiles-row .avatar {
+  align-self: center;
+}
+
+/* Each truncates on its own -- text-overflow does nothing on the flex parent.
+   The name has a floor and the host does not, which is what makes the host
+   yield first. Shrink factors alone were not enough: they distribute in
+   proportion to content width, so a 40-character hostname beside a short name
+   still clipped the name to "Old …" while the host kept 260px. A min-width on
+   the name is a hard stop -- a flex item will not shrink below it -- so the
+   host has to absorb the rest. Losing the tail of a host you can still
+   recognise beats losing the name that says which profile the row is. */
+.run-profiles-label {
+  flex-shrink: 1;
+  font-weight: 650;
+  min-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mono and muted, on .profile-proxy-host's face so a connection reads the same
+   here as it does in the Profiles table. Capped as well as shrinkable: a long
+   provider hostname would otherwise take half the row for a detail, and the
+   head of it is the part anyone recognises. */
+.run-profiles-host {
+  color: var(--ink-faint);
+  flex-shrink: 4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-profiles-proxy {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* "Direct", "Free proxy", "No proxy", "Already running" -- a word where the
+   table would have a chip, because there is no check behind any of them and a
+   chip would claim one. */
+.run-profiles-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.run-profiles-note.is-bad {
+  color: var(--danger);
+}
+
+/* Sits above the list rather than in the toolbar: it acts on what is shown, and
+   a select-all that lives away from the rows it ticks is a control people press
+   twice to find out what it did. */
+.run-profiles-all {
+  align-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  padding: 4px 8px;
+}
+
+/* The count that would otherwise only exist as a disabled checkbox nobody can
+   explain. Tone is --danger's surface, not --danger itself: this is a fact
+   about the list, not an error the user just caused. */
+.run-blocked-note {
+  align-items: center;
+  background: var(--status-ban-bg);
+  border: 1px solid var(--status-ban-border);
+  border-radius: 8px;
+  color: var(--status-ban-ink);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+}
+
+/* A row holding one of these is not a data row -- no hairline under it, and the
+ * cell's own padding would fight the block's. */
+/* The empty state fills the table's body rather than sitting in it as a
+ * short row. `height` on a table cell behaves as a minimum, so this reserves
+ * the body area and vertical-align centres the message inside it -- otherwise
+ * the block hugged the header and the hover tint below made it obvious the row
+ * did not cover the space it appeared to. */
+.empty-row-tr td {
+  border-bottom: 0;
+  height: 320px;
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Not a row anything can be done to, so it does not take the row hover. */
+tbody tr.empty-row-tr:hover {
+  background: transparent;
+}
+
+/* The four card-and-prose tabs -- API, Integrations, Extensions, Automations --
+ * share this shell. Capped and centred, unlike the tables next door: every box
+ * on them is prose, a two-column form or a card grid, and all four were being
+ * stretched by the window rather than sized to their content. On a wide display
+ * the endpoint rows put a 60px path and a short label at opposite ends of a
+ * 2000px row with a lake of nothing between them, the "hand this to an agent"
+ * paragraph ran as one line, and the card grids fanned out to five and six
+ * columns. 1080px is about where the summary grid stops growing, the endpoint
+ * columns stay adjacent and the grids settle at three; below it nothing
+ * changes, so a laptop still gets the full width it had.
+ *
+ * Automations joined last and was the worst case: it is the only one of the
+ * four whose cards carry a description, so a six-column fan-out gave each one a
+ * 220px column with a three-line paragraph in it. */
+.api-panel,
+.automations-tab,
+.extensions-tab,
+.team-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-inline: auto;
+  max-width: 1080px;
+  min-width: 0;
+  width: 100%;
+}
+
+.import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Sized to the reading, not to the screen. The default .profile-modal is
+ * 1380px because the profile editor is three columns of fields; an importer is
+ * one paragraph, one row of buttons and a list, and at that width the
+ * paragraph ran as a single 1300px line -- the dialog was stretched by its own
+ * prose. Two or three wrapped lines in a dialog you can take in at a glance
+ * beat one line tracked across the whole display.
+ *
+ * Compounded with .profile-modal on purpose: that rule sets the same two
+ * properties and is declared further down this file, so a single .import-panel
+ * class would lose the tie and change nothing. Same reason .small-modal is
+ * written that way. */
+.profile-modal.import-panel {
+  max-width: 720px;
+  width: min(720px, calc(100vw - 56px));
+}
+
+/* Narrower again: no column reference to lay out, just the per-line preview,
+   which is a line number, a host:port and a badge. */
+.profile-modal.proxy-import-panel {
+  max-width: 580px;
+  width: min(580px, calc(100vw - 56px));
+}
+
+.import-panel code {
+  background: var(--paper);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  padding: 1px 6px;
+}
+
+/* Wraps rather than overflowing: at 580px the proxy importer's row is two
+   buttons and a Type selector, which is a hair too wide for one line on a
+   narrow window. */
+.import-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.import-file-label {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* The column reference, replacing the paragraph of prose that used to be the
+ * dialog's subtitle. A two-column definition list rather than a table: the
+ * notes are sentences of very uneven length, and a table would either wrap them
+ * into a ragged column or force the dialog wide enough for the longest one. */
+.import-columns {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+}
+
+/* Wide enough for the longest column name and its Required pill on one line --
+   proxy_name wrapping put the pill on a row of its own. */
+.import-columns > div {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 182px minmax(0, 1fr);
+}
+
+.import-columns dt {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Sits beside the column name, so it has to read as an annotation on it rather
+ * than as a second name -- hence the border-only pill, no fill. */
+.import-columns dt em {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  text-transform: uppercase;
+}
+
+.import-columns dd {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 0;
+}
+
+/* A label + select sitting inline in .import-actions, rather than stacked the
+ * way .field lays out inside a form grid. */
+.import-actions .inline-field {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin: 0;
+}
+
+.import-actions .inline-field select {
+  width: auto;
+}
+
+/* Per-line preview of the file being imported. Capped and scrolled: a vendor
+ * list is routinely hundreds of lines, and the dialog still has to show the
+ * Import button underneath it. */
+.proxy-import-preview {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.proxy-import-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  font-size: 13px;
+  gap: 12px;
+  grid-template-columns: 36px 1fr auto;
+  padding: 8px 12px;
+}
+
+.proxy-import-row:last-child {
+  border-bottom: none;
+}
+
+.proxy-import-line {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.proxy-import-target {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.import-summary {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  padding: 16px;
+}
+
+.api-summary {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(200px, 1fr) minmax(260px, 1.2fr);
+  padding: 12px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.summary-item.wide {
+  grid-column: 1 / -1;
+}
+
+.summary-item span {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.summary-item code,
+.summary-item input {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  padding: 8px 9px;
+}
+
+.summary-item code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-item input {
+  min-height: 34px;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Two buttons sat flush against each other here, reading as one segmented
+ * control. Same 10px the grid around them uses. */
+.summary-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.api-note {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  line-height: 1.4;
+  padding: 10px 12px;
+}
+
+.api-note svg {
+  flex: 0 0 auto;
+}
+

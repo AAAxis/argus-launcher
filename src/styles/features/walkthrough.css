@@ -1,0 +1,125 @@
+/* ── Profiles walkthrough ───────────────────────────────────────────────────
+ * A single column: a figure, then the paragraph it illustrates. Sized between
+ * small-modal and the default so three sentences do not run to one line. */
+.intro-modal {
+  width: min(560px, 100vw - 56px);
+}
+
+.intro-body {
+  display: grid;
+  gap: 14px;
+}
+
+.intro-body p {
+  color: var(--ink-soft);
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* The frame and its caption. The frame holds the aspect ratio at 16:10 whether
+ * it has a screenshot in it or not, so a walkthrough that is half illustrated --
+ * which is the state of these two -- does not resize as you page through it. */
+.intro-figure {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.intro-figure-frame {
+  align-items: center;
+  aspect-ratio: 16 / 10;
+  background: var(--paper);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  padding: 16px;
+}
+
+/* Solid once there is something in it: dashed is the convention for a slot
+ * waiting to be filled, and leaving it around a real screenshot reads as one
+ * that failed to load. Tighter padding too -- the border is the picture's mount
+ * now, not a placeholder's outline. */
+.intro-figure-frame.has-shot {
+  border-style: solid;
+  padding: 8px;
+}
+
+/* `contain`, so a shot that is not 16:10 is letterboxed on the paper fill
+ * rather than cropped. Every shot in the app happens to opt into `is-full`
+ * below at the moment; this stays the default because it is the one that cannot
+ * silently eat the subject of a picture that arrives at some other ratio. */
+.intro-figure-frame img {
+  border-radius: 6px;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* The opt-in from IntroStep.fill: the picture is the card, edge to edge.
+ *
+ * No padding and no radius on the image -- the frame's own corners clip it, and
+ * a rounded rectangle inset by nothing inside another rounded rectangle draws a
+ * second, wrong-radius corner. `cover` rather than `contain` because filling is
+ * the whole point; it costs a centre crop to 16:10, which is why only whole-
+ * window shots may ask for this. Their outer band is desktop wallpaper. */
+.intro-figure-frame.is-full {
+  padding: 0;
+}
+
+.intro-figure-frame.is-full img {
+  border-radius: 0;
+  height: 100%;
+  max-height: none;
+  max-width: none;
+  object-fit: cover;
+  width: 100%;
+}
+
+.intro-figure figcaption {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin: 0 auto;
+  max-width: 320px;
+  text-align: center;
+}
+
+/* Left-aligned against the Back/Next pair, the same way a footer's delete
+ * button is. */
+.intro-dots {
+  display: flex;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.intro-dots span {
+  background: var(--border);
+  border-radius: 999px;
+  height: 6px;
+  transition: background-color 0.12s var(--ease), width 0.12s var(--ease);
+  width: 6px;
+}
+
+.intro-dots span.active {
+  background: var(--accent);
+  width: 16px;
+}
+
+.check-field {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.check-field input {
+  height: 18px;
+  width: 18px;
+}
+
+.check-field span {
+  color: var(--ink);
+  font-weight: 800;
+}
+

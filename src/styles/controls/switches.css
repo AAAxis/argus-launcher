@@ -1,0 +1,115 @@
+.error-modal {
+  border-color: var(--danger);
+}
+
+.error-modal h2 {
+  color: var(--danger);
+}
+
+.error-detail {
+  background: var(--danger-bg);
+  border-radius: 8px;
+  color: var(--ink);
+  line-height: 1.5;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+}
+
+/* The same block, without the warning tint. .error-detail's red panel is the
+ * right frame for "this deletes things" and the wrong one for a dialog that is
+ * offering you something -- the workspace prompt was reading as an alert about
+ * a workspace you do not have yet. */
+.modal-detail {
+  background: var(--paper);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  padding: 12px 14px;
+}
+
+/* A standing risk sitting under the control that caused it, rather than a
+ * dialog. Used by the fingerprint editor's timezone field when the chosen zone
+ * contradicts the assigned proxy: the confirmation dialog covers the moment the
+ * zone is picked, and this covers the state persisting afterwards. --danger
+ * rather than a warning token because there is no warning token, and this is a
+ * real detection risk rather than a style note. */
+.field-warning {
+  align-items: flex-start;
+  color: var(--danger);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 1.4;
+  margin: 6px 0 0;
+}
+
+.field-warning svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.checkbox-confirm {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.checkbox-confirm input {
+  flex-shrink: 0;
+  height: 16px;
+  width: 16px;
+}
+
+.checkbox-confirm span {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.switch {
+  cursor: pointer;
+  display: inline-block;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.switch input {
+  height: 0;
+  opacity: 0;
+  position: absolute;
+  width: 0;
+}
+
+.switch-track {
+  background: var(--border);
+  border-radius: 999px;
+  display: block;
+  height: 22px;
+  position: relative;
+  transition: background 0.15s var(--ease);
+  width: 38px;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.switch-thumb {
+  background: var(--switch-thumb);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  height: 18px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform 0.15s var(--ease);
+  width: 18px;
+}
+
+.switch input:checked + .switch-track .switch-thumb {
+  transform: translateX(16px);
+}
+

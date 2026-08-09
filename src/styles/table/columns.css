@@ -1,0 +1,456 @@
+/* ── The column picker ──────────────────────────────────────────────────────
+ * components/ui/ColumnsButton.tsx. Deliberately the same rows as the status and
+ * platform pickers -- label left, tick at the far edge, 7px radius -- because a
+ * third shape of popover list in one app is a third widget to learn. What
+ * differs is that these are switches: the panel stays open while several are
+ * ticked, and toggling one does not dismiss it.
+ *
+ * The trigger sits at the far end of the toolbar, opposite the filters:
+ * everything to its left narrows which rows you see, this decides what a row
+ * shows, and those are not the same kind of control. */
+.table-toolbar .columns-trigger {
+  margin-left: auto;
+}
+
+/* Refresh (components/ui/RefreshButton.tsx) is a .topbar action, not a toolbar
+   one -- it refetches the whole workspace rather than narrowing this table -- so
+   it needs no margin rule here. The class stays as the component's own hook. */
+
+/* How many columns are switched off, on the trigger itself. It is the fact
+   somebody wants when a column they expected is not there, and the only way to
+   tell a configured table from a default one without opening the panel. */
+.columns-trigger-count {
+  background: var(--selected);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+}
+
+/* Profiles offers eighteen columns; at 34px a row that is a panel taller than a
+   laptop window. The list scrolls and the reset stays put beneath it -- Popover
+   deliberately does not close on a scroll inside its own panel. */
+.columns-pop-scroll {
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  /* Room for the scrollbar, so it never sits on top of the ticks. */
+  padding-right: 2px;
+}
+
+.columns-pop-group {
+  display: grid;
+  gap: 2px;
+}
+
+.columns-pop-group + .columns-pop-group {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+/* Small, quiet and not clickable: these name the sections, they are not a
+   second level of choice. */
+.columns-pop-group-label {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0 0 2px;
+  padding: 0 8px;
+}
+
+.columns-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+  width: 100%;
+}
+
+/* Pushed to the far edge so the labels stay aligned to each other rather than
+   each being followed by its own mark -- the same rule .platform-pop-option
+   makes, for the same reason. */
+.columns-pop-option > svg:last-child {
+  margin-left: auto;
+}
+
+.columns-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.columns-pop-option.active {
+  background: var(--selected);
+}
+
+/* Name, which every table keeps. It stays in the list rather than being left
+   out: one greyed row answers "where did Name go?", where an absence raises the
+   question instead. */
+.columns-pop-option:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+  opacity: 1;
+}
+
+/* The divider is the footer's, not the button's: a control that carries its own
+   square top edge cannot also be a rounded control, which is what .status-pop-new
+   settles for and what this panel does not have to. */
+.columns-pop-footer {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+/* A real button, at --radius-sm -- the scale's step for "controls you press".
+   Quiet rather than bordered: a full ghost outline in a 248px panel reads as a
+   second card, so it takes the panel's own hover fill instead, like the option
+   rows above it. */
+.columns-pop-reset {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: center;
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  width: 100%;
+}
+
+.columns-pop-reset:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* The folder name in a table cell, with its icon. */
+.folder-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Scoped to the glyph rather than to `svg`: a folder with a colour carries it
+   as an inline style on .folder-glyph, and a descendant rule naming a colour on
+   the svg itself would win over that inheritance and grey every folder back. */
+.folder-label .folder-glyph {
+  color: var(--ink-faint);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+/* Cells centre on the row rather than sitting on a text baseline. Every table
+ * here has one column carrying a mark two or three times the height of a line
+ * of text -- an avatar, a flag plate, a row of holders -- and baseline
+ * alignment reads as a row where half the columns sag. */
+th,
+td {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 10px 14px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+th {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* A sortable header is the same header, not a button dropped into it: it
+ * inherits the cell's colour, size, weight, tracking and case rather than
+ * re-declaring them, so a sortable column and a plain one read as one row.
+ * The global `button` rule sets min-height, padding and a background this
+ * needs none of -- hence the resets.
+ *
+ * Negative inline margin so the hit area covers the cell's own 14px padding
+ * without the label moving: the text has to stay on the same vertical line as
+ * the columns beside it. */
+.th-sort {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 5px;
+  letter-spacing: inherit;
+  margin: -6px -8px;
+  min-height: 0;
+  padding: 6px 8px;
+  text-transform: inherit;
+}
+
+.th-sort:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* The arrow is the one part that is not the label, so it stays quieter than
+ * it -- it marks which column is sorted, it does not compete to be read. */
+.th-sort svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+tbody tr {
+  transition: background-color 0.1s var(--ease);
+}
+
+tbody tr:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Deliberately not a flex row. `display: flex` on a <td> stops it being a table
+ * cell at all: the engine wraps it in an anonymous cell, and the padding, the
+ * hairline and the row's vertical alignment then apply to the flex box inside
+ * that cell instead of to the cell. This column's underline was drawn a few
+ * pixels above the one every other column shares, and its name rode above the
+ * line its own row sat on.
+ *
+ * Inline layout keeps the cell a cell. The mark beside the name (a profile
+ * avatar, a proxy's flag plate, a cookie glyph) is inline-flex already, so all
+ * it needs is the gap the flex `gap` used to give it and a shared centre. */
+/* nowrap so the mark and the name stay on one line. Without it, a table wide
+   enough to overflow its scroll container squeezes every column to its minimum,
+   and this cell's minimum is reached by dropping the name onto a second line
+   underneath its own avatar. The name ellipsizes instead -- which is what the
+   cap below is for. */
+td.name-cell {
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+/* The third selector is the same plate wrapped in the button that changes its
+   colour (CellColor). It cannot be folded into the first: `>` walks the DOM,
+   not the box tree, so the `display: contents` span between the cell and the
+   button breaks the child combinator even though the button is what the cell
+   actually lays out. Getting this wrong is what dropped the 12px between a
+   cookie-set's icon and its name. */
+td.name-cell > .avatar,
+td.name-cell > .proxy-flag,
+td.name-cell .cell-color-trigger {
+  margin-right: 12px;
+  vertical-align: middle;
+}
+
+/* The cap goes on the inner span ONLY, never also on the cell.
+ *
+ * One long name used to set this column's width for all fifty rows, so the text
+ * is capped and clipped with the whole name in its title -- the same treatment
+ * cell-wide gives the email and start-url columns.
+ *
+ * Capping the <td> as well looks like belt and braces and is actually a bug:
+ * the avatar sits outside this span, so cell content is 20px of mark plus 12px
+ * of margin plus the span, and a 180px cell cannot hold a 180px span beside
+ * them. The inline content wraps, and the name drops onto a second line under
+ * its own avatar. The span's cap is the only one needed -- it is the only thing
+ * here that can grow without bound.
+ *
+ * Still not `display: flex` on the <td>, for the reason spelled out above. */
+td.name-cell .cell-name {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ── Shrink-to-fit columns ──────────────────────────────────────────────────
+ * table-layout: auto hands every unclaimed pixel to the columns that did not
+ * claim one. With only the checkbox, platform and actions cells pinned, a
+ * Status column of 90px chips was drawn 220px wide -- 130px of nothing after
+ * the chip. That, and not the chips themselves, is the "too much space after
+ * the value" this table had in almost every column.
+ *
+ * `width: 1%` + nowrap is the shrink-to-fit idiom td.checkbox-cell and
+ * td.actions-cell already use; this is that same idiom, named, for the columns
+ * whose content is one short fact. Deliberately a class on the cell rather than
+ * a field on TableColumn: a width in the registry would be serialised by
+ * describeColumns into the shape agents read through argus_table_columns, and
+ * that is the front edge of user-resizable columns rather than a spacing fix.
+ *
+ * Safe because `name` is locked and unpinned: there is always at least one
+ * column left to absorb the slack, so the table can never be pinned end to end
+ * and start ignoring `width: 100%`. */
+td.cell-fit {
+  width: 1%;
+  white-space: nowrap;
+}
+
+td.checkbox-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* A checkbox is an inline replaced box, so it sits on the text baseline of a
+   cell that has no text -- a couple of pixels below the middle of every row it
+   is meant to be selecting. */
+th > input[type='checkbox'],
+td.checkbox-cell > input[type='checkbox'] {
+  display: block;
+}
+
+/* ── Selectors ──────────────────────────────────────────────────────────────
+ * The round selection control shared by every table and card grid. See
+ * components/ui/Checkbox.tsx.
+ *
+ * These were unstyled native checkboxes: no accent-color anywhere in this file,
+ * so they were drawn by the platform and ignored the theme entirely -- a stock
+ * blue macOS tick in a table whose accent is ink, and a light-mode widget in a
+ * dark one. Round because the job is picking rows out of a set.
+ *
+ * Deliberately scoped to .selector rather than to input[type='checkbox']: the
+ * consent checkbox in the delete dialogs (.checkbox-confirm) has to stay square,
+ * because a round one reads as "pick one of these" rather than "I agree". */
+.selector {
+  appearance: none;
+  background: var(--raised);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  flex: none;
+  height: 18px;
+  margin: 0;
+  position: relative;
+  transition: background-color 0.12s var(--ease), border-color 0.12s var(--ease);
+  width: 18px;
+}
+
+.selector:hover {
+  border-color: var(--accent);
+}
+
+.selector:checked,
+.selector:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The tick is masked, not drawn.
+ *
+ * It used to be two borders on a box rotated 45deg, and it read as sitting low
+ * in the circle -- correctly, because the ink of such a box lives only on its
+ * bottom and right edges, so the centroid is down-right of the box's centre and
+ * the rotation turns that offset into pure downward drift. `top: 47%` was an
+ * attempt to claw it back and recovered about half a pixel of the ~1.3 it owed.
+ * Centring a shape whose ink is not where its box is cannot be done by nudging
+ * the box.
+ *
+ * A mask fixes the cause rather than the symptom: --tick's alpha carries the
+ * shape and `background` carries the colour, so the tick can still be
+ * --accent-ink in both themes -- which is what the border trick was reaching
+ * for, and what a background-image (whose stroke cannot take a custom property)
+ * could not have given it. The path is lucide's Check, so the tick in a
+ * checkbox and the tick in every chip and menu are now the same drawing. */
+.selector:checked::after {
+  background: var(--accent-ink);
+  content: '';
+  height: 11px;
+  left: 50%;
+  mask-image: var(--tick);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 11px;
+}
+
+/* Some but not all: a bar, not a tick. Only reachable when :checked is false,
+   so it cannot collide with the rule above. */
+.selector:indeterminate::after {
+  background: var(--accent-ink);
+  border-radius: 999px;
+  content: '';
+  height: 1.5px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+}
+
+.selector:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* A row that exists but must not be picked. It keeps its shape rather than
+   disappearing: the Run dialog's blocked profiles are the ones the user most
+   needs to see, because the point of the screen is telling them which. */
+.selector:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.selector:disabled:hover {
+  border-color: var(--border);
+}
+
+td.platform-cell {
+  color: var(--ink-soft);
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* The mark and its version. Only Windows has one to show -- 11 and 10 share the
+   flag because downstream they are the same preset and the same user agent, so
+   without the number the column drew the two identically. */
+.platform-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.platform-version {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* The Profiles table's proxy columns -- two of them.
+ *
+ * The address and its check were briefly one cell, which put "which proxy is
+ * this" and "does it work" in one column sortable only by the first. They are
+ * two questions, and now two columns the user can keep or drop independently:
+ * some workspaces run everything direct, and some care only about the check.
+ * The import review table (ImportProfilesModal) has always split them this way.
+ *
+ * No margin between them any more -- the cell padding is the gap. */
+td.profile-proxy-cell,
+td.profile-proxy-status-cell {
+  white-space: nowrap;
+}
+
+.profile-proxy-host {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* On the row's centre rather than on the text baseline, which is where an
+   inline-flex chip would otherwise sit itself -- a couple of pixels low. */
+.profile-proxy-host,
+td.profile-proxy-status-cell > .proxy-check {
+  vertical-align: middle;
+}
+

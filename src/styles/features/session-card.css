@@ -1,0 +1,387 @@
+/* ── Session card ───────────────────────────────────────────────────────────
+ * The block that takes up the bottom third of every profile's start page,
+ * previewed here with fixed sample values.
+ *
+ * It is a preview and says so: this tab has no profile and no session, so a
+ * card filled with real-looking numbers would be phantom data. It is here
+ * because this is where you decide what the start page carries, and deciding
+ * that without seeing the block is deciding blind.
+ *
+ * The four rows, their icons and their order are the same four homePage.ts
+ * emits (.session-fields / .field). Changing one means changing both. */
+.start-session-card {
+  display: block;
+  padding: 14px;
+}
+
+.start-session-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+
+/* Says outright that the values below are made up. Borrows the warmup status
+ * pair rather than tinting --accent: this is a caveat, not a state the profile
+ * is in. */
+.start-session-tag {
+  background: var(--status-warmup-bg);
+  border-radius: 999px;
+  color: var(--status-warmup-ink);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  text-transform: uppercase;
+}
+
+/* The Re-check control, drawn but not pressable -- same argument as the
+ * automation card's missing Run button. A span, not a disabled button: a
+ * disabled control says "not right now", and this one says "not here". */
+.pill-static {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+}
+
+.start-session-fields {
+  display: grid;
+  gap: 9px 16px;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+}
+
+.start-field {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.start-field.wide {
+  align-items: flex-start;
+  grid-column: 1 / -1;
+}
+
+/* A fixed label column, so the four values line up as a column rather than
+ * starting wherever their own label happened to end. */
+.start-field dt {
+  align-items: center;
+  color: var(--ink-faint);
+  display: flex;
+  flex: 0 0 88px;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 7px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.start-field.wide dt {
+  padding-top: 1px;
+}
+
+.start-field dd {
+  color: var(--ink);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+  min-width: 0;
+}
+
+/* Drops a column at a time rather than letting auto-fill decide, so the tiles
+ * keep a predictable size instead of stretching to fill an awkward remainder. */
+@media (max-width: 900px) {
+  .start-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .start-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.start-tile {
+  position: relative;
+}
+
+.start-tile-open,
+.start-tile-add {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-height: 0;
+  padding: 14px 8px 12px;
+  text-decoration: none;
+  transition: background 0.14s var(--ease);
+  width: 100%;
+}
+
+.start-tile-open:hover,
+.start-tile-add:not(:disabled):hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* No plate and no border: the site's own logo is the tile. The frame this used
+ * to draw was a second rectangle inside one the hover fill already provides,
+ * and it shrank the one part of the tile a person actually recognises. Losing
+ * it buys 14px of logo.
+ *
+ * The box stays a fixed square so a favicon and a monogram produce identically
+ * sized tiles, which is the whole reason it exists. Matches .mark on the
+ * generated browser page. */
+.start-tile-icon {
+  align-items: center;
+  border-radius: 13px;
+  color: var(--ink-soft);
+  display: flex;
+  height: 56px;
+  justify-content: center;
+  width: 56px;
+}
+
+/* Dashed, so the one tile that is an action rather than a destination is
+ * distinguishable from a bookmark whose favicon has not resolved yet. It is
+ * the only tile that keeps a frame, and now that is the whole signal. */
+.start-tile-add .start-tile-icon {
+  background: transparent;
+  border: 1px dashed var(--border-soft);
+}
+
+/* BookmarkFavicon renders the same markup here as in the profile-editor chips,
+ * so both sizings have to be scoped. Unscoped, whichever came last would win
+ * and one of the two would be sized for the other. */
+.start-tile .bookmark-favicon {
+  border-radius: 9px;
+  flex: 0 0 auto;
+  height: 40px;
+  object-fit: contain;
+  width: 40px;
+}
+
+.start-tile .bookmark-monogram {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 20px;
+  font-weight: 800;
+  justify-content: center;
+  padding: 0;
+}
+
+/* min-width: 0 because a grid item defaults to min-width: auto, and without it
+ * a long unbreakable title widens its own column and skews the whole row. */
+.start-tile-label {
+  font-size: 12px;
+  font-weight: 650;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Absolutely positioned so revealing it cannot reflow the tile, and hidden
+ * until the tile is hovered or something inside it takes focus -- keyboard
+ * users reach it by tabbing, which is why :focus-within is here too. */
+.start-tile-edit {
+  min-height: 24px;
+  opacity: 0;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  transition: opacity 0.12s var(--ease);
+  width: 24px;
+}
+
+.start-tile:hover .start-tile-edit,
+.start-tile:focus-within .start-tile-edit,
+.start-card:hover .start-tile-edit,
+.start-card:focus-within .start-tile-edit {
+  opacity: 1;
+}
+
+/* ── Start page bookmark chips ──────────────────────────────────────────────
+ * The shared bookmarks, offered as one-click values for the start URL. Typing
+ * the URL by hand was the only way to point a profile at a page the team had
+ * already saved. */
+.bookmark-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bookmark-chip {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  max-width: 240px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px 0 8px;
+}
+
+.bookmark-chip:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.bookmark-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+/* A long bookmark title truncates rather than stretching the chip past the
+   form column; the full title stays available as the button's title=. */
+.bookmark-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-chip .bookmark-favicon {
+  border-radius: 3px;
+  flex: none;
+  height: 14px;
+  width: 14px;
+}
+
+/* The letter fallback, for a bookmark whose favicon has not resolved. Needs a
+   plate of its own at 14px or the letter floats loose in the chip. */
+.bookmark-chip .bookmark-monogram {
+  align-items: center;
+  background: var(--paper);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 800;
+  justify-content: center;
+  text-transform: uppercase;
+}
+
+.file-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+}
+
+.file-row > span {
+  color: var(--ink-soft);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+  .profile-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-summary {
+    max-height: none;
+    position: static;
+  }
+}
+
+.color-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Filled with its own token triple via an inline style (the six presets are
+ * data, not six rules -- and a custom hex could never be a class). The border
+ * is always the colour's own, so an unselected swatch still reads as a chip
+ * rather than a floating dot; selection is the ring plus the check, not a
+ * border swap that would fight the fill. */
+.swatch {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  transition: box-shadow 0.12s var(--ease), transform 0.12s var(--ease);
+  width: 28px;
+}
+
+.swatch:not(:disabled):hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.swatch.active {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+.swatch:focus-visible {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  outline: none;
+}
+
+/* The custom-colour chip. The native control is the whole chip: it is stretched
+ * over it and made invisible rather than hidden, because display:none takes it
+ * out of the click target the label is pointing at. */
+.swatch-custom {
+  background: var(--raised);
+  border-color: var(--border);
+  color: var(--ink-soft);
+  position: relative;
+}
+
+.swatch-custom input[type="color"] {
+  border: 0;
+  cursor: pointer;
+  height: 100%;
+  left: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.swatch-custom:focus-within {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+.modal-actions {
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+  padding-top: 16px;
+}
+
+.modal-actions .danger {
+  margin-right: auto;
+}
+

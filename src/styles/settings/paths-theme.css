@@ -1,0 +1,158 @@
+/* ── Paths ── */
+.settings-path {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-path code {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  color: var(--ink-soft);
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Theme previews ──
+ * Three cards, each a small drawing of the app in that theme. The colours are
+ * inline styles from AppearanceSection, which is the one place in this app
+ * allowed to name a colour: a light preview has to stay light while the dialog
+ * around it is dark. */
+.theme-choices {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+
+.theme-choice {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 8px 6px;
+}
+
+.theme-choice:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.theme-choice.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+.theme-preview {
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  display: flex;
+  height: 72px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.theme-preview-panel {
+  display: flex;
+  flex: 1 1 0;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px;
+}
+
+/* Split down the middle for "System": each half is a full panel, clipped. */
+.theme-preview.split .theme-preview-panel {
+  flex: 0 0 50%;
+}
+
+.theme-preview-rail {
+  border-radius: 3px;
+  display: flex;
+  flex: 0 0 22%;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 4px;
+}
+
+.theme-preview-rail i {
+  border-radius: 2px;
+  display: block;
+  height: 3px;
+  width: 100%;
+}
+
+.theme-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 2px;
+}
+
+.theme-preview-body i {
+  border-radius: 2px;
+  display: block;
+  height: 4px;
+  width: 100%;
+}
+
+/* Which way "System" is resolving right now, so the card is not a riddle. */
+.theme-preview-resolved {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  bottom: 5px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+  left: 50%;
+  padding: 1px 6px;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.theme-choice-label {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 4px;
+  justify-content: center;
+}
+
+.extension-add-modal {
+  gap: 20px;
+}
+
+.extension-add-section {
+  display: grid;
+  gap: 16px;
+}
+
+.extension-add-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.extension-add-actions button {
+  justify-content: center;
+}
+

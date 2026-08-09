@@ -1,0 +1,376 @@
+/* ── The optional Profiles columns ──────────────────────────────────────────
+ * The nine columns off by default (tables/profileColumns.tsx). All of them are
+ * one short fact per cell, and all of them are things somebody turned on to
+ * scan down rather than to read -- hence quiet, tabular, and nowrap.
+ *
+ * A missing value is an em dash, never an empty cell: a blank in a table this
+ * wide reads as a rendering fault rather than as "this one has none". */
+.cell-muted {
+  color: var(--ink-faint);
+}
+
+td.cell-soft {
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* Login email, start URL and cookie set can all be long enough to set the
+   table's width on their own. Capped and clipped, with the whole value in the
+   title -- the cell says which, and the tooltip says exactly which. */
+td.cell-wide {
+  max-width: 220px;
+}
+
+/* inline-block, not block: these values now sit inside a .cell-trigger, which
+   is an inline-flex box, and a block child of one still has to be able to
+   shrink below its content for the ellipsis to appear. */
+td.cell-wide .cell-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Direct" and the other absent-value words a picker's trigger can show. Quiet,
+   because they are the state of a field rather than a value in it -- the same
+   distinction .cell-muted's em dash makes. */
+.cell-soft-text {
+  color: var(--ink-soft);
+}
+
+/* Room for the copy glyph that hangs out of the value's box. Constant, not
+   hover-dependent: see the .cell-copy rules above. */
+td.cell-copy-cell {
+  padding-right: 34px;
+}
+
+/* Eight characters is enough to tell two profiles apart by eye; the copy button
+   is there because the other twenty-eight are what the API wants. */
+td.profile-id-cell {
+  white-space: nowrap;
+}
+
+.profile-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+/* ── Proxies table cells ────────────────────────────────────────────────────
+ * The connection reads as data rather than as prose, so it gets the mono face
+ * -- host:port is the one column people compare character by character. */
+td.proxy-host-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+td.proxy-check-cell {
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ── The proxy check chip ───────────────────────────────────────────────────
+ * components/ui/ProxyCheckCell.tsx, shared by the Proxies table, the Profiles
+ * table's proxy column and the import review table.
+ *
+ * Same pill geometry as .status-chip so a row does not carry two different
+ * shapes of verdict, but a step quieter: a proxy's health is secondary to the
+ * profile's status, and two chips of equal weight in one row compete.
+ *
+ * The failure used to spill the whole curl error into the cell, which pushed
+ * rows to two lines and stopped the column being scannable; the message is in
+ * the title now, and this is why the chip never wraps. */
+.proxy-check {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 5px;
+  line-height: 1;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.proxy-check.unchecked {
+  background: var(--hover);
+  color: var(--ink-faint);
+}
+
+.proxy-check.checking {
+  background: var(--hover);
+  color: var(--ink-soft);
+}
+
+.proxy-check.ok {
+  background: var(--status-active-bg);
+  border-color: var(--status-active-border);
+  color: var(--status-active-ink);
+}
+
+/* A dead proxy is the reason someone opened this tab, so this is the one chip
+   here that carries a border strong enough to find without reading. */
+/* The chip is now a button: it opens the message rather than only hinting at it
+   in a title, so the cursor says "clickable" and not "hover me".
+   The two resets matter -- the global button rule would otherwise give this the
+   full control height and lift it on hover, and a 34px pill in a table row is
+   not the chip every other state renders. */
+.proxy-check.failed {
+  background: var(--danger-bg);
+  border-color: var(--status-ban-border);
+  color: var(--danger);
+  cursor: pointer;
+  min-height: 0;
+}
+
+.proxy-check.failed:not(:disabled):hover {
+  border-color: var(--danger);
+  box-shadow: none;
+}
+
+/* The chip carries .proxy-check's own padding and radius, so the wrapper must
+   add no box of its own -- it exists only to stop the click. */
+.proxy-check-fail {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* ── The re-checking chip ───────────────────────────────────────────────────
+ * A healthy or unchecked chip in the Profiles table says what it knows, and
+ * says what it can do about it while the pointer is over THE CHIP.
+ *
+ * It used to swap on `tbody tr:hover`, on the theory that the row is the unit
+ * being acted on. In use that is wrong: pointing at a profile's name is not
+ * asking anything about its proxy, and having a column three across change its
+ * words because the pointer entered the row makes the table twitch wherever you
+ * put the cursor. The remedy belongs to the chip, so the chip is what has to be
+ * pointed at -- and hovering it is also the gesture that precedes clicking it.
+ *
+ * The two labels are stacked in one grid cell rather than swapped in and out,
+ * because the table is `table-layout: auto`: a chip whose content changes width
+ * on hover makes the browser recompute every column in the table, and the
+ * jitter lands on all fifty rows at once. Both labels are always laid out, the
+ * grid takes the width of the wider, and hover only changes which one is
+ * painted. "Reachable"/"709 ms" and "Re-check" are close enough in width that
+ * the reserved difference is a few pixels. Narrowing the trigger does not
+ * relax that -- the widths are still reserved on every row, so the column is
+ * the same width whether the pointer is in the table or not.
+ *
+ * .proxy-check is a <button> here, so it needs the same two resets .failed
+ * documents -- the global button rule would give it a min-height and a fill. */
+button.proxy-check-action {
+  cursor: pointer;
+  display: inline-grid;
+  min-height: 0;
+}
+
+.proxy-check-idle,
+.proxy-check-recheck {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  grid-area: 1 / 1;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.proxy-check-recheck,
+.proxy-check-action:hover .proxy-check-idle {
+  visibility: hidden;
+}
+
+.proxy-check-action:hover .proxy-check-recheck,
+.proxy-check-action:focus-visible .proxy-check-recheck {
+  visibility: visible;
+}
+
+.proxy-check-action:focus-visible .proxy-check-idle {
+  visibility: hidden;
+}
+
+/* ── The failure panel ──────────────────────────────────────────────────────
+ * A title, the message, the age, then the actions. The panel had none of the
+ * first three: it opened straight onto the error text, which meant the one
+ * thing every other popover in this app has -- an edge to start reading from --
+ * was the thing this one lacked, and it is the panel people open when something
+ * is wrong. */
+.proxy-fail-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.proxy-fail-message {
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin: 0;
+  /* Clamped rather than scrolled. Three lines holds every failure the checker
+     actually produces; the scroll box this replaces made a one-line 407 look
+     like a log. .expanded below is the way out for the pathological case. */
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  display: -webkit-box;
+  overflow: hidden;
+  /* Selectable, which is half the reason this stopped being a tooltip. curl
+     errors are long single tokens, so they have to be allowed to break. */
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* Asked for, and only then. The cap is what stops a genuinely enormous dump
+   from pushing the actions off the bottom of the viewport -- the message
+   scrolls, never the panel, so Copy and Re-check stay reachable. */
+.proxy-fail-message.expanded {
+  -webkit-line-clamp: none;
+  display: block;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* Shown only when the clamp actually bit -- the component measures rather than
+   guessing -- so it never appears under text that is already whole. */
+.proxy-fail-message + .link-button {
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.proxy-fail-meta {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 8px 0 0;
+}
+
+/* Copy at one end, the remedy at the other, under a rule. Flush-right and
+   6px apart, the two read as one segmented control -- which is what they
+   looked like and what they are not. */
+.proxy-fail-actions {
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+/* The global button rule gives these the 36px --control-h a form field wants.
+   In a 320px popover that is a pair of slabs; --control-h-sm is the height the
+   chips and the pagination bar already use for the same reason. */
+.proxy-fail-btn {
+  font-size: 12.5px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
+/* The flag inside the chip is the same bundled SVG the Name cell uses, sized down
+   so it sits on the chip's line rather than setting the chip's height. */
+.proxy-check .flag-svg {
+  height: 11px;
+  width: 16px;
+}
+
+/* ── "Assigned to" cells ────────────────────────────────────────────────────
+ * Shared by the Proxies table and the Cookies table, which ask the same
+ * question of the same rows: which profiles are holding this. See
+ * components/ui/AssignedCell.tsx. */
+.assigned-cell {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.assigned-empty {
+  color: var(--ink-faint);
+}
+
+/* One holder: the profile's own avatar, and its name in a badge that only
+   appears under the cursor.
+
+   The badge is positioned rather than laid out, and that is the whole point:
+   this table sizes its columns from their content, so a name that took up room
+   when it appeared would re-measure the Assigned to column and shuffle every
+   column beside it on hover. Overlaying it leaves the row exactly where it was
+   and lets the badge run as wide as the name needs. */
+.assigned-holder {
+  display: inline-flex;
+  position: relative;
+}
+
+/* Above the badges of the holders beside it -- otherwise a later sibling's
+   avatar paints over the name this one just opened. */
+.assigned-holder:hover {
+  z-index: 5;
+}
+
+.assigned-holder .avatar {
+  position: relative;
+  z-index: 2;
+}
+
+/* Starts behind its own avatar (hence the left padding) so the badge reads as
+   the avatar growing a name rather than a second thing appearing next to it. */
+.assigned-holder-name {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  /* A block, not a flex row: text-overflow only ellipsizes inline content, and
+     a flex container's anonymous item is not that. line-height does the
+     centring a flex box would have. */
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  height: 26px;
+  left: -2px;
+  line-height: 24px;
+  /* Capped, and clipped rather than pushed past the edge: this table scrolls
+     inside its own box, so a badge wider than the two columns it can spill
+     across would be cut off by that box instead. The cell's title still
+     carries every name in full. */
+  max-width: 220px;
+  opacity: 0;
+  overflow: hidden;
+  padding: 0 12px 0 28px;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity 0.12s var(--ease);
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.assigned-holder:hover .assigned-holder-name,
+.assigned-holder:focus-within .assigned-holder-name {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Several profiles may share one proxy. The count carries the rest; the full
+   list is on the cell's title. */
+.assigned-more {
+  color: var(--ink-softer);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The flag chip is a fixed 34px plate, which is wider than the 12px gap the
+   name cell uses for an avatar. */
+td.name-cell .proxy-flag {
+  min-width: 30px;
+  padding: 4px 5px;
+}
+
+tr.selected {
+  background: var(--hover);
+}
+

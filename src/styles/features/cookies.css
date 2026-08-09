@@ -1,0 +1,145 @@
+/* ── Cookies tab ────────────────────────────────────────────────────────────
+ * The Cookies tab reuses the profiles vocabulary wholesale -- .table-toolbar,
+ * .selection-toolbar, .folder-row, .table-wrap, .pagination-bar are all the
+ * same elements doing the same job. Only what a cookie-set has and a profile
+ * does not is below. */
+
+/* The inspector holds a whole table of its own, so it opts out of .small-modal
+   and takes the full panel width. The inner table is capped and scrolls: a real
+   session export runs to several hundred cookies, and a modal that grows past
+   the viewport puts its own Save button off screen. */
+.cookie-set-modal .table-wrap {
+  max-height: min(46vh, 380px);
+  overflow: auto;
+}
+
+/* The cookie's own domain, compared character by character exactly the way a
+   proxy's host:port is -- hence the same mono treatment. */
+td.cookie-domain-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Every value is editable, but a table of three hundred bordered inputs reads
+   as a form rather than as data. The border arrives on hover and focus, so the
+   column looks like the text it is until it is being changed. */
+td.cookie-value-cell {
+  max-width: 320px;
+}
+
+td.cookie-value-cell input {
+  background: transparent;
+  border-color: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  height: var(--control-h-sm);
+  width: 100%;
+}
+
+td.cookie-value-cell input:hover {
+  border-color: var(--border-soft);
+}
+
+td.cookie-value-cell input:focus {
+  background: var(--paper);
+  border-color: var(--border);
+}
+
+/* An expired cookie is the usual reason a set that "works" launches signed out,
+   so it is coloured rather than left as a date to compare by eye. */
+.cookie-expired {
+  color: var(--danger);
+}
+
+/* httpOnly / secure / sameSite, in the same shape as a tag badge: small, muted,
+   and there to be scanned rather than read. */
+.cookie-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cookie-flag {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* One more column than the profiles version, for the set each profile carries
+   today -- which is the only thing that makes the reassignment readable. */
+.assign-cookies-row {
+  grid-template-columns: 18px minmax(0, 1fr) max-content minmax(0, max-content);
+}
+
+/* Ticking a profile that already has a different set REPLACES it. That is the
+   one destructive thing this dialog does, so it is the one thing in it wearing
+   the danger colour. */
+.assign-cookie-warn {
+  align-items: center;
+  color: var(--danger);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Profile CSV import: the review table and the destination step.
+
+   The dialog this replaces was a paragraph and a row count, so it fit the
+   shared .import-panel width. A table with ten editable columns does not --
+   .import-review-panel is the one dialog in the app allowed to go wide, because
+   the alternative is horizontal scrolling over data the user is being asked to
+   check.
+   --------------------------------------------------------------------------- */
+
+/* Two classes, because .profile-modal.import-panel above pins the importer to
+   720px and would otherwise win on specificity. */
+.profile-modal.import-review-panel {
+  max-width: min(1240px, calc(100vw - 56px));
+  width: min(1240px, calc(100vw - 56px));
+}
+
+.import-lead {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+
+/* The step rail, same shape as the intro dialog's. Ornamental, so it is hidden
+   from assistive tech -- the subtitle already says "Step 2 of 3" in words. */
+.import-dots {
+  display: inline-flex;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.import-dots i {
+  background: var(--border);
+  border-radius: 999px;
+  height: 6px;
+  transition: background 140ms var(--ease), width 140ms var(--ease);
+  width: 6px;
+}
+
+.import-dots i.on {
+  background: var(--accent);
+  width: 18px;
+}
+
+.import-footer-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin-right: 4px;
+}
+

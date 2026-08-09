@@ -1,0 +1,118 @@
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+/* Sentence case at 650, matching .settings-row-label h4 -- the settings dialog
+ * is the app's reference for what a form label looks like, and every other
+ * dialog was still shouting in 900-weight uppercase at it. inline-flex so the
+ * label can carry a 14px glyph without it sitting on the text baseline. */
+.field > span {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The glyph is quieter than the word it labels: at full --ink-soft a column of
+ * twelve icons reads as a second list running down the form. */
+.field > span > svg {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+/* A field's control fills its column; everything else about how it looks comes
+ * from the canonical input/select/textarea rules at the top of this file. */
+/* :not(.selector) matters. This rule was written when every control inside a
+ * field was a text input, and a checkbox is the one input for which "fill the
+ * row" is wrong: .selector is a fixed 18px circle, and .field input's (0,1,1)
+ * beats .selector's (0,1,0), so the first Field to contain a Checkbox rendered
+ * it as a full-width pill with the label shoved out of its box. */
+.field input:not(.selector),
+.field select,
+.field textarea {
+  width: 100%;
+}
+
+/* The canonical select indents 10px; inside a field it matches the input beside
+ * it at 12px, and gives the right side back to the chevron. */
+.field select {
+  padding-left: 12px;
+  padding-right: 38px;
+}
+
+.field textarea {
+  margin: 0;
+  min-height: 140px;
+  padding: 12px;
+}
+
+.field.compact input {
+  max-width: 160px;
+}
+
+.field-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0;
+  text-transform: none;
+}
+
+/* A field's own value, restated in words, inside its label: "Give up after
+ * = 5 minutes". Quieter than the label and pushed to its far end, so it reads
+ * as the form answering rather than as a second thing being asked. */
+.field-echo {
+  color: var(--ink-faint);
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* A unit that belongs to the number rather than to the sentence under it. The
+ * span is the bordered box and the input inside it is bare, which is what keeps
+ * the focus ring around the pair instead of around the number alone. */
+.field-suffixed {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: flex;
+  min-height: var(--control-h);
+  padding-right: 15px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+.field-suffixed:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* The second selector is not redundant: `.field input:not(.selector)` above
+ * sets width: 100%, which on a flex child inside this box makes the number
+ * overrun the unit. Same specificity, and this rule is later, so it wins. */
+.field-suffixed > input,
+.field .field-suffixed > input {
+  background: none;
+  border: none;
+  box-shadow: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: auto;
+}
+
+.field-suffixed > span {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+

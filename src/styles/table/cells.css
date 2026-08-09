@@ -1,0 +1,261 @@
+/* ── Cell controls ──────────────────────────────────────────────────────────
+ * components/ui/CellControls.tsx -- the Profiles table's editable cells.
+ *
+ * The table is `table-layout: auto`, so a column's width is computed from its
+ * content. That is the constraint every rule below is written against: an
+ * affordance that appears on hover must not change any box, or the browser
+ * redistributes width across the whole table and the jitter is visible on every
+ * row at once. Two ways to satisfy that, and both are used here -- the caret is
+ * always drawn and only changes opacity, and the copy button is absolutely
+ * positioned so the width algorithm never sees it at all.
+ *
+ * This is the opposite of what .status-picker-edit used to do: `opacity: 0` on
+ * an in-flow 26px button hid the paint and kept the box, so every status chip
+ * in the table carried ~30px of permanent blank to its right. */
+
+/* At rest, the value and nothing else -- no border, no fill, no caret. A
+ * bordered box around every status in a fifty-row table is a column of controls
+ * again, which is the thing StatusChip exists to stop, and eighteen carets down
+ * a row is the same noise the pencils were.
+ *
+ * The affordance is the hover. Under the pointer the cell lifts onto a fill and
+ * takes a pointer cursor, which is what every other button in this app does;
+ * nothing has to be marked as pressable in advance because the pointer finds it
+ * the moment it matters.
+ *
+ * The fill is drawn by an absolutely positioned ::before inset past the
+ * element's own edges, NOT by padding on the button.
+ *
+ * Padding plus .th-sort's cancelling negative margin is the obvious way to do
+ * this and it is wrong here. A <th> is sized by every cell in its column, so
+ * the header can shed 12px and still measure the same; a `width: 1%` data cell
+ * is sized by this element alone. Padding out and margin back in leaves the
+ * column at the old width while the button's content box is 12px narrower than
+ * its own text -- so every value in the table lost its last few characters to
+ * an ellipsis, chips included.
+ *
+ * Out of flow, nothing is measured: the fill bleeds into the cell's own 14px
+ * gutter so the target reads as a target rather than as a tight box around the
+ * text, and the width algorithm never sees it. Same principle as the copy
+ * button below. */
+.cell-trigger {
+  align-items: center;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  margin: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  position: relative;
+  text-align: left;
+}
+
+/* Deliberately the same fill a sortable header takes: --hover, --radius-xs, and
+   the same -6px/-8px bleed past the text that .th-sort gets from its cancelling
+   margin. A header and a cell are the two pressable things in this table and
+   they should highlight identically -- one hover treatment, not two. */
+.cell-trigger::before {
+  background: transparent;
+  border-radius: var(--radius-xs);
+  content: '';
+  inset: -6px -8px;
+  position: absolute;
+  transition: background-color 0.12s var(--ease);
+}
+
+.cell-trigger:not(:disabled):hover::before,
+.cell-trigger[aria-expanded='true']::before {
+  background: var(--hover);
+}
+
+/* Except when the value is a chip, which already has a box of its own.
+ *
+ * The fill is right for a bare value -- a name, a platform, a timezone -- where
+ * there is nothing to press until the pointer draws one. A status chip is
+ * already a bordered pill with its own tint, so the plate drew a grey rounded
+ * rectangle behind a coloured pill: two nested boxes saying one thing, and the
+ * outer one is the one that does not belong to the value.
+ *
+ * So the chip is the affordance and the chip is what reacts -- its border goes
+ * to the tone's own ink, which is the move .proxy-check.failed already makes,
+ * and needs no per-tone rule because .status-chip sets `color` to that ink.
+ *
+ * A class rather than :has(> .cell-trigger-value > .status-chip): that selector
+ * ties with the hover rule above and would win on source order alone, which is
+ * not a thing to leave a hover state resting on. CellPicker's `chip` prop sets
+ * this, so the call site says which it is. */
+.cell-trigger-chip::before {
+  content: none;
+}
+
+.cell-trigger-chip:not(:disabled):hover .status-chip,
+.cell-trigger-chip[aria-expanded='true'] .status-chip {
+  border-color: currentColor;
+}
+
+.cell-trigger:not(:disabled):hover,
+.cell-trigger[aria-expanded='true'] {
+  background: none;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.cell-trigger:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.cell-trigger:focus-visible::before {
+  box-shadow: var(--focus-ring);
+}
+
+.cell-trigger:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* min-width: 0 so a long value ellipsizes inside the trigger rather than
+   running out of the cell.
+   position: relative because the fill behind it is an absolutely positioned
+   ::before on the trigger: both are positioned, so they paint in DOM order and
+   the value lands on top. Without it the fill would cover the very thing it is
+   highlighting. */
+.cell-trigger-value {
+  align-items: center;
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A cell that navigates rather than edits. The same fill as any other trigger
+   -- it is a button and should read as one -- with the accent carrying the one
+   distinction worth drawing, that pressing it leaves the row. */
+.cell-link:not(:disabled):hover {
+  color: var(--accent);
+}
+
+/* The glyph that is also the colour control (CellColor).
+   display: contents so the wrapper that swallows the row's click adds no box of
+   its own -- the name cell is a flex row and an extra inline-flex between it
+   and the plate would change the gap. Same trick .cell-copy-slot uses, and for
+   the same reason: the swallow is a behaviour, not a layout. */
+.cell-color {
+  display: contents;
+}
+
+/* No plate behind it and no ::before fill: the thing being pressed is already a
+   32px coloured circle, which is the argument .cell-trigger-chip makes about a
+   status chip. The ring is the whole hover state, drawn outside the circle so
+   the colour it is announcing stays unobscured. */
+.cell-color-trigger {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+  transition: box-shadow 0.12s var(--ease);
+}
+
+.cell-color-trigger:not(:disabled):hover,
+.cell-color-trigger[aria-expanded='true'] {
+  background: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.cell-color-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* Roomier than a picker panel: this holds one row of 28px swatches rather than
+   a list of rows, and the padding a list needs leaves them looking dropped in. */
+.cell-color-pop {
+  padding: 12px;
+}
+
+.cell-pop-search {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--ink-faint);
+  display: flex;
+  gap: 7px;
+  margin: -4px -4px 4px;
+  padding: 0 10px 6px;
+}
+
+/* The field carries no chrome of its own -- the panel's edge is already a
+   border, and a second box inside it reads as a form. */
+.cell-pop-search input {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--ink);
+  flex: 1;
+  font: inherit;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0;
+}
+
+.cell-pop-search input:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+/* Capped rather than unbounded: the timezone picker offers ~60 rows, and a
+   panel taller than the window cannot be flipped above its trigger. Popover
+   deliberately does not close on a scroll inside its own panel.
+   overflow-x pinned to hidden because setting one axis computes the other from
+   `visible` up to `auto` -- left alone, a long row would scroll sideways
+   instead of ellipsizing, which is a second scrollbar inside a dropdown. */
+.cell-pop-list {
+  max-height: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* A grid item's min-width is `auto`, which means it cannot shrink below its own
+   min-content -- and with a nowrap label that is the whole string. The three
+   toolbar filters never hit this because a status or a tag is one short word;
+   a proxy row is "DE-01 · SOCKS5 · 198.51.100.24:8080" and ran straight out of
+   the panel, taking its tick with it. Zero here is what lets .filter-pop-name's
+   own ellipsis actually apply. */
+.cell-pop-list .filter-pop-option {
+  min-width: 0;
+}
+
+.cell-pop-empty {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin: 0;
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.cell-pop-footer {
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px -4px -4px;
+  padding: 6px 4px 0;
+}
+
+.cell-pop-footer button {
+  flex: 1 1 auto;
+  min-height: 30px;
+}
+

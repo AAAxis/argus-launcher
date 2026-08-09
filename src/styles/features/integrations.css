@@ -1,0 +1,569 @@
+.integration-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+/* The tab groups by what a tool is (coding agent, automation runtime, set up by
+ * hand) rather than listing ten cards flat. The third group is not a lesser
+ * tier -- it is the honest one: those have no config file this app can write,
+ * so they hand over a snippet instead of pretending to wire themselves up. */
+.integration-section {
+  display: grid;
+  gap: 10px;
+}
+
+.integration-section h3 {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Status of the thing every integration depends on, stated once at the top
+ * rather than repeated on ten cards.
+ *
+ * A surface, not a bare row. It carries the same paper fill and radius as
+ * .api-note directly below it, so the two read as the tab's frame and the cards
+ * as its contents. Loose text on the page background put the API's state, its
+ * address, a count and a search field at the same level as the section
+ * headings, with nothing saying they belonged together. */
+.integration-bar {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 10px 12px;
+}
+
+/* Left cluster: the chip and the address it refers to, kept adjacent so the
+ * address reads as that chip's object rather than a third item in a row. */
+.integration-bar-main {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.integration-bar code {
+  color: var(--ink-faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right cluster: the two ways of narrowing ten cards. `margin-left: auto` lives
+ * here rather than on the search field, so the count travels with it instead of
+ * being stranded mid-row. */
+.integration-bar-side {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+
+/* With ten cards across three sections, "how much of this is live" is otherwise
+ * a counting exercise the user has to do by eye every time they arrive. The
+ * number is the part worth reading, so it takes the ink and the words stay
+ * faint around it. */
+.integration-bar-count {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.integration-bar-count strong {
+  color: var(--ink);
+}
+
+/* ── "How these keys work" ──────────────────────────────────────────────────
+ * A <details>, not a paragraph and not a dialog. The answer to "what do I do
+ * with a key" is the same for all ten tools and about five lines long: ten
+ * copies of it inside the dialogs would be noise, and a permanent block above
+ * the grid would put prose between the user and the thing they came for on
+ * every visit after the first. Folded, it costs one line. */
+.integration-guide {
+  background: var(--paper);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.integration-guide summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  gap: 10px;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+/* The default marker is a triangle in the flow that shoves the icon and label
+ * sideways; the caret below is drawn at the end instead, where it does not
+ * fight the leading glyph for the start of the line. */
+.integration-guide summary::-webkit-details-marker {
+  display: none;
+}
+
+.integration-guide summary::after {
+  border-bottom: 1.5px solid currentcolor;
+  border-right: 1.5px solid currentcolor;
+  content: '';
+  height: 6px;
+  margin-left: auto;
+  opacity: 0.6;
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.12s var(--ease);
+  width: 6px;
+}
+
+.integration-guide[open] summary::after {
+  transform: rotate(-135deg) translate(-2px, -2px);
+}
+
+/* The same disclosure serves the dialog, where it folds away the tool list once
+ * a connection exists. There it sits among the labelled sections, so its
+ * summary takes their eyebrow rather than staying sentence case. */
+.integration-modal .integration-guide summary {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.integration-guide summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.integration-guide-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.integration-guide-body p {
+  line-height: 1.5;
+  margin: 0;
+  max-width: 78ch;
+}
+
+/* The pointer onwards, not a second copy of the API tab. Dimmer than the
+ * explanation above it: it is where to go next, not part of the answer. */
+.integration-guide-more {
+  color: var(--ink-faint);
+}
+
+/* The facts block inside the guide sits on --paper already, so it needs its own
+ * edge rather than its usual fill to stay a distinct object. */
+.integration-guide .integration-facts {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+}
+
+.integration-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-faint);
+  display: flex;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.integration-search input {
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-size: 13px;
+  height: var(--control-h-sm);
+  outline: none;
+  width: 190px;
+}
+
+/* Under the description, carrying whichever fact matters for the card's current
+ * state: the key this connection runs on, or the single reason it is not simply
+ * connected. Fixed height so cards in a row stay aligned whether or not they
+ * have something to say.
+ *
+ * Two rows now rather than one run-on line. The key's name is the thing an
+ * audit ("what can reach my profiles") is conducted in, so it gets a line of
+ * its own instead of being the first clause of a sentence that ends in a
+ * timestamp. */
+.integration-card-meta {
+  color: var(--ink-faint);
+  display: grid;
+  font-size: 12px;
+  gap: 2px;
+  line-height: 1.4;
+  min-height: 36px;
+}
+
+.integration-card-key {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.integration-card-key svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+/* The name is user-supplied by way of the tool's own display name, so it is the
+ * one part that can run long enough to push the token tail off the card. */
+.integration-card-key-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integration-card-key code {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.integration-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.integration-card-actions > button {
+  flex: 1;
+  justify-content: center;
+  min-height: 32px;
+}
+
+/* The one button on a card that must not look like half the decision: it opens
+ * the explanation, next to a Connect that does the thing. Sized to its label
+ * rather than to half the card. */
+.integration-card-actions > .integration-card-more {
+  flex: 0 0 auto;
+}
+
+.integration-card.is-attention {
+  border-color: color-mix(in srgb, var(--status-warmup-ink) 40%, var(--border));
+}
+
+/* Per-check results from a real handshake, not one blended verdict: "not ready"
+ * tells a user nothing about which of five independent things to go and fix. */
+.integration-checks {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.integration-checks li {
+  align-items: flex-start;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.integration-checks li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.integration-checks li span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.integration-checks li.is-ok > svg {
+  color: var(--success);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.integration-checks li.is-bad > svg {
+  color: var(--danger);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.integration-tools {
+  color: var(--ink-soft);
+  display: grid;
+  font-size: 13px;
+  gap: 4px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.integration-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+
+/* Wraps, because this row now carries up to two chips beside the name and a
+ * card is a third of a capped panel wide. Without it "Waiting for Gemini CLI"
+ * pushed the row past the card's edge instead of dropping under the name. The
+ * mark keeps its place at the head of the first line; everything after it flows.
+ * `row-gap` is tighter than the column gap so a wrapped chip sits with the name
+ * rather than looking like a second section. */
+.integration-card-head {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+/* Height and width come from the inline size the component passes, so the mark
+ * always matches the Lucide glyph standing in for the integrations that have no
+ * brand asset. These are the fallbacks. */
+.integration-logo {
+  flex: 0 0 auto;
+  height: 20px;
+  object-fit: contain;
+  width: 20px;
+}
+
+/* Single-colour marks only read on the background they were drawn for, and ours
+ * were drawn for opposite ones: Codex's is #111 and vanishes on a dark surface,
+ * while Cursor's #edecec and the white-only Zed, Windsurf and MCP cuts vanish on
+ * a light one. So each names the theme it has to be inverted in rather than
+ * sharing one "monochrome" flag. Marks that carry their own colours name neither
+ * and are left alone. */
+:root[data-theme="dark"] .integration-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+:root:not([data-theme="dark"]) .integration-logo.invert-on-light {
+  filter: invert(1);
+}
+
+/* The whole-tab empty state. `.empty-state` above is the one-line muted note
+ * used when a filter matched nothing; this is the other case -- the collection
+ * is genuinely empty and the screen has to say what the thing is for. It
+ * replaces the toolbar and pager rather than sitting under them, so it centres
+ * on the panel and caps its measure instead of running the full width. */
+.tab-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 auto;
+  max-width: 620px;
+  padding: 56px 0 40px;
+  text-align: center;
+  width: 100%;
+}
+
+.tab-empty-mark {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  color: var(--ink-faint);
+  display: flex;
+  height: 56px;
+  justify-content: center;
+  margin-bottom: 4px;
+  width: 56px;
+}
+
+.tab-empty h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.tab-empty > p {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0 0 6px;
+  max-width: 400px;
+}
+
+/* Two ways in from an empty tab (add one, or import a file) sit side by side;
+ * the flex column above would otherwise stack them and read as a ranking.
+ *
+ * Wrapping and centred because the empty Automations tab puts up to four of
+ * these at once (create, load the example, mint a Demo profile, read the docs),
+ * which is past what 620px holds on one line. At two buttons neither property
+ * does anything. */
+.tab-empty-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* A button that reads as a link: for the secondary way back to something the
+ * user dismissed, which must not compete with the primary action above it. */
+.link-button {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: auto;
+  padding: 4px 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-button:not(:disabled):hover {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.provider-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 22px;
+  text-align: left;
+  width: 100%;
+}
+
+/* Same eyebrow as a settings group heading, with a hairline running out to the
+ * dismiss button so the section reads as a divider rather than a second title
+ * competing with "No proxies yet". */
+.provider-strip-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.provider-strip-head h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.provider-strip-head::before {
+  content: '';
+  background: var(--border);
+  flex: 1;
+  height: 1px;
+  order: 2;
+}
+
+.provider-strip-head .icon-button {
+  order: 3;
+}
+
+.provider-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+/* .integration-card at a smaller scale. Kept separate rather than sharing the
+ * class: these are outbound links, not connectable things, and the two should
+ * be free to drift. */
+.provider-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.provider-card-head {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+}
+
+.provider-card-head svg {
+  flex: 0 0 auto;
+  height: 20px;
+  width: 20px;
+}
+
+/* What proxy vendors publish is a wordmark, not an app icon: these run from
+   5:1 to 6:1. Forcing them into the 20x20 box the Lucide stand-in uses would
+   squash "bright data" into an illegible smear, so the height is fixed and the
+   width follows the artwork -- the same rule .tag-logo already lives by, and
+   for the same reason. The max-width keeps the longest of them from crowding
+   the blurb underneath. */
+.provider-logo {
+  display: block;
+  flex: 0 0 auto;
+  height: 18px;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: left center;
+  width: auto;
+}
+
+/* One colour only, drawn for one background. See .tag-logo's note. */
+:root:not([data-theme="dark"]) .provider-logo.invert-on-light,
+:root[data-theme="dark"] .provider-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+/* Dark ink plus a brand colour: the hue-rotate puts the colour back after the
+   invert lifts the ink, so IPRoyal's cyan and Webshare's teal stay themselves
+   instead of turning red and magenta. */
+:root[data-theme="dark"] .provider-logo.relight-on-dark,
+:root:not([data-theme="dark"]) .provider-logo.relight-on-light {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.provider-card h4 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.provider-kinds {
+  color: var(--ink-faint);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.provider-card p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* margin-top pins it to the bottom of the card, so the five cards' buttons line
+   up however tall each blurb runs. Centred and wordless: with the icon gone
+   there is nothing for a left-aligned label to sit against, and "Visit" alone
+   in the corner of a full-width button read as a stray caption. */
+.provider-card button {
+  justify-content: center;
+  margin-top: auto;
+  min-height: var(--control-h-sm);
+}
+

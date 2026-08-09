@@ -1,0 +1,103 @@
+body {
+  margin: 0;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+  background-clip: padding-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  align-items: center;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--accent-ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 700;
+  gap: 7px;
+  min-height: var(--control-h);
+  padding: 0 14px;
+  transition: box-shadow 0.12s var(--ease), background-color 0.12s var(--ease), opacity 0.12s var(--ease);
+}
+
+/* Buttons do not move on hover. A control that lifts under the cursor makes a
+ * dense toolbar feel unstable and, at the edges, walks itself out from under
+ * the pointer. The shadow carries the feedback on its own. */
+button:not(:disabled):hover {
+  box-shadow: var(--shadow-sm);
+}
+
+button:not(:disabled):active {
+  box-shadow: none;
+}
+
+/* --raised-soft, not --raised: a ghost button sits on the page, not in a card,
+ * and pure white against the page was the hardest edge in the chrome. */
+button.ghost {
+  background: var(--raised-soft);
+  border: 1px solid var(--border);
+  color: var(--ink);
+}
+
+/* A destructive primary: the Delete in a confirm dialog. This used to set the
+ * colour alone, which left the base `button` fill underneath it -- and that
+ * fill is the accent, which is ink: near-black in light, near-white in dark. So
+ * every Delete rendered as a black button with dark red text on it, which is
+ * both unreadable and the wrong signal. It carries the danger fill instead. */
+button.danger {
+  background: var(--danger);
+  color: var(--danger-ink);
+}
+
+button.danger:not(:disabled):hover {
+  background: var(--danger-strong);
+}
+
+/* `class="danger ghost"` is the quiet variant -- the ghost surface with the
+ * danger word on it, for a toolbar where the destructive action sits beside
+ * three ordinary ones and must not be the loudest thing on the row. Declared
+ * after the filled form so the two win regardless of which order the class
+ * list is written in. */
+button.ghost.danger {
+  background: var(--raised-soft);
+  color: var(--danger);
+}
+
+button.ghost.danger:not(:disabled):hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+

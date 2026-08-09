@@ -1,0 +1,391 @@
+/* The result of "Test connection" in the proxy editor, spanning both form
+ * columns under the fields it describes. Shaped like .api-note; the state
+ * carries in the colour rather than an extra icon-plus-label row. */
+.proxy-modal .profile-form .proxy-test-result {
+  align-items: center;
+  border-radius: 10px;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  grid-column: 1 / -1;
+  line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.proxy-test-result svg,
+.proxy-test-result .proxy-flag {
+  flex: 0 0 auto;
+}
+
+.proxy-test-result.ok {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.proxy-test-result.failed {
+  background: var(--danger-bg);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* Pushed to the trailing edge so it does not sit against the end of a message
+   whose length changes with every failure. Inherits the panel's danger ink
+   rather than the link-button grey, or it would read as the quietest thing in a
+   red box. */
+.proxy-test-copy {
+  color: inherit;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.proxy-test-copy:not(:disabled):hover {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* The check runs in the background and the dialog stays usable while it does,
+ * so this is a neutral progress line rather than a blocking state. */
+.proxy-test-result.pending {
+  background: var(--raised);
+  color: var(--ink-soft);
+}
+
+/* `.status-pill` used to live here: bold coloured text with a glyph and --
+ * despite the name -- no background, border or radius. Both tabs that used it,
+ * Integrations and Extensions, now label their cards with the real pill
+ * (.status-chip, through <Badge>), so it and its `.is-idle`, `.is-warn` and
+ * `.status-dot` companions are gone. Bare coloured text was never distinct
+ * enough for the job: two of them side by side on a card head read as one
+ * sentence rather than as two separate facts. */
+
+.integration-card h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.integration-card p {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.integration-card > button {
+  align-self: stretch;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+}
+
+.integration-card > button:not(.ghost):hover {
+  background: var(--accent-strong);
+}
+
+/* Header is a mark, a name and a one-line description; everything else in the
+ * dialog is a labelled block, so it gets its own row shape. */
+.integration-modal-title {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.integration-modal-title h2 {
+  margin: 0;
+}
+
+.integration-modal-title p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+/* Said before anything is touched. The old flow created a key and edited a file
+ * in the user's home directory on a single unexplained click. */
+/* Flex rather than block: the key section's heading carries a glyph, and a
+ * baseline-aligned inline SVG next to a 12px uppercase label sits a pixel low
+ * every time. */
+.integration-steps h3,
+.integration-next h3,
+.integration-secret h3 {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+/* The section that answers "and now what". Every one of these tools reads its
+ * config at process start, so there is always exactly one thing left for the
+ * user to do, and it is never the same thing twice -- a CLI restarts, an editor
+ * reloads, a missing tool gets installed. Given a left rule and the accent so it
+ * reads as the instruction rather than as the third paragraph of a dialog. */
+.integration-next {
+  border-left: 2px solid var(--accent);
+  padding-left: 12px;
+}
+
+.integration-next p {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── The key ────────────────────────────────────────────────────────────────
+ * The credential this whole screen exists to hand out, on the screen that hands
+ * it out. It used to live only on the API tab, as a row named after a tool with
+ * no way back to that tool. */
+.integration-key-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
+.integration-key-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.integration-key-actions button {
+  min-height: var(--control-h-sm);
+}
+
+/* Only ever shown when a machine carries more than one key for one tool, which
+ * reissue no longer creates but older builds could. It is a live credential
+ * either way, so it is named rather than hidden. */
+.integration-key-extra {
+  color: var(--ink-faint);
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.4;
+  min-width: 180px;
+}
+
+/* Two audiences and the first one's answer is "nothing" -- which is worth a
+ * sentence, because a user who has just been shown a credential assumes there
+ * is a step left for them, and for eight of these ten there is not. */
+.integration-usage {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.integration-usage + .integration-facts,
+.integration-facts + .integration-usage {
+  margin-top: 8px;
+}
+
+/* ── The one-time secret ────────────────────────────────────────────────────
+ * Only the two manual integrations reach this: everywhere else the token goes
+ * straight into a config file and the user never needs to see it. */
+.integration-secret {
+  display: grid;
+  gap: 8px;
+}
+
+.integration-secret h3 {
+  margin: 0;
+}
+
+.integration-secret p {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.integration-steps ol {
+  color: var(--ink-soft);
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+  line-height: 1.45;
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* The concrete facts the steps refer to: which file, which API, which key. */
+.integration-facts {
+  background: var(--paper);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.integration-facts > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.integration-facts span {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.integration-facts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Five short label/value pairs -- name, tail, scope, created, last used -- are
+ * a column half a dialog tall and mostly whitespace. Wrapped into as many
+ * columns as fit, they read as one block of facts about one key. The single-
+ * column default stays for the rows whose values are file paths, which have no
+ * business being 140px wide. */
+.integration-facts.is-columns {
+  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+/* Destructive action sits left, away from the confirming one on the right. */
+.integration-modal-actions {
+  gap: 8px;
+}
+
+.integration-modal-actions .ghost.danger {
+  color: var(--danger);
+  margin-right: auto;
+}
+
+.integration-modal-actions .ghost.danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+.integration-card .endpoint {
+  border-radius: 8px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
+  padding: 10px;
+}
+
+.integration-card .endpoint-head {
+  grid-template-columns: minmax(80px, 1fr) minmax(100px, 1fr) auto;
+}
+
+.apply-status-ok {
+  color: var(--success);
+  font-size: 13px;
+}
+
+.apply-status-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* The third tone, for the thing that is neither: settings written correctly for
+ * a tool that is not on this machine. Green would read as "done", amber as
+ * "you broke something", and it is neither -- it is simply the truth about
+ * where things stand, and the missing half is not the user's mistake. */
+.apply-status-note {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.snippet-block {
+  position: relative;
+}
+
+.snippet-block pre {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px 84px 12px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The block holding a value that will never be shown again. It arrives into a
+ * dialog that already contains two other slabs of monospace, so it draws one
+ * accent ring as it appears and then settles -- enough to say "this one, now",
+ * not a permanent alarm around a successful outcome. */
+.snippet-block.is-fresh pre {
+  animation: secret-ring 1.6s var(--ease) 1;
+  border-color: var(--accent);
+}
+
+@keyframes secret-ring {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+/* Nothing is lost without the animation: the accent border above is the part
+ * that carries the meaning, and it is static. */
+@media (prefers-reduced-motion: reduce) {
+  .snippet-block.is-fresh pre {
+    animation: none;
+  }
+}
+
+.snippet-copy {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  display: flex;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+}
+
+.panel-title {
+  justify-content: space-between;
+}
+
+.panel-subsection {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
+textarea {
+  margin-top: 14px;
+  min-height: 130px;
+  padding: 12px 14px;
+  resize: vertical;
+  width: 100%;
+}
+

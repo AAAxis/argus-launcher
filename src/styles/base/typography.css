@@ -1,0 +1,17 @@
+/* The browser default (2em) is far heavier than anything else on the page once
+ * the base size stepped down, so the page title is set explicitly. */
+.login-panel h1,
+.loading-state h1,
+.topbar h1 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.login-panel p,
+.loading-state p,
+.panel p {
+  color: var(--ink-soft);
+  margin: 0;
+}
+

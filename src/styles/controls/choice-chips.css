@@ -1,0 +1,36 @@
+/* ── Choice chips ───────────────────────────────────────────────────────────
+ * The proxy-mode selector. It was a .segmented control -- three unlabelled
+ * buttons in a shared tray -- which read as a toolbar rather than as one
+ * choice of three. Pills, on the 999px vocabulary .status-chip and the tag
+ * pills already use. It was .segmented's only remaining caller, so that rule
+ * is gone with it. */
+.choice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice-chip {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  min-height: var(--control-h-sm);
+  padding: 0 16px;
+}
+
+.choice-chip:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.choice-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+

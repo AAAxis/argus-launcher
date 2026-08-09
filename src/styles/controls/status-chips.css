@@ -1,0 +1,127 @@
+/* ── Status chips ───────────────────────────────────────────────────────────
+ * A profile's status, everywhere it is shown. This replaced a colour-tinted
+ * <select>: a control that looked like a filled tag but behaved like a
+ * dropdown, so a table column of them read as a column of form controls
+ * rather than as the statuses. The chip is now the value and the pencil beside
+ * it (.status-picker) is the way to change it.
+ *
+ * Each tone needs its own bg/border/ink triple -- the light tints are far too
+ * pale to survive on the dark theme's charcoal, so they are three tokens, not
+ * one hue with opacity. */
+.status-chip {
+  align-items: center;
+  background: var(--status-neutral-bg);
+  border: 1px solid var(--status-neutral-border);
+  border-radius: 999px;
+  color: var(--status-neutral-ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  line-height: 1;
+  padding: 5px 11px 5px 9px;
+  white-space: nowrap;
+}
+
+/* The dot carries the colour at a glance; the tint behind the word is too
+   light to be the only signal, especially for the two red-ish tones. */
+.status-chip-dot {
+  background: currentColor;
+  border-radius: 999px;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+
+.status-chip.status-active {
+  background: var(--status-active-bg);
+  border-color: var(--status-active-border);
+  color: var(--status-active-ink);
+}
+
+.status-chip.status-warmup {
+  background: var(--status-warmup-bg);
+  border-color: var(--status-warmup-border);
+  color: var(--status-warmup-ink);
+}
+
+.status-chip.status-ban {
+  background: var(--status-ban-bg);
+  border-color: var(--status-ban-border);
+  color: var(--status-ban-ink);
+}
+
+.status-chip.status-review {
+  background: var(--status-review-bg);
+  border-color: var(--status-review-border);
+  color: var(--status-review-ink);
+}
+
+.status-chip.status-info {
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  color: var(--status-info-ink);
+}
+
+/* <Badge> borrows .status-chip's pill for labels that are not profile
+   statuses. The base padding is optically weighted for the dot (9px left,
+   11px right); with no dot and no glyph that reads lopsided, so even it up. */
+.status-chip.is-plain {
+  padding: 5px 10px;
+}
+
+.status-chip > svg {
+  flex: none;
+}
+
+.status-picker {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.status-picker-edit {
+  height: 26px;
+  width: 26px;
+}
+
+/* Hidden until its row is hovered -- fifty always-visible pencils down a table
+   are a column of their own. Scoped to tbody on purpose: in the profile dialog
+   this is the only way to change the status, so hiding it there would leave the
+   field with no visible affordance at all. It comes back on keyboard focus, so
+   it is never unreachable without a mouse. */
+tbody .status-picker-edit {
+  opacity: 0;
+}
+
+tbody tr:hover .status-picker-edit,
+tbody .status-picker-edit:focus-visible,
+tbody .status-picker-edit[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.status-pop-list {
+  display: grid;
+  gap: 2px;
+}
+
+.status-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.status-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.status-pop-option.active {
+  background: var(--selected);
+}
+

@@ -1,0 +1,112 @@
+/* One canonical text input, the same way `select` below is canonical.
+ *
+ * These six properties used to be copy-pasted into .field input, .login-panel
+ * input, .table-toolbar input and textarea, which meant an <input> written
+ * anywhere else -- a search box, an inline rename in Settings -- fell back to
+ * the raw browser control and looked broken next to the buttons beside it. The
+ * scoped rules below now carry only what is genuinely local to them (width,
+ * max-width, monospace paths).
+ *
+ * Deliberately typed rather than bare `input`: checkboxes and radios are drawn
+ * by .switch / .checkbox-confirm and must not inherit a 36px pill.
+ *
+ * `:not([type])` is in the list because an attribute selector does not match a
+ * missing attribute, and `<input>` with no type IS a text input -- the HTML
+ * spec says so, and the browser agrees. So every bare `<input value=...>` in
+ * the app fell straight through all of this to the platform default: no token
+ * background, no radius, no 36px height, a hairline border that ignores the
+ * theme. There are about twenty of them across fourteen files (the whole step
+ * editor, TagInput, the three Move dialogs, Account and General settings), and
+ * they were the "input field looks wrong" in the automation editor. Fixing the
+ * rule fixes all of them, and the next one nobody remembers to type. */
+input:not([type]),
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="number"],
+input[type="tel"],
+input[type="url"] {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  /* Fully rounded, matching the selects and the chips. The horizontal padding
+     goes up with the radius: at 999px the curve eats the first character's
+     left bearing, and 12px left the text visibly crowding the edge. */
+  border-radius: 999px;
+  color: var(--ink);
+  min-height: var(--control-h);
+  padding: 0 16px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+/* Focus is the border darkening to the accent plus a soft ring, not the platform
+ * outline -- the outline squares off the corners it draws around. */
+input:not([type]):focus-visible,
+input[type="text"]:focus-visible,
+input[type="email"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="search"]:focus-visible,
+input[type="number"]:focus-visible,
+input[type="tel"]:focus-visible,
+input[type="url"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* The native number stepper, gone, everywhere.
+ *
+ * Chromium draws a two-arrow spinner inside every input[type=number], which is
+ * the only control in this app with a browser-drawn widget inside it -- so a
+ * run timeout, a retry count and a match index each carried a pair of grey
+ * arrows that belong to no part of the design system, sitting where the
+ * select's chevron sits and meaning something else entirely. The keyboard's
+ * up/down arrows still step the value; only the drawn control goes.
+ *
+ * `appearance: textfield` is the Firefox/spec half and the ::-webkit- rules are
+ * the Chromium half. Both are needed, and Electron only reads the second. */
+input[type='number'] {
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+/* One canonical select. Every dropdown in the app inherits from here: the
+ * native macOS arrow is replaced by the themed chevron token, and padding-right
+ * reserves room for it so long folder/status names ellipsize instead of running
+ * underneath the arrow.
+ *
+ * Fully rounded, like the inputs and every chip in the app. Both paddings grew
+ * with the radius -- the left because the curve eats into the first character,
+ * the right because the chevron sat far enough out to clip against it. */
+select {
+  appearance: none;
+  background-color: var(--raised);
+  background-image: var(--chevron);
+  background-position: right 13px center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink);
+  min-height: var(--control-h);
+  padding: 0 37px 0 15px;
+  text-overflow: ellipsis;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+textarea {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 12px 14px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+

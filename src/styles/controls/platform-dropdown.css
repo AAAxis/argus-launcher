@@ -1,0 +1,91 @@
+/* ── The platform dropdown ──────────────────────────────────────────────────
+ * components/ui/PlatformSelect.tsx. Deliberately the same panel geometry as the
+ * status picker above -- two pickers in one row of the import table should not be
+ * two different widgets.
+ *
+ * The trigger is a logo the width of a glyph, not a control the width of
+ * "Windows 11": it replaced a native <select> that was the widest cell in the
+ * row and the only place in the app where a platform appeared without its mark. */
+.platform-select-trigger {
+  align-items: center;
+  background: none;
+  /* Buttons default to the filled accent treatment in this app, so a
+     background-only reset would leave the glyph the accent's ink. */
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  display: inline-flex;
+  height: var(--control-h-sm);
+  justify-content: center;
+  padding: 0 7px;
+}
+
+.platform-select-trigger:hover {
+  background: var(--hover);
+  border-color: var(--border-soft);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.platform-pop-list {
+  display: grid;
+  gap: 2px;
+}
+
+.platform-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+/* The tick is pushed to the far edge so the six names stay left-aligned to each
+   other rather than each being followed by its own mark. */
+.platform-pop-option > svg:last-child {
+  margin-left: auto;
+}
+
+.platform-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.platform-pop-option.active {
+  background: var(--selected);
+}
+
+.platform-pop-hint {
+  border-top: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  padding: 7px 8px 0;
+}
+
+/* A footer action inside the panel rather than a button sitting on it: the
+   ghost fill and full border would make it a second card inside a 230px box. */
+.status-pop-new {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--border-soft);
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: flex-start;
+  margin-top: 6px;
+  padding: 8px 8px 0;
+  width: 100%;
+}
+
+.status-pop-new:not(:disabled):hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+

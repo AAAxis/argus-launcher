@@ -1,0 +1,44 @@
+.login-shell {
+  background: radial-gradient(circle at 50% 0%, var(--paper) 0%, var(--surface) 55%);
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.login-panel {
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+  padding: 32px 28px;
+  text-align: center;
+  width: min(420px, calc(100vw - 40px));
+}
+
+/* The Argus mark at the head of the sign-in panel, drawn as a mask so it takes
+ * a colour rather than stamping black line art into the dark theme -- the same
+ * technique as .brand-mark and .plan-welcome-glyph.
+ *
+ * Filled with --plan-accent, which makes this the fourth surface allowed to use
+ * the token; see its comment at the top of this file. Deliberate, and for the
+ * same reason the other three have it: the sign-in screen is the seam between
+ * the site and the app -- the account was made on argus.bot, in cyan, and the
+ * first launcher screen it leads to should not look like a different company.
+ *
+ * The art is 874x1124, so the box carries that ratio rather than a square that
+ * would leave the mask floating in dead space. */
+.login-mark {
+  background-color: var(--plan-accent);
+  display: block;
+  height: 44px;
+  justify-self: center;
+  mask-image: var(--argus-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 34px;
+}
+

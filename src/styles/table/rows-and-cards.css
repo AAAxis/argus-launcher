@@ -1,0 +1,433 @@
+/* 10% of a cyan accent read clearly against white; 10% of ink reads as a barely
+ * visible grey, so the checked row needs a deeper mix now that the accent is
+ * ink. Still a tint rather than --hover, so a checked row stays distinguishable
+ * from the merely hovered one above it. */
+tr.row-checked {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* A row that arrived since this machine last looked at the tab, and that
+ * somebody else added -- see src/lib/newSince.ts. It holds for the whole visit
+ * rather than decaying, so the rows can be sorted, scanned and acted on; the
+ * watermark advances on arrival, so the next visit opens on a clean table.
+ *
+ * The bar rides on the first cell, NOT on the tr. Under border-collapse:
+ * collapse (see the table rule above) Chromium does not paint box-shadow on a
+ * table row at all, and the bar is the half of this signal that does not depend
+ * on colour.
+ *
+ * --profile-green-* rather than --success: the same pair .automation-card.is-new
+ * has always used for exactly this meaning, already tuned for dark, and
+ * deliberately not --status-active-*, which means a profile whose STATUS is
+ * Active. */
+tbody tr.is-new > td:first-child {
+  box-shadow: inset 3px 0 0 var(--profile-green-border);
+}
+
+/* Guarded rather than ordered, so the two states cannot fight: checked and
+ * selected are about what you are doing to a row, new is about what you have yet
+ * to read, and doing wins. Ordering alone would leave whichever rule came second
+ * winning by accident. */
+tbody tr.is-new:not(.row-checked):not(.selected) {
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, transparent);
+}
+
+tbody tr.is-new:not(.row-checked):not(.selected):hover {
+  background: var(--profile-green-bg);
+}
+
+/* --control-h-sm, matching the .row-action squares beside it: a 36px Launch
+ * next to 32px Edit/Share/Delete read as two sizes of control in one group.
+ * Padding steps down with the height for the same reason. */
+.launch {
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
+/* The row-actions cell. The flex lives on an inner div, NOT on the td -- for
+ * exactly the reason td.name-cell documents above: `display: flex` on a <td>
+ * stops it being a table cell at all, so the padding, the hairline and
+ * `vertical-align: middle` apply to the flex box inside an anonymous cell
+ * rather than to the cell itself.
+ *
+ * That was survivable on Profiles and Proxies, where this cell always holds a
+ * full-height Launch button. It was not on Team, where a row holds zero, one or
+ * two buttons: the cell's height swung between 0 and 36px, and the buttons and
+ * the row's underline visibly floated against every other column.
+ *
+ * `width: 1%` + nowrap is the shrink-to-fit idiom td.checkbox-cell already
+ * uses. It collapses the column onto its content and pins it right, which is
+ * what puts one icon and two icons on the same right edge. */
+td.actions-cell {
+  text-align: right;
+  vertical-align: middle;
+  white-space: nowrap;
+  width: 1%;
+}
+
+/* Rendered even when there are no buttons, so every row in a table reserves the
+ * same height and the hairline is drawn in the same place. A row that offers no
+ * action is still a row. */
+.row-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: flex-end;
+  min-height: var(--control-h);
+}
+
+/* The per-row Edit, Share and Delete.
+ *
+ * These carried a fill and a hairline border, on the argument that a naked glyph
+ * beside a filled Launch reads as a mark printed on the row rather than as
+ * something to press. That argument bought its affordance with three framed
+ * boxes in every row of a table that can show twenty-five of them -- seventy-five
+ * outlines whose only job was to be noticed, in the column furthest from the
+ * data. The toolbar above went flat for the same reason (see .filter-trigger),
+ * and this is the same trade one surface further in.
+ *
+ * So: nothing at rest, and the --hover plate at --radius-xs under the pointer,
+ * which is where the affordance actually has to be. Launch keeps its fill and is
+ * now the only bordered thing in the cell, which is the honest hierarchy -- it
+ * is the one action of the four you came to the row for.
+ *
+ * --control-h-sm, not 36px. .icon-button is always applied alongside this class
+ * and both have specificity (0,1,0), so the later rule's `width: 32px` won on
+ * width while this one's `height: 36px` won on height -- every row action in
+ * the app rendered as a 32x36 rectangle rather than a square. Matching the
+ * smaller token squares the box and keeps the two rules agreeing. */
+.row-action {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  color: var(--ink-soft);
+  height: var(--control-h-sm);
+  width: var(--control-h-sm);
+}
+
+.row-action:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* No border-color to set any more; the tint and the ink carry it alone. */
+.row-action-danger:not(:disabled):hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.icon-button {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.icon-button:hover {
+  background: var(--paper);
+  box-shadow: none;
+  color: var(--accent);
+}
+
+.danger-icon {
+  color: var(--danger);
+}
+
+.danger-icon:hover {
+  background: var(--danger-bg);
+  color: var(--danger-strong);
+}
+
+.split {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+}
+
+.card-grid {
+  align-content: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+/* The card view of a profile -- the same data as a table row, so it takes the
+   same surface radius the table does. */
+.data-card {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  min-height: 96px;
+  padding: 14px;
+  position: relative;
+  text-decoration: none;
+  transition: box-shadow 0.14s var(--ease), border-color 0.14s var(--ease), transform 0.14s var(--ease);
+}
+
+.data-card.selected {
+  background: color-mix(in srgb, var(--accent) 6%, var(--raised));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.card-select {
+  cursor: pointer;
+  left: 14px;
+  position: absolute;
+  top: 18px;
+}
+
+.card-select input {
+  height: 16px;
+  width: 16px;
+}
+
+.selection-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.selection-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pagination-bar {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: space-between;
+}
+
+.pagination-range {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.pagination-selected {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pagination-controls {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.pagination-controls select {
+  background-color: var(--raised);
+  background-position: right 9px center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: var(--control-h-sm);
+  padding: 0 32px 0 10px;
+}
+
+.pagination-controls button {
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.pagination-page {
+  color: var(--ink-soft);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.data-card:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Clipped for the same reason the <p> below it is. Without this a long title --
+ * and a bookmark saved with no name takes the url as its title -- overflowed
+ * its track and painted straight over the card's action buttons. */
+.data-card h2 {
+  font-size: 15px;
+  margin: 0 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-card p {
+  color: var(--ink-soft);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-card span {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.data-card-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.proxy-badge {
+  border-radius: 999px;
+  display: inline-block;
+  flex: none;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 9px;
+  text-transform: uppercase;
+  /* The badge is the fixed part of the proxy cell and the host is the elastic
+     one -- see .import-proxy-host. Letting this wrap took the whole row to two
+     lines, which is what "Saved credentials" used to do. */
+  white-space: nowrap;
+}
+
+.proxy-badge.assigned {
+  background: var(--status-active-bg);
+  color: var(--status-active-ink);
+}
+
+.proxy-badge.unassigned {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* The flag chip. Was scoped to .data-card back when proxies were a card grid;
+ * it is unscoped now because the same chip appears in the proxies table's Name
+ * cell and in the move dialog's rows, and a proxy should not be wearing a
+ * different mark depending on which surface is showing it. The proxy editor's
+ * test result overrides only its flex behaviour, further down. */
+.proxy-flag {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 900;
+  justify-content: center;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  min-width: 34px;
+  overflow: hidden;
+  padding: 6px 7px;
+  text-align: center;
+}
+
+/* Bundled real flag SVGs (country-flag-icons) instead of relying on the OS's
+ * emoji font, which some Windows builds render as boxed letters instead of a
+ * flag glyph even with an explicit font-family. */
+.flag-svg {
+  border-radius: 2px;
+  display: block;
+  height: 14px;
+  width: 21px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.link-card:hover {
+  border-color: var(--ink);
+}
+
+.empty-state {
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* ── Empty states ───────────────────────────────────────────────────────────
+ * Two sizes of the same block. The small one sits in a table cell under headers
+ * that are still worth showing (a filter matched nothing, Trash is empty); the
+ * `hero` one is the same block given room, and is now only the Team tab's --
+ * its roster, its plan gate and its empty share list all sit under a toolbar
+ * that stays useful, so they are a block on the page rather than the page. Both
+ * are centred on the column rather than on the row, which is why the wrapper --
+ * not the cell -- does the centring: a <td> that is one of nine cannot centre
+ * itself across the table.
+ *
+ * A tab whose whole collection is empty uses .tab-empty instead, further down.
+ * Profiles, Proxies, Cookies and Automations all drop their toolbar, folder row
+ * and pager in that case, so there is no shell for the message to sit in and
+ * nothing above it to align to but the topbar. */
+.table-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 auto;
+  max-width: 380px;
+  padding: 26px 0;
+  text-align: center;
+}
+
+.table-empty.hero {
+  max-width: 440px;
+  padding: 64px 0;
+}
+
+.table-empty-icon {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  height: 48px;
+  justify-content: center;
+  margin-bottom: 6px;
+  width: 48px;
+}
+
+.table-empty.hero .table-empty-icon {
+  height: 68px;
+  margin-bottom: 10px;
+  width: 68px;
+}
+
+.table-empty h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.table-empty.hero h2 {
+  font-size: 19px;
+}
+
+.table-empty p {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.table-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
