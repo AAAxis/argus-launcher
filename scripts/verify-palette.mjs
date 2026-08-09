@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Asserts the browser start page and the launcher paint the same colours.
 //
-// src/styles.css is the source of truth. src/lib/palette.ts is the copy that
+// src/styles/base/tokens.css is the source of truth -- it was src/tokens.css
+// until that file was split into 46 sheets and became a barrel of @imports,
+// which left this script parsing a file with no :root block in it and failing
+// its first two checks. src/lib/palette.ts is the copy that
 // travels inside the generated home.html, which is a file:// document with no
 // stylesheet to link to -- so the values necessarily exist twice. They had
 // already drifted once, and badly: the start page was still on the warm paper
@@ -20,7 +23,7 @@ import {dirname, join} from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 
-const cssSource = readFileSync(join(root, 'src/styles.css'), 'utf8');
+const cssSource = readFileSync(join(root, 'src/styles/base/tokens.css'), 'utf8');
 const paletteSource = readFileSync(join(root, 'src/lib/palette.ts'), 'utf8');
 // The third copy: the browser side panel's stylesheet. Same problem as
 // palette.ts, one step further out -- it loads in its own extension page, never
@@ -109,24 +112,24 @@ const tsLight = tsTokens('LIGHT_TOKENS');
 const tsDark = tsTokens('DARK_TOKENS');
 const themeless = new Set(tsList('THEMELESS_TOKENS'));
 
-check(cssLight && cssLight.size > 0, 'styles.css has a :root token block');
-check(cssDark && cssDark.size > 0, 'styles.css has a :root[data-theme="dark"] token block');
+check(cssLight && cssLight.size > 0, 'tokens.css has a :root token block');
+check(cssDark && cssDark.size > 0, 'tokens.css has a :root[data-theme="dark"] token block');
 check(tsLight && tsLight.size > 0, 'palette.ts exports LIGHT_TOKENS');
 check(tsDark && tsDark.size > 0, 'palette.ts exports DARK_TOKENS');
 if (failures > 0) {
   console.error('\nCould not parse both files -- nothing else can be checked.');
   process.exit(1);
 }
-pass(`parsed ${cssLight.size} light and ${cssDark.size} dark tokens from styles.css`);
+pass(`parsed ${cssLight.size} light and ${cssDark.size} dark tokens from tokens.css`);
 
 // ── 1. Light ─────────────────────────────────────────────────────────────────
 for (const [name, value] of tsLight) {
   const css = cssLight.get(name);
-  check(css !== undefined, `${name} is in palette.ts but not in styles.css :root`);
+  check(css !== undefined, `${name} is in palette.ts but not in tokens.css :root`);
   check(css === undefined || css === value,
-      `${name} is ${value} in palette.ts and ${css} in styles.css :root`);
+      `${name} is ${value} in palette.ts and ${css} in tokens.css :root`);
 }
-pass(`${tsLight.size} light tokens match styles.css`);
+pass(`${tsLight.size} light tokens match tokens.css`);
 
 // ── 2. Dark ──────────────────────────────────────────────────────────────────
 // A themeless token (the radius scale) is declared once, in :root, and never
@@ -137,11 +140,11 @@ for (const [name, value] of tsDark) {
   const source = themeless.has(name) ? cssLight : cssDark;
   const where = themeless.has(name) ? ':root' : ':root[data-theme="dark"]';
   const css = source.get(name);
-  check(css !== undefined, `${name} is in palette.ts but not in styles.css ${where}`);
+  check(css !== undefined, `${name} is in palette.ts but not in tokens.css ${where}`);
   check(css === undefined || css === value,
-      `${name} is ${value} in palette.ts and ${css} in styles.css ${where}`);
+      `${name} is ${value} in palette.ts and ${css} in tokens.css ${where}`);
 }
-pass(`${tsDark.size} dark tokens match styles.css`);
+pass(`${tsDark.size} dark tokens match tokens.css`);
 
 // ── 3. The two records describe the same theme ───────────────────────────────
 // A token in one and not the other means one theme paints something the other
@@ -181,18 +184,18 @@ check(panelDark && panelDark.size > 0, 'sidepanel.css has a :root[data-theme="da
 if (panelLight && panelDark) {
   for (const [name, value] of panelLight) {
     const css = cssLight.get(name);
-    check(css !== undefined, `${name} is in sidepanel.css :root but not in styles.css :root`);
+    check(css !== undefined, `${name} is in sidepanel.css :root but not in tokens.css :root`);
     check(css === undefined || css === value,
-        `${name} is ${value} in sidepanel.css :root and ${css} in styles.css :root`);
+        `${name} is ${value} in sidepanel.css :root and ${css} in tokens.css :root`);
   }
   for (const [name, value] of panelDark) {
     const css = cssDark.get(name);
     check(css !== undefined,
-        `${name} is in sidepanel.css dark block but not in styles.css :root[data-theme="dark"]`);
+        `${name} is in sidepanel.css dark block but not in tokens.css :root[data-theme="dark"]`);
     check(css === undefined || css === value,
-        `${name} is ${value} in sidepanel.css dark and ${css} in styles.css dark`);
+        `${name} is ${value} in sidepanel.css dark and ${css} in tokens.css dark`);
   }
-  pass(`${panelLight.size} light and ${panelDark.size} dark tokens in sidepanel.css match styles.css`);
+  pass(`${panelLight.size} light and ${panelDark.size} dark tokens in sidepanel.css match tokens.css`);
 }
 
 // The panel repeats its dark record under @media (prefers-color-scheme: dark)
@@ -234,4 +237,4 @@ if (failures > 0) {
   console.error(`\n${failures} failure(s).`);
   process.exit(1);
 }
-console.log('\nStart page palette matches styles.css.');
+console.log('\nStart page palette matches tokens.css.');
