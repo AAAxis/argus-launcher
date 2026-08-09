@@ -3,7 +3,11 @@
 // .d.cts) rather than a copy -- nothing compiles electron/, but vitest can
 // import it directly.
 import {describe, expect, it} from 'vitest';
-import {composeFinishMessage, shouldNotify} from '../../electron/automation/notify.cjs';
+import {
+  composeFinishMessage,
+  composeFinishTelegram,
+  shouldNotify,
+} from '../../electron/automation/notify.cjs';
 
 function record(overrides: Partial<Parameters<typeof composeFinishMessage>[0]> = {}) {
   return {
@@ -113,5 +117,71 @@ describe('composeFinishMessage', () => {
     const message = composeFinishMessage({status: 'failed'});
     expect(message.title).toBe('Automation failed');
     expect(message.body).toBe('Failed.');
+  });
+});
+
+describe('composeFinishTelegram', () => {
+  it('marks a success with the success emoji and a bold headline', () => {
+    const html = composeFinishTelegram(record());
+    expect(html).toBe('✅ <b>Nightly scrape finished</b>\nFinished in 42s on Amazon-3.');
+  });
+
+  // The whole point of the rich version: the error stops being a clause in a
+  // sentence and becomes a block you can read and long-press to copy.
+  it('lifts the error out of the prose into a pre block on a failure', () => {
+    const html = composeFinishTelegram(record({
+      status: 'failed',
+      failed_step_id: 's2',
+      error: 'net::ERR_TIMED_OUT',
+      log: [{stepId: 's2', message: 'Click #login'}],
+    }));
+    expect(html).toBe(
+        '❌ <b>Nightly scrape failed</b>\n' +
+        'Failed at "Click #login" in 42s on Amazon-3.\n' +
+        '<pre>net::ERR_TIMED_OUT</pre>');
+  });
+
+  // A partial keeps its own mark -- the run finished, a step did not, and
+  // flattening that into either green or red loses what the reader must act on.
+  it('keeps the run-continued sentence when the error moves to its own block', () => {
+    const html = composeFinishTelegram(record({
+      status: 'partial',
+      failed_step_id: 's3',
+      error: 'No element matches #promo',
+      log: [{stepId: 's3', message: 'Extract price'}],
+    }));
+    expect(html).toBe(
+        '⚠️ <b>Nightly scrape finished with a failed step</b>\n' +
+        '"Extract price" failed. The run continued and finished in 42s on Amazon-3.\n' +
+        '<pre>No element matches #promo</pre>');
+  });
+
+  // Selectors and scraped text are exactly the strings that carry an angle
+  // bracket, and an unescaped one is a 400 that loses the whole notification.
+  it('escapes every interpolated value, in the prose and in the block', () => {
+    const html = composeFinishTelegram(record({
+      automation_name: 'Price <watch> & co',
+      status: 'failed',
+      failed_step_id: 's1',
+      error: 'No element matches <div class="a"> & nothing else',
+      log: [{stepId: 's1', message: 'Read #promo > .price'}],
+    }));
+    expect(html).toContain('<b>Price &lt;watch&gt; &amp; co failed</b>');
+    expect(html).toContain('Read #promo &gt; .price');
+    expect(html).toContain('<pre>No element matches &lt;div class="a"&gt; &amp; nothing else</pre>');
+    // The only tags in the output are the ones this composed.
+    expect(html.match(/<\/?[a-z]+>/g)).toEqual(['<b>', '</b>', '<pre>', '</pre>']);
+  });
+
+  it('emits no empty block when the record carries no error', () => {
+    const html = composeFinishTelegram(record({status: 'failed', failed_step_id: 's1'}));
+    expect(html).not.toContain('<pre>');
+    expect(html).toBe('❌ <b>Nightly scrape failed</b>\nFailed at "step s1" in 42s on Amazon-3.');
+  });
+
+  it('still marks a status it has never met, without claiming success', () => {
+    const html = composeFinishTelegram(record({status: 'exploded'}));
+    expect(html.startsWith('ℹ️')).toBe(true);
+    expect(html).toContain('exploded');
   });
 });

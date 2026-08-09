@@ -4252,11 +4252,22 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
         // travels as sendError, which the runner logs into the record -- for a
         // deleted connector that is the sentence naming it.
         return Promise.resolve()
-            .then(() => automationConnectors.send({
-              connector: automationConnectors.resolve(connectorId, 'message'),
-              message: `${title}\n${body}`,
-              subject: title,
-            }))
+            .then(() => {
+              const connector = automationConnectors.resolve(connectorId, 'message');
+              // Telegram is the one kind here that renders rich text, so it
+              // gets the marked-up version -- emoji verdict, bold headline,
+              // error in a monospace block. The rest carry the plain sentence
+              // the bell and the OS notification carry.
+              const rich = connector.kind === 'telegram';
+              return automationConnectors.send({
+                connector,
+                message: rich ?
+                  automationNotify.composeFinishTelegram(record) :
+                  `${title}\n${body}`,
+                subject: title,
+                parseMode: rich ? 'HTML' : undefined,
+              });
+            })
             .then(() => notification)
             .catch((error) => ({
               ...notification,
@@ -4324,11 +4335,12 @@ ipcMain.handle('argus:telegram-link-poll', async (_event, {token, code, welcome}
   }
 });
 
-ipcMain.handle('argus:telegram-send', async (_event, {token, chatId, text}) => {
+ipcMain.handle('argus:telegram-send', async (_event, {token, chatId, text, parseMode}) => {
   try {
     await automationConnectors.send({
       connector: {kind: 'telegram', category: 'message', config: {botToken: token, chatId}},
       message: text,
+      parseMode,
     });
     return {ok: true};
   } catch (error) {

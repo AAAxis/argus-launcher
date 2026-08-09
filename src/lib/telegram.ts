@@ -26,10 +26,16 @@ export function botDeepLink(botName: string, code: string): string {
 
 // Send to one chat through the workspace bot. Fire-and-forget from the run
 // pipeline; the boolean is for the Notification bot view's test button.
+//
+// `parseMode: 'HTML'` marks `text` as Telegram markup -- used by the run
+// summaries, which arrive from composeFinishTelegram with every interpolated
+// value escaped. Main retries unformatted if Telegram cannot parse it, so a
+// bad tag costs the formatting and not the message.
 export async function sendTelegram(
-    botToken: string, chatId: string, text: string): Promise<{ok: boolean; error?: string}> {
+    botToken: string, chatId: string, text: string, parseMode?: 'HTML',
+): Promise<{ok: boolean; error?: string}> {
   if (!native?.telegramSend) {
     return {ok: false, error: 'Telegram needs the desktop app.'};
   }
-  return native.telegramSend(botToken, chatId, text);
+  return native.telegramSend(botToken, chatId, text, parseMode);
 }

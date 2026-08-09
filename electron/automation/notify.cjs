@@ -34,6 +34,23 @@ function shouldNotify(notifyOn, status) {
   return false;
 }
 
+// The verdict at a glance, for the channels that render one. A Telegram
+// notification is read on a phone, in a list of chats, next to a dozen other
+// bots -- the emoji is what says "this one needs you" before a word is read.
+// Deliberately three distinguishable marks and not a green/red pair: partial
+// is its own outcome (the run finished, a step did not) and flattening it into
+// either one loses the thing the reader has to act on.
+const STATUS_EMOJI = {
+  ok: '✅',
+  partial: '⚠️',
+  failed: '❌',
+  cancelled: '🛑',
+};
+
+function statusEmoji(status) {
+  return STATUS_EMOJI[status] || 'ℹ️';
+}
+
 function formatDuration(ms) {
   const total = Math.max(0, Math.round(Number(ms) || 0));
   const seconds = Math.round(total / 1000);
@@ -62,37 +79,47 @@ function failedStepLabel(record) {
   return `step ${record.failed_step_id}`;
 }
 
-// {title, body} for every delivery of one finished run: the OS notification,
-// the bell row and the connector message all carry this, so the three can
-// never tell three stories.
+// One finished run described in three pieces: `title`, the sentence around
+// the error (`lead` before it, `trail` after), and the error itself held
+// apart.
+//
+// Split rather than returned as one string because the two renderings differ
+// only in where the error goes -- inline for plain text, in its own monospace
+// block for Telegram. Composing each from the record separately would be two
+// places to keep saying the same true thing.
 //
 // A failed run must produce a message that says so, naming the step and the
 // error -- a summary that only ever reports success is worse than none.
-function composeFinishMessage(record) {
+function describeFinish(record) {
   const name = record.automation_name || 'Automation';
   const where = record.profile_name ? ` on ${record.profile_name}` : '';
   const took = record.duration_ms == null ? '' : ` in ${formatDuration(record.duration_ms)}`;
+  const error = String(record.error || '').trim();
   switch (record.status) {
     case 'ok':
       return {
         title: `${name} finished`,
-        body: `Finished${took}${where}.`,
+        lead: `Finished${took}${where}`,
+        trail: '.',
+        error: '',
       };
     case 'partial': {
       const step = failedStepLabel(record);
       return {
         title: `${name} finished with a failed step`,
-        body: `${step ? `"${step}" failed` : 'A step failed'}` +
-          `${record.error ? `: ${record.error}` : ''}. The run continued and ` +
-          `finished${took}${where}.`,
+        lead: step ? `"${step}" failed` : 'A step failed',
+        trail: `. The run continued and finished${took}${where}.`,
+        error,
       };
     }
     case 'failed': {
       const step = failedStepLabel(record);
       return {
         title: `${name} failed`,
-        body: `${step ? `Failed at "${step}"` : 'Failed'}${took}${where}` +
-          `${record.error ? `: ${record.error}` : '.'}`,
+        lead: `${step ? `Failed at "${step}"` : 'Failed'}${took}${where}`,
+        // The full stop the error's colon would otherwise replace.
+        trail: error ? '' : '.',
+        error,
       };
     }
     default:
@@ -101,9 +128,53 @@ function composeFinishMessage(record) {
       // truthful rather than throwing inside a finally.
       return {
         title: `${name} ${record.status || 'finished'}`,
-        body: `Ended with status "${record.status}"${took}${where}.`,
+        lead: `Ended with status "${record.status}"${took}${where}`,
+        trail: '.',
+        error: '',
       };
   }
 }
 
-module.exports = {composeFinishMessage, shouldNotify};
+// {title, body} for the plain-text deliveries of one finished run: the OS
+// notification, the bell row and every connector that has no rich text, all
+// from one place so they can never tell three stories.
+function composeFinishMessage(record) {
+  const {title, lead, trail, error} = describeFinish(record);
+  return {title, body: `${lead}${error ? `: ${error}` : ''}${trail}`};
+}
+
+// Telegram's HTML mode is the smallest of the three parse modes to get right:
+// only these three characters are special, and escaping them is the whole
+// contract. MarkdownV2 would demand escaping eighteen characters in every step
+// label and error string, and one missed backslash is a 400 that loses the
+// message -- for a channel whose entire job is to report failures, that is the
+// wrong trade.
+function escapeHtml(text) {
+  return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+}
+
+// The same finished run as composeFinishMessage, marked up for Telegram:
+// emoji verdict, bold headline, and the error in a <pre> block.
+//
+// Composed from the record rather than by decorating the plain body, because
+// the error has to come OUT of the prose to go into its own block -- a stack
+// trace or a selector reads as noise inline and as evidence in monospace, and
+// Telegram's <pre> is also the only part of a message a phone can long-press
+// and copy cleanly.
+//
+// Returns HTML for `parse_mode: 'HTML'`. Every interpolated value is escaped:
+// selectors (`#promo > .price`) and error text are exactly the strings most
+// likely to carry an angle bracket.
+function composeFinishTelegram(record) {
+  const {title, lead, trail, error} = describeFinish(record);
+  return `${statusEmoji(record.status)} <b>${escapeHtml(title)}</b>\n` +
+    // `trail` is empty exactly when the plain text ends on the error's colon;
+    // with the error lifted out, the sentence needs its full stop back.
+    escapeHtml(`${lead}${trail || '.'}`) +
+    (error ? `\n<pre>${escapeHtml(error)}</pre>` : '');
+}
+
+module.exports = {composeFinishMessage, composeFinishTelegram, escapeHtml, shouldNotify, statusEmoji};

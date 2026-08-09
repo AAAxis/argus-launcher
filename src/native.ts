@@ -458,7 +458,10 @@ type ArgusNative = {
   // something only the renderer knows.
   telegramLinkPoll?(token: string, code: string, welcome?: string):
     Promise<{ok: boolean; chatId?: string; username?: string | null; error?: string}>;
-  telegramSend?(token: string, chatId: string, text: string):
+  // `parseMode` is Telegram's rich text switch. 'HTML' means `text` is markup
+  // whose every interpolated value has already been escaped; main falls back
+  // to sending it unformatted if Telegram refuses to parse it.
+  telegramSend?(token: string, chatId: string, text: string, parseMode?: 'HTML'):
     Promise<{ok: boolean; error?: string}>;
   // What models an AI connector's endpoint serves, so the form offers a real
   // choice. Takes the resolved draft, key included, like testConnector.

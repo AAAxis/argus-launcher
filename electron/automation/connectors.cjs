@@ -177,12 +177,51 @@ function requireConfig(connector, key, label) {
   return value;
 }
 
-async function sendTelegram(connector, message) {
+// Telegram rejects a whole message when its markup does not parse -- 400,
+// "can't parse entities". Everything Argus composes is escaped, but a message
+// a step assembled from scraped page text is not, and losing a notification to
+// a stray `<` in someone's product title would be the worst possible failure
+// for the one channel that exists to report failures. So the markup is treated
+// as a nicety: when it does not parse, the same text goes out unformatted.
+function isParseFailure(error) {
+  return error?.statusCode === 400 &&
+    /can't parse entities|unsupported start tag|unclosed/i.test(
+        String(error?.parsed?.description || error?.message || ''));
+}
+
+// The retry's text. Resending the markup verbatim would deliver a message full
+// of literal `<b>` and `&amp;`, which is a worse read than the plain sentence
+// it was decorating -- so the tags come off and the entities go back to being
+// the characters they stand for.
+function stripHtml(text) {
+  return String(text)
+      .replace(/<\/?[a-z][^>]*>/gi, '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&');
+}
+
+async function sendTelegram(connector, message, parseMode) {
   const token = requireConfig(connector, 'botToken', 'bot token');
   const chatId = requireConfig(connector, 'chatId', 'chat id');
-  const answer = await postJson(
-      `https://api.telegram.org/bot${token}/sendMessage`, {},
-      {chat_id: chatId, text: message});
+  const post = (body) => postJson(`https://api.telegram.org/bot${token}/sendMessage`, {}, body);
+  let answer;
+  try {
+    answer = await post({
+      chat_id: chatId,
+      text: message,
+      ...(parseMode ? {parse_mode: parseMode} : {}),
+    });
+  } catch (error) {
+    if (!parseMode || !isParseFailure(error)) {
+      throw error;
+    }
+    answer = await post({
+      chat_id: chatId,
+      text: parseMode === 'HTML' ? stripHtml(message) : message,
+    });
+  }
   // Telegram can answer 200 with ok:false in some proxy setups; trust the
   // body's verdict over the status line.
   if (answer && answer.ok === false) {
@@ -267,15 +306,17 @@ async function sendSmtp(connector, message, subject) {
 // One outbound message through a message connector. `connector` is a resolved
 // record, not an id -- the Test button passes an unsaved draft, and steps pass
 // what resolve() handed back. `subject` is used by the kinds that have one
-// (email) and ignored by the rest.
-async function send({connector, message, subject}) {
+// (email) and ignored by the rest, and `parseMode` likewise: it is Telegram's
+// word for rich text, and a caller that composed markup for one kind has to
+// have composed it knowing which kind it was sending to.
+async function send({connector, message, subject, parseMode}) {
   const body = String(message || '').trim();
   if (!body) {
     throw new Error('There is no message to send');
   }
   switch (connector.kind) {
     case 'telegram':
-      return sendTelegram(connector, body);
+      return sendTelegram(connector, body, parseMode);
     case 'slack':
       return sendSlack(connector, body);
     case 'discord':

@@ -74,8 +74,10 @@ contextBridge.exposeInMainWorld('argusNative', {
   testConnector: (connector) => ipcRenderer.invoke('argus:test-connector', {connector}),
   telegramLinkPoll: (token, code, welcome) =>
     ipcRenderer.invoke('argus:telegram-link-poll', {token, code, welcome}),
-  telegramSend: (token, chatId, text) =>
-    ipcRenderer.invoke('argus:telegram-send', {token, chatId, text}),
+  // `parseMode` is Telegram's rich text switch -- 'HTML' for the marked-up
+  // run summaries, absent for anything composed as plain text.
+  telegramSend: (token, chatId, text, parseMode) =>
+    ipcRenderer.invoke('argus:telegram-send', {token, chatId, text, parseMode}),
   // The endpoint's own model listing, for the form's model picker. Draft in,
   // like testConnector, so an unsaved key can prove itself.
   listConnectorModels: (connector) =>

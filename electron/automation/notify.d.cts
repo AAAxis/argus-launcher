@@ -8,7 +8,7 @@ export function shouldNotify(
   status: string,
 ): boolean;
 
-export function composeFinishMessage(record: {
+interface FinishedRunRecord {
   automation_name?: string | null;
   profile_name?: string | null;
   status?: string | null;
@@ -16,4 +16,16 @@ export function composeFinishMessage(record: {
   failed_step_id?: string | null;
   error?: string | null;
   log?: {stepId?: string; message?: string}[];
-}): {title: string; body: string};
+}
+
+export function composeFinishMessage(
+  record: FinishedRunRecord,
+): {title: string; body: string};
+
+// The same run as Telegram HTML -- emoji verdict, bold title, error in a
+// <pre> block. Send with parse_mode 'HTML'.
+export function composeFinishTelegram(record: FinishedRunRecord): string;
+
+export function escapeHtml(text: unknown): string;
+
+export function statusEmoji(status: string | null | undefined): string;

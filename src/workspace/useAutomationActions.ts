@@ -4,7 +4,7 @@
 // goes through withDb, so a failure toasts once and the caller bails without a
 // false success message.
 import {useRef} from 'react';
-import {composeFinishMessage, shouldNotify} from '../../electron/automation/notify.cjs';
+import {composeFinishTelegram, shouldNotify} from '../../electron/automation/notify.cjs';
 import {useAutomationRuns} from '../hooks/useAutomationRuns';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
@@ -104,8 +104,10 @@ export function useAutomationActions(
     if (!pref || !shouldNotify(pref.notify_on, run.status)) {
       return;
     }
-    const message = composeFinishMessage(run);
-    void sendTelegram(botToken, link.chat_id, `${message.title}\n${message.body}`);
+    // Marked up rather than plain: this one lands on a phone, where the emoji
+    // verdict is what distinguishes "your run finished" from "your run needs
+    // you" in a list of chats, and the error is worth its own copyable block.
+    void sendTelegram(botToken, link.chat_id, composeFinishTelegram(run), 'HTML');
   }
 
   function newAutomation(): ArgusAutomation {
@@ -292,8 +294,13 @@ export function useAutomationActions(
     if (!botToken || !link) {
       return 'Link Telegram first.';
     }
+    // Sent as markup, and shaped like a real run summary: the point of a test
+    // is to prove the channel end to end, and rich text is now part of the
+    // channel -- a bot whose token works but whose HTML is refused would pass
+    // a plain test and still mangle every notification after it.
     const sent = await sendTelegram(
-        botToken, link.chat_id, 'Test message from Argus. Your notifications work.');
+        botToken, link.chat_id,
+        '✅ <b>Test message from Argus</b>\nYour notifications work.', 'HTML');
     return sent.ok ? null : (sent.error || 'The send failed.');
   }
 
