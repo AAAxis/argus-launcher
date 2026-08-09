@@ -251,20 +251,32 @@ export function useProfileActions(
       const tiles = startPageAutomations(state.automations, target)
           .map((tile) => buildRunTile(tile, target, state.automations));
 
+      // The Argus Helper panel offers EVERY automation in the workspace, not
+      // just this profile's pinned tiles -- that is what
+      // /v1/automations/run-any-from-page is for, and the panel resolves the
+      // chosen one through the launcher window on demand.
+      //
+      // So the panel is a run button too, and it needs the same port. Without
+      // this the panel listed the whole catalogue on a profile that had pinned
+      // nothing, and pressing any of it got "This session has no debugging
+      // port" from startTileForEntry -- the phantom control the note below is
+      // about, just reached by a different door.
+      const panelCanRun = state.automations.some((item) => !item.deleted_at);
+
       // The debugging port is opened ONLY when something might drive this
       // session. An always-on --remote-debugging-port would be a real
       // anti-detect regression: the port is connectable by any local process,
-      // and CDP attachment is observable from the page. Pinning an automation
-      // to start pages is the opt-in -- it is what puts a run button inside the
-      // browser, and a button that cannot reach a port is a phantom control. A
-      // workspace that pins nothing and attaches nothing still launches exactly
-      // as it did before, with no extra switches at all.
+      // and CDP attachment is observable from the page. Having an automation
+      // the browser can offer to run is the opt-in -- pinned to the start page,
+      // or listed in the panel. A workspace with no automations at all, and
+      // nothing attached, still launches exactly as it did before, with no
+      // extra switches.
       //
       // No --remote-allow-origins either. It used to be '*' here, which let any
       // web page in any browser on this machine drive an open profile if it
       // found the port. Our clients all connect from Node through
       // electron/cdp-core.cjs and send no Origin, which Chromium accepts.
-      const cdpPort = attached || tiles.length > 0 ?
+      const cdpPort = attached || tiles.length > 0 || panelCanRun ?
         await native.reserveCdpPort?.() :
         undefined;
       const extraArgs = cdpPort ? [`--remote-debugging-port=${cdpPort}`] : [];
