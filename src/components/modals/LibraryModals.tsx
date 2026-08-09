@@ -11,12 +11,12 @@ import {Modal} from '../ui/Modal';
 import {proxyImportExampleList} from '../../data/importTemplate';
 import {parseBookmarkFile} from '../../lib/bookmarkImport';
 import {parseWebstoreExtensionId} from '../../lib/extensions';
-import {parseProxyList} from '../../lib/proxies';
+import {parseProxyList} from '../../lib/proxyList';
 import {native} from '../../native';
 import {useAsyncAction} from '../../useAsyncAction';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ParsedBookmark} from '../../lib/bookmarkImport';
-import type {ParsedProxyLine} from '../../lib/proxies';
+import type {ParsedProxyLine} from '../../lib/proxyList';
 import type {ArgusCookie} from '../../types';
 
 export function CookiePickerModal({search, onSearch, selectedId, onSelect, onClose}: {

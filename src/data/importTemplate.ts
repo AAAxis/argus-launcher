@@ -135,9 +135,8 @@ export function profileImportExampleCsv() {
 }
 
 // The proxy-list twin, behind the proxy importer's own "Download example".
-// Not a CSV: that importer takes a bare list of connection strings, so the
-// example has to be one too, comments and all -- a header row would be the
-// first line it reported as unreadable.
+// A bare list of connection strings rather than a table, because that is the
+// shape a vendor hands out -- the headed form has its own example below.
 //
 // Every line here round-trips through parseProxyList unchanged, and the hosts
 // are documentation ranges (RFC 5737) rather than anything routable, so a file
@@ -151,6 +150,14 @@ export function proxyImportExampleList() {
     '198.51.100.10:1080:proxy-user:proxy-pass',
     '198.51.100.11:1080:proxy-user:proxy-pass',
     '',
+    '# The same four fields with commas, semicolons, tabs or pipes between them.',
+    '198.51.100.12,1080,proxy-user,proxy-pass',
+    '198.51.100.13;1080;proxy-user;proxy-pass',
+    '',
+    '# Credentials in front of the host, either way round the @ falls.',
+    'proxy-user:proxy-pass@198.51.100.14:1080',
+    '198.51.100.15:1080@proxy-user:proxy-pass',
+    '',
     '# No credentials? Leave them off, or leave the trailing colons empty.',
     '203.0.113.20:8080',
     '203.0.113.21:8080::',
@@ -162,6 +169,28 @@ export function proxyImportExampleList() {
     '',
     '# A hostname works exactly like an IP.',
     'gate.example-proxies.test:7000:rotating-user:rotating-pass',
+    '',
+  ].join('\n');
+}
+
+// The headed form, for the other half of what people are handed: a spreadsheet.
+// Its columns are the canonical names, but the importer matches every alias in
+// COLUMN_ALIASES -- "IP"/"Port"/"Login"/"Pass" reads the same as this does, in
+// any column order.
+//
+// A `type` column is included because it is the one thing a headed file can say
+// that the dialog's single Type selector cannot: a mixed list of HTTP and SOCKS5
+// endpoints has no one answer, and a row that names its own protocol keeps it.
+export function proxyImportExampleCsv() {
+  return [
+    'name,type,host,port,username,password',
+    'Berlin 1,socks5,198.51.100.10,1080,proxy-user,proxy-pass',
+    'Berlin 2,socks5,198.51.100.11,1080,proxy-user,proxy-pass',
+    'Shop EU,http,203.0.113.30,3128,shop-eu,s3cret',
+    // No credentials on this one, and a password with a comma in it on the
+    // next -- both round-trip, the second because the cell is quoted.
+    'Open relay,http,203.0.113.20,8080,,',
+    'Rotating,socks5,gate.example-proxies.test,7000,rotating-user,"pa55,word"',
     '',
   ].join('\n');
 }

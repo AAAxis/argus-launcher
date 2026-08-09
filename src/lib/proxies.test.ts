@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
-  formatProxyLink, parseProxyLink, proxyDedupeKey, proxyDedupeKeys, splitPastedConnection,
+  formatProxyLink, namesProxyType, parseProxyLink, proxyDedupeKey, proxyDedupeKeys,
+  splitPastedConnection,
 } from './proxies';
 
 describe('parseProxyLink', () => {
@@ -82,10 +83,81 @@ describe('parseProxyLink', () => {
     });
   });
 
+  // The separator is not load-bearing -- the field ORDER is. This parser split
+  // on ':' alone until a proxy list saved as .csv reported every line
+  // unreadable, header included.
+  it('reads the same fields whichever separator divides them', () => {
+    for (const separator of [':', ',', ';', '\t', '|']) {
+      expect(parseProxyLink(['198.51.100.10', '1080', 'user', 'pass'].join(separator))).toEqual({
+        type: 'socks5',
+        host: '198.51.100.10',
+        port: 1080,
+        username: 'user',
+        password: 'pass',
+      });
+    }
+  });
+
+  it('reads a scheme named as the first field of a delimited line', () => {
+    expect(parseProxyLink('http,198.51.100.10,1080')).toMatchObject({
+      type: 'http', host: '198.51.100.10', port: 1080,
+    });
+  });
+
+  // Neither single separator reads this, so it falls to the mixed split.
+  it('reads a line that mixes separators', () => {
+    expect(parseProxyLink('198.51.100.10:1080,user,pass')).toMatchObject({
+      host: '198.51.100.10', port: 1080, username: 'user', password: 'pass',
+    });
+  });
+
+  it('reads the reversed order with a comma too', () => {
+    expect(parseProxyLink('user,pass,198.51.100.10,1080')).toMatchObject({
+      host: '198.51.100.10', port: 1080, username: 'user', password: 'pass',
+    });
+  });
+
+  // The @-form in both directions. Only the first is a URL; the second parses
+  // as one and comes out with a hostname of "user", which is why the endpoint
+  // is decided by which side actually has a port.
+  it('reads user:pass@host:port', () => {
+    expect(parseProxyLink('user:pass@198.51.100.10:1080')).toMatchObject({
+      host: '198.51.100.10', port: 1080, username: 'user', password: 'pass',
+    });
+  });
+
+  it('reads host:port@user:pass', () => {
+    expect(parseProxyLink('198.51.100.10:1080@user:pass')).toMatchObject({
+      host: '198.51.100.10', port: 1080, username: 'user', password: 'pass',
+    });
+  });
+
+  it('keeps the scheme when an @-form names one', () => {
+    expect(parseProxyLink('http:198.51.100.10:1080@user:pass')?.type).toBe('http');
+  });
+
   it('refuses nonsense', () => {
     expect(parseProxyLink('')).toBeNull();
     expect(parseProxyLink('unknown')).toBeNull();
     expect(parseProxyLink('not-a-proxy-at-all')).toBeNull();
+  });
+
+  // The space is deliberately not a separator: with it, a sentence pasted into a
+  // password field parses as a proxy.
+  it('does not read a sentence as a proxy', () => {
+    expect(parseProxyLink('not a proxy, really')).toBeNull();
+  });
+});
+
+describe('namesProxyType', () => {
+  it('sees a scheme however it is written', () => {
+    expect(namesProxyType('socks5://h:1')).toBe(true);
+    expect(namesProxyType('socks5:h:1')).toBe(true);
+    expect(namesProxyType('http,h,1')).toBe(true);
+  });
+
+  it('sees none in a bare line', () => {
+    expect(namesProxyType('198.51.100.10,1080')).toBe(false);
   });
 });
 
