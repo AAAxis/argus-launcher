@@ -58,6 +58,13 @@ export type ProfileDraft = {
   start_url: string;
   // Which automation runs when this profile launches, or '' for none.
   automation_id: string;
+  // This profile's answers to each automation's declared parameters, keyed by
+  // automation id. The one field that is not a flat string, because it is not
+  // one control -- it is a form per automation, and which automations appear is
+  // the user's choice. The LEAVES are still strings, which is what keeps the
+  // all-strings rule above meaningful: coercion to the declared type happens
+  // once, at run time, in resolveRunVars.
+  automation_vars: Record<string, Record<string, string>>;
   cookie_import_path: string;
   cookie_import_url: string;
   cookie_import_name: string;
@@ -162,6 +169,7 @@ export function newProfileDraft(selfId = ''): ProfileDraft {
     tags: '',
     start_url: '',
     automation_id: '',
+    automation_vars: {},
     cookie_import_path: '',
     cookie_import_url: '',
     cookie_import_name: '',
@@ -223,6 +231,7 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     tags: profile.tags?.join(', ') || '',
     start_url: profile.start_url || '',
     automation_id: profile.automation_id || '',
+    automation_vars: profileVarsToDraft(profile.automation_vars),
     cookie_import_path: profile.cookie_import_path || '',
     cookie_import_url: profile.cookie_import_url || '',
     cookie_import_name: profile.cookie_import_name || '',
@@ -253,6 +262,43 @@ export function draftFromProfile(profile: ArgusProfile): ProfileDraft {
     fingerprint_do_not_track: Boolean(fingerprint.do_not_track),
     fingerprint_rotate: Boolean(fingerprint.rotate_on_launch),
   };
+}
+
+// Stored parameter values to form state. Every leaf becomes a string, because
+// that is what the controls hold -- a `true` from an agent over MCP renders as
+// a ticked box only once it is the string 'true'. A list arrives as a string[]
+// and goes back to the textarea's one-per-line text.
+function profileVarsToDraft(
+    stored: ArgusProfile['automation_vars']): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const [automationId, values] of Object.entries(stored || {})) {
+    const entry: Record<string, string> = {};
+    for (const [name, value] of Object.entries(values || {})) {
+      entry[name] = Array.isArray(value) ? value.join('\n') : String(value ?? '');
+    }
+    out[automationId] = entry;
+  }
+  return out;
+}
+
+// ...and back. Blank leaves are dropped rather than written: an empty string
+// already means "not set" to resolveRunVars, so storing one is noise that also
+// hides which values the user actually chose. The automation's own key SURVIVES
+// an all-blank entry -- adding the block is itself a choice, and dropping it
+// would make the section vanish the next time the profile is opened.
+function draftVarsToProfile(
+    draft: Record<string, Record<string, string>>): ArgusProfile['automation_vars'] {
+  const out: NonNullable<ArgusProfile['automation_vars']> = {};
+  for (const [automationId, values] of Object.entries(draft || {})) {
+    const entry: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(values || {})) {
+      if (value.trim() !== '') {
+        entry[name] = value;
+      }
+    }
+    out[automationId] = entry;
+  }
+  return out;
 }
 
 export function tagsFromDraft(value: string) {
@@ -319,6 +365,7 @@ export function profileFromDraft(draft: ProfileDraft, createdAt?: string): Argus
     tags: normalizeTags(tagsFromDraft(draft.tags)),
     start_url: draft.start_url.trim() || null,
     automation_id: draft.automation_id || null,
+    automation_vars: draftVarsToProfile(draft.automation_vars),
     cookie_import_path: draft.cookie_import_path.trim() || null,
     cookie_import_url: draft.cookie_import_url.trim() || null,
     cookie_import_name: draft.cookie_import_name.trim() || null,

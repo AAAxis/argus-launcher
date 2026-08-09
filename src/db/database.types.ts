@@ -238,6 +238,7 @@ export type Database = {
           notify_connector_id: string | null
           notify_on: string | null
           org_id: string
+          parameters: Json
           pinned: boolean
           schedule: Json | null
           steps: Json
@@ -264,6 +265,7 @@ export type Database = {
           notify_connector_id?: string | null
           notify_on?: string | null
           org_id: string
+          parameters?: Json
           pinned?: boolean
           schedule?: Json | null
           steps?: Json
@@ -290,6 +292,7 @@ export type Database = {
           notify_connector_id?: string | null
           notify_on?: string | null
           org_id?: string
+          parameters?: Json
           pinned?: boolean
           schedule?: Json | null
           steps?: Json
@@ -877,6 +880,7 @@ export type Database = {
         Row: {
           assigned_to: string | null
           automation_id: string | null
+          automation_vars: Json
           avatar: string | null
           color: string | null
           command_line_switches: string[] | null
@@ -907,6 +911,7 @@ export type Database = {
         Insert: {
           assigned_to?: string | null
           automation_id?: string | null
+          automation_vars?: Json
           avatar?: string | null
           color?: string | null
           command_line_switches?: string[] | null
@@ -937,6 +942,7 @@ export type Database = {
         Update: {
           assigned_to?: string | null
           automation_id?: string | null
+          automation_vars?: Json
           avatar?: string | null
           color?: string | null
           command_line_switches?: string[] | null

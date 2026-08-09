@@ -13,6 +13,7 @@
 
 const {openPageSession} = require('../cdp-core.cjs');
 const {interpolateStep} = require('./interpolate.cjs');
+const {redactSecrets} = require('./redact.cjs');
 const {EXECUTORS, evaluateCondition, sleep, validateSteps} = require('./steps.cjs');
 const store = require('./store.cjs');
 const SCHEMA = require('./step-schema.json');
@@ -77,7 +78,7 @@ function summarize(step) {
 
 class Run {
   constructor({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies,
-    resolvedAutomations}) {
+    resolvedAutomations, secretVarNames}) {
     this.app = app;
     this.automation = automation;
     this.profile = profile;
@@ -93,6 +94,11 @@ class Run {
     // refused unknown ids and cycles -- this process has no catalogue to
     // resolve against, so an id missing here is a named runtime error.
     this.resolvedAutomations = resolvedAutomations || {};
+    // Variable names to mask in the log and in the sealed record -- the root
+    // automation's `secret` parameters plus every callee's, collected by the
+    // renderer on the same pass that resolved the call tree. See redact.cjs
+    // for why this cannot be read off `automation` here.
+    this.secretVarNames = secretVarNames || [];
     this.id = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     this.cancelled = false;
     this.screenshotIndex = 0;
@@ -160,7 +166,12 @@ class Run {
   }
 
   persist() {
-    this.record.vars = this.vars;
+    // Redacted here too, and not only in seal(): persist() runs on every change
+    // AND once more from flush() after the seal, so an unmasked assignment here
+    // would put the secret straight back into the record the renderer writes to
+    // Supabase -- and into the disk mirror under <userData>/AutomationRuns/,
+    // which outlives the run.
+    this.record.vars = redactSecrets(this.vars, this.secretVarNames);
     store.writeRun(this.app, this.record);
   }
 
@@ -215,7 +226,12 @@ class Run {
           type: step.type,
           durationMs: Date.now() - startedAt,
           ...(result?.screenshot ? {screenshot: result.screenshot} : {}),
-          ...(result?.vars ? {vars: result.vars} : {}),
+          // Redacted, not raw: this line is written into the run's log and
+          // read back by the whole workspace. The bag the next step
+          // interpolates against (this.vars, assigned above) keeps the real
+          // value.
+          ...(result?.vars ?
+            {vars: redactSecrets(result.vars, this.secretVarNames)} : {}),
         });
         return;
       } catch (error) {
@@ -343,7 +359,10 @@ class Run {
     this.record.duration_ms =
       new Date(this.record.finished_at).getTime() - new Date(this.record.started_at).getTime();
     this.record.step_count = this.stepCount;
-    this.record.vars = this.vars;
+    // The sealed bag is what automation_runs.vars stores, so secrets are masked
+    // on the way in. this.vars itself is untouched -- the run is over, but
+    // nothing should depend on the order of these two lines.
+    this.record.vars = redactSecrets(this.vars, this.secretVarNames);
   }
 
   // `extra` rides on the finished event -- today that is the composed
@@ -362,7 +381,7 @@ class Run {
 // run is minutes, so a route that awaited completion would 504 and look like a
 // hang in the runner rather than a timeout in the bridge.
 async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, onFinish,
-  onNotify, pushCookies, resolvedAutomations}) {
+  onNotify, pushCookies, resolvedAutomations, secretVarNames}) {
   const problems = validateSteps(automation.steps || [], SCHEMA);
   // Callees run through the same runStep, so they are held to the same
   // validity -- checked here, once, not per call at runtime.
@@ -388,7 +407,7 @@ async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, 
   }
 
   const run = new Run({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies,
-    resolvedAutomations});
+    resolvedAutomations, secretVarNames});
   active.set(run.id, {run, profileId: profile.id});
   run.persist();
   onEvent({type: 'started', runId: run.id, run: run.record});

@@ -137,6 +137,25 @@ export function normalizeParams(value: unknown): AutomationParam[] {
   return validateParams(value).length === 0 ? value as AutomationParam[] : [];
 }
 
+// What the profile mapper runs on profiles.automation_vars.
+//
+// Shape-checked but not validated against any declaration, because the profile
+// row knows nothing about which automations exist: an entry for an automation
+// that was deleted, or a value for a parameter that was renamed, is stale
+// rather than wrong. resolveRunVars drops both at the point they would be read.
+export function normalizeProfileVars(value: unknown): ProfileAutomationVars {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const out: ProfileAutomationVars = {};
+  for (const [automationId, values] of Object.entries(value)) {
+    if (values && typeof values === 'object' && !Array.isArray(values)) {
+      out[automationId] = values as ParamValues;
+    }
+  }
+  return out;
+}
+
 // Whether a raw value counts as supplied. Blank is undefined, null, or a string
 // that is only whitespace -- and, for 'list', an array with nothing in it.
 //
@@ -204,16 +223,39 @@ export function paramDefaults(params: AutomationParam[] = []): ParamValues {
   return out;
 }
 
-// Only the keys that are actually set, so a profile holding "" for a parameter
-// falls through to the automation's default instead of blanking it. Keys with
-// no declaration are dropped: a stale value left behind by a renamed parameter
-// must not reappear in the bag under its old name.
-function suppliedOnly(params: AutomationParam[], values: ParamValues = {}): ParamValues {
-  const byName = new Map(params.map((param) => [param.name, param]));
+// A profile's stored values, reduced to the ones that count.
+//
+// Blank falls through, so a profile holding "" for a parameter gets the
+// automation's default rather than an empty string. Undeclared names are
+// dropped: a value left behind by a renamed parameter is stale, and must not
+// reappear in the bag under its old name.
+function profileLayer(
+    byName: Map<string, AutomationParam>, values: ParamValues = {}): ParamValues {
   const out: ParamValues = {};
   for (const [name, raw] of Object.entries(values)) {
     const param = byName.get(name);
     if (param && hasValue(param, raw)) {
+      out[name] = raw;
+    }
+  }
+  return out;
+}
+
+// Explicit values for this run: the dialog's edits, and MCP's `vars` /
+// `varsByProfile`.
+//
+// Undeclared names pass through UNTOUCHED. That is not laxity -- it is the
+// contract POST /v1/automations/run has had since before parameters existed
+// ("seed variables the run starts with, readable as {{vars.<name>}}"), and an
+// agent seeding a variable no declaration mentions must keep working exactly as
+// it did. Declared names still drop when blank, so clearing a box in the Run
+// dialog falls back to the profile's value instead of blanking it.
+function overrideLayer(
+    byName: Map<string, AutomationParam>, values: ParamValues = {}): ParamValues {
+  const out: ParamValues = {};
+  for (const [name, raw] of Object.entries(values)) {
+    const param = byName.get(name);
+    if (!param || hasValue(param, raw)) {
       out[name] = raw;
     }
   }
@@ -240,22 +282,39 @@ export function resolveRunVars(input: {
   const callees = (input.calleeParameters || []).flat();
   // Own declarations win when a caller and a callee name the same parameter --
   // the run is the caller's, and its editor is where the value was set.
-  const known = [...callees, ...own];
+  const byName = new Map([...callees, ...own].map((param) => [param.name, param]));
 
   const merged: ParamValues = {
     ...paramDefaults(callees),
     ...paramDefaults(own),
-    ...suppliedOnly(known, input.profileValues),
-    ...suppliedOnly(known, input.overrides),
+    ...profileLayer(byName, input.profileValues),
+    ...overrideLayer(byName, input.overrides),
   };
 
-  const byName = new Map(known.map((param) => [param.name, param]));
   const out: AutomationVars = {};
   for (const [name, raw] of Object.entries(merged)) {
     const param = byName.get(name);
     out[name] = param ? coerceParamValue(param, raw) : raw;
   }
   return out;
+}
+
+// Every variable name that must be masked in a run's log and record.
+//
+// Takes the whole set of declarations in play -- the root automation's and
+// every callee's -- because a callee shares the caller's variable bag and the
+// main process holds no catalogue to look one up in. See
+// electron/automation/redact.cjs.
+export function secretVarNames(...lists: (AutomationParam[] | undefined)[]): string[] {
+  const names = new Set<string>();
+  for (const list of lists) {
+    for (const param of list || []) {
+      if (param.kind === 'secret') {
+        names.add(param.name);
+      }
+    }
+  }
+  return [...names];
 }
 
 // Required parameters this value set does not answer. `values` is the resolved

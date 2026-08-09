@@ -1,3 +1,4 @@
+import type {AutomationParam, ProfileAutomationVars} from './automations/parameters';
 import type {AutomationSchedule} from './automations/schedule';
 import type {
   AutomationStep,
@@ -120,6 +121,15 @@ export type ArgusProfile = {
   // port is connectable by any local process and CDP attachment is observable
   // from the page.
   automation_id?: string | null;
+  // What this profile answers when a parameterised automation asks, keyed by
+  // automation id: {"flat-search": {"city_name": "Dortmund"}}. This is the
+  // whole point of parameters -- one workflow, a different city per profile.
+  //
+  // NOT limited to automation_id above. A profile holds values for every
+  // parameterised automation it is ever run with, however that run starts
+  // (dialog, launch, schedule, MCP), which is why it is a map and not a second
+  // scalar beside the on-launch slot.
+  automation_vars?: ProfileAutomationVars;
   command_line_switches?: string | null;
   fingerprint?: {
     os?: string;
@@ -345,8 +355,17 @@ export type ArgusAutomation = {
   name: string;
   description?: string | null;
   steps: AutomationStep[];
-  // Seed values every run starts with, before any setVar or extract.
+  // Seed values every run starts with, before any setVar or extract. Untyped
+  // and undeclared -- the bag MCP has always accepted, with no UI of its own.
+  // A declared parameter of the same name SHADOWS its entry; the precedence
+  // lives in resolveRunVars (src/automations/parameters.ts).
   variables?: AutomationVars;
+  // What this automation asks for before it runs: ordered, typed, and the
+  // reason one workflow can serve many profiles. Each is addressable from any
+  // interpolated step field as {{vars.<name>}}, and every profile can hold its
+  // own values (ArgusProfile.automation_vars). Shape in
+  // src/automations/parameters.ts.
+  parameters?: AutomationParam[];
   // Free text, at most 5, normalized through normalizeTags on every write --
   // the same contract profiles.tags has, and the same catalog behind the
   // suggestions, so "facebook" means the same thing on both.

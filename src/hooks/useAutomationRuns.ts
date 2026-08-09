@@ -241,6 +241,9 @@ export function useAutomationRuns(
         // the caller against the loaded workspace (resolveCallTree). This hook
         // cannot resolve it itself -- it does not hold the automations list.
         resolvedAutomations?: Record<string, AutomationStep[]>;
+        // Variable names the runner must mask in the log and in the sealed
+        // record. Resolved by the caller for the same reason the call tree is.
+        secretVarNames?: string[];
         buildLaunch?: (cdpPort: number) => Promise<{ok: boolean; error?: string}>;
       } = {},
   ): Promise<StartRunResult> => {
@@ -293,6 +296,7 @@ export function useAutomationRuns(
         cdpUrl: session.cdpUrl as string,
         vars: options.vars,
         resolvedAutomations: options.resolvedAutomations,
+        secretVarNames: options.secretVarNames,
         ownsSession,
       });
       if (!result.ok || !result.runId) {

@@ -15,6 +15,7 @@ import {useOrg} from '../org';
 import {SHOWCASE_AUTOMATION} from '../data/showcaseAutomation';
 import {collectCallees, resolveCallTree} from '../automations/callGraph';
 import {RUN_CONCURRENCY, runWaitCeiling} from '../automations/limit';
+import {describeMissingParams, resolveRunVars, secretVarNames} from '../automations/parameters';
 import {newId} from './core';
 import type {WorkspaceCore} from './core';
 import type {ProxyActions} from './useProxyActions';
@@ -113,6 +114,7 @@ export function useAutomationActions(
       name: 'New automation',
       steps: [],
       variables: {},
+      parameters: [],
       pinned: false,
       timeout_ms: 300000,
       close_on_finish: false,
@@ -350,14 +352,45 @@ export function useAutomationActions(
       }
       return {ok: false as const, error};
     }
+    // The variable bag this run starts with, assembled from the automation's
+    // defaults, this profile's own answers and whatever the caller passed --
+    // resolveRunVars owns that precedence, and the whole of it happens here
+    // rather than in the runner, so the main process still receives one already
+    // resolved `vars` object and knows nothing about parameters.
+    //
+    // Callee declarations come along because a callAutomation target shares
+    // this bag: without their defaults, a callee's own default is invisible.
+    const calleeParameters = Object.keys(tree.resolved).map((id) =>
+      state.automations.find((entry) => entry.id === id)?.parameters || []);
+    const vars = resolveRunVars({
+      parameters: automation.parameters,
+      calleeParameters,
+      profileValues: profile.automation_vars?.[automation.id],
+      overrides: options.vars,
+    });
+    // Better here than three steps in. An unresolved {{vars.x}} already fails
+    // the step, but it fails it inside a browser the user cannot see, in a
+    // sentence about interpolation rather than about the value they forgot.
+    const missing = describeMissingParams(automation.parameters, vars);
+    if (missing) {
+      const error = `${profile.name} ${missing}. Set it on the profile, or in the Run dialog.`;
+      if (!options.quiet) {
+        toast.fail(`Couldn't run ${automation.name}`, error);
+      }
+      return {ok: false as const, error};
+    }
     if (!options.quiet) {
       toast.setMessage(`Starting ${automation.name}`);
     }
     const result = await startRun(automation, profile, {
       trigger: options.trigger,
-      vars: options.vars,
+      vars,
       resolvedAutomations:
         Object.keys(tree.resolved).length > 0 ? tree.resolved : undefined,
+      // Collected on the same pass, and from the same lists: the runner masks
+      // these in the log and in the record it seals, because a run's vars are
+      // readable by the whole workspace.
+      secretVarNames: secretVarNames(automation.parameters, ...calleeParameters),
       buildLaunch: async (cdpPort) => {
         // The same gate the Launch button goes through, rather than reading
         // the proxy straight off state. This path used to do the latter, which
@@ -404,15 +437,28 @@ export function useAutomationActions(
   async function runMany(
       automation: ArgusAutomation,
       list: ArgusProfile[],
-      options: {trigger?: RunTrigger; vars?: AutomationVars} = {},
+      options: {
+        trigger?: RunTrigger;
+        vars?: AutomationVars;
+        // Per-profile overrides on top of `vars`, keyed by profile id. This is
+        // what makes one dialog able to run Dortmund on one profile and Essen
+        // on the next, and what MCP's varsByProfile lands in.
+        varsByProfile?: Record<string, AutomationVars>;
+      } = {},
   ) {
+    // `vars` applies to every profile; varsByProfile overrides it for one.
+    const varsFor = (profile: ArgusProfile) => ({
+      ...options.vars,
+      ...options.varsByProfile?.[profile.id],
+    });
     if (list.length === 0) {
       return {started: 0, failed: 0};
     }
     if (list.length === 1) {
       // One profile is not a batch: it keeps the live messages and the real
       // error dialog, which are more use than a summary counting to one.
-      const single = await run(automation, list[0], options);
+      const single = await run(automation, list[0],
+          {trigger: options.trigger, vars: varsFor(list[0])});
       return {started: single.ok ? 1 : 0, failed: single.ok ? 0 : 1};
     }
     toast.setMessage(
@@ -421,7 +467,8 @@ export function useAutomationActions(
     let started = 0;
     const failures: string[] = [];
     await mapWithConcurrency(list, RUN_CONCURRENCY, async (profile) => {
-      const result = await run(automation, profile, {...options, quiet: true});
+      const result = await run(automation, profile,
+          {trigger: options.trigger, vars: varsFor(profile), quiet: true});
       if (!result.ok) {
         failures.push(`${profile.name}: ${result.error}`);
         return;

@@ -4,6 +4,9 @@ import {buildLaunchPayload} from '../lib/launch';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {matchedProxyForProfile} from '../lib/proxies';
 import {resolveCallTree} from '../automations/callGraph';
+import {
+  describeMissingParams, resolveRunVars, secretVarNames,
+} from '../automations/parameters';
 import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
 import {fingerprintFromDraftPatch} from '../drafts';
@@ -231,10 +234,30 @@ export function useProfileActions(
       // catalogue to resolve callAutomation references against. A tile whose
       // tree has problems ships without one and the run refuses with a
       // sentence naming the missing callee.
+      // Each tile also carries this profile's answers to the automation's
+      // parameters, resolved here for the same reason the call tree is: the run
+      // starts in the main process, which can see neither the declarations nor
+      // the profile's stored values. A tile the profile cannot satisfy ships
+      // with the sentence saying so, and the run route refuses with it rather
+      // than opening a browser that fails on an unresolved {{vars.x}}.
       const tiles = startPageAutomations(state.automations, target).map((tile) => {
         const tree = resolveCallTree(tile, state.automations);
-        return tree.problems.length === 0 && Object.keys(tree.resolved).length > 0 ?
-          {...tile, resolvedAutomations: tree.resolved} : tile;
+        const calleeParameters = Object.keys(tree.resolved).map((id) =>
+          state.automations.find((entry) => entry.id === id)?.parameters || []);
+        const vars = resolveRunVars({
+          parameters: tile.parameters,
+          calleeParameters,
+          profileValues: target.automation_vars?.[tile.id],
+        });
+        const missing = describeMissingParams(tile.parameters, vars);
+        return {
+          ...tile,
+          ...(tree.problems.length === 0 && Object.keys(tree.resolved).length > 0 ?
+            {resolvedAutomations: tree.resolved} : {}),
+          vars,
+          secretVarNames: secretVarNames(tile.parameters, ...calleeParameters),
+          ...(missing ? {paramsBlocked: `${target.name} ${missing}.`} : {}),
+        };
       });
 
       // The debugging port is opened ONLY when something might drive this
@@ -297,13 +320,32 @@ export function useProfileActions(
               toast.fail(`Couldn't run ${attached.name}`, tree.problems.join(' '));
               return;
             }
+            const calleeParameters = Object.keys(tree.resolved).map((id) =>
+              state.automations.find((entry) => entry.id === id)?.parameters || []);
+            const vars = resolveRunVars({
+              parameters: attached.parameters,
+              calleeParameters,
+              profileValues: target.automation_vars?.[attached.id],
+            });
+            // The browser is already open and stays open -- the profile is
+            // fine, the automation is not. Only the run is abandoned, and it is
+            // abandoned before a record exists rather than after a step fails
+            // on an unresolved {{vars.x}} inside a window nobody is watching.
+            const missing = describeMissingParams(attached.parameters, vars);
+            if (missing) {
+              toast.fail(`Couldn't run ${attached.name}`,
+                  `${target.name} ${missing}. Set it in the profile's Launch section.`);
+              return;
+            }
             const started = await native.startAutomationRun?.({
               automation: attached,
               profile: target,
               trigger: 'launch',
               cdpUrl: ready.cdpUrl,
+              vars,
               resolvedAutomations:
                 Object.keys(tree.resolved).length > 0 ? tree.resolved : undefined,
+              secretVarNames: secretVarNames(attached.parameters, ...calleeParameters),
             });
             if (started && !started.ok) {
               toast.fail(`Couldn't run ${attached.name}`, started.error || 'The run did not start.');

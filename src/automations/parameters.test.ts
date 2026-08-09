@@ -150,9 +150,26 @@ describe('resolveRunVars', () => {
         .toEqual({city_name: 'Dortmund', rooms: 2});
   });
 
-  it('drops a value whose parameter no longer exists', () => {
+  it('drops a profile value whose parameter no longer exists', () => {
     expect(resolveRunVars({parameters, profileValues: {gone: 'stale'}}))
         .toEqual({city_name: 'Dortmund', rooms: 2});
+  });
+
+  // The contract POST /v1/automations/run had before parameters existed: an
+  // agent may seed any variable it likes, declared or not.
+  it('passes an undeclared override through untouched', () => {
+    expect(resolveRunVars({parameters: [], overrides: {rows: [{a: 1}], n: 7}}))
+        .toEqual({rows: [{a: 1}], n: 7});
+    expect(resolveRunVars({parameters, overrides: {seed: 'raw'}}))
+        .toEqual({city_name: 'Dortmund', rooms: 2, seed: 'raw'});
+  });
+
+  it('lets a blank override fall back to the profile', () => {
+    expect(resolveRunVars({
+      parameters,
+      profileValues: {city_name: 'Essen'},
+      overrides: {city_name: ''},
+    }).city_name).toBe('Essen');
   });
 
   it('takes a callee default the caller never declared', () => {

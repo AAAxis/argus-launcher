@@ -429,6 +429,11 @@ type ArgusNative = {
     // calleeId -> steps for every callAutomation in the tree, resolved by the
     // renderer (resolveCallTree) -- main has no automation catalogue.
     resolvedAutomations?: Record<string, AutomationStep[]>;
+    // Variable names to mask in the run's log and sealed record: the `secret`
+    // parameters of the root automation and of every callee. Collected by the
+    // renderer for the same reason resolvedAutomations is -- main holds no
+    // catalogue, so it cannot see a callee's declarations to work them out.
+    secretVarNames?: string[];
     // True when this run had to launch the profile, false when it attached to a
     // window that was already open. The main process will only honour the
     // automation's close_on_finish for the first kind -- see the handler in

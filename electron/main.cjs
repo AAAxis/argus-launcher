@@ -4091,6 +4091,10 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
       // the renderer (the only side with the catalogue). Absent when the tree
       // has no calls.
       resolvedAutomations: payload.resolvedAutomations,
+      // The `secret` parameter names the runner masks in the log and in the
+      // sealed record. Resolved by the renderer for the same reason the call
+      // tree is: a callee's declarations are not visible from here.
+      secretVarNames: payload.secretVarNames,
       onEvent: sendRunEvent,
       // Lets a saveCookies step land its result the same way the extension's
       // push does -- through the renderer, which owns the cloud write and the
@@ -4580,6 +4584,14 @@ function runFromPage(req, res) {
     tokens: runTokens,
     sendJson,
     startRun: async (entry, automation) => {
+      // Set at mint time when this profile has no value for a required
+      // parameter. Refused here, before a session is resolved: the alternative
+      // is a run that starts, drives a browser and dies on an unresolved
+      // {{vars.x}} in a sentence about interpolation rather than about the
+      // value nobody filled in.
+      if (automation.paramsBlocked) {
+        throw Object.assign(new Error(automation.paramsBlocked), {status: 400});
+      }
       const session = await resolveProfileCdp(entry.profileId);
       // A token whose automations list is non-empty was minted alongside a
       // reserved port, so this cannot normally be reached -- but a run with
@@ -4599,6 +4611,11 @@ function runFromPage(req, res) {
         // Rides the run token: the renderer resolved each tile's call tree at
         // mint time, because this process has no catalogue to resolve against.
         resolvedAutomations: automation.resolvedAutomations,
+        // Both ride the run token too: the renderer resolved this profile's
+        // parameter values at mint time, against declarations this process
+        // cannot see.
+        vars: automation.vars,
+        secretVarNames: automation.secretVarNames,
         onEvent: sendRunEvent,
         pushCookies: (profileId, cookies) =>
           askRendererOnPageChannel('argus:cookie-sync-push-request', {profileId, cookies}),
