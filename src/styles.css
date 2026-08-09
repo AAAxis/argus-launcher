@@ -1166,15 +1166,22 @@ nav button.active svg {
 
 /* How many rows on this tab arrived since this machine last looked -- see
  * useNewArrivals. Built from .inbox-count's measurements (10px/750, 15px tall,
- * a 999px pill) so the two badges in the chrome read as one idea, but green
- * rather than the bell's --danger: a colleague adding profiles is news, not an
- * alarm, and the green ties it to the row tint the tab is about to show.
+ * a 999px pill) so the two badges in the chrome read as one idea.
+ *
+ * Neutral, not the --success green it used to take. The green was arguing that
+ * new rows are a good outcome, tying itself to the tint the tab is about to
+ * show -- but the sidebar is the app's quietest surface, drawn in nothing but
+ * greys, and a saturated dot on it was the loudest thing on screen for news as
+ * ordinary as a teammate adding a proxy. --ink-faint keeps the badge legible
+ * against the rail, the --hover of a hovered tab and the --nav-active-bg of
+ * the open one, without claiming a verdict it does not have. The bell keeps
+ * its --danger, which is the one badge in the chrome that does.
  *
  * pointer-events: none so the badge cannot swallow a click meant for the tab
  * it is sitting on. */
 .nav-count {
   align-items: center;
-  background: var(--success);
+  background: var(--ink-faint);
   border-radius: 999px;
   color: var(--paper);
   display: flex;
@@ -2464,7 +2471,14 @@ img.settings-identity-avatar {
  * the title or the content under it -- and the flat .filter-trigger actions
  * (Refresh, Import) and the .icon-button bell are excluded: both already carry
  * their own geometry, and this selector outranks theirs. */
-.topbar .actions button:not(.filter-trigger):not(.icon-button) {
+/* A child combinator, because a Popover renders its panel as a sibling of its
+   trigger -- so everything inside the bell's panel was a `.topbar .actions
+   button` too, and was silently taking this min-height. It went unnoticed while
+   the panel's own buttons all carried .icon-button or set their own height; the
+   moment the clear button stopped doing that, a 22px circle came out 32px tall
+   and oval. The rule only ever meant the header's own actions, and every one of
+   them is a direct child. */
+.topbar .actions > button:not(.filter-trigger):not(.icon-button) {
   min-height: var(--control-h-sm);
   padding: 0 12px;
 }
@@ -10717,11 +10731,29 @@ td.cookie-value-cell input:focus {
 
 /* ── The inbox ── */
 
-/* The bell sits in the topbar, so the count has to read at a glance without
- * enlarging the button and shoving the row around. Absolute, and outside the
- * button's own box. */
+/* The bell takes .filter-trigger's silhouette -- flat at rest, a --hover plate
+ * at --radius-xs under the pointer and while the panel is open -- so it agrees
+ * with Refresh and Import instead of being the one bordered box left in the
+ * row. See the long note on .filter-trigger for why that shape won.
+ *
+ * What it overrides is only the geometry: .filter-trigger is a label-shaped
+ * control (content width, 6px/8px padding), and this is a 32px square holding
+ * a 16px glyph. Declared after it, so the equal-specificity padding wins.
+ *
+ * The count has to read at a glance without enlarging the button and shoving
+ * the row around, so it is absolute and outside the button's own box. */
 .inbox-button {
+  color: var(--ink-soft);
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
   position: relative;
+  width: 32px;
+}
+
+.inbox-button:not(:disabled):hover,
+.inbox-button[aria-expanded='true'] {
+  color: var(--ink);
 }
 
 .inbox-count {
@@ -10768,8 +10800,11 @@ td.cookie-value-cell input:focus {
   border-bottom: 0;
 }
 
+/* flex-start, not centre: the title wraps to two lines (see .inbox-item-name),
+ * and a glyph centred against a two-line block floats away from the word it
+ * belongs to. The 2px puts it on the first line's optical centre instead. */
 .inbox-item-head {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   gap: 8px;
   min-width: 0;
@@ -10778,13 +10813,37 @@ td.cookie-value-cell input:focus {
 .inbox-item-head svg {
   color: var(--ink-faint);
   flex: none;
+  margin-top: 2px;
 }
 
+/* Two lines, then an ellipsis. A 320px panel is narrow enough that a single
+ * clipped line cut most automation titles mid-word, and the title is the only
+ * thing saying which run this is about.
+ *
+ * min-width: 0 is what actually keeps the clear button round -- without it the
+ * title refuses to shrink below its content, and a long one squeezes the 22px
+ * circle beside it into an oval. */
 .inbox-item-name {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
   font-size: 13px;
   font-weight: 650;
+  line-clamp: 2;
+  /* Explicit, because the glyph, the unread dot and the clear button are all
+     nudged onto this line by hand and `normal` is a font's own business. */
+  line-height: 1.35;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+/* Handoff titles keep the old single line: that head row is a name plus a
+   glyph with nothing else competing for it, and the card below it already
+   spells out the kind and the sender. */
+.inbox-item:not(.is-notification) .inbox-item-name {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
   white-space: nowrap;
 }
 
@@ -10826,6 +10885,19 @@ td.cookie-value-cell input:focus {
   margin: 2px 0;
 }
 
+/* The quote bar comes off. .inbox-item-note is set as a quotation because on a
+   handoff it IS one -- a teammate's own words, which must not read as ours.
+   A run notification's body is the app reporting, so quoting it attributes our
+   sentence to somebody. The 22px is the glyph plus the head's gap: with the
+   bar gone the body and the byline hang under the title rather than out to its
+   left, and the card has one text edge instead of two. */
+.inbox-item.is-notification .inbox-item-note,
+.inbox-item.is-notification .inbox-item-from {
+  border-left: 0;
+  margin-left: 22px;
+  padding-left: 0;
+}
+
 /* Tone from the run's own status tokens, reported off the record -- the bell
  * never recomputes a verdict, it only colours the one it was given. */
 .inbox-status.is-active {
@@ -10844,40 +10916,147 @@ td.cookie-value-cell input:focus {
   color: var(--ink-faint);
 }
 
-/* The title doubles as the row's one action; styled as text with an underline
- * on hover so the row does not read as a wall of buttons. */
-.inbox-item-open {
+/* ── The card as the target ──
+ * The whole notification opens the run history it reports on. The title used
+ * to be the only live thing in the card -- underlined on hover, ~140px of a
+ * 320px row -- which made the reader aim at a word when every other list in
+ * the app hands over the whole row.
+ *
+ * The hit area is a stretched overlay rather than a wrapping <button>: the
+ * card also holds the clear, and a button cannot nest in a button. z-index 0
+ * against the clear's 1 settles which one a click on the corner belongs to. */
+/* A rounded plate, so the shade reads as one card lifting out of the list
+ * rather than as a band across the panel. --radius-sm, a notch under the
+ * panel's own --radius: the plate is inset 10px inside it, and matching the
+ * outer corner exactly is what makes a nested box look like it is bulging out
+ * of its container.
+ *
+ * The card's own border-bottom had to go with it -- border-radius rounds the
+ * border box, which would have bent every separator in the list into a pair of
+ * arcs. The hairline is drawn by ::after below instead, where the rounding
+ * cannot reach it. */
+.inbox-item.is-notification {
+  border-bottom: 0;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.inbox-item.is-card {
+  cursor: pointer;
+}
+
+/* 3px between plates, so two lit cards never meet corner to corner -- touching
+   rounded boxes pinch, and the notch it leaves reads as a rendering fault
+   rather than as two cards. */
+.inbox-item.is-notification + .inbox-item.is-notification {
+  margin-top: 3px;
+}
+
+/* Between two notifications, never above the first -- the divider or the
+   handoff above it already ends that group. Inset 10px so it stops short of
+   where the plates' corners curve, and pulled into the middle of that 3px. */
+.inbox-item.is-notification + .inbox-item.is-notification::after {
+  background: var(--border-soft);
+  content: '';
+  height: 1px;
+  left: 10px;
+  position: absolute;
+  right: 10px;
+  top: -2px;
+}
+
+/* A hairline running into the top edge of a rounded plate is the one thing
+   that gives the trick away. Whenever a card carries a plate -- hovered, or
+   unread and holding --surface -- it drops the line above it and the line the
+   card below would draw against it. Between two plates the fills separate them
+   on their own. */
+.inbox-item.is-notification:hover::after,
+.inbox-item.is-notification.is-unread::after,
+.inbox-item.is-notification:hover + .inbox-item.is-notification::after,
+.inbox-item.is-notification.is-unread + .inbox-item.is-notification::after {
+  opacity: 0;
+}
+
+.inbox-item-hit {
   background: none;
   border: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
+  /* The card's, so the focus ring below traces the same corners as the hover
+     plate it sits inside. */
+  border-radius: inherit;
+  box-shadow: none;
+  inset: 0;
   padding: 0;
-  text-align: left;
+  position: absolute;
+  z-index: 0;
 }
 
-.inbox-item-open:hover {
-  text-decoration: underline;
+/* No fill of its own; it is the card underneath that lights up. Shadowless for
+   the same reason every other control here is -- see `button:hover`. */
+.inbox-item-hit:not(:disabled):hover {
+  background: none;
+  box-shadow: none;
 }
 
+/* Inset, because a stretched overlay's outer ring would be clipped by the
+   panel's own overflow on the first and last card. */
+.inbox-item-hit:focus-visible {
+  box-shadow: inset var(--focus-ring);
+  outline: none;
+}
+
+/* The same --hover plate the nav rail and the filter triggers take, so a
+   pressable card in the panel and a pressable row in the chrome answer the
+   pointer identically. Three classes deep to outrank .is-unread's fill below,
+   which is a state and not a hover. */
+.inbox-item.is-notification.is-card:hover {
+  background: var(--hover);
+}
+
+/* Above the hit overlay: these two are read, not pressed, and the unread dot
+   in particular must not eat the card's own click. */
 .inbox-unread-dot {
   background: var(--accent);
   border-radius: 999px;
   flex: none;
   height: 7px;
+  margin-top: 5px;
+  pointer-events: none;
+  position: relative;
   width: 7px;
+  z-index: 1;
 }
 
+/* A circle, not a lozenge. It carries its own geometry rather than borrowing
+   .icon-button's 32px square and then undoing it, and the explicit flex: none
+   is half of what keeps it round (see .inbox-item-name for the other half).
+   The -2px lifts the 22px box onto the centre of the title's first 17.5px
+   line, the same arithmetic the glyph's +2px and the dot's +5px come from. */
 .inbox-item-clear {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
   color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
   height: 22px;
+  justify-content: center;
   margin-left: auto;
+  margin-top: -2px;
   min-height: 22px;
   padding: 0;
+  position: relative;
   width: 22px;
+  z-index: 1;
 }
 
-.inbox-item-clear:hover {
+/* A tinted plate, not just red ink: on a card that is itself shaded under the
+   pointer, a colour change alone did not read as "this is a second, different
+   target". */
+.inbox-item-clear:not(:disabled):hover {
+  background: var(--danger-bg);
+  box-shadow: none;
   color: var(--danger);
 }
 

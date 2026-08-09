@@ -18,8 +18,9 @@
 // per action.
 import {useEffect, useMemo, useState} from 'react';
 import {
-  Bot, BookOpen, Clock, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Share2,
-  Sparkles, Star, Workflow,
+  Bot, BookOpen, CircleCheck, CircleSlash, CircleX, Clock, History, LoaderCircle,
+  MonitorSmartphone, Pencil, Play, Plus, Rocket, Share2, Sparkles, Star,
+  TriangleAlert, Workflow,
 } from 'lucide-react';
 import {Assignee} from '../ui/Assignee';
 import {Badge} from '../ui/Badge';
@@ -36,11 +37,12 @@ import {parseAvatar} from '../../lib/profileAvatar';
 import {profileColorStyle} from '../../lib/profileColors';
 import {automationCap} from '../../automations/limit';
 import {describeRunBlock} from '../../automations/runReadiness';
-import {RUN_LABEL, RUN_TONE} from '../../automations/runStatus';
+import {RUN_LABEL} from '../../automations/runStatus';
 import {describeSchedule} from '../../automations/schedule';
 import {sortAutomations} from '../../automations/sort';
 import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusAutomation, ArgusConnector, AutomationRun} from '../../types';
+import type {RunStatus} from '../../automations/types';
 
 // All, or the ones the browser start pages show. Chips rather than a filter
 // dropdown, on the control Extensions and the proxy-mode selector already use.
@@ -50,6 +52,23 @@ import type {ArgusAutomation, ArgusConnector, AutomationRun} from '../../types';
 // collection -- the services automations call -- which lives here rather than
 // in Settings because it is only ever used from this tab.
 type View = 'all' | 'pinned' | 'mine' | 'connectors' | 'bot';
+
+// The verdict's glyph. A coloured dot said "something happened"; a tick, a
+// triangle and a cross say what happened, which is the whole of what the row is
+// for at a glance across a grid.
+//
+// Here rather than beside RUN_LABEL and RUN_TONE in automations/runStatus.ts:
+// that module is plain .ts and shared with the run-log dialog, and it has no
+// business pulling in an icon set for one caller. Keyed by RunStatus all the
+// same, so a status added to the union has to be given a glyph or typecheck
+// fails -- which is the property that made those two maps worth having.
+const RUN_GLYPH: Record<RunStatus, typeof CircleCheck> = {
+  ok: CircleCheck,
+  partial: TriangleAlert,
+  failed: CircleX,
+  cancelled: CircleSlash,
+  running: LoaderCircle,
+};
 
 export function AutomationsTab({
   onEdit, onNew, onLoadExample, onCreateDemoProfile, onRun, onHistory, onShare, onOpenSite,
@@ -309,198 +328,264 @@ export function AutomationsTab({
           // still a navigable card.
           const avatar = parseAvatar(automation.icon);
           const plate = automation.color ? profileColorStyle(automation.color) : undefined;
-          // What the dot reports when this session has seen nothing: the
-          // denormalized columns, written by whichever machine ran it last.
-          const persisted = !run && automation.last_run_at && automation.last_run_status ?
-            {at: automation.last_run_at, status: automation.last_run_status} : null;
+          // The verdict the card reports: this session's newest run where there
+          // is one, and otherwise the denormalized columns, written by whichever
+          // machine ran it last -- which is what survives a restart and what
+          // covers a teammate's machine, arriving on the normal focus refresh.
+          //
+          // Reconciled here rather than rendered as two near-identical rows, as
+          // it was: they are one line saying one thing, and only ever differed
+          // in where the same four facts were read from.
+          const verdict = run ?
+            {
+              at: run.finished_at || run.started_at,
+              duration_ms: run.duration_ms,
+              error: run.error,
+              status: run.status,
+            } :
+            automation.last_run_at && automation.last_run_status ?
+              {
+                at: automation.last_run_at,
+                duration_ms: null,
+                error: null,
+                status: automation.last_run_status,
+              } :
+              null;
           return (
             <article
-              className={newIds.has(automation.id) ? 'automation-card is-new' : 'automation-card'}
+              className={newIds.has(automation.id) ?
+                'automation-card automation-card-framed is-new' :
+                'automation-card automation-card-framed'}
               key={automation.id}
             >
-              {/* One flex-wrap row -- mark, name, star, step count -- like
-                  .extension-card-head. The step count leads the badges because
-                  it is the one fact every automation has; the rest are wiring,
-                  and wiring belongs under the description.
-                  Delete used to sit here, at the end of the row. It was the one
-                  destructive action in the app reachable in a single click from
-                  a grid, on a card whose other three buttons are all safe, and
-                  it guarded itself with a window.confirm(). It now lives in the
-                  editor's footer beside Cancel and Save -- you open the thing
-                  before you throw it away. */}
-              <div className="automation-card-head">
-                <span
-                  aria-hidden="true"
-                  className={avatar || plate ?
-                    'extension-mark automation-mark' : 'extension-mark is-fallback'}
-                  style={plate}
-                >
-                  {avatar?.kind === 'brand' ?
-                    <TagMark preset={avatar.preset} size={18} /> :
-                    <Workflow size={20} strokeWidth={1.75} />}
-                </span>
-                {/* The star lives INSIDE the h3, straight after the last word
-                    of the name, so it cannot wrap away from it into the badge
-                    row -- a long name takes its star along to the second line.
-                    It is mine, not the workspace's: it re-sorts my grid and
-                    nobody else's. aria-pressed rather than two labels, so a
-                    screen reader hears one control changing state. */}
-                <h3>
-                  {automation.name}
+              {/* The chrome, on the frame rather than in the card: the two
+                  secondary actions on the leading edge, the step count on the
+                  trailing one. Both used to live below -- Share and History as
+                  glyphs crowding the foot beside Run and Edit, the count as a
+                  badge competing with the name for the head's first line.
+                  Moving them out leaves the card itself holding nothing but the
+                  mark, the name, what it does, and the two buttons that matter.
+                  Per-card rather than on a selection toolbar, because this tab
+                  has no selection model at all -- no checkboxes, no
+                  useSelection. Adding one just to reach parity with the three
+                  table tabs would be a larger change than the buttons. */}
+              <div className="automation-card-bar">
+                <div className="automation-card-tools">
                   <button
-                    aria-label={isStarred ?
-                      `Unstar ${automation.name}` : `Star ${automation.name}`}
-                    aria-pressed={isStarred}
-                    className={isStarred ?
-                      'automation-star is-starred' : 'automation-star'}
-                    onClick={() => automations.setStarred(automation.id, !isStarred)}
-                    title={isStarred ? 'Unstar' : 'Star — starred sort to the top'}
+                    className="automation-card-tool"
+                    onClick={() => onShare({kind: 'automation', ids: [automation.id]})}
+                    aria-label={`Share ${automation.name}`}
+                    title="Share with another workspace"
                     type="button"
-                  >
-                    <Star size={15} strokeWidth={2} />
-                  </button>
-                </h3>
-                <Badge icon={<Layers size={12} />}>
+                  ><Share2 size={15} /></button>
+                  <button
+                    className="automation-card-tool"
+                    onClick={() => onHistory(automation)}
+                    aria-label={`History for ${automation.name}`}
+                    title="Run history"
+                    type="button"
+                  ><History size={15} /></button>
+                </div>
+                {/* Plain text, not a <Badge>: it is the one fact every
+                    automation has, so a chip around it on every card in the
+                    grid is twelve outlines reporting the unremarkable.
+                    It opens the editor, which the foot's Edit also does. A
+                    duplicate on purpose: the steps are what the editor shows,
+                    so the count is where a hand goes looking for them, and a
+                    label that reads like a link into the thing it counts should
+                    be one. */}
+                <button
+                  className="automation-card-count"
+                  onClick={() => onEdit(automation)}
+                  title="Open the steps"
+                  type="button"
+                >
                   {automation.steps.length} step{automation.steps.length === 1 ? '' : 's'}
-                </Badge>
+                </button>
               </div>
 
-              {/* Always rendered, empty or not: this is the element carrying
-                  flex: 1, and it is what makes every card's foot land on the
-                  same line across a row. A card without one would pull its
-                  buttons up to meet its badges. */}
-              <p>{automation.description}</p>
-
-              {/* These were .status-pill -- green text, no fill, no border, no
-                  radius, despite the name. Three of them in a row read as one
-                  green sentence. Every tab that used it has since moved to
-                  <Badge>, and the class is gone. */}
-              {(attachedTo.length > 0 || automation.pinned || automation.assigned_to ||
-                automation.schedule?.enabled || automation.created_via === 'mcp' ||
-                (automation.created_by && automation.created_by !== org.userId) ||
-                (automation.tags || []).length > 0) && (
-                <div className="automation-card-meta">
-                  {/* First, because "whose is this" is the question a team asks
-                      of a card before any of the others. Only rendered when
-                      somebody holds it -- an "Unassigned" badge on every card
-                      would be a grid of noise. */}
-                  {automation.assigned_to && (
-                    <Assignee userId={automation.assigned_to} />
-                  )}
-                  {/* Who made it -- but only when that is news: an agent over
-                      MCP always (created_by is just whoever had the launcher
-                      open, which is the misattribution the label corrects), a
-                      teammate when it is not you. Your own cards say nothing,
-                      for the same reason every card saying "Unassigned" would
-                      be noise. */}
-                  {automation.created_via === 'mcp' ? (
-                    <Badge
-                      icon={<Bot size={12} />}
-                      title="Created by an agent over MCP"
-                    >{automation.created_by_label || 'Agent'}</Badge>
-                  ) : automation.created_by && automation.created_by !== org.userId && (
-                    <Badge title="Who created this automation">
-                      by {assigneeName(automation.created_by, state.members)}
-                    </Badge>
-                  )}
-                  {automation.schedule?.enabled && (
-                    <Badge
-                      icon={<Clock size={12} />}
-                      title="Runs on a schedule while the launcher is open"
-                    >{describeSchedule(automation.schedule)}</Badge>
-                  )}
-                  {attachedTo.length > 0 && (
-                    <Badge
-                      icon={<Rocket size={12} />}
-                      title={attachedTo.map((p) => p.name).join(', ')}
-                    >On launch · {attachedTo.length}</Badge>
-                  )}
-                  {automation.pinned && (
-                    <Badge icon={<Workflow size={12} />}>Start page</Badge>
-                  )}
-                  {/* Tags last, and in the tag chip rather than a Badge, so they
-                      read as labels the user chose rather than as more facts the
-                      app is reporting about this row. */}
-                  {(automation.tags || []).map((tag) => <TagChip key={tag} tag={tag} />)}
+              {/* The card proper, inset in the frame on every side. Everything
+                  that describes the automation lives in here; everything the
+                  app says *about* it -- the actions, the count -- rides the
+                  frame outside. */}
+              <div className="automation-card-body">
+                {/* Mark and name, one wrapping row, like .extension-card-head.
+                    Delete used to sit here, at the end of the row. It was the one
+                    destructive action in the app reachable in a single click from
+                    a grid, on a card whose other three buttons are all safe, and
+                    it guarded itself with a window.confirm(). It now lives in the
+                    editor's footer beside Cancel and Save -- you open the thing
+                    before you throw it away. */}
+                <div className="automation-card-head">
+                  <span
+                    aria-hidden="true"
+                    className={avatar || plate ?
+                      'extension-mark automation-mark' : 'extension-mark is-fallback'}
+                    style={plate}
+                  >
+                    {avatar?.kind === 'brand' ?
+                      <TagMark preset={avatar.preset} size={18} /> :
+                      <Workflow size={20} strokeWidth={1.75} />}
+                  </span>
+                  {/* The star lives INSIDE the h3, straight after the last word
+                      of the name, so it cannot wrap away from it into the badge
+                      row -- a long name takes its star along to the second line.
+                      It is mine, not the workspace's: it re-sorts my grid and
+                      nobody else's. aria-pressed rather than two labels, so a
+                      screen reader hears one control changing state. */}
+                  <h3>
+                    {automation.name}
+                    <button
+                      aria-label={isStarred ?
+                        `Unstar ${automation.name}` : `Star ${automation.name}`}
+                      aria-pressed={isStarred}
+                      className={isStarred ?
+                        'automation-star is-starred' : 'automation-star'}
+                      onClick={() => automations.setStarred(automation.id, !isStarred)}
+                      title={isStarred ? 'Unstar' : 'Star — starred sort to the top'}
+                      type="button"
+                    >
+                      <Star size={15} strokeWidth={2} />
+                    </button>
+                  </h3>
                 </div>
-              )}
 
-              {run && (
-                <p className="automation-card-run">
-                  <span
-                    aria-hidden="true"
-                    className={`automation-run-dot is-${run.status}`}
-                  />
-                  <Badge tone={RUN_TONE[run.status]}>
-                    {/* "Running · 3" rather than "Running": one automation can
-                        be in flight on several profiles now, and a single label
-                        would report a batch of five as one run. */}
-                    {RUN_LABEL[run.status]}
-                    {runningCount > 1 ? ` · ${runningCount}` : ''}
-                  </Badge>
-                  {!busy && run.duration_ms ?
-                    ` in ${(run.duration_ms / 1000).toFixed(1)}s` :
-                    ''}
-                  {run.error ? ` — ${run.error}` : ''}
-                </p>
-              )}
+                {/* Always rendered, empty or not: this is the element carrying
+                    flex: 1, and it is what makes every card's foot land on the
+                    same line across a row. A card without one would pull its
+                    buttons up to meet its badges. */}
+                <p>{automation.description}</p>
 
-              {/* What the columns remember when this session saw nothing: the
-                  verdict survives a restart and covers a teammate's machine,
-                  arriving on the normal focus refresh. */}
-              {persisted && (
-                <p className="automation-card-run">
-                  <span
-                    aria-hidden="true"
-                    className={`automation-run-dot is-${persisted.status}`}
-                  />
-                  <Badge tone={RUN_TONE[persisted.status]}>
-                    {RUN_LABEL[persisted.status]}
-                  </Badge>
-                  {ago(persisted.at) ? ` ${ago(persisted.at)}` : ''}
-                </p>
-              )}
+                {/* These were .status-pill -- green text, no fill, no border, no
+                    radius, despite the name. Three of them in a row read as one
+                    green sentence. Every tab that used it has since moved to
+                    <Badge>, and the class is gone. */}
+                {(attachedTo.length > 0 || automation.pinned || automation.assigned_to ||
+                  automation.schedule?.enabled || automation.created_via === 'mcp' ||
+                  (automation.created_by && automation.created_by !== org.userId) ||
+                  (automation.tags || []).length > 0) && (
+                  <div className="automation-card-meta">
+                    {/* First, because "whose is this" is the question a team asks
+                        of a card before any of the others. Only rendered when
+                        somebody holds it -- an "Unassigned" badge on every card
+                        would be a grid of noise. */}
+                    {automation.assigned_to && (
+                      <Assignee userId={automation.assigned_to} />
+                    )}
+                    {/* Who made it -- but only when that is news: an agent over
+                        MCP always (created_by is just whoever had the launcher
+                        open, which is the misattribution the label corrects), a
+                        teammate when it is not you. Your own cards say nothing,
+                        for the same reason every card saying "Unassigned" would
+                        be noise. */}
+                    {automation.created_via === 'mcp' ? (
+                      <Badge
+                        icon={<Bot size={12} />}
+                        title="Created by an agent over MCP"
+                      >{automation.created_by_label || 'Agent'}</Badge>
+                    ) : automation.created_by && automation.created_by !== org.userId && (
+                      <Badge title="Who created this automation">
+                        by {assigneeName(automation.created_by, state.members)}
+                      </Badge>
+                    )}
+                    {automation.schedule?.enabled && (
+                      <Badge
+                        icon={<Clock size={12} />}
+                        title="Runs on a schedule while the launcher is open"
+                      >{describeSchedule(automation.schedule)}</Badge>
+                    )}
+                    {attachedTo.length > 0 && (
+                      <Badge
+                        icon={<Rocket size={12} />}
+                        title={attachedTo.map((p) => p.name).join(', ')}
+                      >On launch · {attachedTo.length}</Badge>
+                    )}
+                    {automation.pinned && (
+                      <Badge icon={<Workflow size={12} />}>Start page</Badge>
+                    )}
+                    {/* Tags last, and in the tag chip rather than a Badge, so they
+                        read as labels the user chose rather than as more facts the
+                        app is reporting about this row. */}
+                    {(automation.tags || []).map((tag) => <TagChip key={tag} tag={tag} />)}
+                  </div>
+                )}
 
-              <div className="extension-card-foot">
-                {/* Opens the picker; it never starts a run itself. It used to
-                    resolve a target with runTarget() and go, which is how a run
-                    landed on a profile nobody chose and died on that profile's
-                    dead proxy. Disabled when nothing in the workspace could
-                    accept a run -- but never for "which profile", which is a
-                    question the dialog asks.
-                    The title is on the wrapper, not on the button. Chromium
-                    suppresses pointer events on a disabled control, tooltips
-                    included, so the one moment the explanation is needed is the
-                    one moment a title on the button itself never appears. */}
-                <span title={block || 'Pick profiles and run'}>
-                  <BusyButton
-                    busy={busy}
-                    busyLabel={runningCount > 1 ? `Running ${runningCount}` : 'Running'}
-                    icon={<Play size={14} />}
-                    onClick={() => onRun(automation)}
-                    disabled={Boolean(block)}
-                    // A disabled button is not tabbable, so the reason has to
-                    // travel with its name to be readable at all.
-                    aria-label={block ? `Run — ${block}` : undefined}
-                  >Run</BusyButton>
-                </span>
-                <button className="ghost" onClick={() => onEdit(automation)}>Edit</button>
-                {/* Per-card rather than on a selection toolbar, because this tab
-                    has no selection model at all -- no checkboxes, no
-                    useSelection. Adding one just to reach parity with the three
-                    table tabs would be a larger change than the button. */}
-                <button
-                  className="ghost"
-                  onClick={() => onShare({kind: 'automation', ids: [automation.id]})}
-                  aria-label={`Share ${automation.name}`}
-                  title="Share with another workspace"
-                ><Share2 size={14} /></button>
-                <button
-                  className="ghost automation-card-history"
-                  onClick={() => onHistory(automation)}
-                  aria-label={`History for ${automation.name}`}
-                  title="Run history"
-                ><History size={14} /></button>
+                {/* The last verdict, as a row rather than a sentence: the status
+                    coloured and led by its own glyph on one edge, when it
+                    happened on the other. It reads as a line in a log, which is
+                    what it is -- the most recent entry of the list it opens.
+                    A button, because the whole row is the way into the history:
+                    the glyph up on the frame is the deliberate route, this is
+                    the one you reach for when a red "Failed" is what caught your
+                    eye. The error itself moves to the title -- a run that failed
+                    on a 300-character stack trace used to wrap it across four
+                    lines of the card, and the dialog one click away shows it
+                    properly.
+                    One block, not two: `verdict` already reconciled this
+                    session's runs with the columns the last session left. */}
+                {verdict && (
+                  <button
+                    className={`automation-card-run is-${verdict.status}`}
+                    onClick={() => onHistory(automation)}
+                    title={verdict.error || 'Open the run history'}
+                    type="button"
+                  >
+                    <span className="automation-card-run-label">
+                      {(() => {
+                        const Glyph = RUN_GLYPH[verdict.status];
+                        return <Glyph aria-hidden="true" size={14} />;
+                      })()}
+                      {/* "Running · 3" rather than "Running": one automation can
+                          be in flight on several profiles now, and a single label
+                          would report a batch of five as one run. */}
+                      {RUN_LABEL[verdict.status]}
+                      {runningCount > 1 ? ` · ${runningCount}` : ''}
+                    </span>
+                    {/* Duration where there is one, elapsed time otherwise: a
+                        finished run is best described by how long it took, and a
+                        running one has no how-long yet. */}
+                    <span className="automation-card-run-when">
+                      {!busy && verdict.duration_ms ?
+                        `${(verdict.duration_ms / 1000).toFixed(1)}s · ${ago(verdict.at)}` :
+                        ago(verdict.at)}
+                    </span>
+                  </button>
+                )}
+
+                <div className="extension-card-foot">
+                  {/* Opens the picker; it never starts a run itself. It used to
+                      resolve a target with runTarget() and go, which is how a run
+                      landed on a profile nobody chose and died on that profile's
+                      dead proxy. Disabled when nothing in the workspace could
+                      accept a run -- but never for "which profile", which is a
+                      question the dialog asks.
+                      The title is on the wrapper, not on the button. Chromium
+                      suppresses pointer events on a disabled control, tooltips
+                      included, so the one moment the explanation is needed is the
+                      one moment a title on the button itself never appears. */}
+                  <span title={block || 'Pick profiles and run'}>
+                    <BusyButton
+                      busy={busy}
+                      busyLabel={runningCount > 1 ? `Running ${runningCount}` : 'Running'}
+                      icon={<Play size={14} />}
+                      onClick={() => onRun(automation)}
+                      disabled={Boolean(block)}
+                      // A disabled button is not tabbable, so the reason has to
+                      // travel with its name to be readable at all.
+                      aria-label={block ? `Run — ${block}` : undefined}
+                    >Run</BusyButton>
+                  </span>
+                  {/* Borderless, in .filter-trigger's vocabulary -- the quiet
+                      silhouette the Profiles and Proxies toolbars use for
+                      everything that is not the one action the screen is for.
+                      With Run filled beside it, the border was the second thing
+                      in the foot claiming to be primary. */}
+                  <button
+                    className="automation-card-edit"
+                    onClick={() => onEdit(automation)}
+                    type="button"
+                  ><Pencil size={14} /> Edit</button>
+                </div>
               </div>
             </article>
           );

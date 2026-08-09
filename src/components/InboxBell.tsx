@@ -129,7 +129,12 @@ export function InboxBell({onViewAll, onOpenAutomationHistory}: {
     <Popover
       label={count > 0 ? `${count} waiting for you` : 'Notifications'}
       panelClassName="inbox-pop"
-      triggerClassName="ghost icon-button inbox-button"
+      // .filter-trigger, not .ghost: the bell is a quiet control, and the
+      // topbar's other quiet controls -- Refresh, Import -- shed their borders
+      // when that silhouette was adopted. The bell kept its frame and so was
+      // the last boxed thing in a row of flat ones, which read as the tab's
+      // primary action rather than a passive indicator.
+      triggerClassName="filter-trigger inbox-button"
       width={320}
       trigger={
         <>
@@ -200,34 +205,52 @@ export function InboxBell({onViewAll, onOpenAutomationHistory}: {
             const openable = Boolean(item.automation_id);
             return (
               <div
-                className={item.read ? 'inbox-item is-notification' :
-                  'inbox-item is-notification is-unread'}
+                className={[
+                  'inbox-item is-notification',
+                  openable ? 'is-card' : '',
+                  item.read ? '' : 'is-unread',
+                ].filter(Boolean).join(' ')}
                 key={item.id}
               >
+                {/* The whole card opens the run history, not just the title.
+                    A three-line card with one clickable word in it makes the
+                    reader aim; every other list in the app hands you the whole
+                    row.
+
+                    A stretched overlay rather than wrapping the card in a
+                    <button>, because the card already contains a button (the
+                    clear) and one cannot nest inside the other. It sits under
+                    the clear in z-order, so the two never fight over a click.
+                    A notification whose automation has since been deleted has
+                    nowhere to go and gets no overlay -- no hit area, and no
+                    hover shade promising one. */}
+                {openable && (
+                  <button
+                    aria-label={`Open the run history for "${item.title}"`}
+                    className="inbox-item-hit"
+                    onClick={() => {
+                      close();
+                      onOpenAutomationHistory(item.automation_id as string);
+                    }}
+                    type="button"
+                  />
+                )}
                 <div className="inbox-item-head">
                   <Icon className={`inbox-status is-${glyph.tone}`} size={14} />
-                  {/* The title is the row's one action: it opens the run
-                      history the notification is reporting on. A notification
-                      whose automation has since been deleted has nowhere to
-                      go, and renders as text rather than a button that does
-                      nothing. */}
-                  {openable ? (
-                    <button
-                      className="inbox-item-name inbox-item-open"
-                      onClick={() => {
-                        close();
-                        onOpenAutomationHistory(item.automation_id as string);
-                      }}
-                      type="button"
-                    >{item.title}</button>
-                  ) : (
-                    <span className="inbox-item-name">{item.title}</span>
-                  )}
+                  <span className="inbox-item-name">{item.title}</span>
                   {!item.read && <span className="inbox-unread-dot" aria-label="Unread" />}
                   <button
                     aria-label={`Clear "${item.title}"`}
-                    className="ghost icon-button inbox-item-clear"
-                    onClick={() => clear(item)}
+                    className="inbox-item-clear"
+                    onClick={(event) => {
+                      // The overlay is a sibling underneath, not an ancestor,
+                      // so this does not bubble into it -- but the card is
+                      // about to lose the row this click is aimed at, and
+                      // stopping here keeps that true if the markup ever
+                      // nests.
+                      event.stopPropagation();
+                      clear(item);
+                    }}
                     title="Clear this notification"
                     type="button"
                   ><X size={13} /></button>

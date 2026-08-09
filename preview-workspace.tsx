@@ -5,7 +5,9 @@
 import {createContext, useContext, useState} from 'react';
 import type {ReactNode} from 'react';
 import {defaultCloudState} from './src/data/statuses';
-import type {ArgusAutomation, ArgusProfile, CloudState, OrgMember} from './src/types';
+import type {
+  ArgusAutomation, ArgusNotification, ArgusProfile, CloudState, OrgMember,
+} from './src/types';
 
 const now = Date.now();
 const iso = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
@@ -81,8 +83,53 @@ const AUTOMATIONS: ArgusAutomation[] = [
   },
 ];
 
+// The bell's two kinds. One handoff, and four notifications covering every
+// state the card has: unread, read, each status tone, a title long enough to
+// wrap and squeeze the clear button, and one with no automation_id -- the row
+// that must NOT become a clickable card because it has nowhere to go.
+const NOTIFICATIONS: (ArgusNotification & {read: boolean})[] = [
+  {
+    id: 'n1', kind: 'automation_run', title: 'FB group lead capture finished',
+    body: '12 of 12 profiles done, 41 leads captured.', status: 'ok',
+    automation_id: 'a1', run_id: 'r1', created_by: 'u', created_at: iso(4), read: false,
+  },
+  {
+    id: 'n2', kind: 'automation_run',
+    title: 'Engage with commenters on the Dortmund listings finished with warnings',
+    body: '3 of 8 profiles could not reach the group.', status: 'partial',
+    automation_id: 'a3', run_id: 'r2', created_by: 'v', created_at: iso(52), read: false,
+  },
+  {
+    id: 'n3', kind: 'automation_run', title: 'WhatsApp warm-up failed',
+    body: 'Step 2 timed out waiting for the chat list.', status: 'failed',
+    automation_id: 'a2', run_id: 'r3', created_by: 'u', created_at: iso(60 * 27), read: true,
+  },
+  {
+    id: 'n4', kind: 'automation_run', title: 'Proxy sanity sweep cancelled',
+    body: 'Stopped by Vlad after 2 of 30 profiles.', status: 'cancelled',
+    automation_id: null, run_id: 'r4', created_by: 'v', created_at: iso(60 * 30), read: true,
+  },
+];
+
+const PENDING = [{
+  id: 'h1', kind: 'profile' as const, item_name: 'Renter DE-1', to_user: 'u', from_user: 'v',
+  note: 'Taking two weeks off -- this one is warmed up and needs its daily run.',
+}];
+
 type Ctx = {
-  data: {state: CloudState};
+  data: {
+    state: CloudState;
+    patch: {notifications: (fn: (list: CloudState['notifications']) =>
+      CloudState['notifications']) => void};
+  };
+  shared: {
+    pending: typeof PENDING;
+    accept: (...args: unknown[]) => Promise<boolean>;
+    decline: (...args: unknown[]) => Promise<void>;
+  };
+  reload: () => Promise<void>;
+  // RefreshButton sits beside the bell in the inbox harness and reads this.
+  refresh: () => Promise<void>;
   automations: {
     runs: Record<string, never>;
     setStarred: (id: string, starred: boolean) => void;
@@ -116,16 +163,34 @@ export function useWorkspace(): Ctx {
 
 export function WorkspaceProvider({children}: {children: ReactNode}) {
   const [stars, setStars] = useState<string[]>(['a1']);
+  // Stateful, unlike the rest of this fixture: the bell marks everything read
+  // on open and clears a row on the X, and both are optimistic patches. Frozen
+  // fixtures would make the panel look correct and behave like nothing.
+  const [notifications, setNotifications] = useState(NOTIFICATIONS);
+  const [pending, setPending] = useState(PENDING);
   const state: CloudState = {
     ...defaultCloudState,
     automations: AUTOMATIONS,
     profiles: PROFILES,
     members: MEMBERS,
+    notifications,
     automation_stars: stars,
     telegram_link: {chat_id: '42', telegram_username: 'roman_p', linked_at: iso(60 * 24 * 2)},
   };
   const value: Ctx = {
-    data: {state},
+    data: {state, patch: {notifications: (fn) => setNotifications(fn)}},
+    shared: {
+      pending,
+      accept: async (id) => {
+        setPending((list) => list.filter((item) => item.id !== id));
+        return true;
+      },
+      decline: async (id) => setPending((list) => list.filter((item) => item.id !== id)),
+    },
+    reload: async () => {},
+    refresh: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    },
     automations: {
       runs: {},
       setStarred: (id, starred) => setStars((current) =>

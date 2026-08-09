@@ -82,9 +82,138 @@
   padding: 14px;
 }
 
-/* Mark, name, step count, delete -- one wrapping row, like
-   .extension-card-head. The h2 became an h3 with it: the tab's own title in
-   the Topbar is the h1, and a grid of twelve h2s claimed twelve sections. */
+/* An automation card is two objects: a recessed frame carrying the chrome, and
+   the card itself inset in it on all four sides. The frame holds what the app
+   says *about* the automation -- Share, History, the step count -- and the card
+   holds what the automation is. Reaching for the actions means reaching outside
+   the thing they act on, which is the whole point of drawing it this way.
+
+   A separate class rather than folding it into .automation-card, because the
+   Connectors view reuses that card wholesale -- same grid, same head, same
+   description, same foot -- and has no frame of its own. Everything the two
+   share stays on .automation-card; everything only the framed one has lands
+   here.
+
+   --paper, not a color-mix against --ink: recessed means *darker* in light and
+   in dark both, and mixing toward the ink colour reverses that in dark, where
+   --ink is near-white. The two palettes already name the surface. */
+.automation-card-framed {
+  background: var(--paper);
+  /* The bar and the card carry their own internal spacing, so there is nothing
+     for the flex gap to do. */
+  gap: 0;
+  /* Asymmetric on purpose. The top opens far enough to seat the bar -- that
+     edge is a place, and it holds three controls. The other three are only an
+     edge: 2px, the thinnest line that still reads as a surface behind the card
+     rather than as a slightly thick border. Nothing sits in them, so any more
+     is a margin the card is paying for. The top's own spacing moved into the
+     bar, which is why this is 0 up there rather than a fourth number. */
+  padding: 0 2px 2px;
+}
+
+/* Was on .automation-card, which the frame now outranks by source order alone
+   -- and .is-new, being two classes to its one, would have won and painted the
+   frame in the card's colour. Written at the same weight so the pair still
+   describes a frame and a card rather than one flat green box. */
+.automation-card-framed.is-new {
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, var(--paper));
+  border-color: var(--profile-green-border);
+}
+
+/* The card proper. --radius-sm because the frame is 14px on the outside and
+   5px thick: an inner corner has to lose exactly the frame's width or the two
+   arcs stop being concentric and the gap pinches at the corners. */
+.automation-card-body {
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  /* Takes the row's spare height so the foot lands on the same line across a
+     row -- the job .automation-card used to do before the frame came between
+     them. The description inside then takes the slack in turn. */
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.automation-card-framed.is-new .automation-card-body {
+  background: color-mix(in srgb, var(--profile-green-bg) 55%, var(--raised));
+  border-color: var(--profile-green-border);
+}
+
+/* Share and History on the leading edge, the step count on the trailing one,
+   both riding the frame between its top edge and the card's. The frame is 0 at
+   the top, so the 6px here is the whole of the space above them.
+
+   The two horizontal numbers exist to put this row on the card's own text
+   rules, now that the frame is too thin to contribute any of it: 2 + 5 + the
+   button's own 8 lands the first glyph at 15px, where the mark below it
+   starts, and 2 + 13 lands the count's last character at 15px from the other
+   edge, where the description ends. */
+.automation-card-bar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 6px 13px 6px 5px;
+}
+
+.automation-card-tools {
+  display: flex;
+  gap: 2px;
+}
+
+/* .filter-trigger's silhouette, which is the app's quiet control: nothing at
+   rest, a --hover plate under the pointer. Two outlined boxes on the frame
+   would out-weigh the two real buttons inside the card. The shadow is
+   suppressed with the border -- the base `button` rule hands every control a
+   hover shadow, and on a flat glyph that reads as a chip lifting off the
+   frame. */
+.automation-card-tool {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--ink-faint);
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.automation-card-tool:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Reads as a label and behaves as one -- no border, no fill -- but it is a
+   button into the editor, so it takes the same --hover plate its two
+   neighbours do. tabular-nums so a grid of cards keeps its counts on one
+   vertical rule instead of shuffling by a digit's width. */
+.automation-card-count {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-height: 0;
+  /* The 6px bleeds the plate past the words without moving them: the count has
+     to stay on the card's right-hand rule, plate or no plate. */
+  margin-right: -6px;
+  padding: 4px 6px;
+}
+
+.automation-card-count:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Mark and name -- one wrapping row, like .extension-card-head. The step count
+   that used to end this row lives in the strip above it now. The h2 became an
+   h3 here: the tab's own title in the Topbar is the h1, and a grid of twelve
+   h2s claimed twelve sections. */
 .automation-card-head {
   align-items: center;
   display: flex;
@@ -108,16 +237,72 @@
    card: the tab already carries one standing note about having no profiles, and
    a second amber box repeating it on every card in the grid says the same thing
    twelve times. The wrapper exists only to hold that title -- a disabled button
-   suppresses its own. */
+   suppresses its own.
+
+   The wrapper is a plain span, so it needs telling it is a flex item. */
 .extension-card-foot > span {
   display: inline-flex;
+}
+
+/* flex: 1 so Run takes half the foot: .extension-card-foot gives its direct
+   button children flex: 1, and Run is not one -- it is wrapped. Without this
+   the wrapper sized to the word and Edit took everything else.
+
+   Scoped to the automation card rather than written on .extension-card-foot >
+   span, which is not only this wrapper: an Extensions card puts its download
+   progress in a foot span too, and stretching that one moves a status line off
+   the leading edge it was put on. */
+.automation-card-body > .extension-card-foot > span {
+  flex: 1;
+}
+
+/* The metrics .extension-card-foot > button hands Edit, applied through the
+   wrapper to Run so the two halves match rather than differing by the 4px
+   between --control-h and 32px. */
+.automation-card-body > .extension-card-foot > span > button {
+  flex: 1;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+}
+
+/* Edit takes .filter-trigger's silhouette -- the quiet control the Profiles and
+   Proxies toolbars use for everything that is not the action the screen is for.
+   It was .ghost, which put a bordered box beside a filled one and left the foot
+   with two buttons both claiming the lead; now the fill alone says which of the
+   two is Run. Still half the row: the pair splits the card evenly whether or
+   not both are drawn as boxes.
+
+   Both rules are written through .extension-card-foot rather than on the class
+   alone, because that foot claims its non-ghost children on hover
+   (`> button:not(.ghost):hover { background: var(--accent-strong) }`) -- which
+   is right when the only button in it is a filled Install, and which painted
+   this one black-on-black the moment the border came off. Matching its
+   specificity is what takes the fill back. */
+.extension-card-foot > .automation-card-edit {
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  font-weight: 500;
+  gap: 7px;
+  min-height: 32px;
+}
+
+.extension-card-foot > .automation-card-edit:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
 }
 
 /* The description, and the reason every card's foot lands on the same line
    across a row -- flex: 1 gives it the slack. Rendered even when empty, so a
    card with no description still pushes its buttons down to meet its
-   neighbours'. Same rule as .extension-card p. */
-.automation-card > p {
+   neighbours'. Same rule as .extension-card p.
+   Two selectors because the two cards nest differently: a connector's
+   description is a child of .automation-card itself, an automation's sits one
+   level in, inside the frame's body. */
+.automation-card > p,
+.automation-card-body > p {
   color: var(--ink-soft);
   flex: 1;
   font-size: 13px;
@@ -132,36 +317,109 @@
   gap: 6px;
 }
 
-/* A badge followed by the duration and, when there is one, the error. Wraps
-   rather than truncates: an error the card cannot show is an error nobody
-   reads. flex: 0 0 auto so it is never the element the row's spare height is
-   taken out of -- that is the description's job, above. */
+/* The last verdict, drawn as a log line rather than as a sentence: the status
+   led by its glyph on the leading edge, when it happened on the trailing one,
+   the full width of the card between them.
+
+   It is a <button> now -- the whole row opens the history -- so most of this
+   block is undoing what `button` hands every control: the accent fill, the 700
+   weight, the 36px floor, the 14px side padding. The negative margin bleeds the
+   hover plate 6px past the text on both sides so the row highlights as a row
+   rather than as a label with a tight box round it, the same trick .th-sort and
+   .filter-trigger use.
+
+   flex: 0 0 auto so it is never the element the card's spare height is taken
+   out of -- that is the description's job, above. */
 .automation-card-run {
   align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
   color: var(--ink-soft);
   display: flex;
   flex: 0 0 auto;
-  flex-wrap: wrap;
   font-size: 12px;
-  gap: 6px;
-  margin: 0;
+  font-weight: 500;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 0 -6px;
+  min-height: 0;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.automation-card-run:not(:disabled):hover {
+  background: var(--hover);
+  /* Buttons in this app do not lift. See the note on `button:hover`. */
+  box-shadow: none;
+}
+
+/* The status carries the colour, not the row: a whole line painted red reads as
+   an error banner across the card, which a run that failed nine hours ago is
+   not. The glyph and the word take it; the timestamp beside them stays quiet.
+   Truncates rather than wraps -- "Finished with errors" is as long as this
+   vocabulary gets, and a two-line status would push the foot off the row its
+   neighbours' feet sit on. */
+.automation-card-run-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-card-run-label > svg {
+  flex: 0 0 auto;
+}
+
+.automation-card-run.is-ok .automation-card-run-label {
+  color: var(--profile-green-ink);
+}
+
+.automation-card-run.is-partial .automation-card-run-label {
+  color: var(--profile-amber-ink);
+}
+
+.automation-card-run.is-failed .automation-card-run-label {
+  color: var(--profile-red-ink);
+}
+
+.automation-card-run.is-cancelled .automation-card-run-label {
+  color: var(--ink-faint);
+}
+
+/* The one status that is not a verdict but a state, so it keeps the dot's
+   pulse: a still blue tick would say a run had finished blue. */
+.automation-card-run.is-running .automation-card-run-label {
+  color: var(--profile-blue-ink);
+}
+
+.automation-card-run.is-running .automation-card-run-label > svg {
+  animation: automation-run-spin 1.4s linear infinite;
+}
+
+@keyframes automation-run-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* tabular-nums so a column of cards keeps "42m ago" and "1d ago" on one rule
+   instead of shuffling by a digit's width. */
+.automation-card-run-when {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The button row is .extension-card-foot now (styles.css), so there is no
-   .automation-card-actions rule left. Run keeps the visual lead by being the
-   only filled button in it rather than by being pushed to the far side with
-   `margin-right: auto` -- with three buttons and a right-aligned foot, that
-   split the row into two clusters with a gap in the middle.
-
-   One override that foot needs here: it gives every direct button `flex: 1`,
-   which is right for the Extensions cards because they hold exactly one. This
-   foot holds three, and the third is a glyph -- History at a third of the card
-   is a wide empty box with a small clock in the middle. It sizes to its
-   content; Run and Edit split what is left. */
-.extension-card-foot > .automation-card-history {
-  flex: 0 0 auto;
-  padding: 0 10px;
-}
+   .automation-card-actions rule left. It holds two buttons splitting the card
+   evenly, and Run keeps the visual lead by being the filled one of the pair.
+   Share and History used to crowd in beside them as glyphs, which is what made
+   the row need an override sizing History to its content; both sit in the
+   strip at the top of the card now, and that override went with them. */
 
 /* The add tile is card-shaped but not a card: an outline standing where the
    next automation goes. These four declarations undo .automation-card's
