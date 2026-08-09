@@ -18,8 +18,16 @@ const MEMBERS: OrgMember[] = [
 ];
 
 const PROFILES = [
-  {id: 'p1', name: 'FB — Warm US 01', deleted_at: null, automation_id: 'a2'},
-  {id: 'p2', name: 'FB — Warm US 02', deleted_at: null, automation_id: null},
+  {id: 'p1', name: 'Renter DE-1', deleted_at: null, automation_id: 'a2',
+    proxy_mode: 'direct',
+    automation_vars: {a1: {city_name: 'Dortmund', number_of_rooms: '2'}}},
+  {id: 'p2', name: 'Renter DE-2', deleted_at: null, automation_id: null,
+    proxy_mode: 'direct',
+    automation_vars: {a1: {city_name: 'Essen', number_of_rooms: '3'}}},
+  // No values at all: the row that cannot run until its required city is
+  // answered, which is what the Run dialog's block has to look like.
+  {id: 'p3', name: 'Renter DE-3', deleted_at: null, automation_id: null,
+    proxy_mode: 'direct'},
 ] as unknown as ArgusProfile[];
 
 const AUTOMATIONS: ArgusAutomation[] = [
@@ -28,6 +36,16 @@ const AUTOMATIONS: ArgusAutomation[] = [
     description: 'Reads new posts in the target groups, extracts author and intent.',
     steps: [{id: 's1', type: 'goto', url: 'https://facebook.com'}] as ArgusAutomation['steps'],
     tags: ['facebook'], pinned: true,
+    parameters: [
+      {name: 'city_name', label: 'City', kind: 'text', required: true,
+        hint: 'Which city to search.', placeholder: 'Dortmund'},
+      {name: 'number_of_rooms', label: 'Rooms', kind: 'number', default: '2'},
+      {name: 'listing_type', label: 'Listing', kind: 'select',
+        options: ['Rent', 'Buy'], default: 'Rent'},
+      {name: 'portal_token', label: 'Portal token', kind: 'secret'},
+      {name: 'districts', label: 'Districts', kind: 'list',
+        hint: 'One per line. A Loop step runs over them.'},
+    ] as ArgusAutomation['parameters'],
     icon: 'brand:facebook', color: 'blue',
     last_run_at: iso(42), last_run_status: 'ok',
     created_by: 'u', created_via: 'user', created_at: iso(60 * 24 * 6),
@@ -72,7 +90,16 @@ type Ctx = {
     linkTelegram: () => Promise<void>;
     unlinkTelegram: () => Promise<void>;
     testTelegram: () => Promise<string | null>;
+    runMany: (...args: unknown[]) => Promise<void>;
   };
+  // Enough of the two action bundles for RunAutomationModal, which reads
+  // profiles.update (the "save these values" checkbox) and proxies.checkMany
+  // (its opening sweep). Both are no-ops here -- this harness renders, it does
+  // not run anything.
+  profiles: {update: (...args: unknown[]) => Promise<boolean>};
+  proxies: {checkMany: (...args: unknown[]) => Promise<void>};
+  selectedProfileId: string | null;
+  checkingProxyIds: Set<string>;
   toast: {setMessage: (text: string) => void; notify: (text: string) => void};
   tagOptions: never[];
 };
@@ -107,7 +134,12 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
       linkTelegram: async () => {},
       unlinkTelegram: async () => {},
       testTelegram: async () => null,
+      runMany: async () => {},
     },
+    profiles: {update: async () => true},
+    proxies: {checkMany: async () => {}},
+    selectedProfileId: 'p1',
+    checkingProxyIds: new Set<string>(),
     toast: {setMessage: () => {}, notify: () => {}},
     tagOptions: [],
   };

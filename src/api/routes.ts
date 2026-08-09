@@ -22,7 +22,7 @@ export type ApiMethod = 'GET' | 'POST';
 // field and reads as its own type in the API docs -- a `columns: tags` row
 // would say the wrong thing about what that field holds.
 export type ApiFieldType =
-  'string' | 'number' | 'boolean' | 'object' | 'steps' | 'tags' | 'strings';
+  'string' | 'number' | 'boolean' | 'object' | 'objects' | 'steps' | 'tags' | 'strings';
 
 export type ApiField = {
   key: string;

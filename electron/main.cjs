@@ -3591,7 +3591,14 @@ function payloadForRoute(route, body) {
       field.type === 'string' ? typeof value === 'string' :
       field.type === 'number' ? typeof value === 'number' && Number.isFinite(value) :
       field.type === 'boolean' ? typeof value === 'boolean' :
+      // 'steps' is a list of steps, 'objects' any list of objects (the
+      // parameter declarations). Both are shape-checked past this point --
+      // validateSteps below, validateParams in the renderer.
       field.type === 'steps' ? Array.isArray(value) :
+      field.type === 'objects' ?
+        Array.isArray(value) &&
+          value.every((item) => item !== null && typeof item === 'object' &&
+            !Array.isArray(item)) :
       // Two names for one shape -- see ApiFieldType in src/api/routes.ts.
       field.type === 'tags' || field.type === 'strings' ?
         Array.isArray(value) && value.every((item) => typeof item === 'string') :
@@ -3599,6 +3606,7 @@ function payloadForRoute(route, body) {
     if (!okType) {
       const expected =
         field.type === 'steps' ? 'list of steps' :
+        field.type === 'objects' ? 'list of objects' :
         field.type === 'tags' || field.type === 'strings' ? 'list of strings' :
         field.type;
       return {error: `${field.key} must be a ${expected}`};
@@ -5302,6 +5310,13 @@ function startAutomationApiServer() {
         }
         if (typeof payload.startUrl === 'string') fields.start_url = payload.startUrl;
         if (typeof payload.automationId === 'string') fields.automation_id = payload.automationId;
+        // Shape only. Which automations exist and which parameters they declare
+        // is renderer knowledge, so the value check lives there -- this is the
+        // same division proxyMode and automationId above already follow.
+        if (payload.automationVars !== null && typeof payload.automationVars === 'object' &&
+            !Array.isArray(payload.automationVars)) {
+          fields.automation_vars = payload.automationVars;
+        }
         mainWindow.webContents.send('argus:update-profile-request', {
           requestId,
           profileId: payload.profileId,

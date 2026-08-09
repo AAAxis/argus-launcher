@@ -164,6 +164,14 @@ const TOOLS = [
         automationId: {type: 'string',
           description: 'Automation to run on every launch (argus_list_automations). ' +
             '"" to detach.'},
+        automationVars: {type: 'object',
+          description: 'This profile\'s answers to automations\' declared parameters, ' +
+            'keyed by automation id: {"<automationId>": {"city_name": "Dortmund"}}. ' +
+            'This is how one automation runs a different city per profile. Replaces ' +
+            'the whole map, so read it back with argus_get_profile and merge rather ' +
+            'than sending one automation on its own. Values for a parameter the ' +
+            'automation no longer declares are ignored at run time. See ' +
+            'argus_automation_schema for the parameter vocabulary.'},
       },
       required: ['profileId'],
     },
@@ -175,7 +183,7 @@ const TOOLS = [
     run: async ({api, args}) => {
       const patch = {profileId: args.profileId};
       for (const field of ['name', 'status', 'tags', 'color', 'avatar', 'folderId',
-        'proxyMode', 'startUrl', 'automationId']) {
+        'proxyMode', 'startUrl', 'automationId', 'automationVars']) {
         if (args[field] !== undefined) {
           patch[field] = args[field];
         }
@@ -412,7 +420,7 @@ function inputSchemaFor(route) {
     // into every session's context; the description points at the tool that
     // returns it on demand instead.
     properties[field.key] =
-      field.type === 'steps' ?
+      field.type === 'steps' || field.type === 'objects' ?
         {type: 'array', items: {type: 'object'}, description: field.description} :
       // Two names for one shape -- see ApiFieldType in src/api/routes.ts.
       field.type === 'tags' || field.type === 'strings' ?
@@ -429,6 +437,35 @@ function inputSchemaFor(route) {
 // the type, what it is called, and its fields with the required ones marked.
 // The full spec -- hints, placeholders, patterns, showWhen -- stays behind
 // GET /v1/automations/schema for anything that needs it.
+// What an automation may ask for before it runs, told the same way the step
+// catalogue is: an agent that has to guess a `kind` writes a parameter the
+// editor cannot render.
+//
+// Kept beside compactSchema deliberately -- both answer "what vocabulary am I
+// writing in", and an agent gets them in one call.
+const PARAMETER_VOCABULARY = {
+  shape: 'parameters: [{name, kind, label?, required?, default?, options?, hint?, placeholder?}]',
+  name: 'Matches ^[A-Za-z_][A-Za-z0-9_]*$. Read from any interpolated step ' +
+    'field as {{vars.<name>}}.',
+  kinds: {
+    text: 'One line.',
+    textarea: 'Several lines, still one string.',
+    number: 'Coerced to a number at run time.',
+    boolean: 'Always answered, so it may not be required.',
+    select: 'One of `options`, which is required and must not be empty.',
+    secret: 'Hidden in the UI and masked in run history. Stored as plain text.',
+    list: 'One value per line, coerced to a real array -- feed it to a loop ' +
+      'step as items: "{{vars.<name>}}".',
+  },
+  resolution: 'Weakest first: the callee defaults of any callAutomation target, ' +
+    "then this automation's `default`, then the profile's own value " +
+    '(argus_update_profile automationVars), then the `vars` passed to ' +
+    'argus_run_automation. A blank never overrides -- it falls through.',
+  required: 'A run with no value and no default is refused before the browser ' +
+    'opens, naming the profile and the parameter.',
+  limits: 'At most 20 per automation.',
+};
+
 function compactSchema(steps) {
   return Object.entries(steps).map(([type, spec]) => ({
     type,
@@ -470,6 +507,11 @@ const AUTOMATION_TOOLS = apiRoutes
         note: 'Every step also takes id (required, unique), label, enabled, ' +
           'timeoutMs, onError (stop|continue|retry) and retries. Full field ' +
           'specs: GET /v1/automations/schema.',
+        // Declared here rather than left to the create tool's field
+        // description, because an agent calls this BEFORE authoring anything --
+        // which is the whole reason this tool exists. Without it, parameters
+        // are discoverable only by reading a paragraph on another tool.
+        parameters: PARAMETER_VOCABULARY,
       });
     }
     if (route.method === 'GET') {

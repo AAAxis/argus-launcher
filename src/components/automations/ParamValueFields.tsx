@@ -120,7 +120,9 @@ function control(
   }
 }
 
-export function ParamValueFields({parameters, values, onChange, showMissing = true}: {
+export function ParamValueFields({
+  parameters, values, onChange, showMissing = true, compact = false,
+}: {
   parameters: AutomationParam[];
   values: ParamValueMap;
   onChange: (next: ParamValueMap) => void;
@@ -128,12 +130,18 @@ export function ParamValueFields({parameters, values, onChange, showMissing = tr
   // turns it off on rows that are not ticked: a profile you are not running is
   // not missing anything.
   showMissing?: boolean;
+  // Two columns and no hints, for the Run dialog. Five parameters at full
+  // height push the second profile off the screen, and a dialog that can only
+  // show one profile's values cannot do the thing it exists for -- running
+  // Dortmund on one and Essen on the next. The profile editor keeps the full
+  // form: there is one automation per block there and room to explain it.
+  compact?: boolean;
 }) {
   if (parameters.length === 0) {
     return null;
   }
   return (
-    <div className="param-values">
+    <div className={`param-values${compact ? ' is-compact' : ''}`}>
       {parameters.map((param) => {
         const value = values[param.name] ?? '';
         const set = (next: string) => onChange({...values, [param.name]: next});

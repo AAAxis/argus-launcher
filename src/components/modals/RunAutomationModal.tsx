@@ -398,6 +398,7 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
                   values={overrides[profile.id] || {}}
                   onChange={(next) =>
                     setOverrides((current) => ({...current, [profile.id]: next}))}
+                  compact
                 />
               </div>
             )}
@@ -421,6 +422,17 @@ export function RunAutomationModal({automation, nested = false, onFixProxy, onCl
             Save these values to {chosen.length === 1 ? 'the profile' : 'the profiles'}
           </span>
         </label>
+      )}
+
+      {/* Said out loud, not only as the disabled button's title. Two ticked
+          profiles can be on screen with their values filled while the one that
+          is missing a city sits below the fold -- a greyed Run with no visible
+          reason reads as a bug. */}
+      {unansweredNote && (
+        <p className="run-blocked-note">
+          <ShieldAlert size={15} />
+          {unansweredNote}
+        </p>
       )}
 
       {blocked.length > 0 && (

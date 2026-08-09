@@ -170,8 +170,15 @@ to the user's account).
   a human opened by hand is never reachable (`electron/main.cjs:3116-3120`,
   `3237-3261`).
 - **`argus_update_profile`** — sets `name`, `tags` (capped at 5 by
-  `normalizeTags`), `status`, `color`, `folderId`
+  `normalizeTags`), `status`, `color`, `folderId`, `avatar`, `proxyMode`,
+  `startUrl`, `automationId` and `automationVars`
   (`electron/main.cjs:3977-3994`, `src/hooks/useAutomationBridge.ts:294-313`).
+  `automationVars` is the profile's answers to automations' declared
+  parameters, keyed by automation id — `{"flat-search": {"city_name":
+  "Dortmund"}}`. It **replaces the whole map**, so read it back with
+  `argus_get_profile` and merge rather than sending one automation on its own.
+  The tool forwards only its declared fields, so a name it does not advertise
+  (`email`, `password`) cannot be reached through it.
 - **`argus_assign_proxy`** — resolves a proxy by id (or host/port) and writes
   `proxy_id` + `proxy_mode: 'assigned'` (`src/hooks/useAutomationBridge.ts:190-212`).
 - **CDP tools** (`electron/mcp/cdp.cjs`):
@@ -190,6 +197,47 @@ to the user's account).
     page; see §6.
 
 ---
+
+### Automation parameters — one workflow, many profiles
+
+An automation may declare **parameters**: typed, named inputs its steps read as
+`{{vars.<name>}}`. That is what lets a single flat-search workflow run Dortmund
+on one profile and Essen on the next, instead of the city being a literal buried
+in a `goto` step.
+
+- **`argus_automation_schema`** returns a `parameters` block alongside the step
+  catalogue: the descriptor shape, the seven kinds, the resolution order and the
+  limits. Call it before authoring — it is the only place the vocabulary is
+  written down for an agent.
+- **`argus_create_automation` / `argus_update_automation`** take `parameters`,
+  an ordered list of `{name, kind, label?, required?, default?, options?, hint?,
+  placeholder?}`. Update replaces the whole list. Bad declarations come back as
+  a 400 naming the index and the problem, from the same `validateParams` the
+  editor runs (`src/automations/parameters.ts`) — what the dialog refuses the
+  API refuses identically.
+- **`argus_list_automations`** returns each automation's `parameters`, so an
+  agent can see what to pass without pulling the whole step tree.
+- **`argus_update_profile.automationVars`** stores a profile's answers.
+- **`argus_run_automation.vars`** overrides them for one run. A declared name is
+  coerced to its kind; any other name is passed through as a plain seed
+  variable, exactly as this field worked before parameters existed.
+
+**Resolution order**, weakest first: callee defaults of any `callAutomation`
+target → the automation's own `default` → the profile's stored value → `vars`.
+A blank never overrides — it falls through. A **required** parameter with no
+value and no default refuses the run before a browser opens, in a sentence
+naming the profile and the parameter.
+
+**One call is one profile.** `argus_run_automation` takes a single `profileId`
+and answers with a single run id. To run the same automation with different
+values across profiles, call it once per profile with that profile's `vars` —
+which is also the only way to get a run id per profile to poll through
+`argus_automation_runs`.
+
+**`secret` parameters are masked in run history** (`••••` in
+`automation_runs.vars` and in every log line), so a value an agent writes there
+cannot be read back out through `argus_automation_runs`. It is still stored as
+plain text in the database, like every proxy password and connector credential.
 
 ## 4. What an agent CANNOT do
 

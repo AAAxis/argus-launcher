@@ -32,8 +32,10 @@ import type {ColumnChange} from '../tables/apiColumns';
 import type {CookieFileSelection} from '../native';
 import type {WorkspaceValue} from '../workspace/WorkspaceProvider';
 import {resolveCallTree} from '../automations/callGraph';
+import {validateParams} from '../automations/parameters';
 import {describeSchedule, validateSchedule} from '../automations/schedule';
 import {isCustomHex, resolveProfileColor} from '../lib/profileColors';
+import type {AutomationParam} from '../automations/parameters';
 import type {AutomationSchedule} from '../automations/schedule';
 import type {AutomationStep, AutomationVars} from '../automations/types';
 import type {ArgusAutomation, ArgusProxy} from '../types';
@@ -1029,6 +1031,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
     notifyOn?: string;
     notifyConnectorId?: string;
     variables?: Record<string, unknown>;
+    parameters?: unknown;
     schedule?: unknown;
   }): Partial<ArgusAutomation> {
     const extras: Partial<ArgusAutomation> = {};
@@ -1078,6 +1081,17 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
       }
       extras.variables = payload.variables as AutomationVars;
     }
+    if (payload.parameters !== undefined) {
+      // The same validator the editor runs, returning the same sentences. What
+      // the dialog refuses the API refuses identically -- the contract
+      // validateSchedule above already keeps, and the reason both live in
+      // src/automations/ rather than in either caller.
+      const problems = validateParams(payload.parameters);
+      if (problems.length > 0) {
+        throw new ApiError(problems.join('; '), 400);
+      }
+      extras.parameters = payload.parameters as AutomationParam[];
+    }
     if (payload.schedule !== undefined) {
       if (payload.schedule === null) {
         extras.schedule = null;
@@ -1113,6 +1127,11 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           name: automation.name,
           description: automation.description || null,
           stepCount: automation.steps.length,
+          // The declarations themselves, not a count: an agent that knows an
+          // automation exists needs to know what to pass it, and making that a
+          // second argus_get_automation call (which returns the whole step
+          // tree) is a lot of context for a list of names and kinds.
+          parameters: automation.parameters || [],
           pinned: Boolean(automation.pinned),
           icon: automation.icon || null,
           color: automation.color || null,
@@ -1164,6 +1183,7 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         notifyOn?: string;
         notifyConnectorId?: string;
         variables?: Record<string, unknown>;
+        parameters?: unknown;
         schedule?: unknown;
         // Forwarded by main on every table-driven channel: the API key's id
         // and display name. Not the author's identity -- the Supabase write
@@ -1182,6 +1202,9 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           description: payload.description?.trim() || null,
           steps: payload.steps,
           variables: {},
+          // Overwritten by `extras` below when the caller sent any -- seeded
+          // here so a row always has the column, the way variables does.
+          parameters: [],
           // automationToRow runs these through normalizeTags, which is the one
           // enforcement point for the 5-tag cap -- an agent posting eight gets
           // five, on the same terms as the editor and the CSV importer.

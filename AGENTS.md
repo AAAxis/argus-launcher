@@ -364,6 +364,40 @@ and the editor needs no change at all. Do not "simplify" that binding into a
 cast — a cast on the right-hand side satisfies the annotation and checks
 nothing.
 
+**An automation's `parameters` are a declaration; `variables` is a bag.** Both
+sit on the row. `parameters` (jsonb array, `src/automations/parameters.ts`) is
+what the editor renders, what a profile answers through
+`profiles.automation_vars`, and what `resolveRunVars` coerces. `variables` is
+the untyped seed map MCP has always accepted and has no UI at all — a declared
+parameter of the same name **shadows** its entry. That precedence is documented
+on the type and enforced in `resolveRunVars`; it is deliberately not a
+constraint, because the bag predates the declaration and rows using both are
+already valid.
+
+**All parameter resolution happens in the renderer, and the runner did not
+change for it.** `useAutomationActions.run()` calls `resolveRunVars` and hands
+the result to the `vars` argument `runner.cjs` already merged
+(`{...automation.variables, ...vars}`). Do not teach the main process about
+parameters: it has no automation catalogue, so it cannot see a `callAutomation`
+callee's declarations, which is exactly why callee defaults and `secret` names
+are both collected renderer-side and passed in.
+
+**A `secret` parameter is redacted in three places, and `persist()` is the one
+that is easy to miss.** `redactSecrets` (`electron/automation/redact.cjs`) runs
+in `Run.seal()`, in the per-step log entry, **and** in `Run.persist()` — persist
+rewrites `record.vars` from the raw bag on every change and once more after the
+seal, so masking only in `seal()` puts the secret straight back into the record
+the renderer writes to Supabase and into the disk mirror under
+`<userData>/AutomationRuns/`. Masking is display protection in a record, not
+encryption; the value is plaintext in the column either way.
+
+**A field that names a variable a step WRITES is marked `writesVar` in
+step-schema.json.** Six fields carry it (`setVar.name` and five `into`s). The
+editor's insert chips and its unset-variable warning (`src/automations/varRefs.ts`)
+read the marker rather than matching on the key name — the same argument
+`check: 'selector'` already makes, and it matters here because those six share a
+regex and a kind with fields that write nothing.
+
 **`evaluate.script` is never interpolated.** Splicing user data into source is
 injection, and a `{{ }}` inside real JavaScript would be silently rewritten.
 Values reach a script through `args`, which are interpolated and passed as a

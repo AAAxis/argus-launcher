@@ -1044,32 +1044,22 @@
   }
 }
 
-/* A card that arrived since this user last looked -- a teammate's machine or
- * an agent over MCP. The glow plays once per visit (the class rides the first
- * render after the watermark check) and settles back to the normal surface,
- * so it marks arrival without becoming a permanent state. */
+/* A card that arrived since this machine last looked -- a teammate's install or
+ * an agent over MCP. See src/lib/newSince.ts.
+ *
+ * This was a three-second glow that decayed back to the normal surface. It now
+ * holds for the whole visit and clears on the next one, because the three table
+ * tabs grew the same marker and a card cannot mean something different from a
+ * row three tabs over. Holding is also the more useful of the two: an arrival
+ * you have to catch within three seconds of the tab painting is one you cannot
+ * sort, filter or come back to.
+ *
+ * The mix is against --raised rather than transparent, unlike the table rows:
+ * a card sits on --surface with a --raised fill of its own, so mixing to
+ * transparent would let the page show through it. */
 .automation-card.is-new {
-  animation: automation-card-arrive 3s ease-out 1;
-}
-
-@keyframes automation-card-arrive {
-  0% {
-    background: color-mix(in srgb, var(--profile-green-bg) 85%, var(--raised));
-    border-color: var(--profile-green-border);
-    box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--profile-green-border) 45%, transparent);
-  }
-
-  70% {
-    background: color-mix(in srgb, var(--profile-green-bg) 45%, var(--raised));
-    border-color: var(--profile-green-border);
-  }
-
-  100% {
-    background: var(--raised);
-    border-color: var(--border);
-    box-shadow: var(--shadow-xs);
-  }
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, var(--raised));
+  border-color: var(--profile-green-border);
 }
 
 /* The schedule's profile checklist -- capped and scrollable so a workspace
@@ -1271,6 +1261,39 @@
 .param-values {
   display: grid;
   gap: 10px;
+}
+
+/* Two columns, no prose. The Run dialog shows one of these per ticked profile,
+   so a full-height form on five parameters would push the second profile --
+   the one you are running a different city on -- off the bottom of the list. */
+.param-values.is-compact {
+  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* A textarea keeps the full width: `list` and `textarea` values are lines, and
+   half a line is not a useful measure for either. Short, though -- three rows
+   of empty box per profile is most of what pushed the next profile off screen,
+   and it still scrolls and still drag-resizes. */
+.param-values.is-compact .field:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.param-values.is-compact textarea {
+  min-height: 0;
+  height: 52px;
+}
+
+.param-values.is-compact .field > span {
+  font-size: 11px;
+}
+
+/* Hints are the first thing to go. They are written once, in the declaration,
+   and the profile editor is where there is room to read them -- here they would
+   triple the height of every row. The missing-value line stays: it is the one
+   sentence that changes what the button does. */
+.param-values.is-compact .field-hint {
+  display: none;
 }
 
 .param-value-missing {
