@@ -36,10 +36,11 @@ describe('nextIndex', () => {
     expect(nextIndex('End', 2, 3)).toBe(2);
   });
 
-  // A launch with no automations hides that tab, and the caller passes the
-  // number of tabs ON SCREEN. Two must wrap cleanly, with no dead stop where
-  // the third used to be.
-  it('wraps over two tabs, the no-automations launch', () => {
+  // No launch hides a tab any more -- all three are always on screen, so three
+  // is the count in practice. The two-tab case is kept because the caller still
+  // passes the number ON SCREEN and setAvailable() still exists: a future tab
+  // that comes and goes must wrap cleanly, with no dead stop where it used to be.
+  it('wraps over two tabs, for a strip with one hidden', () => {
     expect(nextIndex('ArrowRight', 1, 2)).toBe(0);
     expect(nextIndex('ArrowLeft', 0, 2)).toBe(1);
     expect(nextIndex('End', 0, 2)).toBe(1);
@@ -140,5 +141,60 @@ describe('sidepanel.html tab markup', () => {
       const on = attr(tab as string, 'aria-selected') === 'true';
       expect(/\shidden(\s|>|=)/.test(panel), `${attr(panel, 'id')} hidden`).toBe(!on);
     }
+  });
+
+  // Design decision, and the one this refactor was for. Automations used to be
+  // hidden here and revealed by renderAutomations only when the launch carried
+  // some -- so a profile with nothing pinned had no way to discover the tab
+  // existed, and a run started from the launcher had nowhere in this window to
+  // report. The tab is now always on screen and says which case it is in.
+  //
+  // Asserted on the markup because that is where the regression would land:
+  // putting `hidden` back is a one-word change that looks like tidying.
+  it('hides no tab, so the strip cannot conceal a feature', () => {
+    for (const tag of tabTags) {
+      expect(/\shidden(\s|>|=)/.test(tag), `${attr(tag, 'id')} is hidden`).toBe(false);
+    }
+  });
+});
+
+// The Automations panel carries two independent surfaces, and the ids below are
+// the whole contract between this markup and sidepanel.js's paintRunCard. A
+// renamed id there is a card that silently never paints -- $() returns null, the
+// assignment throws inside a poll nobody is watching, and the tab just looks
+// empty.
+describe('sidepanel.html run-progress markup', () => {
+  const html = readFileSync(
+      join(__dirname, '../../extensions/cookie-manager/sidepanel.html'), 'utf8');
+
+  it('carries every id the run card is painted through', () => {
+    for (const id of [
+      'run-card', 'run-icon', 'run-title', 'run-step',
+      'run-bar', 'run-bar-fill', 'run-meta', 'run-stop',
+      'automation-list', 'automations-empty', 'open-automations',
+    ]) {
+      expect(html.includes(`id="${id}"`), `#${id} is missing`).toBe(true);
+    }
+  });
+
+  // Both start hidden: the card until a poll finds a run, the empty state until
+  // the launch snapshot says there is nothing to list. Neither is the panel's
+  // opening state, and shipping either visible means every launch flashes it.
+  it('starts the run card and the empty state hidden', () => {
+    for (const id of ['run-card', 'automations-empty']) {
+      const tag = (html.match(new RegExp(`<[a-z][^>]*id="${id}"[^>]*>`)) || [''])[0];
+      expect(/\shidden(\s|>|=)/.test(tag), `#${id} should start hidden`).toBe(true);
+    }
+  });
+
+  // The bar is an ARIA progressbar rather than a <progress>, because an
+  // indeterminate run has no value to report and aria-valuenow is removed
+  // outright in that state. min and max have to be on the markup for the
+  // script's valuenow to mean anything.
+  it('declares the bar as a bounded progressbar', () => {
+    const tag = (html.match(/<[a-z][^>]*id="run-bar"[^>]*>/) || [''])[0];
+    expect(tag).toContain('role="progressbar"');
+    expect(tag).toContain('aria-valuemin="0"');
+    expect(tag).toContain('aria-valuemax="100"');
   });
 });

@@ -838,15 +838,19 @@ type ArgusNative = {
     result?: {proxyOk: boolean; title: string; detail: string},
     error?: string,
   ): void;
-  // POST /v1/automations/open-in-launcher: a launch's start page asking for one
-  // of its own automations to be opened here. One-way -- main has already
-  // raised the window, so there is nothing to answer and nothing the page could
-  // show if this never arrived.
+  // POST /v1/automations/open-in-launcher: a launch's start page or side panel
+  // asking for one of its own automations to be opened here. One-way -- main has
+  // already raised the window, so there is nothing to answer and nothing the
+  // caller could show if this never arrived.
   //
-  // `automationId` came off the run token's entry check, not off the request
-  // body, so it names a workflow this launch was already offering.
+  // A non-null `automationId` came off the run token's entry check, not off the
+  // request body, so it names a workflow this launch was already offering.
+  //
+  // Null means the caller named none: "the Automations tab for this profile",
+  // which is what the side panel offers a launch with nothing attached to run.
+  // The handler resolves that to the same place a since-deleted workflow does.
   onOpenAutomationRequest?(
-    callback: (payload: {automationId: string; profileId: string}) => void,
+    callback: (payload: {automationId: string | null; profileId: string}) => void,
   ): () => void;
 };
 

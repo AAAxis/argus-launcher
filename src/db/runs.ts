@@ -76,12 +76,11 @@ export async function upsertFinished(orgId: string, run: AutomationRun): Promise
   raise(error, 'runs.upsertFinished');
 }
 
-export async function purgeOlderThan(orgId: string, cutoffIso: string): Promise<void> {
-  const client = requireClient();
-  const {error} = await client
-      .from('automation_runs')
-      .delete()
-      .eq('org_id', orgId)
-      .lt('started_at', cutoffIso);
-  raise(error, 'runs.purgeOlderThan');
-}
+// There is no purge here on purpose. Run retention is the database's job now --
+// purge_expired_data(), scheduled nightly by
+// supabase/migrations/20260816000000_data_retention.sql, deletes runs older than
+// fourteen days for every org. The renderer used to carry a purgeOlderThan()
+// for this and never called it from anywhere, which is how the fourteen days
+// app/privacy/page.tsx promises went unenforced for the rows while the
+// screenshots on disk were swept on schedule. A second copy here is how the two
+// windows would drift apart again.

@@ -589,6 +589,81 @@ async function runAutomation(automationId) {
   return result.ok ? {ok: true} : {ok: false, error: result.message};
 }
 
+// What is running against this profile right now, or null.
+//
+// Scoped to the profile by the launcher, not by this extension: the run may have
+// been started from the launcher's own window, by a schedule, or by an MCP tool,
+// and all three are exactly as relevant to the person watching this window as one
+// started from the panel.
+//
+// This is the one call the panel makes on a timer, so its failure is quiet by
+// design: `ok: false` with no `error` when the window has no launch credential at
+// all. A poll that painted an error banner every second on a window opened
+// outside the launcher would be worse than one that says nothing.
+async function automationStatus() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, available: false};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/automations/status-from-page`,
+      {runToken: config.token});
+  if (!result.ok) {
+    return {ok: false, available: true, error: result.message};
+  }
+  // Both null-able, and both nulls are successful answers that must not be
+  // confused with a failed poll -- the panel paints an idle list for those and
+  // leaves the last known state alone for a failure.
+  //
+  // `last` is the run that most recently FINISHED against this profile. Without
+  // it the progress card is a bar that vanishes: the launcher answers out of its
+  // live map, so the instant a run seals there is nothing to report and the card
+  // disappears without ever saying whether it worked.
+  return {
+    ok: true,
+    available: true,
+    run: result.body.run || null,
+    last: result.body.last || null,
+  };
+}
+
+// Stops whatever is running against this profile. Names no run: the launcher
+// resolves that from the token's own profile, so there is nothing here for a
+// caller to aim.
+async function cancelAutomation() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/automations/cancel-from-page`,
+      {runToken: config.token});
+  if (!result.ok) {
+    return {ok: false, error: result.message};
+  }
+  // False when there was nothing left to stop -- a run that ended between the
+  // last poll and the click. Reported rather than treated as a failure.
+  return {ok: true, cancelled: Boolean(result.body.cancelled)};
+}
+
+// Brings the launcher forward on its Automations tab, naming nothing.
+//
+// The panel's empty state is the only caller: a launch with no automations
+// attached has nothing to run, and "go and attach one" is the only useful thing
+// that screen can offer. Naming no automation is what the launcher reads as "the
+// tab, no particular row" -- see authorizeOpen in run-token.cjs for why widening
+// the route that far is safe.
+async function openAutomationsInLauncher() {
+  const config = await launchConfig();
+  if (!config) {
+    return {ok: false, error: 'This window was not launched from Argus Launcher.'};
+  }
+  const result = await fetchLauncher(
+      `http://127.0.0.1:${config.apiPort}/v1/automations/open-in-launcher`,
+      {runToken: config.token});
+  return result.ok ? {ok: true} : {ok: false, error: result.message};
+}
+
 // ---- import / export -------------------------------------------------------
 function downloadFile(filename, text, mime) {
   const url = `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
@@ -718,6 +793,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         case 'run-automation':
           sendResponse(await runAutomation(message.automationId));
+          return;
+        case 'automation-status':
+          sendResponse(await automationStatus());
+          return;
+        case 'cancel-automation':
+          sendResponse(await cancelAutomation());
+          return;
+        case 'open-automations':
+          sendResponse(await openAutomationsInLauncher());
           return;
         case 'sync-now':
           sendResponse(await pushToLauncher({manual: true}));

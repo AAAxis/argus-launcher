@@ -28,10 +28,13 @@ const telegramLink = require('./telegram-link.cjs');
 const automationNotify = require('./automation/notify.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
-  createRunTokens, handleCookieListFromPage, handleCookiePullFromPage,
-  handleCookiePushFromPage, handleOpenInLauncherFromPage, handleRecheckFromPage,
-  handleRunFromPage,
+  createRunTokens, handleCancelRunFromPage, handleCookieListFromPage,
+  handleCookiePullFromPage, handleCookiePushFromPage,
+  handleOpenInLauncherFromPage, handleRecheckFromPage, handleRunFromPage,
+  handleRunStatusFromPage,
 } = require('./automation/run-token.cjs');
+const {createDrivingState} = require('./automation/driving-state.cjs');
+const {runSummary} = require('./automation/progress.cjs');
 const {routes: apiRoutes} = require('./api/routes.json');
 
 // ── argus:// deep links ──────────────────────────────────────────────────────
@@ -1100,6 +1103,17 @@ function resolveToolbarDark(theme) {
 }
 
 function builtInExtensionPaths(payload) {
+  // A window opening is a window nothing is driving yet. The border's TTL
+  // already means a state file left by a crashed launcher reads as inactive, so
+  // this is tidiness rather than correctness -- but a file describing a run that
+  // ended yesterday has no business sitting in the profile while a person uses
+  // it, and this is the moment it is certainly wrong.
+  drivingState.idle(payload.id);
+  // The last run's verdict belongs to the launch that watched it happen. A new
+  // window's panel must not open reporting on a run that finished before it
+  // existed -- and this is also what bounds the map, whose natural lifetime is
+  // "the current launch of this profile" rather than "this app session".
+  lastFinishedRuns.delete(payload.id);
   const sessionPanel = payload.sessionPanel ? {
     ...payload.sessionPanel,
     toolbarDark: resolveToolbarDark(payload.sessionPanel.theme),
@@ -3772,6 +3786,26 @@ function keyAllowsFolder(key, folderId) {
 // and kill a window a human opened by hand.
 const automationLaunches = new Map();
 
+// The orange border a driven window wears. See driving-state.cjs for why this is
+// a file in the profile's own tree rather than a channel.
+//
+// The directory is resolved the way resolveProfileCdp resolves it -- profiles
+// live under ArgysProfiles/<id> relative to userData -- rather than being read
+// off a launch payload, because most of the callers below have a profile id and
+// nothing else.
+const drivingState = createDrivingState({
+  resolveUserDataDir: (profileId) => {
+    if (!profileId) {
+      return '';
+    }
+    try {
+      return resolveProfileUserDataDir(path.join('ArgysProfiles', profileId));
+    } catch {
+      return '';
+    }
+  },
+});
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
@@ -3891,6 +3925,15 @@ function killAutomationLaunch(profileId) {
   // The token is only good for a live session; outliving one would leave a
   // credential on disk that still works against whatever opens next.
   runTokens.dropForProfile(profileId);
+  // Same reasoning, for the border: a state file left behind outlives the window
+  // it described, and the next launch of this profile would open orange until
+  // its TTL lapsed. Before the early return below, because a window this process
+  // never tracked (adopted from DevToolsActivePort, or closed by hand) can still
+  // have been marked by an MCP call.
+  drivingState.idle(profileId);
+  // And the verdict the closed window's panel was showing. There is no longer a
+  // panel to show it to, and the next launch gets a clean one.
+  lastFinishedRuns.delete(profileId);
   const tracked = automationLaunches.get(profileId);
   if (!tracked) {
     return false;
@@ -3932,7 +3975,63 @@ function killAutomationLaunch(profileId) {
 // So a run starts with the renderer handing over a fully resolved automation
 // and a cdpUrl, and progress comes back as events.
 
+// runId -> {profileId, label}, for the length of a run.
+//
+// A `log` event names its run and nothing else, and the border needs a profile.
+// Rather than widen the event shape -- which the renderer also consumes, and
+// which is persisted -- the started event's record is remembered here, where the
+// border is driven from.
+const runProfiles = new Map();
+
+// profileId -> the last run that FINISHED against it, reduced.
+//
+// Without this the side panel's progress card is a bar that vanishes: the status
+// route answers out of the runner's live map, so the instant a run seals there is
+// nothing to report and the card the user was watching disappears without ever
+// saying whether it worked. That is the one question watching it was for.
+//
+// In memory and one deep per profile, deliberately. Run HISTORY is the renderer's
+// (it owns the Supabase write and the disk mirror); this is the tail of the thing
+// the panel was already watching, and it is allowed to be forgotten when the app
+// restarts -- a panel that reopens tomorrow should say nothing, not report on
+// yesterday.
+const lastFinishedRuns = new Map();
+
+// Every run from every trigger passes through here: the launcher's own Run
+// button, a schedule, the start page, the side panel, an MCP call. That is why
+// the border is driven from this one function rather than from each of those
+// call sites, which is where it would have been forgotten.
 function sendRunEvent(event) {
+  if (event.type === 'started' && event.run) {
+    runProfiles.set(event.runId, {
+      profileId: event.run.profile_id,
+      label: event.run.automation_name || '',
+    });
+    drivingState.runActive(event.run.profile_id, event.run.automation_name);
+  } else if (event.type === 'log') {
+    // Refreshing on every step is what keeps the written expiry ahead of the
+    // clock: the state carries a TTL so a launcher that dies mid-run cannot
+    // leave a window orange forever, and a long run has to keep saying it is
+    // still here.
+    const tracked = runProfiles.get(event.runId);
+    if (tracked) {
+      drivingState.runActive(tracked.profileId, tracked.label);
+    }
+  } else if (event.type === 'finished') {
+    const tracked = runProfiles.get(event.runId);
+    runProfiles.delete(event.runId);
+    // Off the tracked entry rather than off event.run, so a finished event that
+    // arrives without a record (or with one this process never saw start) still
+    // takes the border down.
+    const profileId = tracked ? tracked.profileId :
+      (event.run ? event.run.profile_id : '');
+    if (profileId) {
+      drivingState.idle(profileId);
+    }
+    if (event.run && profileId) {
+      lastFinishedRuns.set(profileId, runSummary(event.run));
+    }
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('argus:automation-run-event', event);
   }
@@ -4633,13 +4732,18 @@ function runFromPage(req, res) {
 }
 
 // Brings the launcher window forward with one of a launch's own automations
-// open, asked for by that launch's start page.
+// open, asked for by that launch's start page or side panel.
 //
 // The window is raised here; naming which workflow to show is the renderer's,
 // because it owns the tabs and the cloud rows. The send is fire-and-forget for
 // the reason handleOpenInLauncherFromPage gives -- and if the renderer has not
 // finished booting, the user still gets a launcher window in front of them,
 // which is most of what they asked for.
+//
+// `automation` is null when the caller named none: "show me the Automations tab
+// for this profile", which is what the side panel's empty state offers a launch
+// that has no automations attached to run. The renderer reads a null
+// automationId as "the tab, no particular row".
 function openInLauncherFromPage(req, res) {
   handleOpenInLauncherFromPage({
     req,
@@ -4650,11 +4754,58 @@ function openInLauncherFromPage(req, res) {
       focusMainWindow();
       if (mainWindow) {
         mainWindow.webContents.send('argus:open-automation-request', {
-          automationId: automation.id,
+          automationId: automation ? automation.id : null,
           profileId: entry.profileId,
         });
       }
     },
+  });
+}
+
+// What is running against a launch's own profile right now, asked for by that
+// launch's side panel on a timer. The scoping and the refusal semantics live in
+// run-token.cjs; this is only the lookup.
+//
+// Answers out of the runner's live map rather than the disk mirror or the
+// renderer: this process owns the run, and a poll that had to cross the IPC
+// boundary to a window that may be closed would answer "no run" for a run that
+// is very much in flight.
+function runStatusFromPage(req, res) {
+  handleRunStatusFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    // Both halves, because the panel needs to distinguish three states and two
+    // fields cannot be collapsed into one: something is running, nothing is
+    // running but the last one has an outcome worth reporting, and nothing has
+    // run at all. `last` is dropped once a new run starts against the profile,
+    // so the panel can never show a stale verdict beside a live bar.
+    status: (entry) => {
+      const run = automationRunner.activeRunForProfile(entry.profileId);
+      return {
+        run,
+        last: run ? null : (lastFinishedRuns.get(entry.profileId) || null),
+      };
+    },
+  });
+}
+
+// Stops whatever is running against a launch's own profile, asked for by that
+// launch's side panel.
+//
+// Cancelling is cooperative: this sets the flag and the runner notices at its
+// next step boundary, seals the record as 'cancelled' and -- deliberately --
+// does NOT close the browser window (see execute()'s finally). Someone standing
+// at the machine pressing Stop wants the run to end, not their session to
+// vanish.
+function cancelRunFromPage(req, res) {
+  handleCancelRunFromPage({
+    req,
+    res,
+    tokens: runTokens,
+    sendJson,
+    cancel: (entry) => automationRunner.cancelForProfile(entry.profileId),
   });
 }
 
@@ -4866,14 +5017,23 @@ function startAutomationApiServer() {
       return;
     }
 
-    // Above the bearer gate on purpose: the caller is a file:// page, which has
-    // no key and must never be given one. All three authenticate with a
-    // per-launch run token instead -- see runTokens for what that does and does
-    // not authorize. None is in electron/api/routes.json: they are not part of
-    // the keyed surface and must never be advertised as one, which is why
-    // verify-api-routes skips them by name.
+    // Above the bearer gate on purpose: the caller is a file:// page or the
+    // bundled side panel, which has no key and must never be given one. All of
+    // these authenticate with a per-launch run token instead -- see runTokens
+    // for what that does and does not authorize. None is in
+    // electron/api/routes.json: they are not part of the keyed surface and must
+    // never be advertised as one, which is why verify-api-routes skips them by
+    // name.
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/run-from-page') {
       runFromPage(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/status-from-page') {
+      runStatusFromPage(req, res);
+      return;
+    }
+    if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/cancel-from-page') {
+      cancelRunFromPage(req, res);
       return;
     }
     if (req.method === 'POST' && parsedUrl.pathname === '/v1/automations/open-in-launcher') {
@@ -5038,6 +5198,17 @@ function startAutomationApiServer() {
         if (session.running && !maySeeAutomationSession(key, session)) {
           sendJson(res, 403, {status: false, msg: 'This key did not launch that profile'});
           return;
+        }
+        // The one choke point for "an AI tool is about to drive this window".
+        // Every CDP-using MCP tool resolves its port through this route first
+        // (electron/mcp/tools.cjs requireCdpUrl), so marking it here covers
+        // navigate, read, screenshot, eval and tabs without touching any of
+        // them -- and cannot be forgotten by a tool added later.
+        //
+        // Only once the request is authorized and the window is actually
+        // running: a refused or missed lookup drove nothing.
+        if (session.running) {
+          drivingState.aiActive(payload.profileId);
         }
         sendJson(res, 200, {
           status: true,
@@ -5430,6 +5601,11 @@ app.whenReady().then(() => {
 // explicitly so a future change that persists this map has to think about it.
 app.on('will-quit', () => {
   runTokens.clear();
+  // The border states are NOT memory only: each is a file in a profile's tree,
+  // and a browser window can outlive this app. Nothing would clear them once
+  // this process is gone, so they come down here -- their TTL is the backstop for
+  // a crash, not for an ordinary quit.
+  drivingState.idleAll();
 });
 
 app.on('window-all-closed', () => {

@@ -132,6 +132,23 @@
 
 * { box-sizing: border-box; }
 
+/* The UA stylesheet's `[hidden] { display: none }` is a (0,1,0) rule that loses to
+ * every later (0,1,0) class rule in this file -- so any element given a `display`
+ * here keeps laying out after `element.hidden = true`, which is how this panel
+ * shows things it was told to hide.
+ *
+ * That has now cost three separate bugs: an empty 11px line inside a card (the
+ * .card-text span rule below still carries its own `:not([hidden])` note from
+ * that one), an empty run card on the Automations tab of every launch, and a
+ * bare progress bar with a live Stop button under it on a profile with no run.
+ * Each was fixed by remembering `:not([hidden])` on one more selector, and the
+ * next `display` declaration would have been the fourth.
+ *
+ * Doubling the attribute is the whole trick: same element, specificity (0,2,0),
+ * so `hidden` beats any single-class rule in this file without !important and
+ * without every future rule having to know about it. */
+[hidden][hidden] { display: none; }
+
 /* No fixed width, unlike the popup this replaces: a side panel is resizable and
  * the user decides. 320px is Chrome's floor, and everything below is laid out
  * to survive it. No bottom padding to reserve: the status bar is sticky rather
@@ -564,16 +581,98 @@ button.icon-button:disabled:hover { background: transparent; color: var(--ink-so
 button.automation { justify-content: flex-start; text-align: left; }
 button.automation .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.automation[data-state="running"] { cursor: progress; }
-button.automation[data-state="done"] {
-  background: var(--status-active-bg);
-  border-color: var(--status-active-bg);
-  color: var(--status-active-ink);
+/* No done/failed tint on the row any more. The row used to carry the verdict
+ * because nothing else could -- the panel was never told how a run ended, so a
+ * four-second green flash was the only feedback available. The card above now
+ * reports the outcome for as long as it is the latest one, and two surfaces
+ * describing the same run in two places is how they end up disagreeing. */
+
+/* ---- the live run ------------------------------------------------------------
+ * Above the list, and independent of it: this reports whatever is running against
+ * this profile, including runs started from the launcher, a schedule or an MCP
+ * tool against a profile that has nothing pinned to run from here.
+ *
+ * Takes the .card tones (tone-ok / tone-warn / tone-bad / tone-off) unchanged, so
+ * a finished run is coloured by the same vocabulary the sync and proxy cards use
+ * and there is one place to retune. */
+.run-card { display: grid; gap: 8px; margin-bottom: 10px; }
+
+/* Track and fill. The track is --border-soft rather than a tinted colour: the
+ * card behind it is already carrying the tone, and a second tinted surface inside
+ * it made the bar read as a nested card. */
+.run-bar {
+  background: var(--border-soft);
+  border-radius: 999px;
+  height: 4px;
+  overflow: hidden;
+  position: relative;
 }
-button.automation[data-state="failed"] {
-  background: var(--danger-bg);
-  border-color: var(--danger-bg);
-  color: var(--danger);
+.run-bar-fill {
+  background: var(--ink-soft);
+  border-radius: 999px;
+  display: block;
+  height: 100%;
+  /* Steps land as discrete jumps a second or more apart, so the eased width is
+   * doing real work here: without it the bar teleports and reads as a redraw
+   * rather than as progress. */
+  transition: width 300ms ease;
+  width: 0;
 }
+/* The tone drives the fill so the bar agrees with the title above it. tone-off
+ * (a run in flight) is deliberately left neutral -- in progress is not a verdict,
+ * and a green bar at 40% would be claiming one. */
+.card.tone-ok .run-bar-fill { background: var(--status-active-ink); }
+.card.tone-warn .run-bar-fill { background: var(--status-warmup-ink); }
+.card.tone-bad .run-bar-fill { background: var(--danger); }
+
+/* A run whose loop has overrun its declared step count has no honest position to
+ * show (see progressOf in electron/automation/progress.cjs), so the bar sweeps
+ * instead of filling: motion without a position, which is what indeterminate
+ * means. The fill's own width is cleared by the script in this state, so the
+ * sweep needs its own box rather than reusing it. */
+.run-bar[data-indeterminate="true"] .run-bar-fill { width: 35%; animation: run-sweep 1.4s ease-in-out infinite; }
+@keyframes run-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(286%); }
+}
+
+.run-foot { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+/* Tabular figures so a counting clock does not shift the text beside it every
+ * time a digit changes width. */
+.run-meta {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-stop { flex: none; }
+
+/* Reduced motion: the sweep is the only thing here that moves without being
+ * driven by an event, and it is decoration -- the words above it already say the
+ * run is in flight. A static part-filled bar is the honest still frame. */
+@media (prefers-reduced-motion: reduce) {
+  .run-bar[data-indeterminate="true"] .run-bar-fill { animation: none; }
+  .run-bar-fill { transition: none; }
+}
+
+/* ---- empty states -----------------------------------------------------------
+ * Says which of two things is true -- there is nothing here yet, or there is
+ * nothing here because of something you have not done -- and names the fix. A
+ * blank panel says neither, which is what this tab used to do by hiding itself. */
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 14px 12px;
+}
+.empty-title { color: var(--ink); font-size: 12.5px; font-weight: 600; margin: 0; }
+.empty-detail { color: var(--ink-soft); font-size: 11px; line-height: 1.45; margin: 0; }
+.empty-state button { margin-top: 2px; }
 
 /* ---- status bar ---------------------------------------------------------------------
  * Sticky, not fixed. A popup was short enough that a trailing line was always in

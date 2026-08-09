@@ -13,6 +13,7 @@
 
 const {openPageSession} = require('../cdp-core.cjs');
 const {interpolateStep} = require('./interpolate.cjs');
+const {runSummary} = require('./progress.cjs');
 const {redactSecrets} = require('./redact.cjs');
 const {EXECUTORS, evaluateCondition, sleep, validateSteps} = require('./steps.cjs');
 const store = require('./store.cjs');
@@ -118,6 +119,13 @@ class Run {
       finished_at: null,
       duration_ms: null,
       step_count: 0,
+      // How many TOP-LEVEL steps this automation declares, recorded so a watcher
+      // has a denominator. Deliberately not a promise about the total: an `if`
+      // branch, a `loop` or a `callAutomation` all run steps that are not in
+      // this count, so step_count can and does overshoot it. progressOf() below
+      // is the one place allowed to turn the pair into a fraction, and it
+      // reports "indeterminate" rather than a number it cannot stand behind.
+      total_steps: (automation.steps || []).length,
       failed_step_id: null,
       error: null,
       vars: {},
@@ -530,6 +538,34 @@ function isProfileRunning(profileId) {
   return false;
 }
 
+// The one run in flight against a profile, reduced for a watcher -- or null.
+//
+// "The one" is not an assumption: start() refuses a second run against a profile
+// that already has one (409, above), so there is at most one to find. That is
+// also why the panel can poll this without paging.
+function activeRunForProfile(profileId) {
+  for (const entry of active.values()) {
+    if (entry.profileId === profileId) {
+      return runSummary(entry.run.record);
+    }
+  }
+  return null;
+}
+
+// Stops whatever is running against a profile, naming no run. Returns the id it
+// stopped, or '' if there was nothing in flight -- the caller reports that
+// rather than failing, since a run that ended a moment before the click is not
+// an error.
+function cancelForProfile(profileId) {
+  for (const [runId, entry] of active) {
+    if (entry.profileId === profileId) {
+      entry.run.cancelled = true;
+      return runId;
+    }
+  }
+  return '';
+}
+
 function activeRuns() {
   return Array.from(active.values()).map((entry) => entry.run.record);
 }
@@ -537,8 +573,10 @@ function activeRuns() {
 module.exports = {
   MAX_CONCURRENT_RUNS,
   SCHEMA,
+  activeRunForProfile,
   activeRuns,
   cancel,
+  cancelForProfile,
   isProfileRunning,
   start,
   validateSteps: (steps) => validateSteps(steps, SCHEMA),

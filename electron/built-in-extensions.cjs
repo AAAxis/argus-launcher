@@ -61,20 +61,26 @@ const BUILT_IN_EXTENSIONS = [
     // The pre-rename directory, removed on launch so it does not sit in every
     // profile forever. Nothing loads it: it is not in --load-extension.
     retired: ['ArgysCookieManager'],
-    // Given its own toolbar button rather than left inside the puzzle-piece
-    // menu. This one is not an accessory to a page -- it is how you open the
-    // session dashboard at all, and two clicks behind a menu is not a place a
-    // primary surface can live. See seedPinnedExtensions below for how, and why
-    // only a stable placement can ask for this.
+    // NOT pinned, and this is the one entry for which that is a decision rather
+    // than a default.
     //
-    // NOTE: on a browser build that carries the native "Argus Helper" toolbar
-    // button (chrome/browser/ui/views/toolbar/argus_toolbar_button.*, driven by
-    // --argus-panel-extension-id), flip this to false -- the native button then
-    // owns the panel and pinning the extension too would show two buttons. It
-    // stays true here because the shipped binary predates that button, and on it
-    // the native side-panel action is unpinned, so this pin is the only way to
-    // reach the panel at all.
-    pinned: true,
+    // It used to be pinned, because the panel had no other way in. The shipped
+    // browser now carries a native, labelled "Argus Helper" toolbar button
+    // (chrome/browser/ui/views/toolbar/argus_toolbar_button.*, driven by
+    // --argus-panel-extension-id and auto-pinned once per profile by
+    // PinnedToolbarActionsModel), and that button owns the panel. Pinning the
+    // extension's own action as well put TWO buttons in the toolbar for one
+    // surface: the labelled native one and an icon-only duplicate.
+    //
+    // Flipping this to false only helps profiles that have never launched --
+    // seedPinnedExtensions seeds once and then leaves the list alone. Profiles
+    // that ran the old build carry the pin in their Preferences forever, which
+    // is what unpinRetiredExtensions below exists to undo.
+    pinned: false,
+    // The other half of that flip: strip a pin this table put there before the
+    // native button existed. Only ever removes THIS entry's own id, so a button
+    // the user pinned by hand is left alone -- see unpinRetiredExtensions.
+    unpin: true,
     // The Argus Panel: the browser's side-panel dashboard. Cookie export/import
     // and sync, the session's proxy readout, and this launch's automations,
     // plus (when this profile has a cookie file assigned) the seed the
@@ -305,46 +311,111 @@ function unpackedExtensionId(extensionDir) {
 // Only stable placements are eligible. A per-launch directory gets a new path,
 // and therefore a new id, every single launch -- pinning those would append a
 // dead id to this list forever and never pin anything the user could see.
-function seedPinnedExtensions(payload, deps) {
-  const prefsPath = path.join(payload.userDataDir, 'Default', 'Preferences');
-  let prefs;
+// The profile's Preferences file as a plain object, plus where to put it back.
+// Two passes below read-modify-write it, and this is the only place that knows
+// how it is spelled: Chromium's JsonPrefStore treats the dots in a registered
+// pref name as nested object paths, so the on-disk shape is {"extensions":
+// {"pinned_extensions": [...]}} rather than a flat dotted key. Same rule
+// writeProfileProxyAssignment documents for argus.profile_data.
+//
+// A missing or unreadable file reads as {}: on a profile's very first launch
+// there is nothing to merge with and nothing to preserve.
+function readProfilePrefs(userDataDir) {
+  const prefsPath = path.join(userDataDir, 'Default', 'Preferences');
   try {
-    prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+    return {prefsPath, prefs: JSON.parse(fs.readFileSync(prefsPath, 'utf8'))};
   } catch {
-    // No Preferences file yet (a profile's very first launch), or an unreadable
-    // one. Either way there is nothing to merge with and nothing to preserve.
-    prefs = {};
+    return {prefsPath, prefs: {}};
   }
-  // Chromium's JsonPrefStore treats the dots in a registered pref name as
-  // nested object paths, so the on-disk shape is {"extensions":
-  // {"pinned_extensions": [...]}} rather than a flat dotted key. Same rule
-  // writeProfileProxyAssignment documents for argus.profile_data.
+}
+
+function writeProfilePrefs(prefsPath, prefs) {
+  fs.mkdirSync(path.dirname(prefsPath), {recursive: true});
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs));
+}
+
+// The id an enabled, stable-placement entry will load under in this profile, or
+// '' when it is switched off, is not stable, or its directory is not there to be
+// realpath()ed. Both pinning passes need exactly this, and neither may throw.
+function pinnableExtensionId(payload, entry, deps) {
+  if (!builtInEnabled(payload.builtInExtensions, entry)) return '';
+  if (entry.placement?.kind !== 'stable') return '';
+  const dir = path.join(payload.userDataDir, entry.placement.name);
+  if (!deps.isLoadableExtensionDir(dir)) return '';
+  try {
+    return unpackedExtensionId(dir);
+  } catch (error) {
+    // A button that is one click further away is not worth failing a launch
+    // over, or even worth a warning louder than this.
+    console.warn(`Could not compute an extension id for "${entry.key}":`, error);
+    return '';
+  }
+}
+
+function seedPinnedExtensions(payload, deps) {
+  const {prefsPath, prefs} = readProfilePrefs(payload.userDataDir);
   const extensions = prefs.extensions || {};
   if (Array.isArray(extensions.pinned_extensions)) {
     return [];
   }
   const ids = [];
   for (const entry of BUILT_IN_EXTENSIONS) {
-    if (!entry.pinned || !builtInEnabled(payload.builtInExtensions, entry)) continue;
-    if (entry.placement?.kind !== 'stable') continue;
-    const dir = path.join(payload.userDataDir, entry.placement.name);
-    if (!deps.isLoadableExtensionDir(dir)) continue;
-    try {
-      ids.push(unpackedExtensionId(dir));
-    } catch (error) {
-      // A button that is one click further away is not worth failing a launch
-      // over, or even worth a warning louder than this.
-      console.warn(`Could not compute an extension id for "${entry.key}":`, error);
-    }
+    if (!entry.pinned) continue;
+    const id = pinnableExtensionId(payload, entry, deps);
+    if (id) ids.push(id);
   }
   if (!ids.length) {
     return [];
   }
   extensions.pinned_extensions = ids;
   prefs.extensions = extensions;
-  fs.mkdirSync(path.dirname(prefsPath), {recursive: true});
-  fs.writeFileSync(prefsPath, JSON.stringify(prefs));
+  writeProfilePrefs(prefsPath, prefs);
   return ids;
+}
+
+// Undoes a pin this table used to seed, for profiles that already have the list
+// and so are out of seedPinnedExtensions' reach forever.
+//
+// Runs on every launch rather than once behind a watermark, and that is
+// deliberate: there is no watermark to keep, and re-checking a list that is
+// almost always already correct costs one read of a file this launch reads
+// anyway. It writes only when it actually removed something.
+//
+// Narrow on purpose. It removes ONLY the id of an entry that carries `unpin`,
+// which means "this table pinned it, and no longer should". A button the user
+// pinned themselves has a different id and is untouched, and an entry the user
+// unpinned by hand is already absent -- so this can never fight a choice
+// someone made, in either direction. That is also why it cannot be expressed as
+// "reset the list": the list is shared with every extension the user pins.
+function unpinRetiredExtensions(payload, deps) {
+  const {prefsPath, prefs} = readProfilePrefs(payload.userDataDir);
+  const pinned = prefs.extensions?.pinned_extensions;
+  if (!Array.isArray(pinned) || !pinned.length) {
+    return [];
+  }
+  const retire = new Set();
+  for (const entry of BUILT_IN_EXTENSIONS) {
+    if (!entry.unpin) continue;
+    // Note this asks for the id whether or not the extension is enabled: a
+    // profile that carries the stale pin AND has since had the panel switched
+    // off still wants the dead button gone. pinnableExtensionId answers ''
+    // for a disabled entry, so ask it directly instead.
+    if (entry.placement?.kind !== 'stable') continue;
+    const dir = path.join(payload.userDataDir, entry.placement.name);
+    if (!deps.isLoadableExtensionDir(dir)) continue;
+    try {
+      retire.add(unpackedExtensionId(dir));
+    } catch {
+      // Nothing to remove that we can name. Leaving the pin is the safe half.
+    }
+  }
+  const kept = pinned.filter((id) => !retire.has(id));
+  if (kept.length === pinned.length) {
+    return [];
+  }
+  prefs.extensions.pinned_extensions = kept;
+  writeProfilePrefs(prefsPath, prefs);
+  return pinned.filter((id) => retire.has(id));
 }
 
 // The id the Argus Panel extension will load under in this profile, or '' if
@@ -372,11 +443,19 @@ async function materializeBuiltIns(payload, deps) {
   const paths = await Promise.all(
       enabled.map((entry) => materializeBuiltIn(payload, entry, deps)));
   // After the copies land, never before: the id is derived from a directory
-  // that has to exist to be realpath()ed.
+  // that has to exist to be realpath()ed. Seed first, then retire -- on a fresh
+  // profile the seed writes the list and the retire pass reads it back, so an
+  // entry that is both `pinned` and `unpin` (nothing is, today) would resolve
+  // the same way it does on an existing profile rather than depending on order.
   try {
     seedPinnedExtensions(payload, deps);
   } catch (error) {
     console.error('Could not seed pinned extensions:', error);
+  }
+  try {
+    unpinRetiredExtensions(payload, deps);
+  } catch (error) {
+    console.error('Could not unpin retired extensions:', error);
   }
   return paths.filter(Boolean);
 }
@@ -391,4 +470,5 @@ module.exports = {
   materializeBuiltIns,
   seedPinnedExtensions,
   unpackedExtensionId,
+  unpinRetiredExtensions,
 };

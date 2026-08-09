@@ -46,6 +46,12 @@ const ArgusIcons = (() => {
     // Automations. Solid, unlike everything else here: at 14px an outlined
     // triangle is three strokes meeting at sharp corners and turns to mush.
     play: '<path d="M8 5.2v13.6l11.5-6.8z" fill="currentColor" stroke="none"/>',
+    // Stop, for a run in flight. Outlined, deliberately unlike `play`: these two
+    // occupy the same slot in the same row seconds apart, and a solid square
+    // beside a solid triangle read as one control that had changed shape rather
+    // than as start and stop. The ring is the same circle every status icon here
+    // is built on, so it sits in a row with them.
+    stopCircle: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
     externalLink: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/>' +
       '<path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
     // Disclosure. Rotated 90deg by CSS when its section is open, rather than

@@ -53,6 +53,13 @@ const MAX_BODY_BYTES = 4096;
 // starve the start page's shared limiter (or be starved by it).
 const COOKIE_RATE = {perTokenPerMin: 12, globalPerMin: 120};
 const COOKIE_MAX_BODY_BYTES = 10 * 1024 * 1024;
+// The status poll is the one route a page hits on a timer -- the side panel asks
+// roughly once a second while a run is in flight, which would exhaust RATE's ten
+// per minute in ten seconds. Its own bucket, sized for that cadence plus enough
+// headroom for two open panels and a burst on reconnect. Reads nothing but the
+// entry's own profile, so a generous limit here buys an attacker a description of
+// a run they could already see out of the window in front of them.
+const STATUS_RATE = {perTokenPerMin: 150, globalPerMin: 900};
 
 // `load` and `save` are how the map outlives this process. They are injected
 // rather than done here for the same reason `now` is: this file must stay
@@ -69,12 +76,37 @@ const COOKIE_MAX_BODY_BYTES = 10 * 1024 * 1024;
 // restarted".
 function createRunTokens({now = () => Date.now(), load = null, save = null} = {}) {
   const tokens = new Map();
-  const hits = [];
-  const cookieHits = [];
 
-  // Rate-limiter state is deliberately NOT restored. Those buckets exist to
-  // stop this process being hammered, and a process that just started has not
-  // been hammered yet.
+  // One sliding-window limiter per surface, from one implementation. This loop
+  // existed twice before the status poll wanted a third window with a third
+  // size, and three hand-copied sliding windows is how the three quietly stop
+  // agreeing about what a minute is.
+  //
+  // Rate-limiter state is deliberately NOT restored from `load`. These buckets
+  // exist to stop this process being hammered, and a process that just started
+  // has not been hammered yet.
+  function makeRateLimiter(config) {
+    const hits = [];
+    return (token) => {
+      const at = now();
+      while (hits.length > 0 && at - hits[0].at > 60000) {
+        hits.shift();
+      }
+      if (hits.length >= config.globalPerMin) {
+        return false;
+      }
+      if (hits.filter((hit) => hit.token === token).length >= config.perTokenPerMin) {
+        return false;
+      }
+      hits.push({token, at});
+      return true;
+    };
+  }
+
+  const rateLimit = makeRateLimiter(RATE);
+  const rateLimitCookie = makeRateLimiter(COOKIE_RATE);
+  const rateLimitStatus = makeRateLimiter(STATUS_RATE);
+
   if (load) {
     try {
       for (const [token, entry] of load() || []) {
@@ -152,21 +184,6 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
     return token;
   }
 
-  function rateLimit(token) {
-    const at = now();
-    while (hits.length > 0 && at - hits[0].at > 60000) {
-      hits.shift();
-    }
-    if (hits.length >= RATE.globalPerMin) {
-      return false;
-    }
-    if (hits.filter((hit) => hit.token === token).length >= RATE.perTokenPerMin) {
-      return false;
-    }
-    hits.push({token, at});
-    return true;
-  }
-
   // Resolves a request to its entry, or to a refusal.
   //
   // EVERY refusal returns the same 403 and the same body, so neither endpoint
@@ -213,25 +230,13 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
     return resolve(payload);
   }
 
-  function rateLimitCookie(token) {
-    const at = now();
-    while (cookieHits.length > 0 && at - cookieHits[0].at > 60000) {
-      cookieHits.shift();
-    }
-    if (cookieHits.length >= COOKIE_RATE.globalPerMin) {
-      return false;
-    }
-    if (cookieHits.filter((hit) => hit.token === token).length >= COOKIE_RATE.perTokenPerMin) {
-      return false;
-    }
-    cookieHits.push({token, at});
-    return true;
-  }
-
-  // The cookie-sync twin of resolve(): same refusal semantics, its own bucket.
-  function authorizeCookieSync(payload) {
+  // resolve()'s shape against a different bucket. Same refusal semantics --
+  // still not an oracle -- and the SAME reason the buckets are separate: a busy
+  // cookie sync must not be able to starve the start page's run button, and a
+  // once-a-second status poll must not be able to starve either.
+  function resolveIn(limiter, payload) {
     const token = typeof payload.runToken === 'string' ? payload.runToken : '';
-    if (!rateLimitCookie(token)) {
+    if (!limiter(token)) {
       return {ok: false, status: 429, body: {status: false, msg: 'Too many requests'}};
     }
     prune();
@@ -242,6 +247,38 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
     return {ok: true, entry};
   }
 
+  // The cookie-sync twin of resolve(): same refusal semantics, its own bucket.
+  function authorizeCookieSync(payload) {
+    return resolveIn(rateLimitCookie, payload);
+  }
+
+  // Reading this launch's own run needs no id, for the same reason re-checking
+  // the proxy does not: the run is looked up by the profile on the entry, so
+  // there is nothing in the request for a caller to choose. Its own bucket
+  // because it is the one route that arrives on a timer.
+  function authorizeStatus(payload) {
+    return resolveIn(rateLimitStatus, payload);
+  }
+
+  // Stopping a run names no run either -- the runner is asked for whatever is in
+  // flight against THIS entry's profile, so a leaked token cannot stop a run on
+  // some other profile even by guessing its id. On the ordinary bucket: this is
+  // a button someone presses, not a poll.
+  function authorizeCancel(payload) {
+    return resolve(payload);
+  }
+
+  // Raising the launcher window may name one of this launch's automations, or
+  // nothing at all -- "just show me the Automations tab for this profile", which
+  // is the only thing the side panel's empty state can usefully offer. Naming
+  // one is authorized exactly as running it is; naming none authorizes nothing
+  // beyond holding a valid token, and its entire effect is that a window the
+  // user already owns comes forward.
+  function authorizeOpen(payload) {
+    const named = typeof payload.automationId === 'string' && payload.automationId !== '';
+    return named ? authorize(payload) : resolve(payload);
+  }
+
   // The mutating members persist; the read paths do not, even though prune()
   // inside them can delete. An expired entry that survives in the file is
   // re-pruned on the next load (and is refused in the meantime by the same
@@ -249,8 +286,11 @@ function createRunTokens({now = () => Date.now(), load = null, save = null} = {}
   // would buy nothing and put a disk write on the hot path.
   return {
     authorize,
+    authorizeCancel,
     authorizeCookieSync,
+    authorizeOpen,
     authorizeRecheck,
+    authorizeStatus,
     clear: () => {
       tokens.clear();
       persist();
@@ -359,17 +399,60 @@ function handleRunFromPage({req, res, tokens, sendJson, startRun}) {
 // front of it -- making it wait on a renderer round trip (the way the re-check
 // route has to, because it has an answer to return) would buy nothing but a
 // timeout to handle.
+// `automation` is null when the request named none -- see authorizeOpen. `open`
+// is expected to read that as "the Automations tab, no particular workflow".
 function handleOpenInLauncherFromPage({req, res, tokens, sendJson, open}) {
   handlePageRequest({
     req,
     res,
     tokens,
     sendJson,
-    authorizeWith: 'authorize',
+    authorizeWith: 'authorizeOpen',
     work: ({entry, automation}) => {
-      open(entry, automation);
+      open(entry, automation || null);
       return {};
     },
+  });
+}
+
+// What is running against this launch's profile, for the side panel's
+// Automations tab. Polled, so `status` is expected to answer with something
+// small -- compact records, never a step log.
+//
+// The shape of that answer is deliberately not decided here: this file knows
+// about tokens and refusals, and main.cjs knows what a run looks like. It is
+// passed through as the response body.
+//
+// Scoped to the entry's profile rather than to the entry's automations list, and
+// that widening is on purpose. A run started from the launcher's own window, from
+// a schedule, or by an MCP tool is exactly as relevant to the person watching
+// this window as one they started from the panel -- and reporting it reveals
+// nothing they cannot see happening in front of them. Starting a run stays
+// narrow (handleRunFromPage still requires a named, offered automation); only
+// watching one is broad.
+function handleRunStatusFromPage({req, res, tokens, sendJson, status}) {
+  handlePageRequest({
+    req,
+    res,
+    tokens,
+    sendJson,
+    authorizeWith: 'authorizeStatus',
+    work: ({entry}) => status(entry),
+  });
+}
+
+// Stops whatever is running against this launch's profile. Named nothing, so
+// there is nothing for a caller to choose; `cancel` returns whether there was
+// anything to stop, which the panel reports rather than treating as a failure --
+// a run that finished a moment before the click is not an error.
+function handleCancelRunFromPage({req, res, tokens, sendJson, cancel}) {
+  handlePageRequest({
+    req,
+    res,
+    tokens,
+    sendJson,
+    authorizeWith: 'authorizeCancel',
+    work: ({entry}) => ({cancelled: Boolean(cancel(entry))}),
   });
 }
 
@@ -456,12 +539,15 @@ module.exports = {
   COOKIE_RATE,
   MAX_BODY_BYTES,
   RATE,
+  STATUS_RATE,
   TTL_MS,
   createRunTokens,
+  handleCancelRunFromPage,
   handleCookieListFromPage,
   handleCookiePullFromPage,
   handleCookiePushFromPage,
   handleOpenInLauncherFromPage,
   handleRecheckFromPage,
   handleRunFromPage,
+  handleRunStatusFromPage,
 };

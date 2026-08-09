@@ -75,18 +75,22 @@ const served = new Set();
 for (const match of mainSource.matchAll(/pathname === '(\/v1\/[^']+)'/g)) {
   served.add(match[1]);
 }
-// These five page routes authenticate with a per-launch run token instead of a
-// key and sit above the bearer gate on purpose -- they are not part of the
-// keyed surface and must never be advertised as one. run-from-page runs one of
-// the launch's own automations; open-in-launcher raises the launcher window
-// with one of those same automations showing; recheck-from-page re-checks that
-// launch's own proxy; push-from-profile/pull-for-profile sync the
-// cookie-manager extension's jar with that launch's profile. All five take an
-// id from the token's entry rather than from the request, which is what makes
-// them safe to open to a file:// document (or, for the cookie pair, the
-// bundled extension).
+// These page routes authenticate with a per-launch run token instead of a key
+// and sit above the bearer gate on purpose -- they are not part of the keyed
+// surface and must never be advertised as one. run-from-page runs one of the
+// launch's own automations; status-from-page and cancel-from-page report and
+// stop whatever is running against that launch's own profile;
+// open-in-launcher raises the launcher window, with one of those same
+// automations showing or just on the Automations tab; recheck-from-page
+// re-checks that launch's own proxy; push-from-profile/pull-for-profile/
+// list-for-profile sync the cookie-manager extension's jar with that launch's
+// profile. Every one of them takes its profile id from the token's entry rather
+// than from the request, which is what makes them safe to open to a file://
+// document (or, for the panel routes, the bundled extension).
 const PAGE_ROUTES = new Set([
   '/v1/automations/run-from-page',
+  '/v1/automations/status-from-page',
+  '/v1/automations/cancel-from-page',
   '/v1/automations/open-in-launcher',
   '/v1/proxies/recheck-from-page',
   '/v1/cookies/push-from-profile',

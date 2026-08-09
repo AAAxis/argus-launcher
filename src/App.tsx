@@ -347,13 +347,17 @@ export function App() {
     }
   }, [introReady]);
 
-  // A profile's start page asking for one of its automation cards to be opened
-  // here. main.cjs has already brought this window to the front; all that is
-  // left is to show the thing the user pressed for.
+  // A profile's start page or side panel asking for one of its automation cards
+  // to be opened here. main.cjs has already brought this window to the front;
+  // all that is left is to show the thing the user pressed for.
   //
-  // The workflow may have been deleted, or unshared, since the session that is
-  // asking was launched -- then the Automations tab is the closest true answer,
-  // exactly as the bell's history handler above resolves the same problem.
+  // Two cases resolve to the tab alone, and the code below does not distinguish
+  // them because the right answer is the same for both. The workflow may have
+  // been deleted, or unshared, since the session that is asking was launched --
+  // then the tab is the closest true answer, exactly as the bell's history
+  // handler above resolves the same problem. Or `automationId` is null, because
+  // the caller named none: the panel's empty state asking for the tab itself,
+  // which is the only thing it can usefully offer a launch with nothing pinned.
   useEffect(() => {
     return native?.onOpenAutomationRequest?.(({automationId}) => {
       const automation = data.state.automations.find((item) => item.id === automationId);

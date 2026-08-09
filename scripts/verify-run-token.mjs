@@ -18,7 +18,7 @@ import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   createRunTokens, handleRecheckFromPage, handleRunFromPage,
-  handleOpenInLauncherFromPage,
+  handleOpenInLauncherFromPage, handleRunStatusFromPage, handleCancelRunFromPage,
   handleCookiePushFromPage, handleCookiePullFromPage, COOKIE_MAX_BODY_BYTES,
 } = require('../electron/automation/run-token.cjs');
 
@@ -43,6 +43,8 @@ let started = 0;
 const rechecked = [];
 const pushed = [];
 const opened = [];
+const statused = [];
+const cancelled = [];
 const server = createServer((req, res) => {
   if (req.url === '/open') {
     handleOpenInLauncherFromPage({
@@ -50,8 +52,37 @@ const server = createServer((req, res) => {
       res,
       tokens,
       sendJson,
+      // `automation` is null when the request named none. Recorded as null
+      // rather than dereferenced, which is what the old `automation.id` did --
+      // and what would crash the process on a body that omitted the field.
       open: (entry, automation) => {
-        opened.push({profileId: entry.profileId, automationId: automation.id});
+        opened.push({profileId: entry.profileId, automationId: automation ? automation.id : null});
+      },
+    });
+    return;
+  }
+  if (req.url === '/status') {
+    handleRunStatusFromPage({
+      req,
+      res,
+      tokens,
+      sendJson,
+      status: (entry) => {
+        statused.push(entry.profileId);
+        return {run: {runId: 'run_1', status: 'running', progress: 0.5}, last: null};
+      },
+    });
+    return;
+  }
+  if (req.url === '/cancel') {
+    handleCancelRunFromPage({
+      req,
+      res,
+      tokens,
+      sendJson,
+      cancel: (entry) => {
+        cancelled.push(entry.profileId);
+        return 'run_1';
       },
     });
     return;
@@ -209,6 +240,116 @@ const openForm = await postOpen({runToken: openToken, automationId: 'a1'},
     {'Content-Type': 'application/x-www-form-urlencoded'});
 check('non-JSON content type refused on the open route too',
     openForm.status === 403 && opened.length === 1);
+
+// Naming NO automation is allowed, and means "the Automations tab for this
+// profile" -- what the side panel's empty state offers a launch that has none
+// attached. Widening an authorized route to accept a missing field is exactly
+// the kind of change that turns into "and null means everything", so the
+// properties asserted are that it still needs a real token and still cannot name
+// a profile.
+const openNoId = await postOpen({runToken: openToken});
+check('naming no automation raises the launcher on the Automations tab',
+    openNoId.status === 200 && opened.length === 2, openNoId.text);
+check('an open with no automation still takes its profile off the token',
+    opened[1]?.profileId === 'p-open' && opened[1]?.automationId === null,
+    JSON.stringify(opened[1]));
+
+const openNoIdNoToken = await postOpen({});
+check('naming no automation does not also excuse the token',
+    openNoIdNoToken.status === 403 && opened.length === 2, openNoIdNoToken.text);
+
+// An empty string is not a name, and must take the no-id path rather than being
+// looked up and refused -- otherwise the panel's empty state breaks the first
+// time something passes '' instead of omitting the field.
+const openEmptyId = await postOpen({runToken: openToken, automationId: ''});
+check('an empty automation id reads as naming none, not as a foreign id',
+    openEmptyId.status === 200 && opened.length === 3, openEmptyId.text);
+
+// ── The status and cancel routes ─────────────────────────────────────────────
+// What the side panel polls, and the Stop button beside it. Neither names a run:
+// the runner is asked for whatever is in flight against the profile ON THE
+// TOKEN, so a leaked token cannot read or stop a run belonging to another
+// profile even by guessing its id.
+//
+// Status has its own rate bucket (STATUS_RATE) because it arrives on a timer;
+// the property that matters is that spending it cannot starve the run button,
+// which is what the separate buckets are for.
+const panelToken = tokens.mint({
+  profileId: 'p-panel',
+  profileName: 'Panel',
+  cdpPort: null,
+  automations: [],
+});
+const postStatus = (body, headers) =>
+  post(body, headers || {'Content-Type': 'application/json'}, '/status');
+const postCancel = (body, headers) =>
+  post(body, headers || {'Content-Type': 'application/json'}, '/cancel');
+
+const statusOk = await postStatus({runToken: panelToken});
+check('a valid token reads its own run status',
+    statusOk.status === 200 && statused.length === 1, statusOk.text);
+check('the status profile comes off the token, not the request',
+    statused[0] === 'p-panel',
+    'the body carries nothing but the token, so there is no id to aim');
+
+const statusUnknown = await postStatus({runToken: 'f'.repeat(64)});
+check('an unknown token cannot read a run status',
+    statusUnknown.status === 403 && statused.length === 1);
+check('and it refuses byte-identically to every other refusal (not an oracle)',
+    statusUnknown.text === unknown.text, statusUnknown.text);
+
+const statusForm = await postStatus({runToken: panelToken},
+    {'Content-Type': 'application/x-www-form-urlencoded'});
+check('non-JSON content type refused on the status route too',
+    statusForm.status === 403 && statused.length === 1);
+
+// A token naming no automations can still watch and stop -- the run it is
+// watching may have been started from the launcher's own window or by a
+// schedule, which is the whole reason status is scoped by profile rather than by
+// the token's automations list. This is the shape every ordinary launch carries.
+const bareToken = tokens.mint({
+  profileId: 'p-bare',
+  profileName: 'Bare',
+  cdpPort: null,
+  automations: [],
+});
+const statusNoAutomations = await postStatus({runToken: bareToken});
+check('a token with no automations can still watch its profile',
+    statusNoAutomations.status === 200 && statused[1] === 'p-bare',
+    statusNoAutomations.text);
+
+const cancelOk = await postCancel({runToken: panelToken});
+check('a valid token stops the run on its own profile',
+    cancelOk.status === 200 && cancelled.length === 1, cancelOk.text);
+check('the cancel profile comes off the token, not the request',
+    cancelled[0] === 'p-panel',
+    'nothing in the body names a run, so a leaked token cannot stop someone else\'s');
+
+// A body that tries to aim it is not an error, it is ignored: the fields are
+// simply never read. Asserted, because "ignored" and "honoured" look identical
+// from the outside unless something checks.
+const cancelAimed = await postCancel(
+    {runToken: panelToken, profileId: 'p-open', runId: 'run_99'});
+check('a cancel body cannot aim at another profile or run',
+    cancelAimed.status === 200 && cancelled[1] === 'p-panel',
+    JSON.stringify(cancelled));
+
+const cancelUnknown = await postCancel({runToken: 'f'.repeat(64)});
+check('an unknown token cannot stop a run',
+    cancelUnknown.status === 403 && cancelled.length === 2);
+
+// The reason status gets its own bucket at all. Sixty polls is a minute of the
+// panel's cadence and would be six times RATE's per-token allowance; the run
+// route has to still work afterwards.
+for (let i = 0; i < 60; i++) {
+  await postStatus({runToken: panelToken});
+}
+const statusAfterBurst = await postStatus({runToken: panelToken});
+check('a minute of polling does not exhaust the status bucket',
+    statusAfterBurst.status === 200, statusAfterBurst.text);
+const cancelAfterBurst = await postCancel({runToken: panelToken});
+check('and it does not starve the routes on the ordinary bucket',
+    cancelAfterBurst.status === 200, cancelAfterBurst.text);
 
 // ── The re-check route ───────────────────────────────────────────────────────
 // Same credential, second power: re-check the profile's assigned proxy. It has

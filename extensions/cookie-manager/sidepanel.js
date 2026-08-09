@@ -185,16 +185,46 @@ $('#recheck').addEventListener('click', () => {
 });
 
 // ── Automations ────────────────────────────────────────────────────────────────
+// Two independent things share this tab, and the split matters:
+//
+//   the LIST -- what this launch may start. Fixed at launch, because the run
+//   token authorizes exactly the automations the launcher put in it (the
+//   profile's own plus every pinned one) and nothing else.
+//
+//   the CARD -- what is running against this profile right now, wherever it was
+//   started from: this panel, the launcher's own Run button, a schedule, an MCP
+//   tool. Polled, and deliberately not scoped to the list -- a profile with
+//   nothing pinned can still have a live run worth watching.
+//
+// The tab itself is always on screen. Hiding it when the list was empty meant
+// someone who had never pinned a workflow could not discover the tab existed, so
+// could not find out how to get one -- and a run started from the launcher had
+// nowhere here to report.
+
+// The last answer from the status poll. Held so a failed poll can leave the card
+// exactly as it was rather than blanking it -- a launcher being restarted should
+// not look like a run disappearing.
+//
+// Declared above renderAutomations, which paints from it: `let` is not hoisted
+// past its initializer, and renderAutomations runs from loadSession() at the
+// bottom of this file.
+let runState = {run: null, last: null};
+// Set while this panel is waiting on its own run-automation call, before the
+// first poll has had a chance to see it. Without it the row springs back to
+// "Run" for up to a second after the click and reads as a button that did
+// nothing.
+let startingId = '';
+
 // Rows, not the start page's tiles: a 320px column fits one tile across, which
-// is a list with extra steps. Built from the launch snapshot, so the panel can
-// only ever offer what this launch was actually given.
+// is a list with extra steps.
 function renderAutomations(automations) {
   const list = $('#automation-list');
   list.replaceChildren();
-  // The tab, not the section: hiding the control and hiding what it reveals are
-  // one act now, and tabs.js does both. A launch with none shows two tabs.
-  tabs.setAvailable('automations', Boolean(automations && automations.length));
-  for (const automation of automations || []) {
+  const offered = automations || [];
+  // The empty state stands in for the list, not for the tab. The card above it is
+  // independent and may still have something to show.
+  $('#automations-empty').hidden = offered.length > 0;
+  for (const automation of offered) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'automation';
@@ -213,33 +243,169 @@ function renderAutomations(automations) {
     row.append(icon, label);
     list.appendChild(row);
   }
+  // A row for a run already in flight has to look like one the moment it is
+  // drawn, not one poll later: loadSession() builds this list while a run may
+  // already be going.
+  paintRunCard();
 }
+
+function paintRunCard() {
+  const view = ArgusRunView.describe(runState.run || runState.last, Date.now());
+  const card = $('#run-card');
+  card.hidden = !view;
+  // The tab's dot, from the same tone the card is painted in -- so a run that
+  // fails while the reader is on Cookies still says so. Cleared to 'off' with no
+  // card, since tabs.js only marks warn and bad.
+  tabs.setTone('automations', view ? view.tone : 'off');
+  // Rows reflect the live run only: a finished one is reported by the card, and
+  // leaving its row spinning would say it was still going.
+  for (const row of $('#automation-list').querySelectorAll('button.automation')) {
+    const live = Boolean(runState.run) && runState.run.automationId === row.dataset.id;
+    const running = live || row.dataset.id === startingId;
+    row.dataset.state = running ? 'running' : 'idle';
+    const icon = row.querySelector('.icon');
+    if (running && icon.dataset.icon !== 'loader') {
+      ArgusIcons.set(icon, 'loader', 14);
+      icon.classList.add('spin');
+    } else if (!running && icon.dataset.icon !== 'play') {
+      ArgusIcons.set(icon, 'play', 14);
+      icon.classList.remove('spin');
+    }
+    // A second run against the same profile is refused by the runner (409), so
+    // offering the button would be offering a click that cannot succeed.
+    row.disabled = Boolean(runState.run) || Boolean(startingId);
+  }
+  if (!view) {
+    return;
+  }
+  card.className = `card run-card tone-${view.tone}`;
+  const icon = $('#run-icon');
+  icon.replaceChildren(ArgusIcons.make(view.icon, 16));
+  icon.classList.toggle('spin', view.spin);
+  $('#run-title').textContent = view.title;
+  $('#run-step').textContent = view.step;
+  $('#run-meta').textContent = view.meta;
+  // Only a live run can be stopped. The button goes away rather than greying out:
+  // a disabled Stop under a card reading "finished" is a control with nothing
+  // left to do.
+  $('#run-stop').hidden = !view.live;
+
+  const bar = $('#run-bar');
+  bar.dataset.indeterminate = view.bar.indeterminate ? 'true' : 'false';
+  $('#run-bar-fill').style.width = view.bar.indeterminate ? '' : `${view.bar.percent}%`;
+  if (view.bar.indeterminate) {
+    bar.removeAttribute('aria-valuenow');
+  } else {
+    bar.setAttribute('aria-valuenow', String(view.bar.percent));
+  }
+  // The bar is decoration for a sighted reader and a duplicate for everyone else
+  // -- the title and the meta line already say all of this in words. Naming it
+  // keeps a screen reader from announcing a bare percentage with no subject.
+  bar.setAttribute('aria-label', view.title);
+}
+
+// ~1s while something is live, and that cadence is what STATUS_RATE in
+// run-token.cjs is sized for. The panel goes quiet when there is nothing moving:
+// a poll every second for the hours this panel sits open beside an idle session
+// would be a loopback request per second forever, to learn nothing.
+//
+// Two things wake it back up: this panel starting a run, and the tab being
+// opened. Neither is the whole story -- a run started from the launcher while
+// this panel sits on the Cookies tab is invisible until something asks -- so the
+// idle cadence is slow rather than absent.
+const POLL_LIVE_MS = 1000;
+const POLL_IDLE_MS = 15000;
+let pollTimer = 0;
+
+async function pollRun() {
+  const result = await send({type: 'automation-status'});
+  // A failed poll leaves the last answer standing. `available: false` is the one
+  // failure that is really an answer: this window has no launch credential, so
+  // there will never be a run to report and the card should stay away.
+  if (result.ok) {
+    runState = {run: result.run || null, last: result.last || null};
+    // The poll has caught up with our own click, so the optimistic row state can
+    // stop standing in for it. Also cleared when the run has already finished by
+    // the time the first poll lands, which is why this is not conditional on
+    // seeing it live.
+    startingId = '';
+    paintRunCard();
+  } else if (result.available === false) {
+    runState = {run: null, last: null};
+    startingId = '';
+    paintRunCard();
+  }
+  schedulePoll();
+}
+
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  const live = Boolean(runState.run) || Boolean(startingId);
+  pollTimer = setTimeout(() => { pollTimer = 0; void pollRun(); },
+      live ? POLL_LIVE_MS : POLL_IDLE_MS);
+}
+
+// Opening the tab is the other thing that earns an immediate poll: it is the
+// moment someone asks the question, and the slow idle cadence means the answer on
+// screen could be fifteen seconds stale. Bound on the strip rather than through
+// tabs.js, which deliberately publishes no selection event -- one listener here
+// is smaller than a callback tabs.js would have to thread to a single caller.
+$('[role="tablist"]').addEventListener('click', (event) => {
+  const tab = event.target.closest('[role="tab"]');
+  if (tab && tab.dataset.tab === 'automations') void pollRun();
+});
+
+// The clock in the meta line has to move between polls, or a run whose step takes
+// thirty seconds looks stalled at "0:04" for all of them. Repaints from the state
+// already held -- no request.
+setInterval(() => {
+  if (runState.run) paintRunCard();
+}, 1000);
 
 $('#automation-list').addEventListener('click', (event) => {
   const row = event.target.closest('button.automation');
-  if (!row || row.dataset.state === 'running') return;
-  const icon = row.querySelector('.icon');
-  row.dataset.state = 'running';
-  ArgusIcons.set(icon, 'loader', 14);
-  icon.classList.add('spin');
+  if (!row || row.disabled) return;
+  startingId = row.dataset.id;
+  paintRunCard();
   setStatus(`Starting ${row.querySelector('.label').textContent}…`);
 
   void (async () => {
     const result = await send({type: 'run-automation', automationId: row.dataset.id});
-    icon.classList.remove('spin');
-    ArgusIcons.set(icon, 'play', 14);
-    row.dataset.state = result.ok ? 'done' : 'failed';
-    setStatus(
-        result.ok ?
-          `Started ${row.querySelector('.label').textContent}` :
-          (result.error || 'The launcher would not start that automation'),
-        !result.ok);
-    // Back to neutral: the tint says what the last click did, not what the
-    // automation is doing now -- the launcher runs it out of this window's sight
-    // and this panel is never told when it ends.
-    setTimeout(() => { row.dataset.state = 'idle'; }, 4000);
+    if (result.ok) {
+      setStatus(`Started ${row.querySelector('.label').textContent}`);
+      // Straight to the live cadence rather than waiting out the idle one: the
+      // card is what the user is now looking at.
+      void pollRun();
+      return;
+    }
+    startingId = '';
+    paintRunCard();
+    setStatus(result.error || 'The launcher would not start that automation', true);
   })();
 });
+
+$('#run-stop').addEventListener('click', () => withBusy($('#run-stop'), async () => {
+  setStatus('Stopping…');
+  const result = await send({type: 'cancel-automation'});
+  if (!result.ok) {
+    setStatus(result.error || 'The launcher would not stop that run', true);
+    return;
+  }
+  // Cancelling is cooperative -- the runner notices at its next step boundary --
+  // so this reports that the ask landed, not that the run has ended. The card
+  // says when it has.
+  setStatus(result.cancelled ?
+    'Stopping the run…' :
+    'That run had already finished');
+  void pollRun();
+}));
+
+$('#open-automations').addEventListener('click', () => withBusy($('#open-automations'), async () => {
+  const result = await send({type: 'open-automations'});
+  if (!result.ok) {
+    setStatus(result.error || 'Could not reach Argus Launcher', true);
+  }
+}));
 
 // Why every launcher-backed control is off, in one sentence naming the fix. A
 // disabled button that does not say why reads as a broken button: three of them
@@ -758,3 +924,7 @@ document.addEventListener('keydown', (event) => {
 
 void loadSession();
 void refresh();
+// The first status poll runs at open, not on a timer: a panel opened while a run
+// is already going has to show it immediately rather than up to fifteen seconds
+// later. It schedules the next one itself, at the cadence the answer earns.
+void pollRun();

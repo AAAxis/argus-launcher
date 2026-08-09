@@ -161,6 +161,7 @@ export async function purge(orgId: string, ids: string[]): Promise<void> {
       .eq('org_id', orgId)
       .in('id', ids);
   raise(error, 'cookieSets.purge');
+  void removeCookieFilesFor(ids);
 }
 
 // Empty Trash. Mirrors profiles.purgeAll exactly, including why it is scoped by
@@ -179,7 +180,9 @@ export async function purgeAll(orgId: string): Promise<string[]> {
       .not('deleted_at', 'is', null)
       .select('id');
   raise(error, 'cookieSets.purgeAll');
-  return ((data || []) as Array<{id: string}>).map((row) => row.id);
+  const ids = ((data || []) as Array<{id: string}>).map((row) => row.id);
+  void removeCookieFilesFor(ids);
+  return ids;
 }
 
 // The 30-day Trash expiry, as one statement. Returns the ids it removed so the
@@ -197,7 +200,9 @@ export async function purgeExpired(orgId: string, cutoffIso: string): Promise<st
       .lt('deleted_at', cutoffIso)
       .select('id');
   raise(error, 'cookieSets.purgeExpired');
-  return ((data || []) as Array<{id: string}>).map((row) => row.id);
+  const ids = ((data || []) as Array<{id: string}>).map((row) => row.id);
+  void removeCookieFilesFor(ids);
+  return ids;
 }
 
 // ---- storage ------------------------------------------------------------
@@ -205,8 +210,19 @@ export async function purgeExpired(orgId: string, cutoffIso: string): Promise<st
 // Uploads a cookie file to the public `global` bucket and returns its URL, or
 // an inline data: URL when the bucket is unreachable. Object paths are
 // unchanged from the blob era so electron/main.cjs consumes them identically.
+//
+// `previousUrl` is the source_url this upload is about to replace, and passing
+// it is what keeps the bucket from growing without bound. The key carries
+// Date.now() on purpose -- the public URL has to change or the CDN serves the
+// pre-edit jar to electron/main.cjs, which fetches source_url over plain HTTP
+// with no credentials -- so every save mints a new object and strands the last
+// one. Nothing can reach a stranded object: cookie_sets.source_url points at
+// exactly one file and there is no snapshot history anywhere in the app. Left
+// alone, the live sync in the cookie-manager extension pushes on a six-second
+// floor, which is roughly ten dead 30 KB objects a minute per running profile.
 export async function uploadCookieFile(
-    keyId: string, fileName: string, base64: string): Promise<string> {
+    keyId: string, fileName: string, base64: string,
+    previousUrl?: string | null): Promise<string> {
   const client = optionalClient();
   if (!client) {
     return `data:text/plain;base64,${base64}`;
@@ -225,7 +241,74 @@ export async function uploadCookieFile(
     throw new Error(`Cookie upload failed: ${uploadError.message}`);
   }
   const {data} = client.storage.from(STORAGE_BUCKET).getPublicUrl(objectPath);
+  // Only after the replacement is safely up. Fire-and-forget from there: a
+  // leftover object costs 30 KB, and failing a cookie save over one would trade
+  // a storage problem for a login problem.
+  void removeSupersededCookieFile(previousUrl, objectPath);
   return data.publicUrl;
+}
+
+// Deletes the object a fresh upload just superseded.
+//
+// Deliberately narrow. It refuses anything outside profile-cookies/ so a legacy
+// data: URL, a foreign source_url, or an avatar path can never be routed here
+// by a caller passing the wrong field, and it no-ops when the two paths match,
+// which is what an upsert onto the same key would look like.
+//
+// The bucket's delete policy is `owner = auth.uid()` for this prefix
+// (supabase/migrations/20260805000001_storage.sql), so this reclaims your own
+// supersedes and silently declines a teammate's. That is the common case --
+// the repeated pusher is one signed-in session -- and the rest is what
+// scripts/sweep-storage.mjs is for.
+async function removeSupersededCookieFile(
+    previousUrl: string | null | undefined, currentPath: string): Promise<void> {
+  const client = optionalClient();
+  if (!client || !previousUrl) {
+    return;
+  }
+  const stale = storageObjectPath(previousUrl);
+  if (!stale || stale === currentPath || !stale.startsWith('profile-cookies/')) {
+    return;
+  }
+  const {error} = await client.storage.from(STORAGE_BUCKET).remove([stale]);
+  if (error) {
+    console.warn('cookieSets: could not remove the superseded cookie file', stale, error);
+  }
+}
+
+// Empties `profile-cookies/<id>/` for sets that have just been hard-deleted.
+//
+// The three purge paths call this because "Delete forever" says, in
+// ConfirmModals, that it removes the cookie files behind the sets -- and until
+// this existed nothing in the app had ever called storage.remove(), so the
+// files outlived the rows that named them. These are session cookies in a
+// public bucket; leaving them behind is the version of this bug that matters.
+//
+// Fire-and-forget, after the rows are already gone. The delete is the thing the
+// user asked for and it has succeeded by this point; a Storage hiccup must not
+// turn into a failed purge, and scripts/sweep-storage.mjs collects whatever
+// this could not (a teammate's uploads, which the bucket's `owner = auth.uid()`
+// delete policy puts out of reach).
+async function removeCookieFilesFor(ids: string[]): Promise<void> {
+  const client = optionalClient();
+  if (!client || ids.length === 0) {
+    return;
+  }
+  for (const id of ids) {
+    const folder = `profile-cookies/${id}`;
+    const {data, error: listError} = await client.storage
+        .from(STORAGE_BUCKET)
+        .list(folder, {limit: 1000});
+    if (listError || !data || data.length === 0) {
+      continue;
+    }
+    const {error} = await client.storage
+        .from(STORAGE_BUCKET)
+        .remove(data.map((entry) => `${folder}/${entry.name}`));
+    if (error) {
+      console.warn('cookieSets: could not remove the cookie files for', id, error);
+    }
+  }
 }
 
 // Reads a cookie file back out, for the inspector.

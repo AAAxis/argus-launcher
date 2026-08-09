@@ -369,7 +369,7 @@ export function useCookieActions({data, toast}: WorkspaceCore) {
     let url: string;
     try {
       url = await db.cookieSets.uploadCookieFile(
-          cookie.id, fileName, cookieFileToBase64(toCookieJson(clean)));
+          cookie.id, fileName, cookieFileToBase64(toCookieJson(clean)), cookie.url);
     } catch (error) {
       toast.fail('Could not save these cookies',
           error instanceof Error ? error.message : String(error));

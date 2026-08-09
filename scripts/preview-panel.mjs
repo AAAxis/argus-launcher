@@ -32,15 +32,21 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 };
 
-// Every state the panel has to survive. Three are easy to forget and all three
-// have been broken at least once: a session whose timezone contradicts its exit
-// (the card must stop claiming success), a launch with no automations (the
-// section must vanish rather than render an empty heading), and a window the
-// launcher never touched.
+// Every state the panel has to survive. Several are easy to forget and each has
+// been broken at least once: a session whose timezone contradicts its exit (the
+// card must stop claiming success), a launch with no automations (which must now
+// say so on a tab that is always there, rather than hiding the tab), and a window
+// the launcher never touched.
 //
 // `session` is argus-session.json as built-in-extensions.cjs writes it;
-// `status` is what background.js answers `get-status` with. Both shapes are
-// owned elsewhere -- if the panel stops matching them, fix the panel.
+// `status` is what background.js answers `get-status` with; `automation` is what
+// it answers `automation-status` with, and its `run`/`last` are summaries as
+// electron/automation/progress.cjs composes them. All three shapes are owned
+// elsewhere -- if the panel stops matching them, fix the panel.
+//
+// The clock is the one thing a fixture cannot state: `startedAt` is filled in at
+// page load, relative to now, so the elapsed line reads as a real duration
+// instead of counting up from 2026.
 const FIXTURES = {
   ok: {
     session: {
@@ -98,6 +104,187 @@ const FIXTURES = {
       {domain: '.instagram.com', name: 'sessionid'},
       {domain: '.google.com', name: 'SID'},
     ],
+  },
+
+  // A run in flight, on the tab it belongs to. The row for the running workflow
+  // has to show a spinner and refuse a second click, and the other row has to be
+  // disabled too -- the runner allows one run per profile, so offering the button
+  // would be offering a click that cannot succeed.
+  running: {
+    session: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      proxy: {
+        ok: true,
+        title: 'Anti-detect proxy active',
+        detail: '142.252.99.144:64455 · Los Angeles, California, US · 131 ms',
+        fields: [{label: 'Exit', value: '142.252.99.144', mono: true, note: '131 ms'}],
+      },
+      recheckable: true,
+      automations: [
+        {id: 'a1', name: 'Warm up the feed'},
+        {id: 'a2', name: 'Check the inbox and mark read'},
+      ],
+    },
+    status: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 148, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: '',
+      },
+      seed: {imported: true, seededAt: 0, seededCount: 64},
+      counts: {total: 148, site: 12, siteDomain: 'instagram.com'},
+    },
+    openTab: 'automations',
+    automation: {
+      ok: true,
+      available: true,
+      run: {
+        runId: 'run_1', status: 'running', automationId: 'a1',
+        automationName: 'Warm up the feed', trigger: 'panel',
+        startedAtOffsetMs: -84000, finishedAt: null,
+        stepCount: 3, totalSteps: 12, progress: 0.25,
+        currentStep: 'Fill #password', error: null,
+      },
+      last: null,
+    },
+  },
+
+  // The same run, with no honest position to report: a loop pushed its step count
+  // past the declared total, so progressOf gave up. The bar must sweep rather than
+  // fill, and the step count must be gone from the meta line rather than reading
+  // "step 46 of 12".
+  indeterminate: {
+    session: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      proxy: {ok: true, title: 'Anti-detect proxy active', detail: '131 ms', fields: []},
+      recheckable: true,
+      automations: [{id: 'a1', name: 'Scrape every listing on the page'}],
+    },
+    status: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 12, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: '',
+      },
+      seed: {imported: false, seededAt: 0, seededCount: 0},
+      counts: {total: 12, site: 0, siteDomain: ''},
+    },
+    openTab: 'automations',
+    automation: {
+      ok: true,
+      available: true,
+      run: {
+        runId: 'run_2', status: 'running', automationId: 'a1',
+        automationName: 'Scrape every listing on the page', trigger: 'schedule',
+        startedAtOffsetMs: -422000, finishedAt: null,
+        stepCount: 45, totalSteps: 6, progress: null,
+        currentStep: 'Read the text of .listing-title (row 38 of 40)', error: null,
+      },
+      last: null,
+    },
+  },
+
+  // A run that failed, reported after the fact. This is the state the panel could
+  // not show at all before: the launcher's live map is empty the instant a run
+  // seals, so without `last` the card the user was watching simply vanished
+  // without ever saying whether it worked.
+  //
+  // Also the tab-dot case: the tone is 'bad', so the Automations tab carries a
+  // mark for a reader sitting on Cookies.
+  ranfailed: {
+    session: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      proxy: {ok: true, title: 'Anti-detect proxy active', detail: '131 ms', fields: []},
+      recheckable: true,
+      automations: [{id: 'a1', name: 'Daily login'}],
+    },
+    status: {
+      profile: {id: 'p1', name: 'Sophia Bennett'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 148, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: '',
+      },
+      seed: {imported: true, seededAt: 0, seededCount: 64},
+      counts: {total: 148, site: 12, siteDomain: 'instagram.com'},
+    },
+    openTab: 'automations',
+    automation: {
+      ok: true,
+      available: true,
+      run: null,
+      last: {
+        runId: 'run_3', status: 'failed', automationId: 'a1',
+        automationName: 'Daily login', trigger: 'panel',
+        startedAtOffsetMs: -95000, finishedAtOffsetMs: -32000,
+        stepCount: 4, totalSteps: 12, progress: null,
+        currentStep: 'Wait for #two-factor',
+        error: 'Wait for #two-factor: timed out after 15000ms',
+      },
+    },
+  },
+
+  // Nothing pinned to this profile and nothing running. The tab is on screen and
+  // has to explain which of those is true and what to do about it -- this is the
+  // screen that used to be a hidden tab, i.e. nothing at all.
+  noautomations: {
+    session: {
+      profile: {id: 'p4', name: 'Fresh profile'},
+      proxy: {ok: true, title: 'Anti-detect proxy active', detail: '88 ms', fields: []},
+      recheckable: true,
+      automations: [],
+    },
+    status: {
+      profile: {id: 'p4', name: 'Fresh profile'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 0, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: '',
+      },
+      seed: {imported: false, seededAt: 0, seededCount: 0},
+      counts: {total: 0, site: 0, siteDomain: ''},
+    },
+    openTab: 'automations',
+    automation: {ok: true, available: true, run: null, last: null},
+  },
+
+  // The case that justifies scoping the status poll by PROFILE rather than by the
+  // token's automations list: nothing is pinned here, so there is nothing to run
+  // from this window -- and a run started from the launcher is going anyway. The
+  // card must show it, above an empty list that is still honest about having
+  // nothing to offer.
+  elsewhere: {
+    session: {
+      profile: {id: 'p4', name: 'Fresh profile'},
+      proxy: {ok: true, title: 'Anti-detect proxy active', detail: '88 ms', fields: []},
+      recheckable: true,
+      automations: [],
+    },
+    status: {
+      profile: {id: 'p4', name: 'Fresh profile'},
+      sync: {
+        available: true, paused: false, inSync: true, reachable: true,
+        pushedAt: 0, pushedCount: 0, lastError: '', lastErrorKind: '',
+        lastErrorSource: '', pushPending: false, lastSet: '',
+      },
+      seed: {imported: false, seededAt: 0, seededCount: 0},
+      counts: {total: 0, site: 0, siteDomain: ''},
+    },
+    openTab: 'automations',
+    automation: {
+      ok: true,
+      available: true,
+      run: {
+        runId: 'run_4', status: 'running', automationId: 'not-in-this-launch',
+        automationName: 'Nightly inventory sweep', trigger: 'schedule',
+        startedAtOffsetMs: -12000, finishedAt: null,
+        stepCount: 1, totalSteps: 8, progress: 0.125,
+        currentStep: 'Go to shop.example.com/inventory', error: null,
+      },
+      last: null,
+    },
   },
 
   // A healthy proxy carrying a detectable session. The card must go amber
@@ -204,6 +391,21 @@ const fixture = FIXTURES[QUERY.get('state')] || FIXTURES.ok;
 // argus-session.json from the launcher's own setting.
 if (fixture.session) fixture.session.theme = QUERY.get('theme') || 'light';
 
+// A run's timestamps are the one thing a static fixture cannot state: an absolute
+// startedAt would have the elapsed clock counting up from whenever this file was
+// written. Fixtures give an offset from now instead, resolved here once at load so
+// the clock in the meta line reads as a real duration and keeps ticking.
+for (const run of [fixture.automation && fixture.automation.run,
+  fixture.automation && fixture.automation.last]) {
+  if (!run) continue;
+  if (typeof run.startedAtOffsetMs === 'number') {
+    run.startedAt = new Date(Date.now() + run.startedAtOffsetMs).toISOString();
+  }
+  if (typeof run.finishedAtOffsetMs === 'number') {
+    run.finishedAt = new Date(Date.now() + run.finishedAtOffsetMs).toISOString();
+  }
+}
+
 const noop = {addListener() {}};
 window.chrome = {
   runtime: {
@@ -212,6 +414,12 @@ window.chrome = {
       if (message.type === 'get-session') return {ok: true, session: fixture.session};
       if (message.type === 'get-status') return fixture.status;
       if (message.type === 'list-launcher-cookies') return fixture.launcherCookies;
+      // Absent on the older fixtures, and that absence is itself a state worth
+      // rendering: no automation key means no launch credential, which is what
+      // the panel reads as "there will never be a run to report here".
+      if (message.type === 'automation-status') {
+        return fixture.automation || {ok: false, available: false};
+      }
       return {ok: true};
     },
   },
@@ -232,10 +440,23 @@ fetch('sidepanel.html').then((response) => response.text()).then((html) => {
   // existed -- a blank panel that said nothing about why. The order matters and
   // the document already states it.
   const sources = [...parsed.querySelectorAll('script[src]')].map((tag) => tag.getAttribute('src'));
+  let pending = sources.length;
   for (const source of sources) {
     const element = document.createElement('script');
     element.src = source;
     element.async = false;
+    element.addEventListener('load', () => {
+      if (--pending) return;
+      // Most fixtures are about the Cookies tab, which opens by default. The ones
+      // about a run are not, and clicking through by hand for every screenshot is
+      // how a state stops being looked at. The real tab, clicked the real way --
+      // tabs.js owns selection and publishes no API for it.
+      const wanted = fixture.openTab;
+      if (wanted) {
+        const tab = document.querySelector('[role="tab"][data-tab="' + wanted + '"]');
+        if (tab) tab.click();
+      }
+    });
     document.body.appendChild(element);
   }
 });

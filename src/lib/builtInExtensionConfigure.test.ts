@@ -4,7 +4,7 @@ import path from 'node:path';
 import {describe, expect, it} from 'vitest';
 // CJS interop: the same table main.cjs materializes extensions from.
 // @ts-expect-error CJS module without types
-import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId} from '../../electron/built-in-extensions.cjs';
+import {argusPanelExtensionId, builtInExtension, seedPinnedExtensions, unpackedExtensionId, unpinRetiredExtensions} from '../../electron/built-in-extensions.cjs';
 
 const deps = {parseCookieUrl: async () => [], parseCookieFile: () => []};
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'argus-ext-'));
@@ -104,10 +104,35 @@ describe('pinning the panel to the toolbar', () => {
     expect(unpackedExtensionId(tempDir())).not.toBe(id);
   });
 
-  it('writes the panel id into extensions.pinned_extensions', () => {
+  // No entry in the table asks to be pinned any more -- the panel's button is
+  // the browser's own native one now. The mechanism stays, because it is the
+  // only way a future built-in could get a button, so it is exercised against a
+  // table entry temporarily flipped back rather than deleted along with the
+  // last caller. Restored in a finally: the table is a module singleton and a
+  // leaked flag would pin the panel again in every test after this one.
+  const asPinned = (run: () => void) => {
+    const entry = builtInExtension('cookie_manager')!;
+    entry.pinned = true;
+    try {
+      run();
+    } finally {
+      entry.pinned = false;
+    }
+  };
+
+  it('pins nothing, because nothing in the table asks to be pinned', () => {
+    const userDataDir = tempDir();
+    materialize(userDataDir);
+    expect(seedPinnedExtensions({userDataDir}, deps)).toEqual([]);
+    expect(readPinned(userDataDir)).toBeUndefined();
+  });
+
+  it('writes an asking entry id into extensions.pinned_extensions', () => {
     const userDataDir = tempDir();
     const dir = materialize(userDataDir);
-    expect(seedPinnedExtensions({userDataDir}, deps)).toEqual([unpackedExtensionId(dir)]);
+    asPinned(() => {
+      expect(seedPinnedExtensions({userDataDir}, deps)).toEqual([unpackedExtensionId(dir)]);
+    });
     expect(readPinned(userDataDir)).toEqual([unpackedExtensionId(dir)]);
   });
 
@@ -116,7 +141,7 @@ describe('pinning the panel to the toolbar', () => {
   it('nests the key rather than writing a flat dotted one', () => {
     const userDataDir = tempDir();
     materialize(userDataDir);
-    seedPinnedExtensions({userDataDir}, deps);
+    asPinned(() => seedPinnedExtensions({userDataDir}, deps));
     const prefs = JSON.parse(
         fs.readFileSync(path.join(userDataDir, 'Default', 'Preferences'), 'utf8'));
     expect(Array.isArray(prefs.extensions.pinned_extensions)).toBe(true);
@@ -131,7 +156,9 @@ describe('pinning the panel to the toolbar', () => {
     fs.mkdirSync(path.join(userDataDir, 'Default'), {recursive: true});
     fs.writeFileSync(path.join(userDataDir, 'Default', 'Preferences'),
         JSON.stringify({extensions: {pinned_extensions: []}}));
-    expect(seedPinnedExtensions({userDataDir}, deps)).toEqual([]);
+    asPinned(() => {
+      expect(seedPinnedExtensions({userDataDir}, deps)).toEqual([]);
+    });
     expect(readPinned(userDataDir)).toEqual([]);
   });
 
@@ -141,7 +168,7 @@ describe('pinning the panel to the toolbar', () => {
     fs.mkdirSync(path.join(userDataDir, 'Default'), {recursive: true});
     fs.writeFileSync(path.join(userDataDir, 'Default', 'Preferences'),
         JSON.stringify({homepage: 'file:///home.html', extensions: {settings: {a: 1}}}));
-    seedPinnedExtensions({userDataDir}, deps);
+    asPinned(() => seedPinnedExtensions({userDataDir}, deps));
     const prefs = JSON.parse(
         fs.readFileSync(path.join(userDataDir, 'Default', 'Preferences'), 'utf8'));
     expect(prefs.homepage).toBe('file:///home.html');
@@ -152,8 +179,10 @@ describe('pinning the panel to the toolbar', () => {
   it('pins nothing when the panel is switched off', () => {
     const userDataDir = tempDir();
     materialize(userDataDir);
-    expect(seedPinnedExtensions(
-        {userDataDir, builtInExtensions: {cookie_manager: false}}, deps)).toEqual([]);
+    asPinned(() => {
+      expect(seedPinnedExtensions(
+          {userDataDir, builtInExtensions: {cookie_manager: false}}, deps)).toEqual([]);
+    });
     expect(readPinned(userDataDir)).toBeUndefined();
   });
 
@@ -170,6 +199,93 @@ describe('pinning the panel to the toolbar', () => {
     materialize(userDataDir);
     expect(argusPanelExtensionId(
         {userDataDir, builtInExtensions: {cookie_manager: false}})).toBe('');
+  });
+});
+
+// The other half of dropping `pinned`. Flipping the flag only helps profiles
+// that have never launched -- seedPinnedExtensions bails on an existing list --
+// so every profile that ran the old build carries the stale pin, and therefore a
+// second, icon-only Argus Helper button beside the native labelled one.
+//
+// This is a pass over a list the user also owns, which is why every test here is
+// about what it must NOT touch.
+describe('unpinning a retired built-in', () => {
+  const panelDir = (userDataDir: string) => path.join(userDataDir, 'ArgusPanel');
+
+  const materialize = (userDataDir: string) => {
+    const dir = panelDir(userDataDir);
+    fs.mkdirSync(dir, {recursive: true});
+    fs.copyFileSync(
+        path.join(__dirname, '../../extensions/cookie-manager/manifest.json'),
+        path.join(dir, 'manifest.json'));
+    return dir;
+  };
+  const deps = {isLoadableExtensionDir: (dir: string) => fs.existsSync(path.join(dir, 'manifest.json'))};
+  const writePrefs = (userDataDir: string, prefs: unknown) => {
+    fs.mkdirSync(path.join(userDataDir, 'Default'), {recursive: true});
+    fs.writeFileSync(path.join(userDataDir, 'Default', 'Preferences'), JSON.stringify(prefs));
+  };
+  const readPrefs = (userDataDir: string) => JSON.parse(
+      fs.readFileSync(path.join(userDataDir, 'Default', 'Preferences'), 'utf8'));
+
+  it('removes the panel id a previous build pinned', () => {
+    const userDataDir = tempDir();
+    const id = unpackedExtensionId(materialize(userDataDir));
+    writePrefs(userDataDir, {extensions: {pinned_extensions: [id]}});
+    expect(unpinRetiredExtensions({userDataDir}, deps)).toEqual([id]);
+    expect(readPrefs(userDataDir).extensions.pinned_extensions).toEqual([]);
+  });
+
+  // The whole reason this cannot be "reset the list": it is shared with every
+  // extension the user pinned themselves, and those ids must survive.
+  it('leaves every other pinned extension in place, in order', () => {
+    const userDataDir = tempDir();
+    const id = unpackedExtensionId(materialize(userDataDir));
+    writePrefs(userDataDir, {extensions: {pinned_extensions: ['aaaa', id, 'bbbb']}});
+    unpinRetiredExtensions({userDataDir}, deps);
+    expect(readPrefs(userDataDir).extensions.pinned_extensions).toEqual(['aaaa', 'bbbb']);
+  });
+
+  it('keeps the rest of the Preferences file', () => {
+    const userDataDir = tempDir();
+    const id = unpackedExtensionId(materialize(userDataDir));
+    writePrefs(userDataDir,
+        {homepage: 'file:///home.html', extensions: {settings: {a: 1}, pinned_extensions: [id]}});
+    unpinRetiredExtensions({userDataDir}, deps);
+    const prefs = readPrefs(userDataDir);
+    expect(prefs.homepage).toBe('file:///home.html');
+    expect(prefs.extensions.settings).toEqual({a: 1});
+  });
+
+  // Runs on every launch, so the overwhelmingly common case is "already
+  // correct". It must not rewrite the file then: Chromium is holding it open,
+  // and a pointless write is a pointless chance to corrupt it.
+  it('writes nothing when there is nothing of ours to remove', () => {
+    const userDataDir = tempDir();
+    materialize(userDataDir);
+    writePrefs(userDataDir, {extensions: {pinned_extensions: ['aaaa']}});
+    const before = fs.statSync(path.join(userDataDir, 'Default', 'Preferences')).mtimeMs;
+    expect(unpinRetiredExtensions({userDataDir}, deps)).toEqual([]);
+    expect(fs.statSync(path.join(userDataDir, 'Default', 'Preferences')).mtimeMs).toBe(before);
+  });
+
+  it('does nothing on a profile that has never launched', () => {
+    const userDataDir = tempDir();
+    materialize(userDataDir);
+    expect(unpinRetiredExtensions({userDataDir}, deps)).toEqual([]);
+    expect(fs.existsSync(path.join(userDataDir, 'Default', 'Preferences'))).toBe(false);
+  });
+
+  // A profile carrying the stale pin AND the panel since switched off still
+  // wants the dead button gone -- the extension is not loaded, so the button
+  // does nothing at all.
+  it('removes the pin even when the panel is switched off', () => {
+    const userDataDir = tempDir();
+    const id = unpackedExtensionId(materialize(userDataDir));
+    writePrefs(userDataDir, {extensions: {pinned_extensions: [id]}});
+    expect(unpinRetiredExtensions(
+        {userDataDir, builtInExtensions: {cookie_manager: false}}, deps)).toEqual([id]);
+    expect(readPrefs(userDataDir).extensions.pinned_extensions).toEqual([]);
   });
 });
 

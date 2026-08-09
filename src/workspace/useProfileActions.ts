@@ -403,7 +403,8 @@ export function useProfileActions(
       if (!match) {
         continue;
       }
-      cookiePatches.set(profile.id, await cloudCookieFromSelection(profile.id, match));
+      cookiePatches.set(profile.id,
+          await cloudCookieFromSelection(profile.id, match, profile.cookie_import_url));
     }
     // One update per profile that actually matched a cookie file; the ones that
     // did not match are never rewritten.

@@ -30,12 +30,16 @@
           aria-selected="false" aria-controls="session-section" tabindex="-1">
         <span class="tab-label">Session</span>
       </button>
-      <!-- Hidden until the launch snapshot says this profile has any, by
-           renderAutomations via tabs.setAvailable(). Same reasoning the section
-           it controls used to carry alone: an empty Automations tab reads as a
-           feature that is broken rather than one that has nothing to show. -->
+      <!-- Always on screen, and it used to be hidden unless the launch was handed
+           automations. That was the wrong reading of the same rule the empty
+           states below follow: a missing tab is not a quiet empty state, it is a
+           missing feature. Someone who has never pinned a workflow could not tell
+           the panel had an Automations tab at all, so they could not find out
+           what to do to get one -- and a run started from the launcher against
+           this profile had nowhere in this window to show its progress. The
+           panel now says which of those is the case. -->
       <button id="tab-automations" class="tab" type="button" role="tab" data-tab="automations"
-          aria-selected="false" aria-controls="automations-section" tabindex="-1" hidden>
+          aria-selected="false" aria-controls="automations-section" tabindex="-1">
         <span class="tab-label">Automations</span>
       </button>
     </div>
@@ -217,11 +221,64 @@
     </section>
 
     <!-- ── Automations ───────────────────────────────────────────────────────
-         Its tab is hidden outright when this launch has none, so the panel
-         behind it is never reachable and needs no empty state of its own. -->
+         Two things at once, and they are independent: the workflows this launch
+         may START (the list, from the launch snapshot -- the run token only
+         authorizes those), and whatever is RUNNING against this profile right
+         now, wherever it was started from. A profile with nothing pinned can
+         still have a live run to watch, which is why the card is not inside the
+         list and does not depend on it. -->
     <section id="automations-section" class="section" role="tabpanel"
         aria-labelledby="tab-automations" hidden>
+
+      <!-- The live run. Hidden until a poll finds one, and it is the first thing
+           in the panel when there is one: what is happening now outranks what
+           you could start. -->
+      <div id="run-card" class="card run-card" hidden>
+        <div class="card-row">
+          <span id="run-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="run-title">&nbsp;</strong>
+            <span id="run-step"></span>
+          </div>
+        </div>
+        <!-- role="progressbar" rather than <progress>: the value is genuinely
+             unknown for a run whose loop has overshot its declared step count,
+             and an indeterminate <progress> cannot also carry the text below.
+             aria-valuenow is omitted in that case, which is how the ARIA spec
+             spells "indeterminate". -->
+        <div id="run-bar" class="run-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <span id="run-bar-fill" class="run-bar-fill"></span>
+        </div>
+        <div class="run-foot">
+          <span id="run-meta" class="run-meta"></span>
+          <!-- Starts hidden, and that is not merely tidiness: paintRunCard
+               returns early when there is no run at all, so this button is never
+               touched on a profile that has never run anything. Shown only for a
+               run that is actually live. -->
+          <button id="run-stop" class="ghost run-stop" type="button" hidden>
+            <span class="icon" data-icon="stopCircle"></span>
+            Stop
+          </button>
+        </div>
+      </div>
+
       <div id="automation-list" class="automation-list"></div>
+
+      <!-- Shown when this launch was handed no automations. Names the reason and
+           the fix, and the button is the only thing this screen can usefully do:
+           the run token authorizes starting only what the launch already offered,
+           so there is nothing here to run and the answer is in the launcher. -->
+      <div id="automations-empty" class="empty-state" hidden>
+        <p class="empty-title">No automations for this profile</p>
+        <p class="empty-detail">
+          Pin a workflow to this profile in Argus Launcher, or set it as the
+          profile&rsquo;s own automation, and it will appear here on the next launch.
+        </p>
+        <button id="open-automations" class="primary" type="button">
+          <span class="icon" data-icon="externalLink"></span>
+          Open Automations in Launcher
+        </button>
+      </div>
     </section>
   </main>
 
@@ -236,6 +293,7 @@
   <script src="sync-status.js"></script>
   <script src="icons.js"></script>
   <script src="tabs.js"></script>
+  <script src="run-view.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>
