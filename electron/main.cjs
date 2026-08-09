@@ -2525,7 +2525,19 @@ async function spawnProfileUnchecked(payload, extraArgs = []) {
   // extension's on-disk directory, which that call creates. The browser's
   // native "Argus Helper" toolbar button opens this extension's side panel.
   const panelExtensionId = builtInExtensions.argusPanelExtensionId(payload);
-  const switches = launchSafeSwitches(payload.commandLineSwitches);
+  // On GPU-less/RDP hosts a --window-size switch is the difference between a
+  // window that shows and one that never does: with software rendering the
+  // browser creates the window but leaves it WS_VISIBLE-off, so the process
+  // runs (CDP answers, the page loads) with nothing on screen -- the exact
+  // "launched, no window" failure, and it happens for ANY size, not just ones
+  // larger than the display. The window_placement pref written by
+  // writeProfileFingerprintPrefs sizes the window without the switch and does
+  // not trip this, so drop the switch here and let the pref do the job.
+  // Real-GPU machines are untouched and keep the switch.
+  const switches = hostNeedsSoftwareRendering() ?
+    launchSafeSwitches(payload.commandLineSwitches)
+        .filter((sw) => !/^--window-size(?:=|$)/.test(sw)) :
+    launchSafeSwitches(payload.commandLineSwitches);
   const explicitTimezone = payload.runtimeFingerprint?.timezone || null;
   const explicitLanguage = payload.runtimeFingerprint?.languages?.[0] || null;
   const timezone = resolveTimezone(explicitTimezone, payload.proxy, proxyGeo);
