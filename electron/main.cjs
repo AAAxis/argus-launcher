@@ -11,10 +11,12 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
+const browserRelease = require('./browser-release.cjs');
 const builtInExtensions = require('./built-in-extensions.cjs');
 const {resolveFavicon} = require('./favicons.cjs');
 const integrations = require('./integrations.cjs');
 const {launcherIconPng, profileIconIcns, profileIconPng} = require('./profile-icons.cjs');
+const {createReleaseNotes} = require('./releases.cjs');
 const screenGeometry = require('./screen-geometry.cjs');
 const cdpCore = require('./cdp-core.cjs');
 const automationRunner = require('./automation/runner.cjs');
@@ -22,6 +24,7 @@ const automationStore = require('./automation/store.cjs');
 const automationSteps = require('./automation/steps.cjs');
 const automationAi = require('./automation/ai.cjs');
 const automationConnectors = require('./automation/connectors.cjs');
+const telegramLink = require('./telegram-link.cjs');
 const automationNotify = require('./automation/notify.cjs');
 const stepSchema = require('./automation/step-schema.json');
 const {
@@ -254,8 +257,8 @@ function managedBrowserRoot() {
 // install at once, and Windows will not let an in-place delete-and-overwrite
 // touch DLLs/EXEs those processes still have open -- the previous direct-
 // overwrite approach silently failed under load and left old, unpatched
-// binaries running with no visible error (see ensureBrowserResource's catch
-// block). A fresh build now gets its own directory instead, so installing it
+// binaries running with no visible error (see applyBrowserResourceError's
+// fallback). A fresh build now gets its own directory instead, so installing it
 // never has to touch files a running process might be holding.
 function managedBrowserCurrentPointerPath() {
   return path.join(managedBrowserRoot(), '.argus-browser-current');
@@ -432,12 +435,29 @@ const updateState = {
   updateInfo: null,
   progress: null,
   downloaded: false,
+  // When the feed was last reached. Shown next to "Check for updates" so
+  // "Up to date" is a claim with a date on it rather than an assertion -- the
+  // launcher spent six commits saying it while the feed was stale.
+  lastCheckedAt: '',
   error: null,
 };
 const resourceState = {
   browserStatus: 'idle',
+  // Kept as the name the rest of the app already reads. It now holds the
+  // installed version rather than whatever the last manifest happened to say.
   browserVersion: '',
   browserPath: managedBrowserAppPath(),
+  // What is on disk, from the marker beside the install.
+  installedBuildId: '',
+  installedVersion: '',
+  installedAt: '',
+  // What the feed offers, from the last successful check.
+  availableVersion: '',
+  availableReleaseDate: '',
+  availableSize: 0,
+  notes: '',
+  lastCheckedAt: '',
+  updateAvailable: false,
   progress: null,
   error: null,
 };
@@ -617,27 +637,35 @@ function fileSha512Base64(filePath) {
 // managed install from months ago would otherwise be treated as "ready"
 // forever and never get replaced.
 //
-// This is keyed on the manifest's sha512, not its version: every published
-// manifest observed so far (mac-arm64 and win-x64, built hours apart) reports
-// the same literal "1.0.0" -- whatever publishes these manifests doesn't
-// actually bump the version field per build. sha512 is the only field that
-// reliably changes when the archive's contents change, so it's the only safe
-// staleness signal here.
-function managedBrowserVersionPath() {
-  return path.join(managedBrowserRoot(), '.argus-browser-build');
+// The decision itself lives in browser-release.cjs, where it can be tested;
+// these two only do the file I/O. Note that the record is keyed on the
+// manifest's sha512 rather than its version, and stays that way now that
+// versions are real: two builds of the same Chromium version are still two
+// different builds, which for a fork is the ordinary case.
+function managedBrowserRecordPath() {
+  return path.join(managedBrowserRoot(), browserRelease.INSTALL_RECORD_FILE);
 }
 
-function readManagedBrowserVersion() {
-  try {
-    return fs.readFileSync(managedBrowserVersionPath(), 'utf8').trim();
-  } catch {
-    return '';
-  }
+function readManagedBrowserRecord() {
+  const read = (file) => {
+    try {
+      return fs.readFileSync(path.join(managedBrowserRoot(), file), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  return browserRelease.readInstallRecord({
+    recordJson: read(browserRelease.INSTALL_RECORD_FILE),
+    legacyBuildId: read(browserRelease.LEGACY_BUILD_ID_FILE),
+  });
 }
 
-function writeManagedBrowserVersion(manifest) {
+function writeManagedBrowserRecord(manifest, {installedAt} = {}) {
   try {
-    fs.writeFileSync(managedBrowserVersionPath(), String(manifest?.sha512 || manifest?.version || ''));
+    const record = browserRelease.buildInstallRecord(manifest, {
+      installedAt: installedAt || new Date().toISOString(),
+    });
+    fs.writeFileSync(managedBrowserRecordPath(), `${JSON.stringify(record, null, 2)}\n`);
   } catch {
     // Best effort -- a missing/unwritable marker just means the next check
     // re-verifies against the manifest instead of trusting a cached build.
@@ -668,41 +696,97 @@ function extractBrowserArchive(archivePath, destinationDir) {
   unzipBufferTo(fs.readFileSync(archivePath), destinationDir);
 }
 
-async function ensureBrowserResource({manual = false} = {}) {
+// Reflects what the marker on disk says onto the state the UI reads. Called
+// on startup before any network is involved, so the Updates page can name the
+// installed version offline rather than showing a blank until a check lands.
+function applyInstalledBrowserRecord() {
+  const record = readManagedBrowserRecord();
+  resourceState.installedBuildId = record?.buildId || '';
+  resourceState.installedVersion = record?.version || '';
+  resourceState.installedAt = record?.installedAt || '';
+  resourceState.browserVersion = record?.version || '';
+  return record;
+}
+
+// Fetches the published manifest and works out where we stand. Downloads
+// nothing.
+//
+// This used to be one function with the install below, which meant every check
+// that found a newer build immediately pulled ~200 MB without asking. Now the
+// only case that still installs unprompted is the one where there is nothing
+// managed to launch at all -- see decideBrowserAction.
+async function checkBrowserResource({manual = false} = {}) {
   if (['checking', 'downloading', 'installing'].includes(resourceState.browserStatus)) {
     return publicResourceState();
   }
   const resolved = resolveBrowserExecutable();
   const managedPath = managedBrowserAppPath();
   const usingManaged = Boolean(resolved && managedPath && resolved.appPath === managedPath);
-  // A bundled browser proves the launcher can start offline, but it does not
-  // prove the browser is current. Always check the published browser manifest
-  // when possible and install the managed copy when its build marker differs.
-  // If the network/manifest check fails, the catch block below falls back to
-  // any resolved browser so existing installs still launch offline.
+  const record = applyInstalledBrowserRecord();
   try {
     resourceState.browserStatus = 'checking';
     resourceState.error = null;
     resourceState.progress = null;
     broadcastResourceState();
-    const manifest = await downloadJson(browserResourceManifestUrl());
-    const manifestBuildId = String(manifest.sha512 || manifest.version || '');
-    if (usingManaged && manifestBuildId && readManagedBrowserVersion() === manifestBuildId) {
-      // Already installed and matches the latest published build -- nothing to do.
+    const manifest = browserRelease.normalizeManifest(
+        await downloadJson(browserResourceManifestUrl()));
+    resourceState.lastCheckedAt = new Date().toISOString();
+    resourceState.availableVersion = manifest.version;
+    resourceState.availableReleaseDate = manifest.releaseDate;
+    resourceState.availableSize = manifest.size;
+    resourceState.notes = manifest.notes;
+
+    const action = browserRelease.decideBrowserAction({record, manifest, usingManaged});
+    if (action === 'up-to-date') {
+      // A legacy marker that already names the published build carries no
+      // version or install date, because the old format never stored them.
+      // Backfill from the manifest now that we know they describe the same
+      // build, so the UI stops saying "1.0.0" without a 200 MB round trip.
+      if (record?.legacy) {
+        writeManagedBrowserRecord(manifest, {installedAt: ''});
+        applyInstalledBrowserRecord();
+      }
       resourceState.browserStatus = 'ready';
       resourceState.browserPath = resolved.appPath;
-      resourceState.browserVersion = manifest.version || '';
+      resourceState.browserVersion = manifest.version;
+      resourceState.installedVersion = manifest.version;
+      resourceState.updateAvailable = false;
       resourceState.error = null;
       resourceState.progress = null;
       return broadcastResourceState();
     }
-    const archiveUrl = new URL(manifest.url, browserResourceManifestUrl()).toString();
+    if (action === 'update-available') {
+      resourceState.browserStatus = 'ready';
+      resourceState.browserPath = resolved.appPath;
+      resourceState.updateAvailable = true;
+      resourceState.error = null;
+      resourceState.progress = null;
+      return broadcastResourceState();
+    }
+    return installBrowserResource({manifest, manual, resolved});
+  } catch (error) {
+    return applyBrowserResourceError(error, {manual, resolved});
+  }
+}
+
+// Downloads, verifies and swaps in a build. `manifest` is optional so the user
+// pressing "Update" or "Reinstall" does not need a check to have run first.
+async function installBrowserResource({manifest = null, manual = false, resolved = null} = {}) {
+  if (['downloading', 'installing'].includes(resourceState.browserStatus)) {
+    return publicResourceState();
+  }
+  const fallback = resolved || resolveBrowserExecutable();
+  try {
+    const current = manifest || browserRelease.normalizeManifest(
+        await downloadJson(browserResourceManifestUrl()));
+    const archiveUrl = new URL(current.url, browserResourceManifestUrl()).toString();
     const archivePath = path.join(app.getPath('temp'), `argys-browser-${browserResourceKey()}-${Date.now()}.zip`);
     resourceState.browserStatus = 'downloading';
-    resourceState.browserVersion = manifest.version || '';
+    resourceState.availableVersion = current.version;
+    resourceState.error = null;
     broadcastResourceState();
     await downloadFile(archiveUrl, archivePath);
-    if (manifest.sha512 && fileSha512Base64(archivePath) !== manifest.sha512) {
+    if (current.sha512 && fileSha512Base64(archivePath) !== current.sha512) {
       throw new Error('Downloaded browser archive checksum does not match manifest.');
     }
     resourceState.browserStatus = 'installing';
@@ -712,7 +796,7 @@ async function ensureBrowserResource({manual = false} = {}) {
     // profile windows have the previous build's DLLs/EXEs open, and Windows
     // refuses to delete those out from under them. A new directory means this
     // install never has to touch a file another process might be holding.
-    const versionedDir = managedBrowserVersionedDir(manifestBuildId);
+    const versionedDir = managedBrowserVersionedDir(current.buildId);
     extractBrowserArchive(archivePath, versionedDir);
     fs.rmSync(archivePath, {force: true});
     writeManagedBrowserCurrentDir(versionedDir);
@@ -720,28 +804,37 @@ async function ensureBrowserResource({manual = false} = {}) {
     if (!installedBrowserPath) {
       throw new Error(`Downloaded browser did not contain a supported app for ${browserResourceKey()}.`);
     }
-    writeManagedBrowserVersion(manifest);
+    writeManagedBrowserRecord(current);
     // Best-effort cleanup of the previous build(s). Anything still backing a
     // running profile simply fails to delete and is retried on a later check.
     pruneStaleManagedBrowserDirs();
+    applyInstalledBrowserRecord();
     resourceState.browserStatus = 'ready';
     resourceState.browserPath = installedBrowserPath;
+    resourceState.updateAvailable = false;
     resourceState.progress = null;
     resourceState.error = null;
   } catch (error) {
-    if (resolved) {
-      // Refresh check failed (e.g. offline) but a previously-installed
-      // browser still resolves -- launch must keep working without network,
-      // so fall back to what's already on disk instead of erroring out.
-      resourceState.browserStatus = 'ready';
-      resourceState.browserPath = resolved.appPath;
-      resourceState.error = null;
-      resourceState.progress = null;
-      return broadcastResourceState();
-    }
-    resourceState.browserStatus = manual ? 'error' : 'idle';
-    resourceState.error = errorDetail(error);
+    return applyBrowserResourceError(error, {manual, resolved: fallback});
   }
+  return broadcastResourceState();
+}
+
+function applyBrowserResourceError(error, {manual, resolved}) {
+  if (resolved) {
+    // The check or install failed (e.g. offline) but a previously-installed
+    // browser still resolves -- launch must keep working without network, so
+    // fall back to what's already on disk instead of erroring out. A manual
+    // attempt still surfaces why it failed; an automatic one stays quiet.
+    resourceState.browserStatus = 'ready';
+    resourceState.browserPath = resolved.appPath;
+    resourceState.error = manual ? errorDetail(error) : null;
+    resourceState.progress = null;
+    return broadcastResourceState();
+  }
+  resourceState.browserStatus = manual ? 'error' : 'idle';
+  resourceState.error = errorDetail(error);
+  resourceState.progress = null;
   return broadcastResourceState();
 }
 
@@ -811,6 +904,7 @@ function configureAutoUpdater() {
     updateState.updateInfo = serializableUpdateInfo(info);
     updateState.downloaded = false;
     updateState.progress = null;
+    updateState.lastCheckedAt = new Date().toISOString();
     updateState.error = null;
     broadcastUpdateState();
   });
@@ -819,6 +913,7 @@ function configureAutoUpdater() {
     updateState.updateInfo = serializableUpdateInfo(info);
     updateState.downloaded = false;
     updateState.progress = null;
+    updateState.lastCheckedAt = new Date().toISOString();
     updateState.error = null;
     broadcastUpdateState();
   });
@@ -2500,6 +2595,9 @@ ipcMain.handle('argus:check-proxy', async (_event, proxy) => {
 const EXTERNAL_URL_HOSTS = new Set([
   'browserargus.com',
   'www.browserargus.com',
+  // The notification bot's deep link (t.me/<bot>?start=<code>). Telegram's
+  // short domain only -- linking never needs telegram.org itself.
+  't.me',
 ]);
 
 // Google sign-in starts at the Supabase project's authorize endpoint, so that
@@ -2660,12 +2758,33 @@ ipcMain.handle('argus:update-status', async () => {
   return publicUpdateState();
 });
 
+// Built lazily: app.getPath('userData') is only meaningful once the app is
+// ready, and nothing asks for release notes before the changelog is opened.
+let releaseNotes = null;
+ipcMain.handle('argus:release-notes', async (_event, {force = false} = {}) => {
+  if (!releaseNotes) {
+    releaseNotes = createReleaseNotes({
+      userDataPath: app.getPath('userData'),
+      downloadJson,
+    });
+  }
+  return releaseNotes.load({force});
+});
+
 ipcMain.handle('argus:resource-status', async () => {
   return publicResourceState();
 });
 
+// Look, don't fetch. What the Updates page's "Check for updates" calls.
+ipcMain.handle('argus:check-browser-resource', async () => {
+  return checkBrowserResource({manual: true});
+});
+
+// Fetch and install, whatever the check said. Backs both "Update to X" and
+// "Reinstall" -- the second is a repair for a corrupted install, so it has to
+// work even when the build ids already agree.
 ipcMain.handle('argus:download-browser-resource', async () => {
-  return ensureBrowserResource({manual: true});
+  return installBrowserResource({manual: true});
 });
 
 ipcMain.handle('argus:api-status', async () => {
@@ -3096,9 +3215,70 @@ ipcMain.handle('argus:download-update', async () => {
   return downloadUpdate();
 });
 
+// How many profile windows are open right now.
+//
+// There is no registry to consult: profiles are spawned detached and the
+// launcher does not track them, deliberately -- a session outlives the app
+// that started it. So this asks the same question resolveProfileCdp() asks
+// when it re-adopts a session after a restart: each profile directory holds a
+// DevToolsActivePort written by a running Chromium, and something answering on
+// that port is what makes it real rather than left over.
+async function countRunningProfileSessions() {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(resolveProfileUserDataDir('ArgysProfiles'), {withFileTypes: true});
+  } catch {
+    return 0;
+  }
+  const ports = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    try {
+      const port = Number(fs.readFileSync(
+          path.join(resolveProfileUserDataDir(path.join('ArgysProfiles', entry.name)), 'DevToolsActivePort'),
+          'utf8').split('\n')[0].trim());
+      if (port > 0) {
+        ports.push(port);
+      }
+    } catch {
+      // No file, or unreadable -- not running.
+    }
+  }
+  // In parallel: cdpAlive waits up to 1.2s per port, and someone with thirty
+  // profiles open should not wait half a minute to be told so.
+  const alive = await Promise.all(ports.map((port) => cdpAlive(port)));
+  return alive.filter(Boolean).length;
+}
+
+ipcMain.handle('argus:running-session-count', async () => {
+  return countRunningProfileSessions();
+});
+
 ipcMain.handle('argus:install-update', async () => {
   if (!updateState.downloaded) {
     return {ok: false, error: 'No downloaded update is ready to install.'};
+  }
+  // Installing quits the app, which takes every open profile window with it.
+  // Asking here rather than in the renderer means it holds for any caller --
+  // the Settings button, the corner toast, and anything added later.
+  const running = await countRunningProfileSessions();
+  if (running > 0) {
+    const {response} = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Close and install'],
+      defaultId: 0,
+      cancelId: 0,
+      message: running === 1 ?
+        '1 profile is open and will be closed.' :
+        `${running} profiles are open and will be closed.`,
+      detail: 'Installing the update restarts Argus Launcher. Anything unsaved in those ' +
+        'browser windows is lost.',
+    });
+    if (response !== 1) {
+      return {ok: false, cancelled: true};
+    }
   }
   autoUpdater.quitAndInstall(false, true);
   return {ok: true};
@@ -3907,6 +4087,10 @@ ipcMain.handle('argus:start-automation-run', async (_event, payload) => {
       trigger: payload.trigger || 'manual',
       cdpUrl: payload.cdpUrl,
       vars: payload.vars,
+      // calleeId -> steps for every callAutomation in the tree, resolved by
+      // the renderer (the only side with the catalogue). Absent when the tree
+      // has no calls.
+      resolvedAutomations: payload.resolvedAutomations,
       onEvent: sendRunEvent,
       // Lets a saveCookies step land its result the same way the extension's
       // push does -- through the renderer, which owns the cloud write and the
@@ -4009,6 +4193,34 @@ ipcMain.handle('argus:list-connector-models', async (_event, {connector}) => {
     return {ok: true, models};
   } catch (error) {
     // The provider's own words -- "invalid x-api-key" beats "could not load".
+    return {ok: false, error: error?.message || String(error)};
+  }
+});
+
+// The notification bot's two halves, both here because outbound HTTP is this
+// process's job (the connectors reasoning). Linking watches the bot's
+// getUpdates feed for the deep-link code the renderer minted; sending is the
+// same Telegram adapter every telegram connector uses, against the member's
+// own chat.
+ipcMain.handle('argus:telegram-link-poll', async (_event, {token, code, welcome}) => {
+  try {
+    const found = await telegramLink.pollForStart({token, code, welcome});
+    return found ?
+      {ok: true, chatId: found.chatId, username: found.username} :
+      {ok: false, error: 'Nobody pressed Start in time. Open the link and try again.'};
+  } catch (error) {
+    return {ok: false, error: error?.message || String(error)};
+  }
+});
+
+ipcMain.handle('argus:telegram-send', async (_event, {token, chatId, text}) => {
+  try {
+    await automationConnectors.send({
+      connector: {kind: 'telegram', category: 'message', config: {botToken: token, chatId}},
+      message: text,
+    });
+    return {ok: true};
+  } catch (error) {
     return {ok: false, error: error?.message || String(error)};
   }
 });
@@ -4384,6 +4596,9 @@ function runFromPage(req, res) {
         profile: {id: entry.profileId, name: entry.profileName || ''},
         trigger: 'start-page',
         cdpUrl,
+        // Rides the run token: the renderer resolved each tile's call tree at
+        // mint time, because this process has no catalogue to resolve against.
+        resolvedAutomations: automation.resolvedAutomations,
         onEvent: sendRunEvent,
         pushCookies: (profileId, cookies) =>
           askRendererOnPageChannel('argus:cookie-sync-push-request', {profileId, cookies}),
@@ -5145,7 +5360,16 @@ function startAutomationApiServer() {
 app.whenReady().then(() => {
   configureAutoUpdater();
   createWindow();
-  void ensureBrowserResource({manual: false});
+  // Name the installed build before any network call, so the Updates page has
+  // something true to show offline instead of a blank.
+  applyInstalledBrowserRecord();
+  void checkBrowserResource({manual: false});
+  // The browser used to be checked exactly once, here, while the launcher
+  // re-checked every four hours -- so a machine left running for a week never
+  // saw a browser release at all. Same interval for both now.
+  setInterval(() => {
+    void checkBrowserResource({manual: false});
+  }, UPDATE_CHECK_INTERVAL_MS);
   // Cold start from a deep link on Windows/Linux: the URL is in our own argv
   // rather than arriving via 'second-instance'. macOS uses 'open-url', which
   // may already have queued something by now.

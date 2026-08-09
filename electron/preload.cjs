@@ -72,6 +72,10 @@ contextBridge.exposeInMainWorld('argusNative', {
   // Takes the config directly rather than an id so an unsaved edit can be
   // tried before it is written.
   testConnector: (connector) => ipcRenderer.invoke('argus:test-connector', {connector}),
+  telegramLinkPoll: (token, code, welcome) =>
+    ipcRenderer.invoke('argus:telegram-link-poll', {token, code, welcome}),
+  telegramSend: (token, chatId, text) =>
+    ipcRenderer.invoke('argus:telegram-send', {token, chatId, text}),
   // The endpoint's own model listing, for the form's model picker. Draft in,
   // like testConnector, so an unsaved key can prove itself.
   listConnectorModels: (connector) =>
@@ -83,6 +87,8 @@ contextBridge.exposeInMainWorld('argusNative', {
   },
   deepLinkReady: () => ipcRenderer.invoke('argus:deep-link-ready'),
   getUpdateStatus: () => ipcRenderer.invoke('argus:update-status'),
+  getReleaseNotes: (options) => ipcRenderer.invoke('argus:release-notes', options || {}),
+  runningSessionCount: () => ipcRenderer.invoke('argus:running-session-count'),
   checkForUpdates: () => ipcRenderer.invoke('argus:check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('argus:download-update'),
   installUpdate: () => ipcRenderer.invoke('argus:install-update'),
@@ -92,6 +98,7 @@ contextBridge.exposeInMainWorld('argusNative', {
     return () => ipcRenderer.removeListener('argus:update-state', listener);
   },
   getResourceStatus: () => ipcRenderer.invoke('argus:resource-status'),
+  checkBrowserResource: () => ipcRenderer.invoke('argus:check-browser-resource'),
   downloadBrowserResource: () => ipcRenderer.invoke('argus:download-browser-resource'),
   onResourceState: (callback) => {
     const listener = (_event, payload) => callback(payload);

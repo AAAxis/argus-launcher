@@ -262,5 +262,16 @@
        "default": 100},
       {"key": "body", "kind": "steps", "label": "Each time"}
     ]
+  },
+  "callAutomation": {
+    "label": "Run automation",
+    "icon": "workflow",
+    "summary": "Run automation {automationId}",
+    "cdp": [],
+    "fields": [
+      {"key": "automationId", "kind": "automation", "label": "Automation", "required": true,
+       "pattern": "^[A-Za-z0-9._-]{1,64}$",
+       "hint": "Runs that automation's steps here, on this run's browser and variables. onError: retry re-runs the whole callee."}
+    ]
   }
 }

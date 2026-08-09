@@ -368,6 +368,36 @@
           "key": "closeOnFinish",
           "type": "boolean",
           "description": "Close the browser when the run ends. Defaults true for runs started over the API."
+        },
+        {
+          "key": "icon",
+          "type": "string",
+          "description": "Card icon, as brand:<slug> from the shared brand catalog (brand:facebook, brand:instagram, ...). Empty clears it."
+        },
+        {
+          "key": "color",
+          "type": "string",
+          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex."
+        },
+        {
+          "key": "notifyOn",
+          "type": "string",
+          "description": "Notify when a run finishes: always or failure. Empty clears it. Delivery is the Argus bell and a desktop notification, plus notifyConnectorId when set."
+        },
+        {
+          "key": "notifyConnectorId",
+          "type": "string",
+          "description": "A message connector id to additionally send the finish notification through. Requires notifyOn."
+        },
+        {
+          "key": "variables",
+          "type": "object",
+          "description": "Seed variables every run starts with, readable as {{vars.<name>}}."
+        },
+        {
+          "key": "schedule",
+          "type": "object",
+          "description": "Run on a schedule while the launcher is open: {enabled, kind: interval|daily|weekly, everyMinutes?, at: \"HH:MM\"?, days: [0-6]?, profileIds: [\"<id>\"]}. Missed slots are skipped. Null clears it."
         }
       ]
     },
@@ -393,7 +423,37 @@
         {"key": "tags", "type": "tags", "description": "Replaces the whole list. At most 5."},
         {"key": "pinned", "type": "boolean"},
         {"key": "timeoutMs", "type": "number"},
-        {"key": "closeOnFinish", "type": "boolean"}
+        {"key": "closeOnFinish", "type": "boolean"},
+        {
+          "key": "icon",
+          "type": "string",
+          "description": "Card icon, as brand:<slug> from the shared brand catalog. Empty clears it."
+        },
+        {
+          "key": "color",
+          "type": "string",
+          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex."
+        },
+        {
+          "key": "notifyOn",
+          "type": "string",
+          "description": "Notify when a run finishes: always or failure. Empty clears it."
+        },
+        {
+          "key": "notifyConnectorId",
+          "type": "string",
+          "description": "A message connector id to additionally send the finish notification through. Requires notifyOn."
+        },
+        {
+          "key": "variables",
+          "type": "object",
+          "description": "Replaces the seed variables every run starts with."
+        },
+        {
+          "key": "schedule",
+          "type": "object",
+          "description": "Replaces the schedule: {enabled, kind: interval|daily|weekly, everyMinutes?, at: \"HH:MM\"?, days: [0-6]?, profileIds: [\"<id>\"]}. Null clears it."
+        }
       ]
     },
     {
@@ -427,6 +487,25 @@
           "key": "vars",
           "type": "object",
           "description": "Seed variables the run starts with, readable as {{vars.<name>}}."
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/runs",
+      "group": "Automations",
+      "label": "Recent runs of one automation, with status and errors",
+      "scope": "any",
+      "channel": "argus:list-automation-runs-request",
+      "mcp": "argus_automation_runs",
+      "mcpDescription": "Recent runs of an automation, newest first: status (running, ok, partial, failed, cancelled), timing, the failed step and the error. This is how to learn how a run started with argus_run_automation ended.",
+      "body": "{ \"automationId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {
+          "key": "limit",
+          "type": "number",
+          "description": "How many runs, newest first. Default 20, at most 50."
         }
       ]
     },

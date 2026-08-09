@@ -6,16 +6,23 @@
 // inline WITHOUT clobbering the step list -- you keep editing the text until it
 // is right, rather than losing it the moment you mistype a brace.
 import {useState} from 'react';
-import {Pencil, Play, Trash2} from 'lucide-react';
+import {Pencil, Play, Send, Trash2} from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {Field} from '../ui/Field';
+import {BrandIconPicker} from '../ui/BrandIconPicker';
 import {BusyButton} from '../ui/BusyButton';
+import {ColorPicker} from '../ui/ColorPicker';
 import {TagInput} from '../ui/TagInput';
 import {StepList} from '../automations/StepList';
 import {STEP_SCHEMA} from '../../automations/schema';
+import {
+  MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES, validateSchedule,
+} from '../../automations/schedule';
+import {assigneeName} from '../../lib/assignees';
 import {MAX_PROFILE_TAGS} from '../../lib/tags';
+import type {AutomationSchedule, ScheduleKind} from '../../automations/schedule';
 import type {TagUsage} from '../../lib/tags';
-import type {ArgusAutomation} from '../../types';
+import type {ArgusAutomation, OrgMember} from '../../types';
 import type {AutomationStep} from '../../automations/types';
 
 // Mirrors electron/automation/steps.cjs validateSteps closely enough to catch
@@ -206,9 +213,143 @@ function TimeoutField({value, onChange}: {
   );
 }
 
+// The schedule, as presets rather than cron: a kind, its one or two inputs,
+// and which profiles it runs on. The document is draft state like every other
+// field -- Save writes it -- and validateSchedule is the same gate the
+// scheduler and the MCP handlers use, so what saves is what fires.
+const DAY_CHIPS: {day: number; label: string}[] = [
+  {day: 1, label: 'Mon'}, {day: 2, label: 'Tue'}, {day: 3, label: 'Wed'},
+  {day: 4, label: 'Thu'}, {day: 5, label: 'Fri'}, {day: 6, label: 'Sat'},
+  {day: 0, label: 'Sun'},
+];
+
+function ScheduleFields({value, profiles, problems, onChange}: {
+  value: AutomationSchedule | null;
+  profiles: {id: string; name: string}[];
+  problems: string[];
+  onChange: (schedule: AutomationSchedule | null) => void;
+}) {
+  function switchKind(kind: '' | ScheduleKind) {
+    if (!kind) {
+      // Off discards the document rather than keeping a disabled copy: dead
+      // config a later edit resurrects by surprise, the notify_connector_id
+      // lesson.
+      onChange(null);
+      return;
+    }
+    onChange({
+      enabled: true,
+      kind,
+      everyMinutes: kind === 'interval' ? (value?.everyMinutes || 30) : undefined,
+      at: kind === 'interval' ? undefined : (value?.at || '09:00'),
+      days: kind === 'weekly' ? (value?.days?.length ? value.days : [1]) : undefined,
+      profileIds: value?.profileIds || [],
+    });
+  }
+
+  return (
+    <>
+      <Field
+        label="Run on a schedule"
+        hint="Fires while the launcher is open. Times it was closed for are skipped, not caught up."
+      >
+        <select
+          value={value?.enabled ? value.kind : ''}
+          onChange={(event) => switchKind(event.target.value as '' | ScheduleKind)}
+        >
+          <option value="">No schedule</option>
+          <option value="interval">Every N minutes</option>
+          <option value="daily">Daily at a time</option>
+          <option value="weekly">Weekly on days</option>
+        </select>
+      </Field>
+      {value?.enabled && value.kind === 'interval' && (
+        <Field label="Every">
+          <span className="field-suffixed">
+            <input
+              max={MAX_INTERVAL_MINUTES}
+              min={MIN_INTERVAL_MINUTES}
+              type="number"
+              value={value.everyMinutes ?? 30}
+              onChange={(event) => onChange({
+                ...value,
+                everyMinutes: Math.round(Number(event.target.value) || 0),
+              })}
+            />
+            <span aria-hidden="true">min</span>
+          </span>
+        </Field>
+      )}
+      {value?.enabled && value.kind !== 'interval' && (
+        <Field label="At">
+          <input
+            type="time"
+            value={value.at || '09:00'}
+            onChange={(event) => onChange({...value, at: event.target.value})}
+          />
+        </Field>
+      )}
+      {value?.enabled && value.kind === 'weekly' && (
+        <Field label="On" group>
+          <div className="choice-chips" role="group" aria-label="Days of week">
+            {DAY_CHIPS.map(({day, label}) => {
+              const active = (value.days || []).includes(day);
+              return (
+                <button
+                  aria-pressed={active}
+                  className={active ? 'choice-chip active' : 'choice-chip'}
+                  key={day}
+                  type="button"
+                  onClick={() => onChange({
+                    ...value,
+                    days: active ?
+                      (value.days || []).filter((d) => d !== day) :
+                      [...(value.days || []), day],
+                  })}
+                >{label}</button>
+              );
+            })}
+          </div>
+        </Field>
+      )}
+      {value?.enabled && (
+        <Field
+          label="On profiles"
+          hint={profiles.length === 0 ? 'No live profiles to schedule onto yet.' : undefined}
+          group
+        >
+          <div className="automation-schedule-profiles">
+            {profiles.map((profile) => (
+              <label className="checkbox-row" key={profile.id}>
+                <input
+                  checked={value.profileIds.includes(profile.id)}
+                  type="checkbox"
+                  onChange={(event) => onChange({
+                    ...value,
+                    profileIds: event.target.checked ?
+                      [...value.profileIds, profile.id] :
+                      value.profileIds.filter((id) => id !== profile.id),
+                  })}
+                />
+                <span>{profile.name}</span>
+              </label>
+            ))}
+          </div>
+        </Field>
+      )}
+      {value?.enabled && problems.length > 0 && (
+        <ul className="automation-problems">
+          {problems.map((problem) => <li key={problem}>{problem}</li>)}
+        </ul>
+      )}
+    </>
+  );
+}
+
 export function AutomationModal({
-  automation, exists, tagOptions = [], checkProfile, connectors = [], onClose, onSave, onRun,
-  onDelete,
+  automation, exists, tagOptions = [], checkProfile, connectors = [], profiles = [],
+  automations = [], members = [], telegramLinked = false, telegramPref = null,
+  onTelegramPref, onLinkTelegram, onClose, onSave, onRun, onDelete,
 }: {
   automation: ArgusAutomation;
   exists: boolean;
@@ -219,6 +360,21 @@ export function AutomationModal({
   // The workspace's connectors, for a step's connector dropdown. Names
   // only -- the key never comes near the editor.
   connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
+  // Live profiles, for the schedule's target list. Names and ids only.
+  profiles?: {id: string; name: string}[];
+  // The workspace's automations, for callAutomation's picker. The one being
+  // edited is filtered out HERE, not by the picker: this file knows the draft's
+  // id, and excluding it is what makes a self-call inexpressible in the UI.
+  automations?: {id: string; name: string}[];
+  // The roster, for the attribution line -- created_by/updated_by are uuids.
+  members?: OrgMember[];
+  // Personal Telegram: whether MY account is linked, and MY preference for
+  // this automation. Written through the callbacks the moment they change --
+  // they are per-user rows, not part of the automation document Save writes.
+  telegramLinked?: boolean;
+  telegramPref?: 'always' | 'failure' | null;
+  onTelegramPref?: (value: 'always' | 'failure' | null) => void;
+  onLinkTelegram?: () => void;
   onClose: () => void;
   onSave: (next: ArgusAutomation) => Promise<string | null>;
   onRun?: (next: ArgusAutomation) => void;
@@ -235,6 +391,10 @@ export function AutomationModal({
   const [saving, setSaving] = useState(false);
 
   const problems = validate(draft.steps);
+  // A schedule that is present but unsound blocks Save the same way a bad
+  // step does -- the scheduler refuses invalid documents, so saving one would
+  // silently never fire.
+  const scheduleProblems = draft.schedule ? validateSchedule(draft.schedule) : [];
 
   // Only applied when it parses AND validates. Anything else leaves the step
   // list exactly as it was.
@@ -293,7 +453,7 @@ export function AutomationModal({
           <BusyButton
             busy={saving}
             busyLabel="Saving"
-            disabled={problems.length > 0 || !draft.name.trim()}
+            disabled={problems.length > 0 || scheduleProblems.length > 0 || !draft.name.trim()}
             onClick={() => void save()}
           >Save</BusyButton>
         </>
@@ -332,6 +492,7 @@ export function AutomationModal({
               steps={draft.steps}
               checkProfile={checkProfile}
               connectors={connectors}
+              automations={automations.filter((entry) => entry.id !== draft.id)}
               onChange={(steps) => setDraft({...draft, steps})}
             />
           ) : (
@@ -383,6 +544,23 @@ export function AutomationModal({
                 rows={2}
                 value={draft.description || ''}
                 onChange={(event) => setDraft({...draft, description: event.target.value})}
+              />
+            </Field>
+            {/* Identity before wiring: the icon and colour are how this card is
+                found in the grid, the same question the profile avatar answers.
+                Brands only -- the catalog is what lets an agent set one by
+                name over MCP. */}
+            <Field label="Icon" group>
+              <BrandIconPicker
+                value={draft.icon || ''}
+                onChange={(icon) => setDraft({...draft, icon: icon || null})}
+              />
+            </Field>
+            <Field label="Card colour" group>
+              <ColorPicker
+                label="Card colour"
+                value={draft.color || ''}
+                onChange={(color) => setDraft({...draft, color})}
               />
             </Field>
             <Field
@@ -452,8 +630,11 @@ export function AutomationModal({
                 }}
               >
                 <option value="">Don&apos;t notify</option>
-                <option value="always">Notify when it finishes</option>
-                <option value="failure">Notify on failure</option>
+                {/* "always" spelled as what it covers. It used to say "when it
+                    finishes", which read as success-only next to the failure
+                    option -- the exact opposite of what it means. */}
+                <option value="always">Every run — success and failure</option>
+                <option value="failure">Failures only</option>
               </select>
             </Field>
             {draft.notify_on && (
@@ -487,11 +668,64 @@ export function AutomationModal({
                 </select>
               </Field>
             )}
+            {/* Personal, not part of the document: the select writes MY pref
+                row the moment it changes, so there is nothing here for Save to
+                save. Only for a saved automation -- the pref row references
+                the automation and cannot exist before it does. */}
+            {exists && onTelegramPref && (
+              <Field
+                label="Personal Telegram"
+                hint={telegramLinked ?
+                  'Messages you, and only you, through the Argus bot. ' +
+                    'Teammates set their own.' :
+                  'One-time setup: open the Argus bot and press Start.'}
+              >
+                {telegramLinked ? (
+                  <select
+                    value={telegramPref || ''}
+                    onChange={(event) => onTelegramPref(
+                        (event.target.value || null) as 'always' | 'failure' | null)}
+                  >
+                    <option value="">Don&apos;t message me</option>
+                    <option value="always">Message me every run — success and failure</option>
+                    <option value="failure">Message me on failures only</option>
+                  </select>
+                ) : (
+                  <button className="ghost" onClick={onLinkTelegram} type="button">
+                    <Send size={14} /> Link Telegram
+                  </button>
+                )}
+              </Field>
+            )}
+            <ScheduleFields
+              profiles={profiles}
+              problems={scheduleProblems}
+              value={draft.schedule ?? null}
+              onChange={(schedule) => setDraft({...draft, schedule})}
+            />
             <TimeoutField
               value={draft.timeout_ms ?? DEFAULT_TIMEOUT_MS}
               onChange={(timeout_ms) => setDraft({...draft, timeout_ms})}
             />
           </div>
+
+          {/* Who made this and who last touched it. The uuids are resolved
+              against the roster; an agent's work names the agent, because
+              created_by on an MCP write is just whoever had the launcher
+              open. */}
+          {exists && (automation.created_by || automation.created_via === 'mcp') && (
+            <p className="automation-attribution">
+              Created by {automation.created_via === 'mcp' ?
+                `${automation.created_by_label || 'an agent'} (MCP)` :
+                assigneeName(automation.created_by, members) || 'someone'}
+              {automation.created_at ? ` · ${automation.created_at.slice(0, 10)}` : ''}
+              {automation.updated_by && automation.updated_at &&
+                automation.updated_at.slice(0, 10) !== automation.created_at?.slice(0, 10) ?
+                ` — edited by ${assigneeName(automation.updated_by, members) || 'someone'}` +
+                  ` · ${automation.updated_at.slice(0, 10)}` :
+                ''}
+            </p>
+          )}
         </aside>
       </div>
     </Modal>

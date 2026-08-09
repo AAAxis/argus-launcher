@@ -12,7 +12,10 @@ const LOGO = 'data:image/svg+xml;base64,' + btoa(
        <circle cx="24" cy="24" r="5" fill="#111"/>
      </svg>`);
 
-const ACME = {id: 'a', name: 'Acme Traffic', plan: 'team', logo_url: LOGO};
+const ACME = {
+  id: 'a', name: 'Acme Traffic', plan: 'team', logo_url: LOGO,
+  telegram_bot_token: '1234567890:PREVIEWFIXTURETOKEN', telegram_bot_name: 'browserargusnotifybot',
+};
 const SIMNETIQ = {id: 'b', name: 'Simnetiq LTD', plan: 'base', logo_url: null};
 
 export function useOrg() {

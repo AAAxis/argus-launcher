@@ -23,6 +23,10 @@ const NAV_STEP_TIMEOUT_MS = 30000;
 const DEFAULT_RUN_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_LOOP_ITERATIONS = 1000;
 const MAX_RETRIES = 5;
+// How many callAutomation frames may stack. Mirrors MAX_CALL_DEPTH in
+// src/automations/callGraph.ts -- the renderer refuses statically, this
+// refuses at runtime for steps that arrived without pre-resolution.
+const MAX_CALL_DEPTH = 3;
 const RETRY_BACKOFF_MS = 1000;
 
 // Three concurrent runs, and exactly one per profile.
@@ -72,7 +76,8 @@ function summarize(step) {
 }
 
 class Run {
-  constructor({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies}) {
+  constructor({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies,
+    resolvedAutomations}) {
     this.app = app;
     this.automation = automation;
     this.profile = profile;
@@ -83,6 +88,11 @@ class Run {
     // or a caller that never asked for the capability) -- saveCookies throws
     // rather than silently no-op-ing when this is undefined; see steps.cjs.
     this.pushCookies = pushCookies;
+    // calleeId -> steps, for every callAutomation reachable from the root.
+    // Pre-resolved by the renderer (src/automations/callGraph.ts), which also
+    // refused unknown ids and cycles -- this process has no catalogue to
+    // resolve against, so an id missing here is a named runtime error.
+    this.resolvedAutomations = resolvedAutomations || {};
     this.id = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     this.cancelled = false;
     this.screenshotIndex = 0;
@@ -238,9 +248,32 @@ class Run {
     }
   }
 
-  // Dispatches one interpolated step. if/loop are handled here rather than in
-  // steps.cjs because they recurse back into runStep.
+  // Dispatches one interpolated step. if/loop/callAutomation are handled here
+  // rather than in steps.cjs because they recurse back into runStep.
   async execute(cdp, step, path, loop) {
+    if (step.type === 'callAutomation') {
+      const callee = this.resolvedAutomations[step.automationId];
+      if (!callee) {
+        throw new Error('The automation this step calls no longer exists or was ' +
+          'not resolved before the run started');
+      }
+      // The renderer's static walk already refused cycles and depth; this is
+      // the belt for steps that arrived some other way (a buffered run, a
+      // future caller that skips resolution). Counted off the path because the
+      // path IS the call stack.
+      const callDepth = path.split('.call.').length - 1;
+      if (callDepth >= MAX_CALL_DEPTH) {
+        throw new Error(`Automations can only call ${MAX_CALL_DEPTH} levels deep`);
+      }
+      // Same session, same vars bag, same whole-run budget: a callee is inline
+      // steps, not a second run. `.call.` in the path is what the log viewer
+      // indents on, and what the guard above counts.
+      for (let i = 0; i < callee.length; i++) {
+        await this.runStep(cdp, callee[i], `${path}.call.${i}`, loop);
+      }
+      return undefined;
+    }
+
     if (step.type === 'if') {
       const taken = await evaluateCondition(cdp, step.condition || {});
       const branch = taken ? (step.then || []) : (step.else || []);
@@ -329,8 +362,14 @@ class Run {
 // run is minutes, so a route that awaited completion would 504 and look like a
 // hang in the runner rather than a timeout in the bridge.
 async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, onFinish,
-  onNotify, pushCookies}) {
+  onNotify, pushCookies, resolvedAutomations}) {
   const problems = validateSteps(automation.steps || [], SCHEMA);
+  // Callees run through the same runStep, so they are held to the same
+  // validity -- checked here, once, not per call at runtime.
+  for (const [calleeId, steps] of Object.entries(resolvedAutomations || {})) {
+    problems.push(...validateSteps(steps || [], SCHEMA)
+        .map((problem) => `${calleeId}: ${problem}`));
+  }
   if (problems.length > 0) {
     throw new Error(`This automation is not valid: ${problems.slice(0, 5).join('; ')}`);
   }
@@ -348,7 +387,8 @@ async function start({app, automation, profile, trigger, cdpUrl, vars, onEvent, 
     throw error;
   }
 
-  const run = new Run({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies});
+  const run = new Run({app, automation, profile, trigger, cdpUrl, vars, onEvent, pushCookies,
+    resolvedAutomations});
   active.set(run.id, {run, profileId: profile.id});
   run.persist();
   onEvent({type: 'started', runId: run.id, run: run.record});

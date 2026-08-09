@@ -15,6 +15,7 @@
 // before the recipient has chosen which of their workspaces to put it in, so
 // there is no org to filter on until they accept.
 export * as account from './account';
+export * as automationStars from './automationStars';
 export * as automations from './automations';
 export * as bookmarks from './bookmarks';
 export * as connectors from './connectors';
@@ -30,6 +31,7 @@ export * as runs from './runs';
 export * as shared from './shared';
 export * as statuses from './statuses';
 export * as team from './team';
+export * as telegramPrefs from './telegramPrefs';
 
 export {CloudUnavailableError, STORAGE_BUCKET, supabase} from './client';
 export {describeDbError} from './errors';

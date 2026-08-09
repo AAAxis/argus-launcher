@@ -148,59 +148,155 @@ export type Database = {
           },
         ]
       }
+      automation_stars: {
+        Row: {
+          automation_id: string
+          org_id: string
+          starred_at: string
+          user_id: string
+        }
+        Insert: {
+          automation_id: string
+          org_id: string
+          starred_at?: string
+          user_id?: string
+        }
+        Update: {
+          automation_id?: string
+          org_id?: string
+          starred_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_stars_automation_id_fkey"
+            columns: ["automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_stars_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_telegram_prefs: {
+        Row: {
+          automation_id: string
+          notify_on: string
+          org_id: string
+          user_id: string
+        }
+        Insert: {
+          automation_id: string
+          notify_on: string
+          org_id: string
+          user_id?: string
+        }
+        Update: {
+          automation_id?: string
+          notify_on?: string
+          org_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_telegram_prefs_automation_id_fkey"
+            columns: ["automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_telegram_prefs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       automations: {
         Row: {
           assigned_to: string | null
           close_on_finish: boolean
+          color: string | null
           created_at: string
           created_by: string | null
+          created_by_label: string | null
+          created_via: string
           description: string | null
+          icon: string | null
           id: string
+          last_run_at: string | null
+          last_run_status: string | null
           name: string
           notify_connector_id: string | null
           notify_on: string | null
           org_id: string
           pinned: boolean
+          schedule: Json | null
           steps: Json
           tags: string[] | null
           timeout_ms: number
           updated_at: string
+          updated_by: string | null
           variables: Json
         }
         Insert: {
           assigned_to?: string | null
           close_on_finish?: boolean
+          color?: string | null
           created_at?: string
           created_by?: string | null
+          created_by_label?: string | null
+          created_via?: string
           description?: string | null
+          icon?: string | null
           id: string
+          last_run_at?: string | null
+          last_run_status?: string | null
           name: string
           notify_connector_id?: string | null
           notify_on?: string | null
           org_id: string
           pinned?: boolean
+          schedule?: Json | null
           steps?: Json
           tags?: string[] | null
           timeout_ms?: number
           updated_at?: string
+          updated_by?: string | null
           variables?: Json
         }
         Update: {
           assigned_to?: string | null
           close_on_finish?: boolean
+          color?: string | null
           created_at?: string
           created_by?: string | null
+          created_by_label?: string | null
+          created_via?: string
           description?: string | null
+          icon?: string | null
           id?: string
+          last_run_at?: string | null
+          last_run_status?: string | null
           name?: string
           notify_connector_id?: string | null
           notify_on?: string | null
           org_id?: string
           pinned?: boolean
+          schedule?: Json | null
           steps?: Json
           tags?: string[] | null
           timeout_ms?: number
           updated_at?: string
+          updated_by?: string | null
           variables?: Json
         }
         Relationships: [
@@ -630,6 +726,8 @@ export type Database = {
           plan: string
           profile_limit: number | null
           seat_limit: number
+          telegram_bot_name: string | null
+          telegram_bot_token: string | null
           website: string | null
         }
         Insert: {
@@ -650,6 +748,8 @@ export type Database = {
           plan?: string
           profile_limit?: number | null
           seat_limit?: number
+          telegram_bot_name?: string | null
+          telegram_bot_token?: string | null
           website?: string | null
         }
         Update: {
@@ -670,6 +770,8 @@ export type Database = {
           plan?: string
           profile_limit?: number | null
           seat_limit?: number
+          telegram_bot_name?: string | null
+          telegram_bot_token?: string | null
           website?: string | null
         }
         Relationships: [
@@ -1172,6 +1274,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_telegram: {
+        Row: {
+          chat_id: string
+          linked_at: string
+          telegram_username: string | null
+          user_id: string
+        }
+        Insert: {
+          chat_id: string
+          linked_at?: string
+          telegram_username?: string | null
+          user_id?: string
+        }
+        Update: {
+          chat_id?: string
+          linked_at?: string
+          telegram_username?: string | null
+          user_id?: string
+        }
+        Relationships: []
       }
     }
     Views: {

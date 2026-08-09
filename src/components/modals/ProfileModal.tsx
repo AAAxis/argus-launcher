@@ -246,7 +246,7 @@ export function ProfileModal({
         className=""
         onClose={onClose}
         title={draft.saved ? 'Edit profile' : 'Create profile'}
-        subtitle="Cloud-backed profile settings used when Argys Browser launches anonymously."
+        subtitle="Cloud-backed profile settings used when Argus Browser launches anonymously."
         footer={
           <>
             {draft.saved && (

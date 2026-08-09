@@ -7,7 +7,7 @@ import {native} from '../native';
 import {useOrg} from '../org';
 import type {ReactNode} from 'react';
 import type {TabId} from '../data/tabs';
-import type {UpdateState} from '../native';
+import type {ResourceState, UpdateState} from '../native';
 
 export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorkspace, onLeaveWorkspace,
   collapsed, onToggleCollapsed}: {
@@ -142,39 +142,76 @@ export function Topbar({activeTab, actions, onViewShares, onOpenAutomationHistor
 // different update forever. Before this existed, an available update only ever
 // showed up as a one-line status buried in Settings, so it was easy to sit on
 // an old, unpatched build indefinitely without ever knowing.
-export function UpdateToast({state, dismissedVersion, onDismiss}: {
+export function UpdateToast({state, resourceState, dismissedVersion, onDismiss}: {
   state: UpdateState | null;
+  // The browser's own update, which this used to be silent about entirely --
+  // so a waiting browser build was invisible unless you opened Settings and
+  // went looking. Both programs get the same corner notice now.
+  resourceState: ResourceState | null;
   dismissedVersion: string;
   onDismiss: (version: string) => void;
 }) {
-  if (!state ||
-      !['available', 'downloading', 'downloaded'].includes(state.status) ||
-      dismissedVersion === (state.updateInfo?.version || '')) {
+  const launcherWaiting = state &&
+    ['available', 'downloading', 'downloaded'].includes(state.status);
+  const browserWaiting = resourceState?.updateAvailable &&
+    resourceState.browserStatus === 'ready';
+
+  // The launcher takes precedence when both are waiting: it is the one whose
+  // install closes windows, so it is the one worth interrupting for. The
+  // browser's notice reappears on the next render once the launcher's is gone.
+  if (launcherWaiting) {
+    const version = state?.updateInfo?.version || '';
+    if (dismissedVersion === version) {
+      return null;
+    }
+    return (
+      <div className="update-toast">
+        <div className="update-toast-body">
+          <strong>
+            {state?.status === 'downloaded' ?
+              `Launcher ${version} downloaded — restart to install` :
+              state?.status === 'downloading' ?
+                `Downloading launcher update… ${Math.round(state.progress?.percent || 0)}%` :
+                `Launcher update ${version} available`}
+          </strong>
+        </div>
+        <div className="update-toast-actions">
+          {state?.status === 'available' && (
+            <button onClick={() => native?.downloadUpdate?.()}>Download</button>
+          )}
+          {state?.status === 'downloaded' && (
+            <button onClick={() => native?.installUpdate?.()}>Restart &amp; install</button>
+          )}
+          <button
+            className="icon-button"
+            aria-label="Dismiss update notice"
+            onClick={() => onDismiss(version || 'unknown')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!browserWaiting) {
     return null;
   }
-  const version = state.updateInfo?.version || '';
+  const browserVersion = resourceState?.availableVersion || '';
+  if (dismissedVersion === browserVersion) {
+    return null;
+  }
   return (
     <div className="update-toast">
       <div className="update-toast-body">
-        <strong>
-          {state.status === 'downloaded' ?
-            `Version ${version} downloaded — restart to install` :
-            state.status === 'downloading' ?
-              `Downloading update… ${Math.round(state.progress?.percent || 0)}%` :
-              `Update ${version} available`}
-        </strong>
+        <strong>Browser update {browserVersion} available</strong>
       </div>
       <div className="update-toast-actions">
-        {state.status === 'available' && (
-          <button onClick={() => native?.downloadUpdate?.()}>Download</button>
-        )}
-        {state.status === 'downloaded' && (
-          <button onClick={() => native?.installUpdate?.()}>Restart &amp; install</button>
-        )}
+        <button onClick={() => native?.downloadBrowserResource?.()}>Update</button>
         <button
           className="icon-button"
           aria-label="Dismiss update notice"
-          onClick={() => onDismiss(version || 'unknown')}
+          onClick={() => onDismiss(browserVersion || 'unknown')}
         >
           <X size={16} />
         </button>

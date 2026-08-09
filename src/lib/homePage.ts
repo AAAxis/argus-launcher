@@ -677,7 +677,7 @@ h1{font-size:20px;letter-spacing:-0.01em;margin:0;font-weight:700;overflow:hidde
 <main>
 <div class="brand">${argusMark}</div>
 <h1>${safeName}</h1>
-<p class="sub">Anonymous Argys Browser session</p>
+<p class="sub">Anonymous Argus Browser session</p>
 <div class="search-wrap">
 <form class="search" id="search" autocomplete="off">
 <input type="text" aria-label="Search or enter address" placeholder="Search ${escapeHtml(engine.name)} or enter address" autofocus>

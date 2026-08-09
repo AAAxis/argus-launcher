@@ -144,5 +144,46 @@ Worth auditing before shipping a Windows build; not blocking the cloud/billing w
 
 ## Distribution
 
+Two programs ship from here and update independently: this launcher, and the Argus
+Browser it launches profiles into. They use different feeds and different rituals.
+
+### Releasing the launcher
+
 electron-builder, `publish.provider = generic` pointing at a Cloudflare R2 public bucket
 (`pub-a6c0e96f900b4b698762591fddd497aa.r2.dev`). Auto-update via `electron-updater`.
+
+```bash
+# 1. bump the version. Nothing else sets it -- there is no buildVersion to keep
+#    in step any more, electron-builder derives CFBundleVersion from this.
+npm version 1.0.59 --no-git-tag-version
+git commit -am "Release v1.0.59"
+git push
+
+# 2. tag. This, and only this, publishes.
+git tag v1.0.59 && git push origin v1.0.59
+```
+
+**A push to `main` builds and typechecks but publishes nothing.** That guard exists
+because the opposite cost us a release: `build-release.yml` used to publish on every
+push, republishing `v<package.json version>` and overwriting `latest.yml` /
+`latest-mac.yml` with a new build under a version clients already had. Six commits
+landed on top of 1.0.57 that way; every 1.0.57 install reported "up to date" while
+running months-old code, and only a hand re-download fixed it. CI now refuses to
+publish when the tag and `package.json` disagree, and refuses to publish at all
+without mac signing secrets.
+
+### Releasing the browser
+
+The browser is not in this repo — it is the Chromium fork in `../browser`. It has its
+own feed: a per-platform manifest at
+`…r2.dev/resources/browser/latest-<platform>-<arch>.json`, which `electron/main.cjs`
+polls and installs itself. See `../browser/publish-browser.mjs`; the short version is
+
+```bash
+bash browser/package_dmg.sh out/Release   # sign, notarize, staple
+node browser/publish-browser.mjs          # zip, hash, manifest, gh release
+```
+
+which creates a `browser-v<version>-<key>` release on this repo. `publish-browser.yml`
+then mirrors the assets to R2, using the same credentials as the launcher feed. Version
+comes from `browser/src/chrome/VERSION` — there is nothing to bump by hand.

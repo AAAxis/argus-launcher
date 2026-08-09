@@ -108,6 +108,12 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       setState((current) => ({...current, members: fn(current.members)})),
     noteSummaries: (fn: (list: ProfileNoteSummary[]) => ProfileNoteSummary[]) =>
       setState((current) => ({...current, note_summaries: fn(current.note_summaries)})),
+    automationStars: (fn: (list: string[]) => string[]) =>
+      setState((current) => ({...current, automation_stars: fn(current.automation_stars)})),
+    telegramPrefs: (fn: (list: CloudState['telegram_prefs']) => CloudState['telegram_prefs']) =>
+      setState((current) => ({...current, telegram_prefs: fn(current.telegram_prefs)})),
+    telegramLink: (link: CloudState['telegram_link']) =>
+      setState((current) => ({...current, telegram_link: link})),
   };
 
   // One parallel read per table instead of five sequential selects against one
@@ -137,7 +143,8 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       const [profilesResult, proxiesResult, foldersResult, cookiesResult, extensionsResult,
         bookmarksResult, statusesResult, automationsResult, connectorsResult,
         notificationsResult, notificationReadsResult,
-        organizationResult, membersResult, noteSummariesResult] = await Promise.allSettled([
+        organizationResult, membersResult, noteSummariesResult,
+        starsResult, telegramPrefsResult, telegramLinkedResult] = await Promise.allSettled([
         db.profiles.list(targetOrgId),
         db.proxies.list(targetOrgId),
         db.folders.list(targetOrgId),
@@ -158,9 +165,14 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         // on demand. One row per profile that has any notes, so a workspace
         // that writes none pays for an empty result.
         db.profileNotes.summaries(targetOrgId),
+        // Personal state: this user's stars, their Telegram prefs, and whether
+        // their Telegram is linked. RLS narrows all three to own rows.
+        db.automationStars.list(targetOrgId),
+        db.telegramPrefs.list(targetOrgId),
+        db.telegramPrefs.myLink(),
       ]);
 
-      // The workspace changed while these fourteen reads were in flight. Nothing
+      // The workspace changed while these seventeen reads were in flight. Nothing
       // below this line belongs to the org the user is now looking at.
       if (!current()) {
         return null;
@@ -206,6 +218,9 @@ export function useCloudData(orgId: string | null, toast: Toast) {
       const organization = take('organization', organizationResult, null);
       const members = take('team members', membersResult, []);
       const noteSummaries = take('profile notes', noteSummariesResult, []);
+      const automationStars = take('automation stars', starsResult, []);
+      const telegramPrefs = take('telegram preferences', telegramPrefsResult, []);
+      const telegramLink = take('telegram link', telegramLinkedResult, null);
       const mergedBookmarks = mergeBookmarks(bookmarkRows, socialBookmarks);
 
       // A partial load is shown but never written back from. Every self-healing
@@ -236,6 +251,10 @@ export function useCloudData(orgId: string | null, toast: Toast) {
             {built_in_extensions: organization?.built_in_extensions} : {}),
           ...(membersResult.status === 'fulfilled' ? {members} : {}),
           ...(noteSummariesResult.status === 'fulfilled' ? {note_summaries: noteSummaries} : {}),
+          ...(starsResult.status === 'fulfilled' ? {automation_stars: automationStars} : {}),
+          ...(telegramPrefsResult.status === 'fulfilled' ? {telegram_prefs: telegramPrefs} : {}),
+          ...(telegramLinkedResult.status === 'fulfilled' ?
+            {telegram_link: telegramLink} : {}),
         }));
         // Toasted even when quiet: a failing table stays failing, so silence
         // here is the same "everything vanished" mystery in a smaller frame.
@@ -261,6 +280,9 @@ export function useCloudData(orgId: string | null, toast: Toast) {
         notifications,
         members,
         note_summaries: noteSummaries,
+        automation_stars: automationStars,
+        telegram_prefs: telegramPrefs,
+        telegram_link: telegramLink,
         built_in_extensions: organization?.built_in_extensions,
       };
 

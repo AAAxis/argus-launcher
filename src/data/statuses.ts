@@ -67,6 +67,9 @@ export const defaultCloudState: CloudState = {
   notifications: [],
   members: [],
   note_summaries: [],
+  automation_stars: [],
+  telegram_prefs: [],
+  telegram_link: null,
 };
 
 // BUILT_IN_EXTENSIONS moved to data/extensionCatalog.ts, where it sits next to

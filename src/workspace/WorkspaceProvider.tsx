@@ -6,6 +6,7 @@ import type {ReactNode} from 'react';
 import {baseCookieStatuses, baseProfileStatuses, baseProxyStatuses} from '../data/statuses';
 import {tagsInUse} from '../lib/tags';
 import {statusList} from '../lib/text';
+import {useAutomationScheduler} from '../hooks/useAutomationScheduler';
 import {useToast} from '../hooks/useToast';
 import {native} from '../native';
 import {useOrg} from '../org';
@@ -143,6 +144,10 @@ export function WorkspaceProvider({children}: {children: ReactNode}) {
   // records are written by whoever is signed in, and a run that starts while
   // signed out has to buffer to disk instead of failing.
   const automations = useAutomationActions(core, proxies, orgId, Boolean(org.userId));
+  // The schedule ticker. Mounted here, not on the Automations tab: a schedule
+  // fires whichever tab is open, and only while this window exists -- which is
+  // the stated contract ("while the launcher is open").
+  useAutomationScheduler(orgId, Boolean(org.userId), data.state, automations);
   // Mounted here rather than in the Connectors view: it pushes the connector
   // list into the main process on every change, and that has to keep happening
   // whether or not that view is open.

@@ -4,17 +4,21 @@
 // goes through withDb, so a failure toasts once and the caller bails without a
 // false success message.
 import {useRef} from 'react';
+import {composeFinishMessage, shouldNotify} from '../../electron/automation/notify.cjs';
 import {useAutomationRuns} from '../hooks/useAutomationRuns';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
 import {mapWithConcurrency} from '../lib/concurrency';
+import {botDeepLink, mintLinkCode, sendTelegram} from '../lib/telegram';
 import {native} from '../native';
+import {useOrg} from '../org';
 import {SHOWCASE_AUTOMATION} from '../data/showcaseAutomation';
+import {collectCallees, resolveCallTree} from '../automations/callGraph';
 import {RUN_CONCURRENCY, runWaitCeiling} from '../automations/limit';
 import {newId} from './core';
 import type {WorkspaceCore} from './core';
 import type {ProxyActions} from './useProxyActions';
-import type {ArgusAutomation, ArgusProfile} from '../types';
+import type {ArgusAutomation, ArgusProfile, AutomationRun} from '../types';
 import type {AutomationVars, RunTrigger} from '../automations/types';
 
 export type AutomationActions = ReturnType<typeof useAutomationActions>;
@@ -29,36 +33,79 @@ export function useAutomationActions(
     signedIn: boolean,
 ) {
   const {state, withDb, withDbError, patch} = data;
+  // For the workspace's notification bot (organizations.telegram_bot_*), which
+  // rides the org row rather than CloudState.
+  const org = useOrg();
   const {runs, startRun, cancelRun, waitForRun} = useAutomationRuns(orgId, signedIn,
-      // Notify-on-finish delivered to Argus: one row in `notifications` (main
-      // composed it; only this side can write it) and the same row patched
-      // into the bell immediately -- the reload-on-focus would show it anyway,
-      // but the machine that ran the automation should not have to lose focus
-      // to see its own bell ring. Offline, the insert fails quietly and the
-      // local row lasts until the next reload; the flushed run record remains
-      // the durable truth.
-      (notification) => {
-        const row = {
-          id: newId(),
-          kind: notification.kind,
-          title: notification.title,
-          body: notification.body,
-          status: notification.status ?? null,
-          automation_id: notification.automation_id ?? null,
-          run_id: notification.run_id ?? null,
-          created_at: new Date().toISOString(),
-          read: false,
-        };
-        if (orgId) {
-          void db.notifications.create(orgId, row).catch(() => undefined);
+      // Every terminal run lands here. Three independent consequences:
+      //
+      // The card's last-run verdict, patched locally so the dot updates the
+      // moment the run ends -- useAutomationRuns wrote the columns; this is the
+      // same value applied to the render cache, guarded the same way (only
+      // forward).
+      //
+      // Notify-on-finish delivered to Argus, only when the event carries a
+      // notification: one row in `notifications` (main composed it; only this
+      // side can write it) and the same row patched into the bell immediately
+      // -- the reload-on-focus would show it anyway, but the machine that ran
+      // the automation should not have to lose focus to see its own bell ring.
+      // Offline, the insert fails quietly and the local row lasts until the
+      // next reload; the flushed run record remains the durable truth.
+      //
+      // A personal Telegram message, when this user opted in for this
+      // automation -- fire-and-forget through the landing API, which holds the
+      // bot token.
+      (run, notification) => {
+        if (run.automation_id && run.finished_at) {
+          patch.automations((list) => list.map((item) =>
+            item.id === run.automation_id &&
+                (!item.last_run_at || item.last_run_at < run.finished_at!) ?
+              {...item, last_run_at: run.finished_at, last_run_status: run.status} :
+              item));
         }
-        patch.notifications((list) => [row, ...list]);
+        if (notification) {
+          const row = {
+            id: newId(),
+            kind: notification.kind,
+            title: notification.title,
+            body: notification.body,
+            status: notification.status ?? null,
+            automation_id: notification.automation_id ?? null,
+            run_id: notification.run_id ?? null,
+            created_at: new Date().toISOString(),
+            read: false,
+          };
+          if (orgId) {
+            void db.notifications.create(orgId, row).catch(() => undefined);
+          }
+          patch.notifications((list) => [row, ...list]);
+        }
+        sendTelegramForRun(run);
       });
   // automationId -> the profile it last ran on, this session. State the editor's
   // Check button reads through runTarget so it tests a selector against the page
   // the last run actually used. A ref, not state: nothing re-renders on it, and
   // it is written from inside an in-flight run.
   const lastRunProfileIds = useRef<Record<string, string>>({});
+
+  // The personal-Telegram half of notify-on-finish. Gated by the same pure
+  // shouldNotify the org-connector path uses ('failure' includes partial,
+  // cancelled never sends), against MY pref for this automation rather than
+  // the automation's own notify_on -- the two are independent settings.
+  function sendTelegramForRun(run: AutomationRun) {
+    const botToken = org.org?.telegram_bot_token;
+    const link = state.telegram_link;
+    if (!run.automation_id || !botToken || !link) {
+      return;
+    }
+    const pref = state.telegram_prefs.find(
+        (entry) => entry.automation_id === run.automation_id);
+    if (!pref || !shouldNotify(pref.notify_on, run.status)) {
+      return;
+    }
+    const message = composeFinishMessage(run);
+    void sendTelegram(botToken, link.chat_id, `${message.title}\n${message.body}`);
+  }
 
   function newAutomation(): ArgusAutomation {
     return {
@@ -69,6 +116,10 @@ export function useAutomationActions(
       pinned: false,
       timeout_ms: 300000,
       close_on_finish: false,
+      // Minted here, not left to the column default: the optimistic row is
+      // sorted (newest first) the moment it lands in local state, and a row
+      // without created_at would sort last instead of first.
+      created_at: new Date().toISOString(),
     };
   }
 
@@ -84,7 +135,11 @@ export function useAutomationActions(
   // would let the first person who edits the example rewrite what everyone
   // loads next, for the rest of the session.
   function exampleAutomation(): ArgusAutomation {
-    return {...structuredClone(SHOWCASE_AUTOMATION), id: newId()};
+    return {
+      ...structuredClone(SHOWCASE_AUTOMATION),
+      id: newId(),
+      created_at: new Date().toISOString(),
+    };
   }
 
   // create vs replace is the caller's call, never an upsert -- see the comment
@@ -95,9 +150,12 @@ export function useAutomationActions(
     if (error) {
       return error;
     }
+    // Prepend, not append: the grid renders newest first and the DB read
+    // orders created_at DESC, so a new row lands where the next reload would
+    // put it. (The tab re-sorts anyway; this keeps the two honest.)
     patch.automations((list) => exists ?
       list.map((item) => item.id === automation.id ? automation : item) :
-      [...list, automation]);
+      [automation, ...list]);
     return null;
   }
 
@@ -120,6 +178,18 @@ export function useAutomationActions(
       profile.automation_id && ids.includes(profile.automation_id) ?
         {...profile, automation_id: null} :
         profile));
+    // Callers left pointing at what was just deleted. Non-blocking -- the
+    // delete happened -- but said out loud, because their next run will refuse
+    // with "no longer exists" and this is the moment that explains why.
+    const orphaned = state.automations.filter((item) =>
+      !ids.includes(item.id) &&
+      collectCallees(item.steps).some((calleeId) => ids.includes(calleeId)));
+    if (orphaned.length > 0) {
+      toast.notify(
+          `${orphaned.map((item) => item.name).join(', ')} call${orphaned.length === 1 ? 's' : ''} ` +
+          'what you just deleted — their Run automation steps will now fail.',
+          {tone: 'info'});
+    }
     return true;
   }
 
@@ -128,6 +198,113 @@ export function useAutomationActions(
       list.map((item) => item.id === automation.id ? {...item, pinned} : item));
     await withDb((activeOrgId) =>
       db.automations.update(activeOrgId, automation.id, {pinned}));
+  }
+
+  // My per-automation Telegram preference. Written immediately, not on Save:
+  // it is a per-user row beside the automation, not part of the document.
+  async function setTelegramPref(automationId: string, value: 'always' | 'failure' | null) {
+    patch.telegramPrefs((list) => {
+      const rest = list.filter((entry) => entry.automation_id !== automationId);
+      return value ? [...rest, {automation_id: automationId, notify_on: value}] : rest;
+    });
+    await withDb((activeOrgId) => value ?
+      db.telegramPrefs.set(activeOrgId, automationId, value) :
+      db.telegramPrefs.clear(activeOrgId, automationId));
+  }
+
+  // The one-time link, entirely local: mint a code, open the bot's deep link
+  // in the user's own browser (never a profile), and let the main process
+  // watch the bot's getUpdates feed for the /start that carries the code back.
+  // The poll gives up after two minutes with a sentence -- the user may simply
+  // not have finished, and the button is still there.
+  async function linkTelegram() {
+    const botToken = org.org?.telegram_bot_token;
+    const botName = org.org?.telegram_bot_name;
+    if (!botToken || !botName) {
+      toast.setMessage(
+          'Set up the notification bot first — Automations tab, Notification bot.');
+      return;
+    }
+    if (!native?.telegramLinkPoll) {
+      toast.setMessage('Linking Telegram needs the desktop app.');
+      return;
+    }
+    const code = mintLinkCode();
+    const deepLink = botDeepLink(botName, code);
+    // The bot's welcome, composed here because only the renderer can answer
+    // the question it exists for: which workspaces will message this chat.
+    // That is every workspace this user belongs to that runs THIS bot -- a
+    // send happens wherever a launcher is signed into one of them.
+    const botSlug = botName.replace(/^@/, '');
+    const serving = org.orgs
+        .filter((membership) =>
+          (membership.org.telegram_bot_name || '').replace(/^@/, '') === botSlug)
+        .map((membership) => membership.org.name);
+    const welcome =
+      'Welcome! Your Telegram is now linked to Argus.\n\n' +
+      'This chat will receive automation updates from: ' +
+      `${serving.length > 0 ? serving.join(', ') : org.org?.name || 'your workspace'}.\n\n` +
+      'Pick which automations message you in each automation\'s editor, under ' +
+      'Personal Telegram. Nothing is sent until you subscribe to one.';
+    // openExternal answers whether the OS actually took the URL (main refuses
+    // hosts off its allow-list, among other things). Claiming "the chat just
+    // opened" when nothing opened is the failure this used to have -- fall
+    // back to showing the link itself, and keep polling either way: pasting
+    // it into Telegram by hand still completes the same link.
+    const opened = await native.openExternal?.(deepLink);
+    toast.setMessage(opened ?
+      'Press Start in the Telegram chat that just opened.' :
+      `Couldn't open Telegram. Open ${deepLink} yourself, then press Start.`);
+    const found = await native.telegramLinkPoll(botToken, code, welcome);
+    if (!found.ok || !found.chatId) {
+      toast.setMessage(found.error || 'Linking timed out. Try again.');
+      return;
+    }
+    const chatId = found.chatId;
+    const username = found.username || null;
+    const error = await withDbError(() => db.telegramPrefs.saveLink(chatId, username));
+    if (error) {
+      toast.setMessage(error);
+      return;
+    }
+    patch.telegramLink({
+      chat_id: chatId,
+      telegram_username: username,
+      linked_at: new Date().toISOString(),
+    });
+    toast.notify('Telegram linked. Argus can message you now.', {tone: 'ok'});
+  }
+
+  // Severs MY chat only. The per-automation prefs survive on purpose --
+  // relinking next week should not mean re-subscribing to a dozen automations.
+  async function unlinkTelegram() {
+    patch.telegramLink(null);
+    await withDb(() => db.telegramPrefs.unlink());
+  }
+
+  // The Notification bot view's test button. Returns the failure sentence, or
+  // null -- the caller renders it inline rather than as a toast.
+  async function testTelegram(): Promise<string | null> {
+    const botToken = org.org?.telegram_bot_token;
+    const link = state.telegram_link;
+    if (!botToken || !link) {
+      return 'Link Telegram first.';
+    }
+    const sent = await sendTelegram(
+        botToken, link.chat_id, 'Test message from Argus. Your notifications work.');
+    return sent.ok ? null : (sent.error || 'The send failed.');
+  }
+
+  // A star is the signed-in user's own, so this patches automation_stars (the
+  // per-user list) rather than the automation row -- same optimistic shape as
+  // setPinned otherwise.
+  async function setStarred(automationId: string, starred: boolean) {
+    patch.automationStars((ids) => starred ?
+      (ids.includes(automationId) ? ids : [...ids, automationId]) :
+      ids.filter((id) => id !== automationId));
+    await withDb((activeOrgId) => starred ?
+      db.automationStars.add(activeOrgId, automationId) :
+      db.automationStars.remove(activeOrgId, automationId));
   }
 
   // Which automation runs when this profile launches. A bare UPDATE, so it
@@ -162,12 +339,25 @@ export function useAutomationActions(
       }
       return {ok: false as const, error};
     }
+    // Every callAutomation reference, resolved against the loaded workspace
+    // before anything launches. A dangling id or a cycle is a sentence here,
+    // not a failed run three steps in.
+    const tree = resolveCallTree(automation, state.automations);
+    if (tree.problems.length > 0) {
+      const error = tree.problems.join(' ');
+      if (!options.quiet) {
+        toast.fail(`Couldn't run ${automation.name}`, error);
+      }
+      return {ok: false as const, error};
+    }
     if (!options.quiet) {
       toast.setMessage(`Starting ${automation.name}`);
     }
     const result = await startRun(automation, profile, {
       trigger: options.trigger,
       vars: options.vars,
+      resolvedAutomations:
+        Object.keys(tree.resolved).length > 0 ? tree.resolved : undefined,
       buildLaunch: async (cdpPort) => {
         // The same gate the Launch button goes through, rather than reading
         // the proxy straight off state. This path used to do the latter, which
@@ -257,6 +447,7 @@ export function useAutomationActions(
 
   return {
     runs, attach, exampleAutomation, newAutomation, remove, run, runMany, save, setPinned,
+    setStarred, setTelegramPref, linkTelegram, unlinkTelegram, testTelegram,
     cancelRun,
     lastRunProfileId: (automationId: string) => lastRunProfileIds.current[automationId] || null,
   };

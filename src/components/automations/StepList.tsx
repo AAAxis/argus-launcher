@@ -109,7 +109,9 @@ function AddStep({onAdd, subtle}: {
   );
 }
 
-export function StepList({steps, onChange, checkProfile, connectors = [], depth = 0}: {
+export function StepList({
+  steps, onChange, checkProfile, connectors = [], automations = [], depth = 0,
+}: {
   steps: AutomationStep[];
   onChange: (next: AutomationStep[]) => void;
   // Passed straight through to StepFields for the Check button. Threaded
@@ -119,6 +121,9 @@ export function StepList({steps, onChange, checkProfile, connectors = [], depth 
   // The workspace's connectors, for a step's connector dropdown. Threaded
   // for the same reason checkProfile is.
   connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
+  // The workspace's other automations, for callAutomation's picker -- the one
+  // being edited is excluded by the caller.
+  automations?: {id: string; name: string}[];
   depth?: number;
 }) {
   // A Set, not a single id. It used to be `string | null`, so opening one step
@@ -253,6 +258,7 @@ export function StepList({steps, onChange, checkProfile, connectors = [], depth 
                     onChange={(next) => replace(index, next)}
                     checkProfile={checkProfile}
                     connectors={connectors}
+                    automations={automations}
                   />
                 </div>
               )}
@@ -279,6 +285,7 @@ export function StepList({steps, onChange, checkProfile, connectors = [], depth 
                           steps={nested}
                           checkProfile={checkProfile}
                           connectors={connectors}
+                          automations={automations}
                           depth={depth + 1}
                           onChange={(next) => replace(
                               index,

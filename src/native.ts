@@ -7,7 +7,9 @@ import type {
   RuntimeFingerprint,
   SharedExtension,
 } from './types';
-import type {AutomationVars, RunLogEntry, RunTrigger} from './automations/types';
+import type {
+  AutomationStep, AutomationVars, RunLogEntry, RunTrigger,
+} from './automations/types';
 import type {RuntimeConnector} from './data/connectors';
 import type {SessionField} from './lib/homePage';
 import type {ThemePreference} from './theme';
@@ -138,6 +140,7 @@ export type UpdateState = {
     | 'downloaded'
     | 'error';
   currentVersion: string;
+  lastCheckedAt: string;
   updateInfo: {
     version: string;
     releaseName?: string;
@@ -158,14 +161,46 @@ export type UpdateState = {
 
 export type ResourceState = {
   browserStatus: 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'error';
+  // The installed version, not the feed's. These were the same field until the
+  // feed started carrying a real version -- it reported whatever the last
+  // manifest said, which for months was the literal "1.0.0".
   browserVersion: string;
   browserPath: string;
+  installedBuildId: string;
+  installedVersion: string;
+  installedAt: string;
+  availableVersion: string;
+  availableReleaseDate: string;
+  availableSize: number;
+  notes: string;
+  lastCheckedAt: string;
+  updateAvailable: boolean;
   progress: {
     percent: number;
     transferred: number;
     total: number;
   } | null;
   error: string | null;
+};
+
+export type ReleaseEntry = {
+  tag: string;
+  version: string;
+  name: string;
+  // Empty for releases published before the workflow started passing
+  // body_path. The changelog shows version and date for those rather than a
+  // blank panel.
+  notes: string;
+  publishedAt: string;
+};
+
+export type ReleaseNotes = {
+  launcher: ReleaseEntry[];
+  browser: ReleaseEntry[];
+  fetchedAt: string;
+  // Served from cache because GitHub could not be reached or rate-limited us.
+  stale?: boolean;
+  error?: string;
 };
 
 export type ApiState = {
@@ -391,6 +426,9 @@ type ArgusNative = {
     trigger: RunTrigger;
     cdpUrl: string;
     vars?: AutomationVars;
+    // calleeId -> steps for every callAutomation in the tree, resolved by the
+    // renderer (resolveCallTree) -- main has no automation catalogue.
+    resolvedAutomations?: Record<string, AutomationStep[]>;
     // True when this run had to launch the profile, false when it attached to a
     // window that was already open. The main process will only honour the
     // automation's close_on_finish for the first kind -- see the handler in
@@ -407,6 +445,16 @@ type ArgusNative = {
   // unsaved draft can be tried before it is written. For an AI connector this
   // is one tiny completion; for a messaging one it sends a real test message.
   testConnector?(connector: RuntimeConnector): Promise<{ok: boolean; error?: string}>;
+  // The notification bot. Linking watches the bot's getUpdates feed for the
+  // deep-link code (the bot has no webhook); sending is the standard Telegram
+  // adapter against the member's own chat. Both outbound calls live in main.
+  // `welcome` is the reply the bot sends into the chat once Start lands --
+  // composed renderer-side, because which workspaces will message this chat is
+  // something only the renderer knows.
+  telegramLinkPoll?(token: string, code: string, welcome?: string):
+    Promise<{ok: boolean; chatId?: string; username?: string | null; error?: string}>;
+  telegramSend?(token: string, chatId: string, text: string):
+    Promise<{ok: boolean; error?: string}>;
   // What models an AI connector's endpoint serves, so the form offers a real
   // choice. Takes the resolved draft, key included, like testConnector.
   listConnectorModels?(connector: RuntimeConnector):
@@ -449,11 +497,14 @@ type ArgusNative = {
   ): () => void;
   deepLinkReady?(): Promise<boolean>;
   getUpdateStatus?(): Promise<UpdateState>;
+  getReleaseNotes?(options?: {force?: boolean}): Promise<ReleaseNotes>;
+  runningSessionCount?(): Promise<number>;
   checkForUpdates?(): Promise<UpdateState>;
   downloadUpdate?(): Promise<UpdateState>;
   installUpdate?(): Promise<{ok: boolean; error?: string}>;
   onUpdateState?(callback: (state: UpdateState) => void): () => void;
   getResourceStatus?(): Promise<ResourceState>;
+  checkBrowserResource?(): Promise<ResourceState>;
   downloadBrowserResource?(): Promise<ResourceState>;
   onResourceState?(callback: (state: ResourceState) => void): () => void;
   getApiStatus?(): Promise<ApiState>;

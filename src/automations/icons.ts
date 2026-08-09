@@ -30,6 +30,7 @@ import {
   Timer,
   Variable,
   Webhook,
+  Workflow,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 
@@ -50,6 +51,7 @@ const ICON_BY_NAME: Record<string, LucideIcon> = {
   'timer': Timer,
   'variable': Variable,
   'webhook': Webhook,
+  'workflow': Workflow,
 };
 
 export function stepIcon(name: string): LucideIcon {

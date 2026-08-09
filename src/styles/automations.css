@@ -958,3 +958,227 @@
 :root[data-theme="dark"] .connector-logo.invert-on-dark {
   filter: invert(1);
 }
+
+/* ---- card identity, stars, run verdicts, arrivals ------------------------ */
+
+/* The picked brand mark on its colour plate. Same box as .is-fallback, but the
+ * fill and border come inline from profileColorStyle -- six theme-aware token
+ * triples or the user's own hex -- so the rule only shapes, never colours. */
+.extension-mark.automation-mark {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+}
+
+/* My star. A bare glyph riding inline at the end of the card's name -- inside
+ * the h3, so a wrapping name takes it along -- not a framed control. The base
+ * `button` rule hands every button a min-height, padding and a hover shadow;
+ * all three are undone here, because a star with a control-sized hit box and a
+ * shadow reads as a fourth card action, which it is not. Fill arrives with
+ * .is-starred so the off state is an outline, the way every star toggle
+ * everywhere works. */
+.automation-star {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  display: inline-flex;
+  margin-left: 6px;
+  min-height: 0;
+  padding: 1px;
+  vertical-align: -2px;
+}
+
+.automation-star:not(:disabled):hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.automation-star.is-starred {
+  color: var(--profile-amber-ink);
+}
+
+.automation-star.is-starred svg {
+  fill: currentColor;
+}
+
+/* The verdict at a glance, before the badge spells it out. Same palette as
+ * RUN_TONE: green/amber/red are the profile ink tokens, cancelled is faint,
+ * running breathes in blue because "still going" is the one state that is not
+ * a verdict yet. */
+.automation-run-dot {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.automation-run-dot.is-ok {
+  background: var(--profile-green-ink);
+}
+
+.automation-run-dot.is-partial {
+  background: var(--profile-amber-ink);
+}
+
+.automation-run-dot.is-failed {
+  background: var(--profile-red-ink);
+}
+
+.automation-run-dot.is-cancelled {
+  background: var(--ink-faint);
+}
+
+.automation-run-dot.is-running {
+  animation: automation-run-pulse 1.6s ease-in-out infinite;
+  background: var(--profile-blue-ink);
+}
+
+@keyframes automation-run-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* A card that arrived since this user last looked -- a teammate's machine or
+ * an agent over MCP. The glow plays once per visit (the class rides the first
+ * render after the watermark check) and settles back to the normal surface,
+ * so it marks arrival without becoming a permanent state. */
+.automation-card.is-new {
+  animation: automation-card-arrive 3s ease-out 1;
+}
+
+@keyframes automation-card-arrive {
+  0% {
+    background: color-mix(in srgb, var(--profile-green-bg) 85%, var(--raised));
+    border-color: var(--profile-green-border);
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--profile-green-border) 45%, transparent);
+  }
+
+  70% {
+    background: color-mix(in srgb, var(--profile-green-bg) 45%, var(--raised));
+    border-color: var(--profile-green-border);
+  }
+
+  100% {
+    background: var(--raised);
+    border-color: var(--border);
+    box-shadow: var(--shadow-xs);
+  }
+}
+
+/* The schedule's profile checklist -- capped and scrollable so a workspace
+ * with forty profiles does not turn the settings column into a page. */
+.automation-schedule-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* Who made it, who last touched it. A standing fact under the settings, in
+ * the same quiet voice as a field hint. */
+.automation-attribution {
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 2px 0;
+}
+
+/* ---- the Notification bot view ------------------------------------------- */
+
+/* Two cards, capped like a settings column rather than stretched to the grid
+ * width -- there are exactly two of these and they hold forms, not tiles. */
+.notification-bot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.notification-bot-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.notification-bot-card h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.notification-bot-card p {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 4px;
+  margin: 0;
+}
+
+.notification-bot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notification-bot-actions > span {
+  display: inline-flex;
+}
+
+/* The owner's one surviving line of bot plumbing, in a hint's voice. The
+ * Change button undoes the base button chrome the same way .automation-star
+ * does -- it is a link in a sentence, not a control. */
+.notification-bot-footnote {
+  align-items: center;
+  color: var(--ink-faint);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin: 0 2px;
+}
+
+.notification-bot-change {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--ink-soft);
+  min-height: 0;
+  padding: 1px 2px;
+  text-decoration: underline;
+}
+
+.notification-bot-change:not(:disabled):hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Mark, title, About -- one row atop the link card. The About button rides the
+ * right edge, the way the Cookies toolbar places its own. */
+.notification-bot-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.notification-bot-head h3 {
+  margin: 0;
+}
+
+.notification-bot-head .notification-bot-about {
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 8px;
+}

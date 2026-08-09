@@ -161,7 +161,11 @@ jobs:
         run: npx electron-builder --win nsis --x64 --publish never
 
       - name: Upload Windows updater files to R2
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        # Tags only. This used to include workflow_dispatch, which meant a
+        # manual run could overwrite the live feed with an untagged build --
+        # the same class of mistake as publishing on every push (see the
+        # publish job below).
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
@@ -193,6 +197,18 @@ jobs:
     needs:
       - build-mac
       - build-windows
+    # Tags only, and this guard is the whole point of the job's name.
+    #
+    # Without it this ran on every push to main and republished
+    # v<package.json version> -- overwriting latest.yml/latest-mac.yml with a
+    # new build under a version number clients already had. Six commits landed
+    # on top of 1.0.57 that way, and every 1.0.57 install reported "up to date"
+    # forever while running months-old code. Re-downloading the DMG by hand was
+    # the only way out.
+    #
+    # Releasing is now deliberate: bump package.json, commit, tag vX.Y.Z, push
+    # the tag. A plain push still builds and typechecks; it just cannot publish.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -203,16 +219,49 @@ jobs:
         shell: bash
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
+      # The other half of the guard above. Tagging v1.0.58 while package.json
+      # still says 1.0.57 would build 1.0.57 artifacts, publish them under a
+      # 1.0.58 tag, and write a feed nobody can act on -- so fail loudly here
+      # instead. The tag name goes through env rather than being interpolated
+      # into the script.
+      - name: Check the tag matches package.json
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          PKG_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${TAG_NAME}" != "v${PKG_VERSION}" ]; then
+            echo "Tag ${TAG_NAME} does not match package.json version ${PKG_VERSION}."
+            echo "Bump package.json and re-tag; do not publish a mismatched pair."
+            exit 1
+          fi
+          echo "Publishing ${TAG_NAME} from package.json ${PKG_VERSION}."
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
 
+      # Same notes the build jobs write into latest.yml, regenerated here.
+      # Without this the release body is empty: action-gh-release was never
+      # given one, so every release on the repo is a bare tag and a date. The
+      # app's changelog reads these bodies, so an empty one is a blank page.
+      - name: Write release notes
+        shell: bash
+        run: |
+          mkdir -p build
+          git log -1 --format=%b > build/release-notes.md
+          if [ ! -s build/release-notes.md ]; then
+            git log -1 --format=%s > build/release-notes.md
+          fi
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
+          body_path: build/release-notes.md
           files: release-artifacts/*
           fail_on_unmatched_files: true
 
@@ -233,15 +282,21 @@ jobs:
               --endpoint-url "${R2_ENDPOINT}" \
               --cache-control "public, max-age=60"
           done
-          if [ -n "${CSC_LINK}" ]; then
-            aws s3 cp release-artifacts/latest-mac.yml "s3://${R2_BUCKET}/latest-mac.yml" \
+          # Fatal, not a warning. An unsigned mac build genuinely must not reach
+          # the feed -- ShipIt refuses to install one -- but this step used to
+          # skip with an echo, which produced a green "release" that shipped
+          # Windows only and left every mac user silently on the old version.
+          # A tagged release that cannot publish mac is a failed release.
+          if [ -z "${CSC_LINK}" ]; then
+            echo "CSC_LINK is not set, so the mac build is unsigned and cannot be published."
+            echo "Set the signing secrets, or delete this tag if you meant to ship Windows only."
+            exit 1
+          fi
+          aws s3 cp release-artifacts/latest-mac.yml "s3://${R2_BUCKET}/latest-mac.yml" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=60"
+          for file in release-artifacts/Argys-Anty-*-mac-arm64.*; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
               --endpoint-url "${R2_ENDPOINT}" \
               --cache-control "public, max-age=60"
-            for file in release-artifacts/Argys-Anty-*-mac-arm64.*; do
-              aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
-                --endpoint-url "${R2_ENDPOINT}" \
-                --cache-control "public, max-age=60"
-            done
-          else
-            echo "CSC_LINK is not set; skipping mac updater upload to avoid unsigned ShipIt updates."
-          fi
+          done

@@ -16,22 +16,29 @@
 // own toolbar instead of the app Topbar, which is where Extensions puts its Add
 // action and why that tab has no `case` in renderTopActions() at all. One place
 // per action.
-import {useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {
-  BookOpen, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Share2, Sparkles,
-  Workflow,
+  Bot, BookOpen, Clock, History, Layers, MonitorSmartphone, Play, Plus, Rocket, Share2,
+  Sparkles, Star, Workflow,
 } from 'lucide-react';
 import {Assignee} from '../ui/Assignee';
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {ConnectorsView} from '../automations/ConnectorsView';
-import {TagChip} from '../ui/TagChip';
+import {NotificationBotView} from '../automations/NotificationBotView';
+import {TagChip, TagMark} from '../ui/TagChip';
 import {useOrg} from '../../org';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import {SITE_LINKS} from '../../data/links';
+import {assigneeName} from '../../lib/assignees';
+import {ago} from '../../lib/relativeTime';
+import {parseAvatar} from '../../lib/profileAvatar';
+import {profileColorStyle} from '../../lib/profileColors';
 import {automationCap} from '../../automations/limit';
 import {describeRunBlock} from '../../automations/runReadiness';
 import {RUN_LABEL, RUN_TONE} from '../../automations/runStatus';
+import {describeSchedule} from '../../automations/schedule';
+import {sortAutomations} from '../../automations/sort';
 import type {ShareRequest} from '../modals/ShareModal';
 import type {ArgusAutomation, ArgusConnector, AutomationRun} from '../../types';
 
@@ -42,7 +49,7 @@ import type {ArgusAutomation, ArgusConnector, AutomationRun} from '../../types';
 // profile's session. `connectors` is not a filter at all but the tab's second
 // collection -- the services automations call -- which lives here rather than
 // in Settings because it is only ever used from this tab.
-type View = 'all' | 'pinned' | 'mine' | 'connectors';
+type View = 'all' | 'pinned' | 'mine' | 'connectors' | 'bot';
 
 export function AutomationsTab({
   onEdit, onNew, onLoadExample, onCreateDemoProfile, onRun, onHistory, onShare, onOpenSite,
@@ -77,7 +84,50 @@ export function AutomationsTab({
   const org = useOrg();
   const [view, setView] = useState<View>('all');
   const {state} = data;
-  const list = state.automations;
+  // Starred first, then newest -- re-sorted here rather than trusting the DB
+  // order because stars are per-user state the query cannot see.
+  const list = useMemo(
+      () => sortAutomations(state.automations, state.automation_stars),
+      [state.automations, state.automation_stars]);
+  const starred = useMemo(
+      () => new Set(state.automation_stars), [state.automation_stars]);
+
+  // The "new since you last looked" watermark, per org and user, local to this
+  // machine. Absent on first visit: initialised to now, so a fresh install
+  // never opens onto a wall of green.
+  const seenKey = `argus:automations-seen:${org.orgId || 'none'}:${org.userId || 'anon'}`;
+  const watermark = useMemo(() => {
+    const stored = localStorage.getItem(seenKey);
+    if (!stored) {
+      localStorage.setItem(seenKey, new Date().toISOString());
+      return '';
+    }
+    return stored;
+    // Re-read only when the workspace or user changes -- advancing it below
+    // must NOT recompute this, or the glow would vanish mid-animation.
+  }, [seenKey]);
+  // Advance to the newest card after render, so each new arrival animates on
+  // exactly one visit. The memo above keeps this render's value.
+  useEffect(() => {
+    const newest = state.automations.reduce(
+        (max, automation) =>
+          automation.created_at && automation.created_at > max ? automation.created_at : max,
+        '');
+    const current = localStorage.getItem(seenKey) || '';
+    if (newest > current) {
+      localStorage.setItem(seenKey, newest);
+    }
+  }, [seenKey, state.automations]);
+  // A card glows when it arrived after the user last looked AND someone else
+  // made it -- a teammate on another machine, or an agent over MCP (whose rows
+  // carry this user's uuid in created_by, which is exactly why created_via is
+  // checked first).
+  function isNewToMe(automation: ArgusAutomation): boolean {
+    if (!watermark || !automation.created_at || automation.created_at <= watermark) {
+      return false;
+    }
+    return automation.created_via === 'mcp' || automation.created_by !== org.userId;
+  }
   // UX only, never security: trg_automation_limit is the real gate and
   // describeDbError turns its exception into the same sentence. This just says
   // it before the click rather than after.
@@ -197,7 +247,7 @@ export function AutomationsTab({
           how to make another on the right. */}
       <section className="integration-bar">
         <div className="choice-chips" role="radiogroup" aria-label="Automations view">
-          {(['all', 'pinned', 'mine', 'connectors'] as const)
+          {(['all', 'pinned', 'mine', 'connectors', 'bot'] as const)
               .filter((option) => option !== 'mine' || showAssignee)
               .map((option) => (
                 <button
@@ -210,11 +260,12 @@ export function AutomationsTab({
                 >
                   {option === 'all' ? 'All' :
                     option === 'pinned' ? 'On start pages' :
-                      option === 'mine' ? 'Assigned to me' : 'Connectors'}
+                      option === 'mine' ? 'Assigned to me' :
+                        option === 'connectors' ? 'Connectors' : 'Notification bot'}
                 </button>
               ))}
         </div>
-        {view === 'connectors' ? (
+        {view === 'bot' ? null : view === 'connectors' ? (
           <div className="integration-bar-side">
             <span className="integration-bar-count">
               <strong>{state.connectors.length}</strong>{' '}
@@ -252,9 +303,11 @@ export function AutomationsTab({
         <ConnectorsView onNew={onNewConnector} onEdit={onEditConnector} />
       )}
 
-      {view !== 'connectors' && automationsEmpty && automationsEmptyState}
+      {view === 'bot' && <NotificationBotView />}
 
-      {view !== 'connectors' && !automationsEmpty && <>
+      {view !== 'connectors' && view !== 'bot' && automationsEmpty && automationsEmptyState}
+
+      {view !== 'connectors' && view !== 'bot' && !automationsEmpty && <>
       {/* Repeated from the empty state on purpose. That copy of the offer goes
           away the instant the first automation is saved, so someone who loads
           the example before making a profile would otherwise be left with a Run
@@ -280,9 +333,22 @@ export function AutomationsTab({
           const run = latest.get(automation.id);
           const runningCount = live.get(automation.id) || 0;
           const busy = runningCount > 0;
+          const isStarred = starred.has(automation.id);
+          // The brand mark the user picked, or the shared workflow glyph. The
+          // colour plate applies either way -- a coloured default glyph is
+          // still a navigable card.
+          const avatar = parseAvatar(automation.icon);
+          const plate = automation.color ? profileColorStyle(automation.color) : undefined;
+          // What the dot reports when this session has seen nothing: the
+          // denormalized columns, written by whichever machine ran it last.
+          const persisted = !run && automation.last_run_at && automation.last_run_status ?
+            {at: automation.last_run_at, status: automation.last_run_status} : null;
           return (
-            <article className="automation-card" key={automation.id}>
-              {/* One flex-wrap row -- mark, name, step count -- like
+            <article
+              className={isNewToMe(automation) ? 'automation-card is-new' : 'automation-card'}
+              key={automation.id}
+            >
+              {/* One flex-wrap row -- mark, name, star, step count -- like
                   .extension-card-head. The step count leads the badges because
                   it is the one fact every automation has; the rest are wiring,
                   and wiring belongs under the description.
@@ -293,10 +359,37 @@ export function AutomationsTab({
                   editor's footer beside Cancel and Save -- you open the thing
                   before you throw it away. */}
               <div className="automation-card-head">
-                <span aria-hidden="true" className="extension-mark is-fallback">
-                  <Workflow size={20} strokeWidth={1.75} />
+                <span
+                  aria-hidden="true"
+                  className={avatar || plate ?
+                    'extension-mark automation-mark' : 'extension-mark is-fallback'}
+                  style={plate}
+                >
+                  {avatar?.kind === 'brand' ?
+                    <TagMark preset={avatar.preset} size={18} /> :
+                    <Workflow size={20} strokeWidth={1.75} />}
                 </span>
-                <h3>{automation.name}</h3>
+                {/* The star lives INSIDE the h3, straight after the last word
+                    of the name, so it cannot wrap away from it into the badge
+                    row -- a long name takes its star along to the second line.
+                    It is mine, not the workspace's: it re-sorts my grid and
+                    nobody else's. aria-pressed rather than two labels, so a
+                    screen reader hears one control changing state. */}
+                <h3>
+                  {automation.name}
+                  <button
+                    aria-label={isStarred ?
+                      `Unstar ${automation.name}` : `Star ${automation.name}`}
+                    aria-pressed={isStarred}
+                    className={isStarred ?
+                      'automation-star is-starred' : 'automation-star'}
+                    onClick={() => automations.setStarred(automation.id, !isStarred)}
+                    title={isStarred ? 'Unstar' : 'Star — starred sort to the top'}
+                    type="button"
+                  >
+                    <Star size={15} strokeWidth={2} />
+                  </button>
+                </h3>
                 <Badge icon={<Layers size={12} />}>
                   {automation.steps.length} step{automation.steps.length === 1 ? '' : 's'}
                 </Badge>
@@ -313,6 +406,8 @@ export function AutomationsTab({
                   green sentence. Every tab that used it has since moved to
                   <Badge>, and the class is gone. */}
               {(attachedTo.length > 0 || automation.pinned || automation.assigned_to ||
+                automation.schedule?.enabled || automation.created_via === 'mcp' ||
+                (automation.created_by && automation.created_by !== org.userId) ||
                 (automation.tags || []).length > 0) && (
                 <div className="automation-card-meta">
                   {/* First, because "whose is this" is the question a team asks
@@ -321,6 +416,28 @@ export function AutomationsTab({
                       would be a grid of noise. */}
                   {automation.assigned_to && (
                     <Assignee userId={automation.assigned_to} />
+                  )}
+                  {/* Who made it -- but only when that is news: an agent over
+                      MCP always (created_by is just whoever had the launcher
+                      open, which is the misattribution the label corrects), a
+                      teammate when it is not you. Your own cards say nothing,
+                      for the same reason every card saying "Unassigned" would
+                      be noise. */}
+                  {automation.created_via === 'mcp' ? (
+                    <Badge
+                      icon={<Bot size={12} />}
+                      title="Created by an agent over MCP"
+                    >{automation.created_by_label || 'Agent'}</Badge>
+                  ) : automation.created_by && automation.created_by !== org.userId && (
+                    <Badge title="Who created this automation">
+                      by {assigneeName(automation.created_by, state.members)}
+                    </Badge>
+                  )}
+                  {automation.schedule?.enabled && (
+                    <Badge
+                      icon={<Clock size={12} />}
+                      title="Runs on a schedule while the launcher is open"
+                    >{describeSchedule(automation.schedule)}</Badge>
                   )}
                   {attachedTo.length > 0 && (
                     <Badge
@@ -340,6 +457,10 @@ export function AutomationsTab({
 
               {run && (
                 <p className="automation-card-run">
+                  <span
+                    aria-hidden="true"
+                    className={`automation-run-dot is-${run.status}`}
+                  />
                   <Badge tone={RUN_TONE[run.status]}>
                     {/* "Running · 3" rather than "Running": one automation can
                         be in flight on several profiles now, and a single label
@@ -351,6 +472,22 @@ export function AutomationsTab({
                     ` in ${(run.duration_ms / 1000).toFixed(1)}s` :
                     ''}
                   {run.error ? ` — ${run.error}` : ''}
+                </p>
+              )}
+
+              {/* What the columns remember when this session saw nothing: the
+                  verdict survives a restart and covers a teammate's machine,
+                  arriving on the normal focus refresh. */}
+              {persisted && (
+                <p className="automation-card-run">
+                  <span
+                    aria-hidden="true"
+                    className={`automation-run-dot is-${persisted.status}`}
+                  />
+                  <Badge tone={RUN_TONE[persisted.status]}>
+                    {RUN_LABEL[persisted.status]}
+                  </Badge>
+                  {ago(persisted.at) ? ` ${ago(persisted.at)}` : ''}
                 </p>
               )}
 

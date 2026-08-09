@@ -3,6 +3,7 @@ import {toCsv} from '../lib/csv';
 import {buildLaunchPayload} from '../lib/launch';
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {matchedProxyForProfile} from '../lib/proxies';
+import {resolveCallTree} from '../automations/callGraph';
 import {startPageAutomations} from '../lib/startPageAutomations';
 import {native} from '../native';
 import {fingerprintFromDraftPatch} from '../drafts';
@@ -225,7 +226,16 @@ export function useProfileActions(
       // because it is what makes the decision -- buildLaunchPayload derives the
       // same list from the same function, so the tiles and the port behind them
       // cannot disagree.
-      const tiles = startPageAutomations(state.automations, target);
+      // Each tile carries its resolved call tree into the run token: a
+      // start-page run starts in the main process (runFromPage), which has no
+      // catalogue to resolve callAutomation references against. A tile whose
+      // tree has problems ships without one and the run refuses with a
+      // sentence naming the missing callee.
+      const tiles = startPageAutomations(state.automations, target).map((tile) => {
+        const tree = resolveCallTree(tile, state.automations);
+        return tree.problems.length === 0 && Object.keys(tree.resolved).length > 0 ?
+          {...tile, resolvedAutomations: tree.resolved} : tile;
+      });
 
       // The debugging port is opened ONLY when something might drive this
       // session. An always-on --remote-debugging-port would be a real
@@ -280,11 +290,20 @@ export function useProfileActions(
                   ready?.error || 'The browser never answered on its debugging port.');
               return;
             }
+            // callAutomation references resolved here, like every other path
+            // that hands an automation to the runner -- main has no catalogue.
+            const tree = resolveCallTree(attached, state.automations);
+            if (tree.problems.length > 0) {
+              toast.fail(`Couldn't run ${attached.name}`, tree.problems.join(' '));
+              return;
+            }
             const started = await native.startAutomationRun?.({
               automation: attached,
               profile: target,
               trigger: 'launch',
               cdpUrl: ready.cdpUrl,
+              resolvedAutomations:
+                Object.keys(tree.resolved).length > 0 ? tree.resolved : undefined,
             });
             if (started && !started.ok) {
               toast.fail(`Couldn't run ${attached.name}`, started.error || 'The run did not start.');

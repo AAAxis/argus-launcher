@@ -7,6 +7,9 @@
 // `cookie_set_id` there, and two scalar fields are arrays in the database.
 // Renaming the app types would touch every tab and dialog in main.tsx, so the
 // translation lives here instead and the UI keeps reading what it always read.
+import {normalizeParams, normalizeProfileVars} from '../automations/parameters';
+import {normalizeSchedule} from '../automations/schedule';
+import {isRunStatus} from '../automations/runStatus';
 import {normalizeTags} from '../lib/tags';
 import type {
   ArgusAutomation,
@@ -116,6 +119,8 @@ export function rowToOrg(row: OrganizationRow): ArgusOrg {
     website: row.website,
     logo_url: row.logo_url,
     onboarded_at: row.onboarded_at,
+    telegram_bot_token: row.telegram_bot_token ?? null,
+    telegram_bot_name: row.telegram_bot_name ?? null,
   };
 }
 
@@ -145,6 +150,7 @@ export function rowToProfile(row: ProfileRow): ArgusProfile {
     cookie_mode: undef(row.cookie_mode) as ArgusProfile['cookie_mode'],
     cookie_id: row.cookie_set_id,
     automation_id: row.automation_id,
+    automation_vars: normalizeProfileVars(row.automation_vars),
     command_line_switches: switchesToText(row.command_line_switches),
     fingerprint,
     created_at: undef(row.created_at),
@@ -184,6 +190,7 @@ export function profileToRow(orgId: string, profile: ArgusProfile): Insert<Profi
     proxy_id: profile.proxy_id ?? null,
     cookie_set_id: profile.cookie_id ?? null,
     automation_id: profile.automation_id ?? null,
+    automation_vars: profile.automation_vars ?? {},
     fingerprint: (profile.fingerprint || {}) as Record<string, unknown>,
     status: profile.status ?? null,
     tags: profile.tags ?? [],
@@ -245,6 +252,9 @@ export function profilePatchToRow(patch: Partial<ArgusProfile>): Partial<Profile
   }
   if ('automation_id' in patch) {
     row.automation_id = patch.automation_id ?? null;
+  }
+  if ('automation_vars' in patch) {
+    row.automation_vars = patch.automation_vars ?? {};
   }
   if ('cookie_id' in patch) {
     row.cookie_set_id = patch.cookie_id ?? null;
@@ -577,6 +587,7 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
     description: row.description,
     steps: (row.steps || []) as AutomationStep[],
     variables: (row.variables || {}) as AutomationVars,
+    parameters: normalizeParams(row.parameters),
     tags: row.tags || [],
     pinned: row.pinned ?? false,
     timeout_ms: row.timeout_ms ?? undefined,
@@ -586,6 +597,15 @@ export function rowToAutomation(row: AutomationRow): ArgusAutomation {
     notify_connector_id: row.notify_connector_id ?? null,
     notify_on: row.notify_on === 'always' || row.notify_on === 'failure' ?
       row.notify_on : null,
+    icon: row.icon ?? null,
+    color: row.color ?? null,
+    last_run_at: row.last_run_at ?? null,
+    last_run_status: isRunStatus(row.last_run_status) ? row.last_run_status : null,
+    created_by: row.created_by ?? null,
+    created_via: row.created_via === 'mcp' ? 'mcp' : 'user',
+    created_by_label: row.created_by_label ?? null,
+    updated_by: row.updated_by ?? null,
+    schedule: normalizeSchedule(row.schedule),
     created_at: undef(row.created_at),
     updated_at: undef(row.updated_at),
     assigned_to: row.assigned_to,
@@ -604,6 +624,7 @@ export function automationToRow(
     description: automation.description ?? null,
     steps: automation.steps as unknown[],
     variables: (automation.variables || {}) as Record<string, unknown>,
+    parameters: (automation.parameters || []) as unknown[],
     // normalizeTags is the only enforcement point for the 5-tag cap and it is
     // applied at the edges, exactly as it is for profiles -- see AGENTS.md.
     tags: normalizeTags(automation.tags || []),
@@ -612,6 +633,16 @@ export function automationToRow(
     close_on_finish: automation.close_on_finish ?? false,
     notify_connector_id: automation.notify_connector_id ?? null,
     notify_on: automation.notify_on ?? null,
+    icon: automation.icon ?? null,
+    color: automation.color ?? null,
+    // created_via/created_by_label are set on create and then never rewritten:
+    // replace() runs on every editor save, and a human's save must not adopt
+    // an agent's automation (or the reverse). created_by keeps its DB default,
+    // auth.uid(); last_run_* belong to recordRunOutcome alone; updated_by is
+    // the trigger's.
+    ...(automation.created_via ? {created_via: automation.created_via} : {}),
+    ...(automation.created_by_label ? {created_by_label: automation.created_by_label} : {}),
+    schedule: (automation.schedule as Record<string, unknown> | null) ?? null,
     created_at: automation.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -632,6 +663,9 @@ export function automationPatchToRow(
   if ('variables' in patch) {
     row.variables = (patch.variables || {}) as Record<string, unknown>;
   }
+  if ('parameters' in patch) {
+    row.parameters = (patch.parameters || []) as unknown[];
+  }
   if ('tags' in patch) {
     row.tags = normalizeTags(patch.tags || []);
   }
@@ -650,6 +684,18 @@ export function automationPatchToRow(
   if ('notify_on' in patch) {
     row.notify_on = patch.notify_on ?? null;
   }
+  if ('icon' in patch) {
+    row.icon = patch.icon ?? null;
+  }
+  if ('color' in patch) {
+    row.color = patch.color ?? null;
+  }
+  if ('schedule' in patch) {
+    row.schedule = (patch.schedule as Record<string, unknown> | null) ?? null;
+  }
+  // created_via, created_by_label, last_run_* and updated_by are deliberately
+  // not patchable: attribution is set once at create, the run verdict belongs
+  // to recordRunOutcome, and updated_by to the DB trigger.
   return row;
 }
 

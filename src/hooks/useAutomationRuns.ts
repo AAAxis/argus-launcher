@@ -22,7 +22,9 @@ import * as db from '../db';
 import {describeDbError} from '../db';
 import {native} from '../native';
 import type {ArgusAutomation, ArgusProfile, AutomationRun} from '../types';
-import type {AutomationVars, RunLogEntry, RunTrigger} from '../automations/types';
+import type {
+  AutomationStep, AutomationVars, RunLogEntry, RunTrigger,
+} from '../automations/types';
 
 const FLUSH_INTERVAL_MS = 400;
 
@@ -48,11 +50,13 @@ export type RunNotification = {
 export function useAutomationRuns(
     orgId: string | null,
     signedIn: boolean,
-    // Called when a finished event carries a notification. The caller owns
-    // what that means (the Supabase insert and the bell patch); this hook only
-    // hands it over, so its "runs are the only thing written here" header
-    // stays true.
-    onNotification?: (notification: RunNotification) => void,
+    // Called on EVERY terminal run this session sees, with the notification
+    // payload when the finished event carried one (it does only when the
+    // automation's notify_on said so). The caller owns what either means --
+    // the bell insert, the card's last-run patch, a personal Telegram send --
+    // this hook only hands them over, so its "runs are the only thing written
+    // here" header stays true of workspace tables.
+    onRunFinished?: (run: AutomationRun, notification?: RunNotification) => void,
 ) {
   // runId -> run, for anything in flight or just finished this session.
   const [runs, setRuns] = useState<Record<string, AutomationRun>>({});
@@ -64,8 +68,8 @@ export function useAutomationRuns(
   const waiters = useRef<Map<string, (run: AutomationRun) => void>>(new Map());
   // A ref because the event subscription below deliberately mounts once; a
   // closure over the prop would go stale on the first re-render.
-  const notifyRef = useRef(onNotification);
-  notifyRef.current = onNotification;
+  const finishedRef = useRef(onRunFinished);
+  finishedRef.current = onRunFinished;
 
   // Mirror the ref into state on a timer rather than per event.
   useEffect(() => {
@@ -105,12 +109,11 @@ export function useAutomationRuns(
       }
       pending.current[event.runId] = event.run;
       dirty.current = true;
-      // Notify-on-finish: the composed notification rides the finished event.
-      // Handed to the owner before the run write for the same reason waiters
-      // are resolved first -- neither should wait on Supabase.
-      if (event.notification) {
-        notifyRef.current?.(event.notification);
-      }
+      // Every terminal run goes to the owner -- the bell row (when the event
+      // carries a notification), the card's last-run patch, a personal
+      // Telegram send. Handed over before the run write for the same reason
+      // waiters are resolved first: none of it should wait on Supabase.
+      finishedRef.current?.(event.run, event.notification ?? undefined);
       // Before the database write, and outside its promise: a batch's pacing
       // must not wait on Supabase, and an offline machine still has to start
       // its next run.
@@ -125,6 +128,13 @@ export function useAutomationRuns(
         void db.runs.upsertFinished(org, event.run)
             .then(() => native?.markAutomationRunFlushed?.(event.runId))
             .catch(() => undefined);
+        // The denormalized card verdict. Independent of the run write -- its
+        // .lt guard makes it safe whatever order finishes land in.
+        if (event.run.automation_id && event.run.finished_at) {
+          void db.automations.recordRunOutcome(
+              org, event.run.automation_id, event.run.finished_at, event.run.status)
+              .catch(() => undefined);
+        }
       }
     });
   }, []);
@@ -177,6 +187,14 @@ export function useAutomationRuns(
           continue;
         }
         await db.runs.upsertFinished(orgId, run);
+        // Buffered runs are by definition stale -- the .lt guard on this
+        // update is what stops one regressing a verdict a newer run already
+        // wrote.
+        if (run.automation_id && run.finished_at) {
+          await db.automations.recordRunOutcome(
+              orgId, run.automation_id, run.finished_at, run.status)
+              .catch(() => undefined);
+        }
         await native.markAutomationRunFlushed?.(run.id);
       }
     } catch {
@@ -219,6 +237,10 @@ export function useAutomationRuns(
       options: {
         trigger?: RunTrigger;
         vars?: AutomationVars;
+        // calleeId -> steps for every callAutomation in the tree, resolved by
+        // the caller against the loaded workspace (resolveCallTree). This hook
+        // cannot resolve it itself -- it does not hold the automations list.
+        resolvedAutomations?: Record<string, AutomationStep[]>;
         buildLaunch?: (cdpPort: number) => Promise<{ok: boolean; error?: string}>;
       } = {},
   ): Promise<StartRunResult> => {
@@ -270,6 +292,7 @@ export function useAutomationRuns(
         trigger: options.trigger || 'manual',
         cdpUrl: session.cdpUrl as string,
         vars: options.vars,
+        resolvedAutomations: options.resolvedAutomations,
         ownsSession,
       });
       if (!result.ok || !result.runId) {

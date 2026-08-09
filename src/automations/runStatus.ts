@@ -28,3 +28,9 @@ export const RUN_LABEL: Record<RunStatus, string> = {
   cancelled: 'Cancelled',
   running: 'Running',
 };
+
+// For values that arrive as bare text -- the denormalized
+// automations.last_run_status column, not the runs table.
+export function isRunStatus(value: unknown): value is RunStatus {
+  return typeof value === 'string' && value in RUN_TONE;
+}

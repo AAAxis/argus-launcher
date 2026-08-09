@@ -1,3 +1,4 @@
+import type {AutomationSchedule} from './automations/schedule';
 import type {
   AutomationStep,
   AutomationVars,
@@ -376,6 +377,28 @@ export type ArgusAutomation = {
   // field). Deliberately no FK behind it -- a deleted connector fails the send
   // with a sentence naming it rather than silently notifying nobody.
   notify_connector_id?: string | null;
+  // Card identity: 'brand:<slug>' (the profile-avatar grammar, decoded by
+  // parseAvatar) or null for the default workflow glyph; `color` is a
+  // ProfileColorKey or '#rrggbb' tinting the icon's plate.
+  icon?: string | null;
+  color?: string | null;
+  // Verdict of the newest finished run, denormalized onto the row by
+  // recordRunOutcome so the card can show it without reading runs. The runs
+  // table holds the truth; these are reported, never recomputed.
+  last_run_at?: string | null;
+  last_run_status?: RunStatus | null;
+  // Attribution. created_by is the human whose session wrote the row (DB
+  // default auth.uid()); created_via says whether a person or an agent over
+  // MCP authored it, because for MCP writes created_by is just whoever had the
+  // launcher open. created_by_label names the agent in that case. Set once at
+  // create, never rewritten by saves. updated_by is trigger-maintained.
+  created_by?: string | null;
+  created_via?: 'user' | 'mcp';
+  created_by_label?: string | null;
+  updated_by?: string | null;
+  // When this automation runs by itself -- null/undefined means it does not.
+  // Shape and arithmetic in src/automations/schedule.ts.
+  schedule?: AutomationSchedule | null;
   created_at?: string;
   updated_at?: string;
   // Who is on the hook for this automation. See ArgusProfile.assigned_to.
@@ -493,6 +516,11 @@ export type ArgusOrg = {
   country?: string | null;
   website?: string | null;
   logo_url?: string | null;
+  // The workspace's notification bot: the token members' launchers send
+  // through, and the @username the link button opens. Owner-set on the
+  // Automations tab's Notification bot view.
+  telegram_bot_token?: string | null;
+  telegram_bot_name?: string | null;
   // The gate the setup prompt reads. A timestamp rather than a boolean so
   // "never asked" and "asked, answered the first question, skipped the rest"
   // stay distinguishable -- a solo workspace legitimately has null in every
@@ -699,5 +727,14 @@ export type CloudState = {
   // split runs and cookie payloads already get. Without this the Notes column
   // would be a query per visible row.
   note_summaries: ProfileNoteSummary[];
+  // The signed-in user's starred automation ids. Personal, not workspace data
+  // -- RLS narrows the read to own rows -- so no other member's stars ever
+  // appear here.
+  automation_stars: string[];
+  // This user's per-automation Telegram preferences, and their own linked
+  // chat (null until they press Start in the bot). The chat id here is only
+  // ever the signed-in user's own -- RLS narrows the read.
+  telegram_prefs: {automation_id: string; notify_on: 'always' | 'failure'}[];
+  telegram_link: {chat_id: string; telegram_username: string | null; linked_at: string} | null;
   built_in_extensions?: BuiltInExtensionToggles;
 };

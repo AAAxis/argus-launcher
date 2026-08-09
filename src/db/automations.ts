@@ -4,8 +4,10 @@ import {automationPatchToRow, automationToRow, rowToAutomation} from './mappers'
 import type {AutomationRow} from './rows';
 
 const COLUMNS =
-  'id,org_id,name,description,steps,variables,tags,pinned,timeout_ms,close_on_finish,' +
-  'notify_connector_id,notify_on,created_by,created_at,updated_at,assigned_to';
+  'id,org_id,name,description,steps,variables,parameters,tags,pinned,timeout_ms,close_on_finish,' +
+  'notify_connector_id,notify_on,icon,color,last_run_at,last_run_status,' +
+  'created_by,created_via,created_by_label,updated_by,schedule,' +
+  'created_at,updated_at,assigned_to';
 
 export async function list(orgId: string): Promise<ArgusAutomation[]> {
   const client = optionalClient();
@@ -16,7 +18,9 @@ export async function list(orgId: string): Promise<ArgusAutomation[]> {
       .from('automations')
       .select(COLUMNS)
       .eq('org_id', orgId)
-      .order('created_at', {ascending: true});
+      // Newest first -- the grid's base order (stars re-sort locally on top of
+      // it). The optimistic insert in useAutomationActions prepends to match.
+      .order('created_at', {ascending: false});
   raise(error, 'automations.list');
   return ((data || []) as unknown as AutomationRow[]).map(rowToAutomation);
 }
@@ -68,6 +72,24 @@ export async function update(
       .eq('org_id', orgId)
       .eq('id', id);
   raise(error, 'automations.update');
+}
+
+// Stamp the verdict of a finished run onto the automation row, so the card can
+// show a status without reading the runs table. The guard makes this
+// last-writer-safe against out-of-order arrivals: a disk-buffered run flushed
+// after a restart, or two runs finishing seconds apart on two machines, only
+// ever move last_run_at forward. RunStatus by construction -- callers pass
+// run.status off a sealed record.
+export async function recordRunOutcome(
+    orgId: string, id: string, finishedAt: string, status: string): Promise<void> {
+  const client = requireClient();
+  const {error} = await client
+      .from('automations')
+      .update({last_run_at: finishedAt, last_run_status: status})
+      .eq('org_id', orgId)
+      .eq('id', id)
+      .or(`last_run_at.is.null,last_run_at.lt.${finishedAt}`);
+  raise(error, 'automations.recordRunOutcome');
 }
 
 // Hard delete -- automations have no Trash.

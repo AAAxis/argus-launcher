@@ -28,7 +28,8 @@ export type StepType =
   | 'notify'
   | 'saveCookies'
   | 'if'
-  | 'loop';
+  | 'loop'
+  | 'callAutomation';
 
 // What every step carries.
 //
@@ -216,6 +217,15 @@ export type AutomationStep =
       items?: string;
       maxIterations?: number;
       body: AutomationStep[];
+    })
+  | (StepBase & {
+      // Run another automation's steps inline, on this run's browser session
+      // and vars. The reference is by id -- the renderer resolves the whole
+      // call tree before the run starts (src/automations/callGraph.ts: unknown
+      // ids, cycles and depth are caught there), because the main process has
+      // no automation catalogue of its own.
+      type: 'callAutomation';
+      automationId: string;
     });
 
 // Variables as they cross the wire. JSON-serializable only: an evaluate that
@@ -223,7 +233,7 @@ export type AutomationStep =
 // into a named error rather than a silent empty.
 export type AutomationVars = Record<string, unknown>;
 
-export type RunTrigger = 'manual' | 'launch' | 'start-page' | 'mcp' | 'api';
+export type RunTrigger = 'manual' | 'launch' | 'start-page' | 'mcp' | 'api' | 'schedule';
 
 // `partial` is its own status rather than folded into `ok`: a run where a step
 // failed under onError:'continue' did not do what it says on the tin.

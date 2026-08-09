@@ -20,7 +20,9 @@ const ORG_COLUMNS =
   'id,name,plan,profile_limit,seat_limit,billing_status,current_period_end,created_at,' +
   'built_in_extensions,automation_limit,' +
   // 2026-08-08-org-profile.sql
-  'org_type,legal_name,country,website,logo_url,onboarded_at';
+  'org_type,legal_name,country,website,logo_url,onboarded_at,' +
+  // 20260812000000_automations_upgrade.sql
+  'telegram_bot_token,telegram_bot_name';
 
 // Every organization the signed-in user belongs to, oldest membership first.
 //
@@ -130,6 +132,23 @@ export async function rename(orgId: string, name: string): Promise<void> {
   raise(error, 'orgs.rename');
   if (!data || data.length === 0) {
     throw new Error('Could not rename this workspace. Only its owner can.');
+  }
+}
+
+// The workspace's notification bot, owner-only like rename and guarded the
+// same way -- RLS filters rather than erroring, so success-with-no-rows has to
+// be turned back into a sentence here.
+export async function setTelegramBot(
+    orgId: string, token: string | null, name: string | null): Promise<void> {
+  const client = requireClient();
+  const {data, error} = await client
+      .from('organizations')
+      .update({telegram_bot_token: token, telegram_bot_name: name})
+      .eq('id', orgId)
+      .select('id');
+  raise(error, 'orgs.setTelegramBot');
+  if (!data || data.length === 0) {
+    throw new Error('Could not save the bot. Only the workspace owner can.');
   }
 }
 

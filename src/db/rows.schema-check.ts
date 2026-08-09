@@ -27,6 +27,8 @@ import type {Database} from './database.types';
 import type {
   AutomationRow,
   AutomationRunRow,
+  AutomationStarRow,
+  AutomationTelegramPrefRow,
   ConnectorRow,
   CookieSetRow,
   CustomStatusRow,
@@ -41,6 +43,7 @@ import type {
   ProxyRow,
   SharedBookmarkRow,
   SharedExtensionRow,
+  UserTelegramRow,
 } from './rows';
 
 type Tables = Database['public']['Tables'];
@@ -68,6 +71,10 @@ const _notifications: ColumnsExist<NotificationRow, Tables['notifications']['Row
 const _notificationReads:
   ColumnsExist<NotificationReadRow, Tables['notification_reads']['Row']> = true;
 const _automationRuns: ColumnsExist<AutomationRunRow, Tables['automation_runs']['Row']> = true;
+const _automationStars: ColumnsExist<AutomationStarRow, Tables['automation_stars']['Row']> = true;
+const _telegramPrefs: ColumnsExist<
+  AutomationTelegramPrefRow, Tables['automation_telegram_prefs']['Row']> = true;
+const _userTelegram: ColumnsExist<UserTelegramRow, Tables['user_telegram']['Row']> = true;
 /* eslint-enable @typescript-eslint/no-unused-vars */
 
 // OrgMemberIdentityRow is deliberately absent: it shapes the return of the

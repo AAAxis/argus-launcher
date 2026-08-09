@@ -43,6 +43,10 @@ export type OrganizationRow = {
   website: string | null;
   logo_url: string | null;
   onboarded_at: string | null;
+  // The workspace's notification bot (@BotFather-minted). Org-readable like
+  // every connector credential; owner-writable via per-column grants.
+  telegram_bot_token: string | null;
+  telegram_bot_name: string | null;
 };
 
 export type OrgMemberRow = {
@@ -144,6 +148,11 @@ export type ProfileRow = {
   password: string | null;
   // The automation to run when this profile launches. Added 2026-08-05.
   automation_id: string | null;
+  // This profile's parameter values, keyed by automation id:
+  // {"flat-search": {"city_name": "Dortmund"}}. Not limited to automation_id --
+  // a profile holds values for every parameterised automation it is run with,
+  // however that run starts. Added 20260814000000_automation_parameters.sql.
+  automation_vars: Record<string, Record<string, unknown>> | null;
   // The profile's picture: `brand:<slug>`, an https URL, or null for the
   // initials plate. Added 2026-08-05. See ArgusProfile.avatar in src/types.ts.
   avatar: string | null;
@@ -315,6 +324,11 @@ export type AutomationRow = {
   description: string | null;
   steps: unknown[];
   variables: Record<string, unknown> | null;
+  // The declared inputs, an ordered list of AutomationParam. Order is the form
+  // order, which is why it is an array. `variables` above stays the untyped
+  // seed bag MCP has always accepted; a declared parameter of the same name
+  // shadows its entry (resolveRunVars).
+  parameters: unknown[] | null;
   tags: string[] | null;
   pinned: boolean | null;
   timeout_ms: number | null;
@@ -325,10 +339,53 @@ export type AutomationRow = {
   // desktop notification); deliberately no FK -- see the migration.
   notify_connector_id: string | null;
   notify_on: string | null;
+  // Card identity: 'brand:<slug>' (the profile-avatar grammar) or null for the
+  // default workflow glyph; a ProfileColorKey or '#rrggbb' tinting its plate.
+  icon: string | null;
+  color: string | null;
+  // Denormalized verdict of the newest finished run -- reported by
+  // recordRunOutcome, never recomputed. automation_runs holds the truth.
+  last_run_at: string | null;
+  last_run_status: string | null;
   created_by: string | null;
+  // 'user' | 'mcp'. created_by_label names the agent for the mcp case, where
+  // created_by is just whichever human's launcher answered the request.
+  created_via: string | null;
+  created_by_label: string | null;
+  // Who last saved -- maintained by a DB trigger, not the mappers.
+  updated_by: string | null;
+  // The schedule document, shaped and validated by src/automations/schedule.ts.
+  schedule: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   assigned_to: string | null;
+};
+
+// One per-user star. Insert/delete only -- see the migration for why this is
+// not a starred_by[] array on automations.
+export type AutomationStarRow = {
+  org_id: string;
+  automation_id: string;
+  user_id: string;
+  starred_at: string;
+};
+
+// "I, personally, want a Telegram message about this automation." Independent
+// of automations.notify_on, which is the org-connector path.
+export type AutomationTelegramPrefRow = {
+  org_id: string;
+  automation_id: string;
+  user_id: string;
+  notify_on: string;
+};
+
+// The signed-in user's own Telegram link. chat_id is written only by the
+// landing backend; the launcher reads its own row to learn "linked or not".
+export type UserTelegramRow = {
+  user_id: string;
+  chat_id: string;
+  telegram_username: string | null;
+  linked_at: string;
 };
 
 // An outside service automations talk to: an AI endpoint or a messaging

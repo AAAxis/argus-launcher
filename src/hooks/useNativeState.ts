@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {native} from '../native';
-import type {ApiState, ResourceState, UpdateState} from '../native';
+import type {ApiState, ReleaseNotes, ResourceState, UpdateState} from '../native';
 import type {Toast} from './useToast';
 
 // The three main-process status channels all follow one shape: ask once at
@@ -59,8 +59,34 @@ export function useResourceStatus(toast: Toast) {
   return {
     resourceState,
     apiState,
+    // Look, don't fetch.
+    checkBrowser: () => void native?.checkBrowserResource?.().then(setResourceState),
+    // Fetch and install: "Update to X", "Install", and "Reinstall" all land
+    // here. Kept under the old name because App and the browser-missing
+    // banner both already call it.
     retryBrowserDownload: () => void native?.downloadBrowserResource?.().then(setResourceState),
   };
+}
+
+// Release history for the changelog, from the GitHub release list both
+// programs publish to. Loaded once on mount; the main process caches it, so
+// re-opening the changelog costs nothing.
+export function useReleaseNotes() {
+  const [releaseNotes, setReleaseNotes] = useState<ReleaseNotes | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void native?.getReleaseNotes?.().then((notes) => {
+      if (!cancelled) {
+        setReleaseNotes(notes);
+      }
+    // A changelog is not worth an error state. If this fails the modal says so
+    // and offers a retry.
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return releaseNotes;
 }
 
 // Launcher self-update: the status the main process reports, the three actions
@@ -100,28 +126,4 @@ export function useUpdater(toast: Toast) {
   }
 
   return {updateState, busy, run, dismissedVersion, setDismissedVersion};
-}
-
-export function updateStatusLabel(state: UpdateState | null) {
-  if (!state) {
-    return 'Checking updater';
-  }
-  switch (state.status) {
-    case 'disabled':
-      return 'Packaged builds only';
-    case 'checking':
-      return 'Checking for updates';
-    case 'available':
-      return `Version ${state.updateInfo?.version || 'available'} ready`;
-    case 'downloading':
-      return `Downloading ${Math.round(state.progress?.percent || 0)}%`;
-    case 'downloaded':
-      return `Version ${state.updateInfo?.version || ''} downloaded`;
-    case 'not-available':
-      return 'Up to date';
-    case 'error':
-      return state.error || 'Update check failed';
-    default:
-      return 'Ready to check';
-  }
 }

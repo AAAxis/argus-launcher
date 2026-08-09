@@ -43,7 +43,7 @@ import {ProfileModal} from './components/modals/ProfileModal';
 import {ShareModal} from './components/modals/ShareModal';
 import type {ShareRequest} from './components/modals/ShareModal';
 import {
-  ChangelogModal, OAuthApprovalModal, RevealedKeyModal, UpdateControl,
+  ChangelogModal, OAuthApprovalModal, RevealedKeyModal,
 } from './components/modals/SettingsModal';
 import {SettingsDialog} from './settings/SettingsDialog';
 import {BusyButton} from './components/ui/BusyButton';
@@ -69,7 +69,7 @@ import {
   useBackgroundProxyChecks, useFaviconWarmer, useOAuthApproval,
 } from './hooks/useBackgroundWork';
 import {useEditors} from './hooks/useEditors';
-import {useResourceStatus, useUpdater} from './hooks/useNativeState';
+import {useReleaseNotes, useResourceStatus, useUpdater} from './hooks/useNativeState';
 import {useSignIn} from './hooks/useSignIn';
 import {native} from './native';
 import * as db from './db';
@@ -86,8 +86,9 @@ export function App() {
   const {data, toast} = workspace;
 
   const signIn = useSignIn();
-  const {resourceState, apiState, retryBrowserDownload} = useResourceStatus(toast);
+  const {resourceState, apiState, checkBrowser, retryBrowserDownload} = useResourceStatus(toast);
   const updater = useUpdater(toast);
+  const releaseNotes = useReleaseNotes();
   const apiKeys = useApiKeys(org.userId, org.orgId);
   const integrations = useIntegrations(apiKeys, apiState);
   const editors = useEditors();
@@ -444,6 +445,7 @@ export function App() {
           </div>
         )}
         <UpdateToast
+          resourceState={resourceState}
           state={updater.updateState}
           dismissedVersion={updater.dismissedVersion}
           onDismiss={updater.setDismissedVersion}
@@ -453,7 +455,8 @@ export function App() {
       {settingsOpen && (
         <SettingsDialog
           onClose={() => setSettingsOpen(false)}
-          onDownloadBrowser={retryBrowserDownload}
+          onCheckBrowser={checkBrowser}
+          onInstallBrowser={retryBrowserDownload}
           onOpenChangelog={() => setChangelogOpen(true)}
           onOpenIntro={() => {
             setSettingsOpen(false);
@@ -466,10 +469,20 @@ export function App() {
           onOpenSite={openAccountPage}
           onSignOut={() => void signOut()}
           resourceState={resourceState}
-          updateControl={<UpdateControl updater={updater} />}
+          onUpdaterAction={(action) => void updater.run(action)}
+          releaseNotes={releaseNotes}
+          updateState={updater.updateState}
+          updaterBusy={updater.busy}
         />
       )}
-      {changelogOpen && <ChangelogModal updater={updater} onClose={() => setChangelogOpen(false)} />}
+      {changelogOpen && (
+        <ChangelogModal
+          installedBrowserVersion={resourceState?.installedVersion || ''}
+          onClose={() => setChangelogOpen(false)}
+          releaseNotes={releaseNotes}
+          updater={updater}
+        />
+      )}
       {personalDue && (
         <PersonalWorkspaceModal
           busy={personalBusy}
@@ -700,6 +713,23 @@ export function App() {
             category: connector.category,
             is_default: connector.is_default,
           }))}
+          // Live profiles only, for the schedule's target list -- a trashed
+          // profile cannot accept a run.
+          profiles={data.state.profiles
+              .filter((profile) => !profile.deleted_at)
+              .map((profile) => ({id: profile.id, name: profile.name}))}
+          // For callAutomation's picker. The modal excludes the draft itself.
+          automations={data.state.automations.map((automation) => ({
+            id: automation.id,
+            name: automation.name,
+          }))}
+          members={data.state.members}
+          telegramLinked={Boolean(data.state.telegram_link)}
+          telegramPref={data.state.telegram_prefs.find((pref) =>
+            pref.automation_id === automationDraft.automation.id)?.notify_on ?? null}
+          onTelegramPref={(value) => void workspace.automations.setTelegramPref(
+              automationDraft.automation.id, value)}
+          onLinkTelegram={() => void workspace.automations.linkTelegram()}
           onClose={() => setAutomationDraft(null)}
           onRun={setRunningAutomation}
           onSave={(next) => workspace.automations.save(next, automationDraft.exists)}

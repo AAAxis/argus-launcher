@@ -14,7 +14,7 @@ import {assignedSet, resolveLiveSetAction, sanitizeSetName} from '../lib/cookieS
 import {cloudCookieFromSelection} from '../lib/cookieUpload';
 import {assigneeName} from '../lib/assignees';
 import {canRecheckProxy, homeProxyStatus} from '../lib/homePage';
-import {normalizeTags} from '../lib/tags';
+import {normalizeTags, tagPresetFor} from '../lib/tags';
 import {newProfileDraft, profileFromDraft, withFingerprintOs} from '../drafts';
 import {osPresets, randomFingerprintPatch} from '../lib/fingerprintPresets';
 import {comparable} from '../lib/text';
@@ -31,7 +31,11 @@ import {isTableId, TABLE_IDS} from '../tables/columns';
 import type {ColumnChange} from '../tables/apiColumns';
 import type {CookieFileSelection} from '../native';
 import type {WorkspaceValue} from '../workspace/WorkspaceProvider';
-import type {AutomationStep} from '../automations/types';
+import {resolveCallTree} from '../automations/callGraph';
+import {describeSchedule, validateSchedule} from '../automations/schedule';
+import {isCustomHex, resolveProfileColor} from '../lib/profileColors';
+import type {AutomationSchedule} from '../automations/schedule';
+import type {AutomationStep, AutomationVars} from '../automations/types';
 import type {ArgusAutomation, ArgusProxy} from '../types';
 
 // One subscribe/respond pair, with the try/catch every handler needs. Fifteen
@@ -1015,6 +1019,89 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
   // folder-scoped key on create/update/delete -- automations are org-wide and
   // have no folder to scope against.
 
+  // The optional presentation/wiring fields create and update share, each
+  // validated to the same rule the editor enforces, each throwing the sentence
+  // the agent needs. Only keys present in the payload appear in the result --
+  // the update handler's only-what-was-sent contract depends on that.
+  function automationExtras(payload: {
+    icon?: string;
+    color?: string;
+    notifyOn?: string;
+    notifyConnectorId?: string;
+    variables?: Record<string, unknown>;
+    schedule?: unknown;
+  }): Partial<ArgusAutomation> {
+    const extras: Partial<ArgusAutomation> = {};
+    if (payload.icon !== undefined) {
+      const icon = payload.icon.trim();
+      if (icon && (!icon.startsWith('brand:') || !tagPresetFor(icon.slice('brand:'.length)))) {
+        throw new ApiError(
+            'icon must be "brand:<slug>" naming a catalog brand ' +
+            '(brand:facebook, brand:instagram, ...) or empty to clear it', 400);
+      }
+      extras.icon = icon || null;
+    }
+    if (payload.color !== undefined) {
+      const color = payload.color.trim();
+      if (color && !resolveProfileColor(color) && !isCustomHex(color)) {
+        throw new ApiError(
+            'color must be slate, blue, green, violet, red, amber, or a #rrggbb hex', 400);
+      }
+      extras.color = color || null;
+    }
+    if (payload.notifyOn !== undefined) {
+      const notifyOn = payload.notifyOn.trim();
+      if (notifyOn && notifyOn !== 'always' && notifyOn !== 'failure') {
+        throw new ApiError('notifyOn must be always, failure, or empty to clear it', 400);
+      }
+      extras.notify_on = (notifyOn || null) as ArgusAutomation['notify_on'];
+      // Clearing notifyOn clears the target too -- the editor's rule: a
+      // connector id behind a null notify_on is dead state.
+      if (!notifyOn) {
+        extras.notify_connector_id = null;
+      }
+    }
+    if (payload.notifyConnectorId !== undefined) {
+      const connectorId = payload.notifyConnectorId.trim();
+      if (connectorId && !state.connectors.some((connector) =>
+        connector.id === connectorId && connector.category === 'message')) {
+        throw new ApiError(
+            `No message connector with id ${connectorId}. ` +
+            'Connectors are managed in the launcher, on the Automations tab.', 400);
+      }
+      extras.notify_connector_id = connectorId || null;
+    }
+    if (payload.variables !== undefined) {
+      if (typeof payload.variables !== 'object' || payload.variables === null ||
+          Array.isArray(payload.variables)) {
+        throw new ApiError('variables must be an object of seed values', 400);
+      }
+      extras.variables = payload.variables as AutomationVars;
+    }
+    if (payload.schedule !== undefined) {
+      if (payload.schedule === null) {
+        extras.schedule = null;
+      } else {
+        const problems = validateSchedule(payload.schedule);
+        if (problems.length > 0) {
+          throw new ApiError(problems.join(' '), 400);
+        }
+        extras.schedule = payload.schedule as AutomationSchedule;
+      }
+    }
+    return extras;
+  }
+
+  // What resolveCallTree's problems become on this surface. Checked against
+  // the workspace WITH the incoming edit applied, so a save that would create
+  // a cycle is a 400 here rather than a failed run later.
+  function requireSoundCallTree(automation: ArgusAutomation, all: ArgusAutomation[]) {
+    const {problems} = resolveCallTree(automation, all);
+    if (problems.length > 0) {
+      throw new ApiError(problems.join(' '), 400);
+    }
+  }
+
   // Deliberately not the whole step tree: a workspace with thirty automations
   // would put every step of every one of them into an agent's context on a
   // request that only asked what exists. argus_get_automation is one call away.
@@ -1027,6 +1114,21 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           description: automation.description || null,
           stepCount: automation.steps.length,
           pinned: Boolean(automation.pinned),
+          icon: automation.icon || null,
+          color: automation.color || null,
+          // The agent-facing half of attribution: who made it (a member's
+          // name, or the creating agent's label) and through what.
+          createdVia: automation.created_via || 'user',
+          createdBy: automation.created_via === 'mcp' ?
+            (automation.created_by_label || 'Agent') :
+            (assigneeName(automation.created_by, state.members) || null),
+          lastRunAt: automation.last_run_at || null,
+          lastRunStatus: automation.last_run_status || null,
+          schedule: automation.schedule?.enabled ?
+            describeSchedule(automation.schedule) : null,
+          // The SIGNED-IN USER'S star, since MCP writes ride their session --
+          // an agent sees the stars of whoever runs the launcher.
+          starred: state.automation_stars.includes(automation.id),
           runsOnLaunchFor: state.profiles
               .filter((profile) => !profile.deleted_at &&
                 profile.automation_id === automation.id)
@@ -1057,8 +1159,20 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         pinned?: boolean;
         timeoutMs?: number;
         closeOnFinish?: boolean;
+        icon?: string;
+        color?: string;
+        notifyOn?: string;
+        notifyConnectorId?: string;
+        variables?: Record<string, unknown>;
+        schedule?: unknown;
+        // Forwarded by main on every table-driven channel: the API key's id
+        // and display name. Not the author's identity -- the Supabase write
+        // below still rides whoever is signed in -- which is exactly why the
+        // label is recorded.
+        agent?: {id: string; name: string};
       }) => {
         requireSignedIn();
+        const extras = automationExtras(payload);
         const automation: ArgusAutomation = {
           // Minted here, never taken from the caller: the id doubles as a
           // directory name under <userData>/AutomationRuns and the column has
@@ -1075,7 +1189,21 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           pinned: Boolean(payload.pinned),
           timeout_ms: Math.min(payload.timeoutMs ?? 300000, 600000),
           close_on_finish: Boolean(payload.closeOnFinish),
+          ...extras,
+          // What the card's "who made this" reads. created_by (the uuid) still
+          // defaults to the signed-in user -- that is the session the write
+          // rides -- so created_via is what tells an agent's work apart.
+          created_via: 'mcp',
+          created_by_label: payload.agent?.name || 'Agent',
+          // The grid sorts newest-first on this the moment it lands.
+          created_at: new Date().toISOString(),
         };
+        if (automation.notify_connector_id && !automation.notify_on) {
+          throw new ApiError('notifyConnectorId requires notifyOn (always or failure)', 400);
+        }
+        // callAutomation references resolved now, not at run time: an id that
+        // names nothing or a circle is this call's error, with the sentence.
+        requireSoundCallTree(automation, [automation, ...state.automations]);
         // exists: false, so this is an INSERT and never an upsert. The org's
         // automation_limit is enforced by trg_automation_limit on the way in
         // and comes back through here as a plain sentence.
@@ -1100,6 +1228,12 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         pinned?: boolean;
         timeoutMs?: number;
         closeOnFinish?: boolean;
+        icon?: string;
+        color?: string;
+        notifyOn?: string;
+        notifyConnectorId?: string;
+        variables?: Record<string, unknown>;
+        schedule?: unknown;
       }) => {
         requireSignedIn();
         const existing = state.automations.find((item) => item.id === payload.automationId);
@@ -1108,7 +1242,10 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
         }
         // Only what was sent. Spreading the payload wholesale would write
         // `undefined` over every field the caller left out, which is how a
-        // rename would silently empty the step list.
+        // rename would silently empty the step list. automationExtras keeps
+        // the same contract: absent keys stay absent. created_via and
+        // created_by_label are deliberately not editable -- attribution is
+        // set once at create.
         const next: ArgusAutomation = {
           ...existing,
           ...(payload.name !== undefined ? {name: payload.name.trim()} : {}),
@@ -1124,13 +1261,56 @@ export function useAutomationBridge(workspace: WorkspaceValue) {
           ...(payload.closeOnFinish !== undefined ?
             {close_on_finish: payload.closeOnFinish} :
             {}),
+          ...automationExtras(payload),
         };
+        if (next.notify_connector_id && !next.notify_on) {
+          throw new ApiError('notifyConnectorId requires notifyOn (always or failure)', 400);
+        }
+        // Checked against the workspace with this edit applied: an update
+        // that would introduce a cycle is refused here, by name, instead of
+        // surfacing as a failed run later.
+        requireSoundCallTree(
+            next, state.automations.map((item) => item.id === next.id ? next : item));
         const error = await automationActions.save(next, true);
         if (error) {
           throw new ApiError(error, 400);
         }
         toast.setMessage(`Updated ${next.name}`);
         return {automation: next};
+      },
+      cloud);
+
+  // Run outcomes for an agent: how a run started with argus_run_automation
+  // ended. Without `log` and `vars` -- they are the bulk of a run row, and an
+  // agent that wants the play-by-play can ask for a narrower tool when one
+  // exists. Reads the runs table, not session state, so a run finished by a
+  // teammate's launcher answers too.
+  useApiChannel(
+      'argus:list-automation-runs-request',
+      async (payload: {requestId: string; automationId: string; limit?: number}) => {
+        requireSignedIn();
+        if (!state.automations.some((item) => item.id === payload.automationId)) {
+          throw new ApiError(`No automation with id ${payload.automationId}`, 404);
+        }
+        const runs = await db.runs.list(data.orgId || '', {
+          automationId: payload.automationId,
+          limit: Math.min(Math.max(1, payload.limit ?? 20), 50),
+        });
+        return {
+          runs: runs.map((run) => ({
+            id: run.id,
+            profileId: run.profile_id,
+            profileName: run.profile_name || null,
+            trigger: run.trigger,
+            status: run.status,
+            startedAt: run.started_at,
+            finishedAt: run.finished_at || null,
+            durationMs: run.duration_ms ?? null,
+            stepCount: run.step_count ?? null,
+            failedStepId: run.failed_step_id || null,
+            error: run.error || null,
+          })),
+        };
       },
       cloud);
 

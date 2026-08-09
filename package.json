@@ -1,6 +1,6 @@
 {
   "name": "argys-anty",
-  "version": "1.0.57",
+  "version": "1.0.58",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
@@ -44,7 +44,6 @@
   "build": {
     "appId": "com.argys.anty",
     "productName": "Argus Launcher",
-    "buildVersion": "1.0.26.0",
     "icon": "assets/icons/launcher-light.icns",
     "artifactName": "Argys-Anty-${version}-${os}-${arch}.${ext}",
     "protocols": [

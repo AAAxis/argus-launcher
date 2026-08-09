@@ -35,7 +35,12 @@ export type FieldKind =
   // list in the JSON -- which is why the editor threads the connector list
   // down to StepFields the same way it threads checkProfile, instead of the
   // schema naming them.
-  | 'connector';
+  | 'connector'
+  // A dropdown of the workspace's other automations, for callAutomation. Data
+  // like 'connector', threaded the same way; the automation being edited is
+  // excluded so the picker cannot express the one cycle it would otherwise
+  // invite.
+  | 'automation';
 
 export type FieldSpec = {
   key: string;

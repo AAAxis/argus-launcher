@@ -13,17 +13,17 @@ import {
   CreditCard, PackageOpen, Palette, SlidersHorizontal, User, X,
 } from 'lucide-react';
 import * as db from '../db';
-import type {ResourceState} from '../native';
+import type {ReleaseNotes, ResourceState, UpdateState} from '../native';
 import {useOrg} from '../org';
 import {useWorkspace} from '../workspace/WorkspaceProvider';
 import {AccountSection} from './sections/AccountSection';
 import {AppearanceSection} from './sections/AppearanceSection';
-import {BrowserUpdatesSection} from './sections/BrowserUpdatesSection';
 import {GeneralSection} from './sections/GeneralSection';
 import {PlanUsageSection} from './sections/PlanUsageSection';
+import {UpdatesSection} from './sections/UpdatesSection';
 
 export type SettingsSectionId =
-  'account' | 'plan' | 'appearance' | 'general' | 'browser';
+  'account' | 'plan' | 'appearance' | 'general' | 'updates';
 
 type SectionDef = {
   id: SettingsSectionId;
@@ -40,7 +40,9 @@ const SECTIONS: SectionDef[] = [
   // and moved to Automations → Connectors, taking the group with them.
   {id: 'appearance', label: 'Appearance', group: 'App', icon: Palette},
   {id: 'general', label: 'General', group: 'App', icon: SlidersHorizontal},
-  {id: 'browser', label: 'Browser & updates', group: 'App', icon: PackageOpen},
+  // Both programs live here now -- the launcher and the browser it starts --
+  // so the label names the job rather than one of the two things it covers.
+  {id: 'updates', label: 'Updates', group: 'App', icon: PackageOpen},
 ];
 
 export type SettingsDialogProps = {
@@ -54,10 +56,16 @@ export type SettingsDialogProps = {
   onOpenIntro: () => void;
   // Closes this dialog and lands on the Plans tab, for the same reason.
   onOpenPlans: () => void;
-  // The launcher's own update panel, owned by App's updater hook.
-  updateControl: ReactNode;
+  // Both halves of the Updates page. The launcher's state machine stays in
+  // App's updater hook -- this passes it through rather than owning it, the
+  // way the old updateControl node did.
+  updateState: UpdateState | null;
+  updaterBusy: boolean;
+  onUpdaterAction: (action: 'check' | 'download' | 'install') => void;
   resourceState: ResourceState | null;
-  onDownloadBrowser: () => void;
+  onCheckBrowser: () => void;
+  onInstallBrowser: () => void;
+  releaseNotes: ReleaseNotes | null;
 };
 
 export function SettingsDialog(props: SettingsDialogProps) {
@@ -191,12 +199,16 @@ export function SettingsDialog(props: SettingsDialogProps) {
             {active === 'general' && (
               <GeneralSection onMessage={toast.setMessage} onOpenIntro={props.onOpenIntro} />
             )}
-            {active === 'browser' && (
-              <BrowserUpdatesSection
-                onDownloadBrowser={props.onDownloadBrowser}
+            {active === 'updates' && (
+              <UpdatesSection
+                onCheckBrowser={props.onCheckBrowser}
+                onInstallBrowser={props.onInstallBrowser}
                 onOpenChangelog={props.onOpenChangelog}
+                onUpdaterAction={props.onUpdaterAction}
+                releaseNotes={props.releaseNotes}
                 resourceState={props.resourceState}
-                updateControl={props.updateControl}
+                updateState={props.updateState}
+                updaterBusy={props.updaterBusy}
               />
             )}
           </div>

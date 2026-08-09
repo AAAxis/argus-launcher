@@ -186,10 +186,11 @@ function control(
     field: FieldSpec,
     value: unknown,
     set: (next: unknown) => void,
-    // The workspace's connectors, for the one field kind whose options are
-    // data rather than a list in step-schema.json. Names and ids only -- no
-    // config ever reaches the editor.
+    // The workspace's connectors and automations, for the two field kinds
+    // whose options are data rather than a list in step-schema.json. Names and
+    // ids only -- no config ever reaches the editor.
     connectors: {id: string; name: string; category: string; is_default?: boolean}[],
+    automations: {id: string; name: string}[],
 ): ReactNode {
   switch (field.kind) {
     case 'textarea':
@@ -269,6 +270,25 @@ function control(
         </select>
       );
     }
+    case 'automation':
+      // The other automations in the workspace -- the one being edited is
+      // already excluded upstream, so the picker cannot express a self-call.
+      // Unlike 'connector' there is no workspace default: calling nothing is
+      // not a sensible run, so an empty pick stays a validation problem.
+      return (
+        <select value={String(value ?? '')} onChange={(event) => set(event.target.value)}>
+          <option value="">Choose an automation…</option>
+          {automations.map((automation) => (
+            <option key={automation.id} value={automation.id}>{automation.name}</option>
+          ))}
+          {/* A callee that was deleted, or arrived by pasted JSON. Named as
+              missing rather than snapped to empty, so the step keeps showing
+              what it points at -- the run will refuse it with a sentence. */}
+          {Boolean(value) && !automations.some((automation) => automation.id === value) && (
+            <option value={String(value)}>Missing automation</option>
+          )}
+        </select>
+      );
     default:
       return (
         <input
@@ -280,13 +300,15 @@ function control(
   }
 }
 
-export function StepFields({step, onChange, checkProfile, connectors = []}: {
+export function StepFields({step, onChange, checkProfile, connectors = [], automations = []}: {
   step: AutomationStep;
   onChange: (next: AutomationStep) => void;
   // Threaded from the editor rather than read from context, exactly as
   // checkProfile is: StepList is also the recursion, and a branch's steps
   // choose from the same list.
   connectors?: {id: string; name: string; category: string; is_default?: boolean}[];
+  // The workspace's other automations, for callAutomation's picker.
+  automations?: {id: string; name: string}[];
   // The profile a Check tests against. See automations/target.ts -- the same
   // rule the Run button uses, so the page you check is the page you run on.
   checkProfile?: {id: string; name: string} | null;
@@ -315,7 +337,7 @@ export function StepFields({step, onChange, checkProfile, connectors = []}: {
         if (field.kind === 'boolean') {
           return (
             <div className="automation-field" key={field.key}>
-              {control(field, values[field.key], set, connectors)}
+              {control(field, values[field.key], set, connectors, automations)}
               {field.hint && <p className="field-hint">{field.hint}</p>}
             </div>
           );
@@ -326,7 +348,7 @@ export function StepFields({step, onChange, checkProfile, connectors = []}: {
             label={field.required ? `${field.label} *` : field.label}
             hint={field.hint}
           >
-            {control(field, values[field.key], set, connectors)}
+            {control(field, values[field.key], set, connectors, automations)}
             {/* Keyed on the selector's current value, so editing the input
                 clears a stale verdict rather than leaving "1 match" sitting
                 under a selector that has since been changed. */}
