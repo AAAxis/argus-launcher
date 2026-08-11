@@ -1,0 +1,1725 @@
+/* ── Automations ─────────────────────────────────────────────────────────────
+ * Split out of styles.css, which is 6,000 lines and was the only home every
+ * area had. Imported from main.tsx directly after it, so the cascade order is
+ * exactly what it was when these rules sat at the bottom of that file.
+ *
+ * The step list borrows the surface tokens the rest of the app uses rather
+ * than inventing a palette: a step row is a .data-card at rest and gains its
+ * own border only when expanded, so a list of twenty does not read as twenty
+ * competing boxes.
+ *
+ * Every border in here used to say var(--line). That token belongs to the
+ * landing site's design system and is not defined in the launcher, and an
+ * undefined var() inside the `border` shorthand is invalid at computed-value
+ * time -- which resets every longhand to `unset`, and border-style's initial
+ * value is `none`. So none of these borders rendered at all. The launcher's
+ * token is --border; the whole file now uses it. */
+
+/* .automations-tab carries no padding of its own. It used to say
+ * `padding: 24px`, nested inside .content's own 24px -- so the automation grid
+ * was the one page in the app inset 48px from the window edge and pushed a
+ * further 24px below the header, which is what made this tab look like it
+ * began somewhere different from every other one. .content owns page padding
+ * for all eight tabs.
+ *
+ * The rest of the wrapper -- the 1080px cap, the column, the 16px gap -- is the
+ * shared `.api-panel, .automations-tab, .extensions-tab` rule in styles.css,
+ * which this tab joined when it was restyled to match Extensions.
+ *
+ * A tab with no automations at all does not use this wrapper: it returns
+ * .tab-empty (styles.css) instead, the shared whole-tab empty state that
+ * Profiles, Proxies, Cookies and the Start page all sit in. There used to be an
+ * `.is-empty` override here that centred the hero in 60vh, which is why the
+ * glyph on this tab sat lower than on those and moved as the window resized. */
+
+/* The one .api-note in the app that carries an action. It is a standing fact
+   *and* the way out of it -- load the example before making a profile and this
+   note is the only thing on the tab that can unstick you, because the same
+   offer in the hero vanished with the first saved automation. So the button is
+   pushed to the far edge and the note is allowed to wrap, neither of which the
+   read-only notes on API, Integrations and Extensions need. */
+.automation-profile-note {
+  flex-wrap: wrap;
+}
+
+.automation-profile-note > button {
+  margin-left: auto;
+}
+
+/* Why an empty grid can happen: nothing is pinned by default, so the "On start
+   pages" chip has a legitimate zero state. Left in the flow rather than
+   centred like the hero -- the toolbar above it is still the subject of the
+   page, and this is a footnote under the chip that caused it. */
+/* The answer under an empty grid: a chip that matched nothing, an empty
+   folder, or an empty Trash. A <p> in three of the four cases and a <div>
+   holding a sentence and a button in the folder one, so the rules cover both
+   -- `margin: 0` on the element and on any paragraph inside it. */
+.automation-view-empty {
+  align-items: flex-start;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  gap: 10px;
+  margin: 0;
+}
+
+.automation-view-empty p {
+  margin: 0;
+}
+
+/* Was 320px at 16px. Now the same 300/12 as .extension-grid and
+   .integration-grid: inside the 1080px cap those settle at three columns
+   rather than three-and-a-gap, so the three card tabs deal the same hand at
+   the same window width. */
+.automation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+/* .extension-card's metrics, deliberately duplicated rather than aliased: the
+   two grids hold different things and only one of them has a description doing
+   the flex work below. Was 20px padding and no shadow, which is what made an
+   automation card read as a heavier object than an extension card sitting one
+   tab away. */
+.automation-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+
+/* An automation card is two objects: a recessed frame carrying the chrome, and
+   the card itself inset in it on all four sides. The frame holds what the app
+   says *about* the automation -- Share, History, the step count -- and the card
+   holds what the automation is. Reaching for the actions means reaching outside
+   the thing they act on, which is the whole point of drawing it this way.
+
+   A separate class rather than folding it into .automation-card, because the
+   Connectors view reuses that card wholesale -- same grid, same head, same
+   description, same foot -- and has no frame of its own. Everything the two
+   share stays on .automation-card; everything only the framed one has lands
+   here.
+
+   --frame, and not --paper: the frame is not *recessed*, it is the other
+   surface from the card, and which of the two is darker flips with the theme.
+   Light is a grey tray holding a white card; dark is a lighter tray holding a
+   darker one. tokens.css owns that inversion so no rule here has to know which
+   theme it is in -- see the note on --frame there.
+
+   No border. Two rules used to draw one edge: .automation-card's hairline and
+   this surface step. The step alone is the frame, and the line on top of it
+   read as a third object between the frame and the page. .automation-card
+   keeps its border for the Connectors view, which reuses that card unframed. */
+.automation-card-framed {
+  background: var(--frame);
+  border: 0;
+  /* The bar and the card carry their own internal spacing, so there is nothing
+     for the flex gap to do. */
+  gap: 0;
+  /* Asymmetric on purpose. The top opens far enough to seat the bar -- that
+     edge is a place, and it holds three controls. The other three are only an
+     edge: thin enough to read as a surface behind the card rather than as a
+     slightly thick border. Nothing sits in them, so any more is a margin the
+     card is paying for. The top's own spacing moved into the bar, which is why
+     this is 0 up there rather than a fourth number.
+
+     3px, not the 2px it was: the frame used to be 1px of border plus 2px of
+     padding, and dropping the border without paying that pixel back would have
+     shrunk the edge by a third and pulled the card's corner off the frame's --
+     see the concentric-arc note below, which is measured against this number. */
+  padding: 0 3px 3px;
+}
+
+/* Was on .automation-card, which the frame now outranks by source order alone
+   -- and .is-new, being two classes to its one, would have won and painted the
+   frame in the card's colour. Written at the same weight so the pair still
+   describes a frame and a card rather than one flat green box.
+
+   An automation with a colour of its own outranks this: automationFrameStyle
+   puts the tint on the element, and no stylesheet beats an inline style. So a
+   coloured arrival shows its own colour on the frame and the green only on the
+   body below, which is enough to read as new -- and better than the previous
+   arrangement, where the two fought over one border-color and the winner
+   depended on which had been written last. */
+.automation-card-framed.is-new {
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, var(--frame));
+}
+
+/* The card proper. --radius-sm because the frame is 14px on the outside and
+   5px thick: an inner corner has to lose exactly the frame's width or the two
+   arcs stop being concentric and the gap pinches at the corners. */
+.automation-card-body {
+  background: var(--frame-card);
+  /* The only line left in the card, now that the frame draws none -- and what
+     makes the inset read as inset rather than as a patch of a second colour. */
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  /* Takes the row's spare height so the foot lands on the same line across a
+     row -- the job .automation-card used to do before the frame came between
+     them. The description inside then takes the slack in turn. */
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.automation-card-framed.is-new .automation-card-body {
+  background: color-mix(in srgb, var(--profile-green-bg) 55%, var(--frame-card));
+  border-color: var(--profile-green-border);
+}
+
+/* Share and History on the leading edge, the step count on the trailing one,
+   both riding the frame between its top edge and the card's. The frame is 0 at
+   the top, so the 6px here is the whole of the space above them.
+
+   The two horizontal numbers exist to put this row on the card's own text
+   rules, now that the frame is too thin to contribute any of it: 2 + 5 + the
+   button's own 8 lands the first glyph at 15px, where the mark below it
+   starts, and 2 + 13 lands the count's last character at 15px from the other
+   edge, where the description ends. */
+.automation-card-bar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 6px 13px 6px 5px;
+}
+
+.automation-card-tools {
+  display: flex;
+  gap: 2px;
+}
+
+/* .filter-trigger's silhouette, which is the app's quiet control: nothing at
+   rest, a --hover plate under the pointer. Two outlined boxes on the frame
+   would out-weigh the two real buttons inside the card. The shadow is
+   suppressed with the border -- the base `button` rule hands every control a
+   hover shadow, and on a flat glyph that reads as a chip lifting off the
+   frame. */
+.automation-card-tool {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--ink-faint);
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.automation-card-tool:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Reads as a label and behaves as one -- no border, no fill -- but it is a
+   button into the editor, so it takes the same --hover plate its two
+   neighbours do. tabular-nums so a grid of cards keeps its counts on one
+   vertical rule instead of shuffling by a digit's width. */
+.automation-card-count {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-height: 0;
+  /* The 6px bleeds the plate past the words without moving them: the count has
+     to stay on the card's right-hand rule, plate or no plate. */
+  margin-right: -6px;
+  padding: 4px 6px;
+}
+
+.automation-card-count:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Mark and name -- one wrapping row, like .extension-card-head. The step count
+   that used to end this row lives in the strip above it now. The h2 became an
+   h3 here: the tab's own title in the Topbar is the h1, and a grid of twelve
+   h2s claimed twelve sections. */
+.automation-card-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.automation-card-head h3 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+  /* min-width rather than a truncation: a name is how you tell two automations
+     apart, so it wraps to a second line instead of ending in an ellipsis. */
+  min-width: 0;
+}
+
+/* The head's delete button is gone -- deleting a workflow is done from the
+   editor's footer now, beside Cancel and Save. Its rules went with it. */
+
+/* Why Run is grey is a tooltip on the wrapper around it, not a banner on the
+   card: the tab already carries one standing note about having no profiles, and
+   a second amber box repeating it on every card in the grid says the same thing
+   twelve times. The wrapper exists only to hold that title -- a disabled button
+   suppresses its own.
+
+   The wrapper is a plain span, so it needs telling it is a flex item. */
+.extension-card-foot > span {
+  display: inline-flex;
+}
+
+/* flex: 1 so Run takes half the foot: .extension-card-foot gives its direct
+   button children flex: 1, and Run is not one -- it is wrapped. Without this
+   the wrapper sized to the word and Edit took everything else.
+
+   Scoped to the automation card rather than written on .extension-card-foot >
+   span, which is not only this wrapper: an Extensions card puts its download
+   progress in a foot span too, and stretching that one moves a status line off
+   the leading edge it was put on. */
+.automation-card-body > .extension-card-foot > span {
+  flex: 1;
+}
+
+/* The metrics .extension-card-foot > button hands Edit, applied through the
+   wrapper to Run so the two halves match rather than differing by the 4px
+   between --control-h and 32px. */
+.automation-card-body > .extension-card-foot > span > button {
+  flex: 1;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+}
+
+/* Edit takes .filter-trigger's silhouette -- the quiet control the Profiles and
+   Proxies toolbars use for everything that is not the action the screen is for.
+   It was .ghost, which put a bordered box beside a filled one and left the foot
+   with two buttons both claiming the lead; now the fill alone says which of the
+   two is Run. Still half the row: the pair splits the card evenly whether or
+   not both are drawn as boxes.
+
+   Both rules are written through .extension-card-foot rather than on the class
+   alone, because that foot claims its non-ghost children on hover
+   (`> button:not(.ghost):hover { background: var(--accent-strong) }`) -- which
+   is right when the only button in it is a filled Install, and which painted
+   this one black-on-black the moment the border came off. Matching its
+   specificity is what takes the fill back. */
+.extension-card-foot > .automation-card-edit {
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  font-weight: 500;
+  gap: 7px;
+  min-height: 32px;
+}
+
+.extension-card-foot > .automation-card-edit:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* The description, and the reason every card's foot lands on the same line
+   across a row -- flex: 1 gives it the slack. Rendered even when empty, so a
+   card with no description still pushes its buttons down to meet its
+   neighbours'. Same rule as .extension-card p.
+   Two selectors because the two cards nest differently: a connector's
+   description is a child of .automation-card itself, an automation's sits one
+   level in, inside the frame's body. */
+.automation-card > p,
+.automation-card-body > p {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.automation-card-meta {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The last verdict, drawn as a log line rather than as a sentence: the status
+   led by its glyph on the leading edge, when it happened on the trailing one,
+   the full width of the card between them.
+
+   It is a <button> now -- the whole row opens the history -- so most of this
+   block is undoing what `button` hands every control: the accent fill, the 700
+   weight, the 36px floor, the 14px side padding. The negative margin bleeds the
+   hover plate 6px past the text on both sides so the row highlights as a row
+   rather than as a label with a tight box round it, the same trick .th-sort and
+   .filter-trigger use.
+
+   flex: 0 0 auto so it is never the element the card's spare height is taken
+   out of -- that is the description's job, above. */
+.automation-card-run {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--ink-soft);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 0 -6px;
+  min-height: 0;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.automation-card-run:not(:disabled):hover {
+  background: var(--hover);
+  /* Buttons in this app do not lift. See the note on `button:hover`. */
+  box-shadow: none;
+}
+
+/* The status carries the colour, not the row: a whole line painted red reads as
+   an error banner across the card, which a run that failed nine hours ago is
+   not. The glyph and the word take it; the timestamp beside them stays quiet.
+   Truncates rather than wraps -- "Finished with errors" is as long as this
+   vocabulary gets, and a two-line status would push the foot off the row its
+   neighbours' feet sit on. */
+.automation-card-run-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-card-run-label > svg {
+  flex: 0 0 auto;
+}
+
+.automation-card-run.is-ok .automation-card-run-label {
+  color: var(--profile-green-ink);
+}
+
+.automation-card-run.is-partial .automation-card-run-label {
+  color: var(--profile-amber-ink);
+}
+
+.automation-card-run.is-failed .automation-card-run-label {
+  color: var(--profile-red-ink);
+}
+
+.automation-card-run.is-cancelled .automation-card-run-label {
+  color: var(--ink-faint);
+}
+
+/* The one status that is not a verdict but a state, so it keeps the dot's
+   pulse: a still blue tick would say a run had finished blue. */
+.automation-card-run.is-running .automation-card-run-label {
+  color: var(--profile-blue-ink);
+}
+
+.automation-card-run.is-running .automation-card-run-label > svg {
+  animation: automation-run-spin 1.4s linear infinite;
+}
+
+@keyframes automation-run-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* tabular-nums so a column of cards keeps "42m ago" and "1d ago" on one rule
+   instead of shuffling by a digit's width. */
+.automation-card-run-when {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The button row is .extension-card-foot now (styles.css), so there is no
+   .automation-card-actions rule left. It holds two buttons splitting the card
+   evenly, and Run keeps the visual lead by being the filled one of the pair.
+   Share and History used to crowd in beside them as glyphs, which is what made
+   the row need an override sizing History to its content; both sit in the
+   strip at the top of the card now, and that override went with them. */
+
+/* The add tile is card-shaped but not a card: an outline standing where the
+   next automation goes. These four declarations undo .automation-card's
+   surface, and they have to be written at this specificity because
+   automations.css loads after styles.css -- at equal weight the plain
+   .extension-add-tile rule there loses to .automation-card above, and the tile
+   comes out as a filled card with a dashed border. */
+.automation-card.extension-add-tile {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  gap: 6px;
+}
+
+.automation-card.extension-add-tile:not(:disabled):hover {
+  background: var(--raised);
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+/* ── The step flow ───────────────────────────────────────────────────────────
+ * Node cards joined by a drawn connector, in one column. The connector is the
+ * point: a plain 6px gap between rounded boxes reads as a list of unrelated
+ * settings, and this is a program that runs top to bottom.
+ *
+ * Everything here is pseudo-elements on the existing boxes -- no SVG, no canvas
+ * library, no stored node positions. The model is a tree and the run log
+ * addresses steps by their path through it ('5.body.2'), so a flow that can be
+ * drawn from the tree alone is the flow that stays honest. */
+
+.automation-flow {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+}
+
+.automation-flow.is-nested {
+  margin-top: 0;
+}
+
+.automation-steps-empty {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* The gutter under each node is where its connector is drawn, so it is padding
+ * rather than a gap -- a gap belongs to neither neighbour and cannot be drawn
+ * into. --arm is the connector's x-offset: it lines up with the middle of the
+ * icon tile, so the line appears to leave the node from its glyph. */
+.automation-node {
+  --arm: 30px;
+  --gutter: 20px;
+  padding-bottom: var(--gutter);
+  position: relative;
+}
+
+/* Anchored bottom + height, not top + bottom. `top: 100%; bottom: 0` reads as
+   if it should span the gutter and does not: both percentages resolve against
+   this box's own height, so top lands below bottom, the height computes
+   negative and the line does not render at all. That shipped for exactly one
+   screenshot -- the arrowheads below drew fine, so the flow looked like a
+   column of cards with small triangles floating between them. */
+.automation-node::after {
+  background: var(--border);
+  bottom: 0;
+  content: '';
+  height: var(--gutter);
+  left: var(--arm);
+  position: absolute;
+  width: 2px;
+}
+
+/* The arrowhead, sitting at the foot of the line so the eye picks up direction
+ * without having to read the numbers. */
+.automation-node::before {
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--border);
+  bottom: 0;
+  content: '';
+  left: calc(var(--arm) - 3px);
+  position: absolute;
+  z-index: 1;
+}
+
+.automation-node-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-xs);
+}
+
+.automation-node-card.is-off {
+  opacity: 0.55;
+}
+
+.automation-node-card.is-open {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.automation-node-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.automation-node-handle {
+  color: var(--ink-faint);
+  cursor: grab;
+  display: inline-flex;
+}
+
+/* The tinted tile is what makes a row scannable as a kind at a glance -- the
+ * schema has named an icon for every step type since the catalogue was
+ * written, and until now nothing rendered it. */
+.automation-node-icon {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.automation-node-index {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 16px;
+}
+
+.automation-node-label {
+  align-items: baseline;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The pencil is the row's primary action, so it holds a tint at rest rather
+   than only on hover -- an icon button that is invisible until you find it is
+   the problem the chevron already had. */
+.automation-node-edit {
+  color: var(--ink-soft);
+  flex: none;
+}
+
+.automation-node-edit:hover {
+  color: var(--ink);
+}
+
+.automation-node-edit.is-editing {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-strong);
+}
+
+.automation-node-title {
+  flex: none;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* The generated summary is the one thing that must survive a narrow window,
+ * so it takes the slack and truncates rather than wrapping the row. */
+.automation-node-summary {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-node-enabled {
+  display: inline-flex;
+}
+
+.automation-node-fields {
+  border-top: 1px solid var(--border);
+  padding: 12px 12px 14px 46px;
+}
+
+.automation-step-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.automation-step-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 6px 0 0 var(--arm);
+}
+
+.automation-step-advanced summary {
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.automation-step-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+/* ── Branches ────────────────────────────────────────────────────────────────
+ * One box per 'steps' field on the node above: two for an if, one for a loop.
+ * They hang off the connector rather than sitting beside the node, so the
+ * reading order stays vertical and a branch is unambiguously *inside* the step
+ * that owns it.
+ *
+ * Two branches sit side by side when there is room and stack when there is not;
+ * a single-branch step (loop) always takes the full width, because a loop body
+ * squeezed into half a column for symmetry helps nobody. */
+
+/* margin-top is load-bearing, and its absence was the bug. The container sat
+ * flush against the node card above it while ::before reached 20px *up* from
+ * its own top edge -- so the trunk was drawn twenty pixels inside the card,
+ * over its bottom border and up towards the icon tile, which is exactly what
+ * made the line look like it came out of the step's glyph. The two numbers have
+ * to agree: the margin is the gap the line has to cross, and ::before's
+ * negative top is that same gap. */
+.automation-branches {
+  display: grid;
+  gap: 12px;
+  margin-left: var(--arm);
+  margin-top: 12px;
+  padding: 0 0 0 16px;
+  position: relative;
+}
+
+.automation-branches[data-count='2'] {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+/* The elbow: the node's connector runs down past the branches, and each branch
+ * taps off it. Drawn on the container so it spans however many there are. */
+.automation-branches::before {
+  background: var(--border);
+  bottom: 12px;
+  content: '';
+  left: 0;
+  position: absolute;
+  top: -12px;
+  width: 2px;
+}
+
+.automation-branch {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px 10px;
+  position: relative;
+}
+
+/* The stub joining this branch to the trunk. It lands on the label's line, so
+   it moved down 2px with the box's top padding. */
+.automation-branch::before {
+  background: var(--border);
+  content: '';
+  height: 2px;
+  left: -16px;
+  position: absolute;
+  top: 24px;
+  width: 16px;
+}
+
+.automation-branch-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+/* Yes and No carry the app's existing green and red, mixed back toward the
+   surface so a branch reads as a labelled region rather than as a status. The
+   loop body gets the violet, which is not used by any step state.
+   The fill is the same three status tokens as the border and the label, so the
+   branch is one colour stated three ways. Held well back toward --paper: the
+   step cards inside are --raised and have to stay the foreground, and a branch
+   at full --status-*-bg reads as an alert about the steps rather than as the
+   region containing them. Both themes define these, so nothing here needs a
+   dark-mode counterpart. */
+.automation-branch[data-branch='then'] {
+  background: color-mix(in srgb, var(--status-active-bg) 55%, var(--paper));
+  border-color: color-mix(in srgb, var(--status-active-border) 45%, var(--border));
+}
+
+.automation-branch[data-branch='then'] .automation-branch-label {
+  color: var(--status-active-ink);
+}
+
+.automation-branch[data-branch='else'] {
+  background: color-mix(in srgb, var(--status-ban-bg) 55%, var(--paper));
+  border-color: color-mix(in srgb, var(--status-ban-border) 45%, var(--border));
+}
+
+.automation-branch[data-branch='else'] .automation-branch-label {
+  color: var(--status-ban-ink);
+}
+
+.automation-branch[data-branch='body'] {
+  background: color-mix(in srgb, var(--status-review-bg) 55%, var(--paper));
+  border-color: color-mix(in srgb, var(--status-review-border) 45%, var(--border));
+}
+
+.automation-branch[data-branch='body'] .automation-branch-label {
+  color: var(--status-review-ink);
+}
+
+/* The last node inside a branch still gets its connector stub down to the
+ * branch's own Add step, which is the correct reading -- but the box should not
+ * end on 20px of empty gutter. */
+.automation-branch .automation-node:last-of-type {
+  --gutter: 14px;
+}
+
+.automation-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── The editor's right-hand column ──────────────────────────────────────────
+ * .profile-editor-side had no rule anywhere in either stylesheet. It is a plain
+ * block, so its five controls stacked with whatever margins they brought with
+ * them -- which for a <label class="field"> is none at all. That is why the
+ * timeout's hint appeared to be glued to the checkbox under it: nothing
+ * separated them. The gap belongs to the column, not to each field.
+ *
+ * Scoped to the automation editor. The profile editor uses the same layout
+ * class and settled its own spacing long ago inside .profile-summary. */
+.automation-modal .profile-editor-side {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+}
+
+/* Trash's second action. "Delete permanently" is two words longer than
+   anything else this foot holds and wrapped to two lines in a 300px card,
+   which made the row taller than every other card in the grid. */
+.automation-card-edit.danger {
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+/* The settings, on their own surface. --paper against the dialog's --raised is
+   the same inset relationship .automation-node-icon uses against its card, so
+   this reads as a recessed panel rather than as a new kind of box. */
+.automation-settings-card {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* ── The selector Check ── */
+
+.automation-check {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.automation-check-run {
+  flex: none;
+}
+
+.automation-check-result {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* One match is the answer you want; several is a step that will act on
+   whichever the browser returns first, which is a warning and not an error. */
+.automation-check-result.is-ok {
+  color: var(--status-active-ink);
+}
+
+.automation-check-result.is-warn {
+  color: var(--status-warmup-ink);
+}
+
+.automation-check-result.is-bad {
+  color: var(--danger);
+}
+
+.automation-check-result.is-idle {
+  color: var(--ink-soft);
+}
+
+/* ── Add-step menu ── */
+
+/* The end of the flow, and the only way to add anything to it, so it carries
+   the accent. The first cut was a dashed ghost in --ink-soft, on the theory
+   that it should not compete with the nodes above it; at 12px, greyed, behind
+   a dashed hairline, it lost to them so completely that it read as a disabled
+   control. It is the primary action on this screen -- the flow stays empty
+   until it is pressed -- and it should look like one.
+
+   The top margin matters as much as the colour did: it sat flush under the
+   last node's connector, so the arrow appeared to point at nothing. */
+.automation-add {
+  align-items: center;
+  align-self: flex-start;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--accent-ink);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 650;
+  gap: 7px;
+  margin-top: 6px;
+  min-height: var(--control-h-sm);
+  padding: 0 16px;
+}
+
+.automation-add:hover {
+  background: var(--accent-strong);
+}
+
+/* Inside a branch it is one of three or four on screen at once, and a stack of
+   filled pills would outweigh the steps they belong to -- so it keeps the
+   weight and the shape but states itself in ink rather than in fill. */
+.automation-add.is-subtle {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.automation-add.is-subtle:hover {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.automation-add-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* The colour is the point. These override the base button rule's background
+   but used to inherit its `color: var(--accent-ink)` -- which is #ffffff in
+   light mode, on a --surface of #f7f7f6. Every step type in the picker was
+   white text on a white chip, at about 1.03:1. */
+.automation-add-menu button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 4px 10px;
+}
+
+.automation-add-menu button:hover {
+  background: var(--hover);
+}
+
+.automation-add-menu .automation-add-cancel {
+  border-style: dashed;
+  color: var(--ink-soft);
+}
+
+/* ── Key/value and condition editors ── */
+
+.automation-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.automation-kv-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+}
+
+.automation-condition {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.automation-problems {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.automation-json textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Run log ── */
+
+.run-log-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 16px;
+  min-height: 360px;
+}
+
+.run-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+/* Same white-on-white bug the add-step picker had: a transparent background
+   over the base button rule's --accent-ink. */
+.run-log-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.run-log-entry.is-active {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.run-log-entry-meta,
+.run-log-entry-time {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.run-log-detail {
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.run-log-lines {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+/* Indentation is inline (padding-left from the entry's path depth), so the
+ * log lines up with the editor's nesting without a class per level. */
+.run-log-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+/* Warn and error tint the whole line, message included. The ink tokens are the
+   ones the status chips use, so a warn line and a warmup chip are the same
+   amber in both themes. */
+.run-log-line.is-warn {
+  color: var(--status-warmup-ink);
+}
+
+.run-log-line.is-error {
+  color: var(--danger);
+}
+
+.run-log-line-path {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  min-width: 46px;
+}
+
+.run-log-line-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-log-line-ms {
+  color: var(--ink-soft);
+}
+
+.run-log-shot {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ── Connectors ──────────────────────────────────────────────────────────────
+ * The Connectors view reuses .automation-card wholesale -- same grid, same
+ * head, same foot -- so only what a connector card has and an automation card
+ * does not needs rules: the masked secret, the test verdict, and the modal's
+ * kind picker. */
+
+/* The masked secret, monospace so the four visible characters can actually be
+ * compared against the credential in hand -- the only thing they are for. */
+.connector-card-secret {
+  color: var(--ink-soft);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Test says what the service said, in the service's own words. Green and red
+ * because there are exactly two answers and no third state worth a colour. */
+.connector-card-test {
+  align-items: flex-start;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0;
+}
+
+.connector-card-test > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.connector-card-test.is-ok {
+  color: var(--status-active-ink);
+}
+
+.connector-card-test.is-bad {
+  color: var(--danger);
+}
+
+/* Delete keeps to the far edge of the foot so the safe actions read as one
+ * group and the destructive one stands apart. */
+.connector-card-delete {
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+
+.connector-card-delete:hover {
+  color: var(--danger);
+}
+
+/* The modal's kind picker: two headed groups of small tiles. A grid rather
+ * than an eighteen-entry select because the choice is the whole first step of
+ * the dialog, and a dropdown hides seventeen of the answers.
+ *
+ * No padding of its own: .profile-modal already pads 18px and gaps its
+ * children 14px, and the first cut of these rules added the old Settings
+ * section's 22px on top -- which is why the picker sat in a double inset
+ * against its own title. Same fix on .connector-form below. */
+.connector-pick-group {
+  padding: 0;
+}
+
+.connector-pick-group h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.connector-pick-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.connector-pick-tile {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.connector-pick-tile:hover {
+  border-color: var(--accent);
+}
+
+.connector-pick-tile > svg {
+  color: var(--ink-soft);
+  flex: none;
+}
+
+.connector-form {
+  display: grid;
+  gap: 14px;
+  padding: 0;
+}
+
+/* The reveal toggle sits inside the field's row, not floating over the input,
+ * so the input keeps its full click target and the toggle keeps a real one. */
+.connector-secret-input {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.connector-secret-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Back-to-the-picker leans left so Test / Cancel / Save keep the right edge
+ * the app's other modal footers use. */
+.connector-modal-back {
+  margin-right: auto;
+}
+
+/* Brand marks keep their own colours and their own aspect -- height fixed,
+ * width left to the artwork, exactly as .tag-logo does and for the same
+ * reason: several brand cuts are not square. */
+.connector-logo {
+  max-width: 30px;
+  object-fit: contain;
+  width: auto;
+}
+
+/* Load/Refresh models sits under the model box, beside the way back to the
+ * list when the user chose to type. */
+.connector-models-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+/* One colour only, drawn for one background -- see .tag-logo's note in
+ * styles.css. Which marks carry these classes is LOGO_ADAPT in
+ * src/data/connectors.ts. */
+:root:not([data-theme="dark"]) .connector-logo.invert-on-light,
+:root[data-theme="dark"] .connector-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+/* ---- card identity, stars, run verdicts, arrivals ------------------------ */
+
+/* The plate behind an *uncoloured* automation's glyph. .extension-mark.is-fallback
+ * fills with --paper, which the card body now is in dark -- so the plate had
+ * nothing to sit against and vanished, taking the glyph's box with it. Stepping
+ * back to --frame puts it on the same side of the card it is already on in
+ * light, and does it without either rule naming a theme.
+ *
+ * The coloured path needs nothing: AutomationMark only reaches for
+ * .automation-mark below when there is a colour, and then profileColorStyle
+ * fills the plate inline. */
+.automation-card-head > .extension-mark.is-fallback {
+  background: var(--frame);
+}
+
+/* The default workflow glyph on its colour plate. Same box as .is-fallback,
+ * but the fill and border come inline from profileColorStyle -- six
+ * theme-aware token triples or the user's own hex -- so the rule only shapes,
+ * never colours.
+ *
+ * Brand marks used to land here too, which is what put an 18px Instagram logo
+ * in the middle of a violet chip. They take .is-brand below instead. */
+.extension-mark.automation-mark {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+}
+
+/* A brand logo is its own colour and its own shape. It gets the box and
+ * nothing else: no plate, no hairline, no radius, and no tint -- AutomationMark
+ * does not pass profileColorStyle down this path at all, and the automation's
+ * colour goes to the card's frame instead.
+ *
+ * The two rules on .tag-logo undo TagMark's inline sizing, which is written for
+ * a chip: it fixes height and lets width run to size * 1.9 so a wordmark like
+ * eBay is not squashed. Inside a square box that spills, so the width is capped
+ * back and object-fit -- already on .tag-logo -- letterboxes the wide cuts.
+ * The theme-adapt filters (.invert-on-light and friends) still apply: they are
+ * what keeps a single-colour mark like TikTok visible, and the surface behind
+ * it is --raised now rather than --paper, which is the same direction in both
+ * themes. */
+.extension-mark.is-brand {
+  align-items: center;
+  background: none;
+  border: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.extension-mark.is-brand .tag-logo {
+  height: 100%;
+  max-width: 100%;
+}
+
+/* My star. A bare glyph riding inline at the end of the card's name -- inside
+ * the h3, so a wrapping name takes it along -- not a framed control. The base
+ * `button` rule hands every button a min-height, padding and a hover shadow;
+ * all three are undone here, because a star with a control-sized hit box and a
+ * shadow reads as a fourth card action, which it is not. Fill arrives with
+ * .is-starred so the off state is an outline, the way every star toggle
+ * everywhere works. */
+.automation-star {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  display: inline-flex;
+  margin-left: 6px;
+  min-height: 0;
+  padding: 1px;
+  vertical-align: -2px;
+}
+
+.automation-star:not(:disabled):hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.automation-star.is-starred {
+  color: var(--profile-amber-ink);
+}
+
+.automation-star.is-starred svg {
+  fill: currentColor;
+}
+
+/* The verdict at a glance, before the badge spells it out. Same palette as
+ * RUN_TONE: green/amber/red are the profile ink tokens, cancelled is faint,
+ * running breathes in blue because "still going" is the one state that is not
+ * a verdict yet. */
+.automation-run-dot {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.automation-run-dot.is-ok {
+  background: var(--profile-green-ink);
+}
+
+.automation-run-dot.is-partial {
+  background: var(--profile-amber-ink);
+}
+
+.automation-run-dot.is-failed {
+  background: var(--profile-red-ink);
+}
+
+.automation-run-dot.is-cancelled {
+  background: var(--ink-faint);
+}
+
+.automation-run-dot.is-running {
+  animation: automation-run-pulse 1.6s ease-in-out infinite;
+  background: var(--profile-blue-ink);
+}
+
+@keyframes automation-run-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* A card that arrived since this machine last looked -- a teammate's install or
+ * an agent over MCP. See src/lib/newSince.ts.
+ *
+ * This was a three-second glow that decayed back to the normal surface. It now
+ * holds for the whole visit and clears on the next one, because the three table
+ * tabs grew the same marker and a card cannot mean something different from a
+ * row three tabs over. Holding is also the more useful of the two: an arrival
+ * you have to catch within three seconds of the tab painting is one you cannot
+ * sort, filter or come back to.
+ *
+ * The mix is against --raised rather than transparent, unlike the table rows:
+ * a card sits on --surface with a --raised fill of its own, so mixing to
+ * transparent would let the page show through it. */
+.automation-card.is-new {
+  background: color-mix(in srgb, var(--profile-green-bg) 70%, var(--raised));
+  border-color: var(--profile-green-border);
+}
+
+/* The schedule's profile checklist -- capped and scrollable so a workspace
+ * with forty profiles does not turn the settings column into a page. */
+.automation-schedule-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* Who made it, who last touched it. A standing fact under the settings, in
+ * the same quiet voice as a field hint. */
+.automation-attribution {
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 2px 0;
+}
+
+/* ---- the Notification bot view ------------------------------------------- */
+
+/* Two cards, capped like a settings column rather than stretched to the grid
+ * width -- there are exactly two of these and they hold forms, not tiles. */
+.notification-bot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.notification-bot-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.notification-bot-card h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.notification-bot-card p {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 4px;
+  margin: 0;
+}
+
+.notification-bot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notification-bot-actions > span {
+  display: inline-flex;
+}
+
+/* The owner's one surviving line of bot plumbing, in a hint's voice. The
+ * Change button undoes the base button chrome the same way .automation-star
+ * does -- it is a link in a sentence, not a control. */
+.notification-bot-footnote {
+  align-items: center;
+  color: var(--ink-faint);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin: 0 2px;
+}
+
+.notification-bot-change {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--ink-soft);
+  min-height: 0;
+  padding: 1px 2px;
+  text-decoration: underline;
+}
+
+.notification-bot-change:not(:disabled):hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Mark, title, About -- one row atop the link card. The About button rides the
+ * right edge, the way the Cookies toolbar places its own. */
+.notification-bot-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.notification-bot-head h3 {
+  margin: 0;
+}
+
+.notification-bot-head .notification-bot-about {
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+/* ── Parameters: declaring them, and answering them ────────────────────────── */
+
+/* The declaration card, above the settings card in the editor's right column.
+   Its own surface for the same reason the settings card has one -- but ABOVE
+   it, because parameters are what the steps read and the settings below are
+   wiring you set once. */
+.automation-parameters {
+  gap: 10px;
+}
+
+/* The heading and its "i" on one line, with the hint below the pair. Its own
+   row rather than the InfoHint sitting inside the h3, so the trigger's 4px of
+   button padding cannot nudge the heading's baseline. */
+.automation-parameters-title {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.automation-parameters-head h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.automation-parameters-head code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.automation-param {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.automation-param-row {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+}
+
+/* The whole collapsed row is the toggle, not just the chevron: a 14px target
+   beside a 300px row is a target nobody aims at. */
+.automation-param-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.automation-param-toggle:hover {
+  color: var(--accent-strong);
+}
+
+/* Monospace because it is a variable name, and the same treatment it gets
+   inside a {{vars.x}} template. Truncates rather than wrapping -- the summary
+   is a glance, and the expanded body has the whole of it. */
+.automation-param-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-param-body {
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.automation-param-add {
+  justify-self: start;
+}
+
+/* Warnings, not errors. Same list, quieter ink: these do not block Save, and
+   painting them --danger would say the workflow is broken when a caller may
+   well be supplying the variable. */
+.automation-problems.is-warning {
+  color: var(--status-warmup-ink);
+}
+
+/* ── Answering parameters (profile editor and Run dialog) ── */
+
+.param-values {
+  display: grid;
+  gap: 10px;
+}
+
+/* Two columns, no prose. The Run dialog shows one of these per ticked profile,
+   so a full-height form on five parameters would push the second profile --
+   the one you are running a different city on -- off the bottom of the list. */
+.param-values.is-compact {
+  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* A textarea keeps the full width: `list` and `textarea` values are lines, and
+   half a line is not a useful measure for either. Short, though -- three rows
+   of empty box per profile is most of what pushed the next profile off screen,
+   and it still scrolls and still drag-resizes. */
+.param-values.is-compact .field:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.param-values.is-compact textarea {
+  min-height: 0;
+  height: 52px;
+}
+
+.param-values.is-compact .field > span {
+  font-size: 11px;
+}
+
+/* Hints are the first thing to go. They are written once, in the declaration,
+   and the profile editor is where there is room to read them -- here they would
+   triple the height of every row. The missing-value line stays: it is the one
+   sentence that changes what the button does. */
+.param-values.is-compact .field-hint {
+  display: none;
+}
+
+.param-value-missing {
+  color: var(--danger);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
+/* Insert chips under an interpolated step field. Small and quiet: they are an
+   affordance beside the input, not a second control competing with it. */
+.automation-insert-vars {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.automation-insert-vars-label {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.automation-insert-var {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.automation-insert-var:hover {
+  background: var(--hover);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* ── The profile editor's Automation values block ── */
+
+.profile-automation-values {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.profile-automation-values-block {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+
+.profile-automation-values-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.profile-automation-values-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-automation-values-note {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.profile-automation-values-add {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 6px;
+}
+
+.profile-automation-values-add select {
+  flex: 1;
+}
+
+/* ── The Run dialog's per-profile values ── */
+
+/* The wrapper that lets the form be a SIBLING of the row's <label> rather than
+   a child of it -- a label's implicit activation would toggle the checkbox on
+   every click into an input. */
+.run-profiles-entry {
+  display: grid;
+}
+
+/* Indented to the row's checkbox column, so the values read as belonging to
+   the profile above them rather than as a new section. */
+.run-profiles-params {
+  border-left: 2px solid var(--border-soft);
+  margin: 0 0 8px 34px;
+  padding: 2px 0 2px 12px;
+}
+
+.run-profiles-save {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

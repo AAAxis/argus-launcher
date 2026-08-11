@@ -1,0 +1,210 @@
+/* The plan plate, what the plan includes, and the usage meters.
+ *
+ * Was styles.css:2054-2257, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Plan ──
+ *
+ * A plan surface, so this block and .settings-included below are two of the
+ * three places allowed to draw with --plan-accent. See the token's comment at
+ * the top of this file. */
+.settings-plan {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+/* Washed rather than filled: this plate sits at the top of a panel of plain
+ * rows, and a solid accent block that size would be the loudest thing in
+ * Settings. */
+.settings-plan-mark {
+  align-items: center;
+  background: color-mix(in srgb, var(--plan-accent) 12%, transparent);
+  border-radius: var(--radius);
+  color: var(--plan-accent);
+  display: inline-flex;
+  flex: none;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.settings-plan-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-plan-title {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-plan-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* The status word arrives lowercase from the database ("active", "past_due").
+ * Capitalised here rather than in the component so the Badge stays the app's
+ * one pill and does not grow a formatting opinion for this caller. */
+.settings-plan-title .status-chip {
+  text-transform: capitalize;
+}
+
+/* ── What the plan includes ── */
+.settings-included {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  padding: 12px 0;
+}
+
+.settings-included-tile {
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+}
+
+.settings-included-icon {
+  align-items: center;
+  color: var(--plan-accent);
+  display: inline-flex;
+  margin-bottom: 4px;
+}
+
+.settings-included-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.settings-included-tile strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+/* A workspace whose limit columns disagree with the plan it is on. Warning
+ * rather than danger: nothing is broken and nothing the user did caused it --
+ * the numbers are simply not the ones the tier sells, which is a billing
+ * correction, not a failure.
+ *
+ * Borrows the --status-warmup-* triple rather than tinting --danger. Those are
+ * introduced for the profile status pills, but they are the only warning colours
+ * in the file that carry their own light and dark values, and a note that reads
+ * as amber on paper and mud on charcoal is worse than reusing them. */
+.settings-note {
+  background: var(--status-warmup-bg);
+  border: 1px solid var(--status-warmup-border);
+  border-radius: var(--radius);
+  color: var(--status-warmup-ink);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+}
+
+.settings-plan p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.settings-plan-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Usage meters ── */
+.settings-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.settings-meter-numbers {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+/* The meter's own name, when the caller hands it one instead of drawing a
+ * heading above the control. The auto margin is the whole layout: the name sits
+ * hard left, the count stays hard right where every other meter puts it, and
+ * the track spans both underneath. Two rows, not three. */
+/* align-self overrides the row's baseline: the count is the tallest thing on the
+ * line, and baseline-aligning a flex box that contains an icon lines the icon up
+ * with the digits instead of the words next to it. */
+.settings-meter-label {
+  align-items: center;
+  align-self: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  margin-inline-end: auto;
+  min-width: 0;
+}
+
+/* One line instead of two, for the Team toolbar. The stacked form is right in
+ * Settings, where a meter owns a row and vertical space is free -- but in a
+ * toolbar it makes a two-line block sitting beside one-line controls, and the
+ * numbers ride above the track instead of beside the button they explain. */
+.settings-meter.is-compact {
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-meter.is-compact .settings-meter-numbers {
+  flex: none;
+  white-space: nowrap;
+}
+
+.settings-meter.is-compact .settings-meter-track {
+  min-width: 56px;
+}
+
+.settings-meter strong {
+  font-size: 15px;
+}
+
+.settings-meter span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.settings-meter-track {
+  background: var(--border-soft);
+  border-radius: 999px;
+  height: 5px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.settings-meter-track span {
+  background: var(--accent);
+  display: block;
+  height: 100%;
+  transition: width 0.2s var(--ease);
+}
+
+.settings-meter-track span.full {
+  background: var(--danger);
+}
+

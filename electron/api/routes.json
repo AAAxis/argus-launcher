@@ -1,0 +1,712 @@
+{
+  "$comment": [
+    "The local automation API's route table, and the one place it is written down.",
+    "",
+    "It used to be three: the pathname allow-list in electron/main.cjs, the tool",
+    "catalogue in electron/mcp/tools.cjs, and API_GROUPS in src/data/apiDocs.ts.",
+    "Three hand-maintained copies of one list, kept in step by a comment -- and they",
+    "had already drifted. apiDocs documented POST /v1/proxies, POST /v1/profiles and",
+    "POST /v1/profiles/{id}/launch, none of which are routed, and advertised a",
+    "`notes` field on /v1/profiles/update that the handler's whitelist does not have.",
+    "Agents handed that brief burned their first turns on 404s.",
+    "",
+    "Same device as electron/automation/step-schema.json: JSON, because nothing",
+    "compiles electron/ and a TypeScript table would have to be maintained twice.",
+    "src/api/routes.ts pins it to a type; scripts/verify-api-routes.mjs asserts the",
+    "table and main.cjs's allow-list agree in both directions.",
+    "",
+    "`channel` marks a route whose dispatch is driven from this table. The older",
+    "routes are documented here but still dispatched by their hand-written blocks in",
+    "main.cjs -- migrating those is a separate job, and the verify script is what",
+    "stops the two descriptions diverging in the meantime.",
+    "",
+    "`scope`: 'any' accepts any valid key; 'unscoped' additionally requires a key",
+    "with no folderScope. Automations are org-wide objects with no folder of their",
+    "own, so a key granted one folder must not be able to author them.",
+    "",
+    "`mcp` names the tool in electron/mcp/tools.cjs that fronts this route, where",
+    "one exists. Not every route has one on purpose -- each tool costs context in",
+    "every session, so destructive and bulk routes stay HTTP-only."
+  ],
+  "$sessionToolsComment": [
+    "MCP tools that drive an open page over CDP directly and so have no route of",
+    "their own -- they resolve a port through POST /v1/profiles/cdp and then talk",
+    "to the browser. The definitions live in electron/mcp/tools.cjs.",
+    "",
+    "These carry a label and a group because they are the half of the tool surface",
+    "the API tab could not show. The tab renders the route table, and a tool with",
+    "no route was simply absent from it -- so the one screen that answers 'what can",
+    "reach my profiles' was missing the five tools that touch the page itself.",
+    "They render as MCP-only rows: no curl, because there is no endpoint to call.",
+    "",
+    "The design at docs/superpowers/specs/2026-08-05-api-mcp-browser-control-design.md",
+    "gives all five a real /v1/pages/* route, at which point they become ordinary",
+    "entries in `routes` below and this array goes away."
+  ],
+  "sessionTools": [
+    {
+      "mcp": "monti_list_tabs",
+      "group": "Driving a page",
+      "label": "List the open pages in a running profile"
+    },
+    {
+      "mcp": "monti_navigate",
+      "group": "Driving a page",
+      "label": "Point a page at a URL and wait for it to settle"
+    },
+    {
+      "mcp": "monti_read_page",
+      "group": "Driving a page",
+      "label": "Read a page's visible text, whole or by CSS selector"
+    },
+    {
+      "mcp": "monti_screenshot",
+      "group": "Driving a page",
+      "label": "Screenshot a page — JPEG by default, PNG on request"
+    },
+    {
+      "mcp": "monti_eval",
+      "group": "Driving a page",
+      "label": "Evaluate a JavaScript expression in a page and return its value"
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v1/profiles",
+      "mcp": "monti_list_profiles",
+      "group": "Profiles",
+      "label": "List profiles (optional ?folder=<id>)",
+      "scope": "any"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/get",
+      "mcp": "monti_get_profile",
+      "group": "Profiles",
+      "label": "Read one profile",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/create",
+      "group": "Profiles",
+      "label": "Create a profile",
+      "scope": "any",
+      "channel": "monti:create-profile-request",
+      "mcp": "monti_create_profile",
+      "mcpDescription": "Create a browser profile. Only name is required; everything else gets the same defaults the app's own New Profile dialog uses -- status Ready, a random colour, a stable Windows 11 fingerprint, no proxy. proxyMode 'assigned' needs proxyId to name a proxy from the library (monti_list_proxies); omit both to create a direct-connection profile. Returns the created profile. Its id is permanent: it doubles as the on-disk browser-data directory name.",
+      "body": "{ \"name\": \"warmup-01\", \"proxyId\": \"<id>\", \"tags\": [\"warmup\"] }",
+      "fields": [
+        {"key": "name", "type": "string", "required": true,
+         "description": "The profile's display name."},
+        {"key": "folderId", "type": "string",
+         "description": "Folder to file it in. Omit for the root. Folder ids come from monti_list_folders."},
+        {"key": "status", "type": "string",
+         "description": "Workflow status label. Defaults to Ready. monti_list_statuses has the ones this workspace uses."},
+        {"key": "tags", "type": "tags",
+         "description": "Free-text labels, at most 5. Extras are dropped."},
+        {"key": "color", "type": "string",
+         "description": "A preset name like blue or violet, or a #rrggbb hex. Defaults to a random preset."},
+        {"key": "avatar", "type": "string",
+         "description": "\"brand:<slug>\" for a built-in site logo (brand:instagram, brand:facebook, ...). Omit for initials."},
+        {"key": "proxyMode", "type": "string",
+         "description": "assigned, direct or free_proxy. Defaults to assigned when proxyId is given, direct otherwise."},
+        {"key": "proxyId", "type": "string",
+         "description": "A proxy from the library (monti_list_proxies). Implies proxyMode assigned."},
+        {"key": "startUrl", "type": "string",
+         "description": "URL the profile opens on launch."},
+        {"key": "fingerprintOs", "type": "string",
+         "description": "Windows 11, Windows 10, macOS, Ubuntu, Android or iOS. Defaults to Windows 11."},
+        {"key": "randomizeFingerprint", "type": "boolean",
+         "description": "Pick a random realistic device identity for that OS instead of the stable default."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/update",
+      "mcp": "monti_update_profile",
+      "group": "Profiles",
+      "label": "Update name, status, tags, colour, avatar, folder, proxy mode, start URL or launch automation",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"status\": \"Ready\", \"proxyMode\": \"direct\", \"startUrl\": \"https://example.com\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/notes",
+      "group": "Profiles",
+      "label": "Read a profile's notes, newest first",
+      "scope": "any",
+      "channel": "monti:list-profile-notes-request",
+      "mcp": "monti_profile_notes",
+      "mcpDescription": "The notes on a profile, newest first -- what it is for, who it belongs to, what has been tried on it. Each note carries its author and when it was written. Read this before acting on an unfamiliar profile: it is where the humans running this workspace write down the things the profile's name and tags cannot say.",
+      "body": "{ \"profileId\": \"<id>\", \"limit\": 50 }",
+      "fields": [
+        {"key": "profileId", "type": "string", "required": true,
+         "description": "The profile whose notes to read."},
+        {"key": "limit", "type": "number",
+         "description": "How many of the newest notes to return. Defaults to 50."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/notes/add",
+      "group": "Profiles",
+      "label": "Append a note to a profile",
+      "scope": "any",
+      "channel": "monti:add-profile-note-request",
+      "mcp": "monti_add_profile_note",
+      "mcpDescription": "Append a note to a profile's thread -- what you did to it, what you found, why it is set up the way it is. The note is filed under this API key's own name and marked as written by an agent, so it is distinguishable from what a person wrote. Notes are append-only over the API: there is no tool to edit or delete one, including your own.",
+      "body": "{ \"profileId\": \"<id>\", \"body\": \"Warmed up for 20 minutes; no checkpoint.\" }",
+      "fields": [
+        {"key": "profileId", "type": "string", "required": true,
+         "description": "The profile to annotate."},
+        {"key": "body", "type": "string", "required": true,
+         "description": "The note itself, up to 2000 characters."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/assign-proxy",
+      "mcp": "monti_assign_proxy",
+      "group": "Profiles",
+      "label": "Put a profile on a proxy from the library",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"proxyId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/launch-automation",
+      "mcp": "monti_launch_profile",
+      "group": "Profiles",
+      "label": "Open a profile for automation; returns its CDP url. Reuses a running session unless relaunch is set",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"relaunch\": false }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/cdp",
+      "mcp": "monti_profile_session",
+      "group": "Profiles",
+      "label": "Where a running profile's CDP endpoint is, without launching it",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/close-automation",
+      "mcp": "monti_close_profile",
+      "group": "Profiles",
+      "label": "Close a session this key opened",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/delete",
+      "mcp": "monti_delete_profile",
+      "group": "Profiles",
+      "label": "Move a profile to Trash (permanent: true to purge; the tool only soft-deletes)",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"permanent\": false }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/profiles/update-fingerprint",
+      "mcp": "monti_update_fingerprint",
+      "group": "Profiles",
+      "label": "Re-roll or override a profile's fingerprint",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"fingerprint\": { \"canvas\": \"Noise\" } }"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/proxies",
+      "mcp": "monti_list_proxies",
+      "group": "Proxies",
+      "label": "List proxies",
+      "scope": "any"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/create",
+      "group": "Proxies",
+      "label": "Add proxy",
+      "scope": "any",
+      "body": "{ \"name\": \"US proxy\", \"type\": \"socks5\", \"host\": \"1.2.3.4\", \"port\": 1080 }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/update",
+      "group": "Proxies",
+      "label": "Update a proxy",
+      "scope": "any",
+      "body": "{ \"proxyId\": \"<id>\", \"name\": \"US proxy\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/check",
+      "mcp": "monti_check_proxy",
+      "group": "Proxies",
+      "label": "Check reachability and egress IP",
+      "scope": "any",
+      "body": "{ \"host\": \"1.2.3.4\", \"port\": 1080, \"type\": \"socks5\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/delete",
+      "group": "Proxies",
+      "label": "Remove a proxy",
+      "scope": "any",
+      "body": "{ \"proxyId\": \"<id>\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/proxies/reimport",
+      "group": "Proxies",
+      "label": "Re-import proxies from a file on disk",
+      "scope": "any",
+      "body": "{ \"filePath\": \"/path/to/proxies.txt\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cookies/bulk-match",
+      "group": "Cookies",
+      "label": "Match exported cookie files in a folder to profiles by name",
+      "scope": "any",
+      "body": "{ \"folderPath\": \"/path/to/cookies\", \"profileIds\": [\"<id>\"] }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cookies/push-local",
+      "group": "Cookies",
+      "label": "Attach a cookie file on disk to one profile",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"filePath\": \"/path/to/cookies.json\" }"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/monitoring/report",
+      "group": "Monitoring",
+      "label": "Report a run's outcome from an external script",
+      "scope": "any",
+      "body": "{ \"profileId\": \"<id>\", \"status\": \"ok\" }"
+    },
+
+    {
+      "method": "GET",
+      "path": "/v1/automations",
+      "group": "Automations",
+      "label": "List the org's automations, with step counts",
+      "scope": "any",
+      "channel": "monti:list-automations-request",
+      "mcp": "monti_list_automations",
+      "mcpDescription": "List the automations in this workspace. Returns id, name, description, step count and where each is wired in.",
+      "fields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/automations/schema",
+      "group": "Automations",
+      "label": "The step catalogue: every step type, its fields and how they validate",
+      "scope": "any",
+      "local": true,
+      "mcp": "monti_automation_schema",
+      "mcpDescription": "The step vocabulary an automation is written in. Call this before monti_create_automation rather than guessing field names.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/get",
+      "group": "Automations",
+      "label": "Read one automation, including its full step tree",
+      "scope": "any",
+      "channel": "monti:get-automation-request",
+      "mcp": "monti_get_automation",
+      "mcpDescription": "Read one automation's full step tree, in the same shape monti_create_automation accepts.",
+      "body": "{ \"automationId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/create",
+      "group": "Automations",
+      "label": "Create an automation. Steps are validated before anything is stored",
+      "scope": "unscoped",
+      "channel": "monti:create-automation-request",
+      "mcp": "monti_create_automation",
+      "mcpDescription": "Create an automation from a list of steps. Call monti_automation_schema first for the step vocabulary. Steps are validated before anything is stored, and the error names the exact path that failed.",
+      "body": "{ \"name\": \"Sign in\", \"steps\": [{ \"id\": \"s1\", \"type\": \"goto\", \"url\": \"https://example.com\" }] }",
+      "fields": [
+        {"key": "name", "type": "string", "required": true},
+        {"key": "description", "type": "string"},
+        {
+          "key": "steps",
+          "type": "steps",
+          "required": true,
+          "description": "The step tree. See monti_automation_schema for the field list of each type."
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "description": "Free-text labels, at most 5. Extras are dropped."
+        },
+        {
+          "key": "pinned",
+          "type": "boolean",
+          "description": "Show as a tile on every profile's start page."
+        },
+        {
+          "key": "timeoutMs",
+          "type": "number",
+          "description": "Whole-run ceiling in milliseconds. Capped at 600000."
+        },
+        {
+          "key": "closeOnFinish",
+          "type": "boolean",
+          "description": "Close the browser when the run ends. Defaults true for runs started over the API."
+        },
+        {
+          "key": "icon",
+          "type": "string",
+          "description": "Card icon, as brand:<slug> from the shared brand catalog (brand:facebook, brand:instagram, ...). Empty clears it."
+        },
+        {
+          "key": "color",
+          "type": "string",
+          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex. Tints the card's plate, or its frame when an icon is set."
+        },
+        {
+          "key": "folderId",
+          "type": "string",
+          "description": "File it in an automation folder. Use the id from the automations list in monti_list_folders. Empty leaves it in All automations. Filing only: it changes nothing about how or when the automation runs."
+        },
+        {
+          "key": "notifyOn",
+          "type": "string",
+          "description": "Notify when a run finishes: always or failure. Empty clears it. Delivery is the Monti bell and a desktop notification, plus notifyConnectorId when set."
+        },
+        {
+          "key": "notifyConnectorId",
+          "type": "string",
+          "description": "A message connector id to additionally send the finish notification through. Requires notifyOn."
+        },
+        {
+          "key": "variables",
+          "type": "object",
+          "description": "Seed variables every run starts with, readable as {{vars.<name>}}. Prefer `parameters` for anything a person or a profile should be able to set -- a declared parameter of the same name shadows an entry here."
+        },
+        {
+          "key": "parameters",
+          "type": "objects",
+          "description": "What this automation asks for before it runs: an ordered list of {name, kind, label?, required?, default?, options?, hint?}. `name` matches ^[A-Za-z_][A-Za-z0-9_]*$ and is read from any interpolated step field as {{vars.<name>}}. `kind` is one of text, textarea, number, boolean, select, secret, list; `options` is required on select, and a boolean may not be required. Each profile can hold its own value (monti_update_profile automationVars), and a run can override them (monti_run_automation vars)."
+        },
+        {
+          "key": "schedule",
+          "type": "object",
+          "description": "Run on a schedule while the launcher is open: {enabled, kind: interval|daily|weekly, everyMinutes?, at: \"HH:MM\"?, days: [0-6]?, profileIds: [\"<id>\"]}. Missed slots are skipped. Null clears it."
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/update",
+      "group": "Automations",
+      "label": "Change an automation's name, description, steps or wiring",
+      "scope": "unscoped",
+      "channel": "monti:update-automation-request",
+      "mcp": "monti_update_automation",
+      "mcpDescription": "Change an existing automation. Only the fields you send are written; omitting steps leaves the step tree alone.",
+      "body": "{ \"automationId\": \"<id>\", \"name\": \"Sign in\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {"key": "name", "type": "string"},
+        {"key": "description", "type": "string"},
+        {
+          "key": "steps",
+          "type": "steps",
+          "description": "Replaces the whole step tree. Omit to leave it unchanged."
+        },
+        {"key": "tags", "type": "tags", "description": "Replaces the whole list. At most 5."},
+        {"key": "pinned", "type": "boolean"},
+        {"key": "timeoutMs", "type": "number"},
+        {"key": "closeOnFinish", "type": "boolean"},
+        {
+          "key": "icon",
+          "type": "string",
+          "description": "Card icon, as brand:<slug> from the shared brand catalog. Empty clears it."
+        },
+        {
+          "key": "color",
+          "type": "string",
+          "description": "Card colour: slate, blue, green, violet, red, amber, or a #rrggbb hex. Tints the card's plate, or its frame when an icon is set."
+        },
+        {
+          "key": "folderId",
+          "type": "string",
+          "description": "Move it to an automation folder. Use the id from the automations list in monti_list_folders. Empty moves it back to All automations. Filing only: it changes nothing about how or when the automation runs."
+        },
+        {
+          "key": "notifyOn",
+          "type": "string",
+          "description": "Notify when a run finishes: always or failure. Empty clears it."
+        },
+        {
+          "key": "notifyConnectorId",
+          "type": "string",
+          "description": "A message connector id to additionally send the finish notification through. Requires notifyOn."
+        },
+        {
+          "key": "variables",
+          "type": "object",
+          "description": "Replaces the seed variables every run starts with. A declared parameter of the same name shadows an entry here."
+        },
+        {
+          "key": "parameters",
+          "type": "objects",
+          "description": "Replaces the whole list of what this automation asks for before it runs: an ordered list of {name, kind, label?, required?, default?, options?, hint?}. `name` matches ^[A-Za-z_][A-Za-z0-9_]*$ and is read from any interpolated step field as {{vars.<name>}}. `kind` is one of text, textarea, number, boolean, select, secret, list; `options` is required on select, and a boolean may not be required. Each profile can hold its own value (monti_update_profile automationVars), and a run can override them (monti_run_automation vars)."
+        },
+        {
+          "key": "schedule",
+          "type": "object",
+          "description": "Replaces the schedule: {enabled, kind: interval|daily|weekly, everyMinutes?, at: \"HH:MM\"?, days: [0-6]?, profileIds: [\"<id>\"]}. Null clears it."
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/delete",
+      "group": "Automations",
+      "label": "Move an automation to Trash. It stops running on launch and on its schedule",
+      "scope": "unscoped",
+      "channel": "monti:delete-automation-request",
+      "mcp": "monti_delete_automation",
+      "mcpDescription": "Move an automation to Trash, where it stays for 30 days and can be restored from the app. It immediately stops running on launch and on any schedule, and disappears from monti_list_automations. Profiles keep it attached so that a restore puts them back as they were. Past runs stay readable. There is no API to restore or to delete permanently: both are done in the app.",
+      "body": "{ \"automationId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/run",
+      "group": "Automations",
+      "label": "Run an automation against a profile, launching it if needed",
+      "scope": "any",
+      "channel": "monti:run-automation-request",
+      "mcp": "monti_run_automation",
+      "mcpDescription": "Run an automation against a profile, launching the profile if it is not already open. Returns a run id immediately; the run continues in the background. One call is one profile: to run the same automation with different values on several profiles, call it once per profile with that profile's vars, which also gives you a run id per profile to poll.",
+      "body": "{ \"automationId\": \"<id>\", \"profileId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {"key": "profileId", "type": "string", "required": true},
+        {
+          "key": "vars",
+          "type": "object",
+          "description": "Values for this run, readable as {{vars.<name>}}. A name the automation declares as a parameter is coerced to that parameter's kind and beats both the automation's default and the profile's own stored value; any other name is passed through as a plain seed variable, exactly as this field has always worked."
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/automations/runs",
+      "group": "Automations",
+      "label": "Recent runs of one automation, with status and errors",
+      "scope": "any",
+      "channel": "monti:list-automation-runs-request",
+      "mcp": "monti_automation_runs",
+      "mcpDescription": "Recent runs of an automation, newest first: status (running, ok, partial, failed, cancelled), timing, the failed step and the error. This is how to learn how a run started with monti_run_automation ended.",
+      "body": "{ \"automationId\": \"<id>\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {
+          "key": "limit",
+          "type": "number",
+          "description": "How many runs, newest first. Default 20, at most 50."
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connectors",
+      "group": "Connectors",
+      "label": "The workspace's connectors, and the field list of every kind",
+      "scope": "any",
+      "channel": "monti:list-connectors-request",
+      "mcp": "monti_list_connectors",
+      "mcpDescription": "The message and AI connectors this workspace has, and the catalogue of kinds one can be created from. Call this before writing a notify, aiPrompt or aiCheck step, or setting notifyConnectorId -- those fields take an id from here and there is no other way to learn one. Stored credentials are never returned: a connector's config is write-only over this API.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/create",
+      "group": "Connectors",
+      "label": "Add a connector. Owner-only, like the Connectors view",
+      "scope": "unscoped",
+      "channel": "monti:create-connector-request",
+      "mcp": "monti_create_connector",
+      "mcpDescription": "Add a connector -- a Telegram bot, a Slack or Discord webhook, WhatsApp, SMTP, or an AI provider. Call monti_list_connectors first for the kind's field list. `config` carries the credentials; anything you send here is in this conversation's transcript, and it cannot be read back out afterwards. Returns the connector without its config.",
+      "body": "{ \"name\": \"Ops Telegram\", \"kind\": \"telegram\", \"config\": { \"botToken\": \"...\", \"chatId\": \"-1004281234567\" } }",
+      "fields": [
+        {"key": "name", "type": "string", "required": true,
+         "description": "What the connector is called in the app."},
+        {"key": "kind", "type": "string", "required": true,
+         "description": "telegram, slack, discord, whatsapp, smtp, or an AI kind. See the `kinds` block of monti_list_connectors. The category follows from the kind and cannot be set."},
+        {"key": "config", "type": "object",
+         "description": "The kind's fields, as a flat object of strings. Missing required fields are a 400 naming each one."},
+        {"key": "isDefault", "type": "boolean",
+         "description": "Make this the default for its category, used by steps that name no connector. The first connector in a category is the default whether or not this is sent."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/update",
+      "group": "Connectors",
+      "label": "Rename a connector, change its config or make it the default",
+      "scope": "unscoped",
+      "channel": "monti:update-connector-request",
+      "mcp": "monti_update_connector",
+      "mcpDescription": "Change a connector. `config` merges key by key, so a chat id can be changed without re-sending the bot token, and omitting config entirely leaves every stored credential alone. The kind cannot be changed -- delete and recreate instead.",
+      "body": "{ \"connectorId\": \"<id>\", \"config\": { \"chatId\": \"-1004281234567\" } }",
+      "fields": [
+        {"key": "connectorId", "type": "string", "required": true},
+        {"key": "name", "type": "string"},
+        {"key": "config", "type": "object",
+         "description": "Merged into the stored config. Send only the keys that change; send a key as \"\" to clear it."},
+        {"key": "isDefault", "type": "boolean",
+         "description": "true promotes this connector and demotes the previous default in its category. false is refused -- promote another one instead, so a category is never left without a default."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/delete",
+      "group": "Connectors",
+      "label": "Delete a connector",
+      "scope": "unscoped",
+      "channel": "monti:delete-connector-request",
+      "mcp": "monti_delete_connector",
+      "mcpDescription": "Delete a connector. Steps that still name it start failing with a sentence saying it is gone -- they do not fall back to another connector. Check monti_list_automations first if you are not sure what uses it.",
+      "body": "{ \"connectorId\": \"<id>\" }",
+      "fields": [
+        {"key": "connectorId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connectors/test",
+      "group": "Connectors",
+      "label": "Send a real test message, or a one-word AI completion",
+      "scope": "unscoped",
+      "channel": "monti:test-connector-request",
+      "mcp": "monti_test_connector",
+      "mcpDescription": "Prove a connector works: a message connector sends a real test message, an AI connector asks for a one-word completion. Reports the service's own error text when it fails, which is usually the whole diagnosis. Do this after creating one rather than waiting for a run to fail.",
+      "body": "{ \"connectorId\": \"<id>\" }",
+      "fields": [
+        {"key": "connectorId", "type": "string", "required": true}
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/folders",
+      "group": "Workspace",
+      "label": "The folders profiles, proxies, cookie sets and automations are filed in",
+      "scope": "any",
+      "channel": "monti:list-folders-request",
+      "mcp": "monti_list_folders",
+      "mcpDescription": "The workspace's folders, grouped by what they file: profiles, proxies, cookies, automations. Each carries the id its folderId argument takes; the four groups are separate namespaces, so an automation's folderId must come from the automations group. A folder-scoped key sees only the profile folders it is scoped to. Read-only: folders are created and renamed in the app.",
+      "fields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/statuses",
+      "group": "Workspace",
+      "label": "Every status label a profile, proxy or cookie set can carry",
+      "scope": "any",
+      "channel": "monti:list-statuses-request",
+      "mcp": "monti_list_statuses",
+      "mcpDescription": "The status labels this workspace uses, built-in and custom. monti_update_profile.status takes a free string, so without this an agent can write a status the app never offers and the row lands looking broken. Read-only: custom statuses are created in the app.",
+      "fields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/telegram",
+      "group": "Notifications",
+      "label": "Whether the notification bot is set up, and who is subscribed",
+      "scope": "any",
+      "channel": "monti:telegram-status-request",
+      "mcp": "monti_telegram_status",
+      "mcpDescription": "The state of personal Telegram notifications: whether the workspace has a notification bot, whether the signed-in user has linked their Telegram, and which automations they get messages about. This is separate from telegram connectors -- it is per person, and it is what answers 'why did that run not message me'. Neither the bot token nor the chat id is returned.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/telegram/pref",
+      "group": "Notifications",
+      "label": "Subscribe the signed-in user to one automation's outcomes",
+      "scope": "any",
+      "channel": "monti:set-telegram-pref-request",
+      "mcp": "monti_set_telegram_pref",
+      "mcpDescription": "Turn personal Telegram messages on or off for one automation, for the signed-in user. This is that person's own setting and is independent of the automation's notifyOn, which is the workspace-wide one. Requires a linked Telegram -- check monti_telegram_status first.",
+      "body": "{ \"automationId\": \"<id>\", \"notifyOn\": \"failure\" }",
+      "fields": [
+        {"key": "automationId", "type": "string", "required": true},
+        {"key": "notifyOn", "type": "string",
+         "description": "always or failure. Empty unsubscribes. 'failure' includes a run that finished with a failed step."}
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/telegram/bot",
+      "group": "Notifications",
+      "label": "Set the workspace's notification bot. Owner-only",
+      "scope": "unscoped",
+      "channel": "monti:set-telegram-bot-request",
+      "mcp": "monti_set_telegram_bot",
+      "mcpDescription": "Point the workspace at a Telegram bot from BotFather, so members can link their own chats to it. Write-only: the token is never returned by any route. Members still have to press Start in Telegram themselves, which only the app can walk them through -- this call does not link anybody.",
+      "body": "{ \"botName\": \"myworkspacebot\", \"botToken\": \"123456789:AA...\" }",
+      "fields": [
+        {"key": "botName", "type": "string", "required": true,
+         "description": "The bot's @username, with or without the @."},
+        {"key": "botToken", "type": "string", "required": true,
+         "description": "The token BotFather issued. Stored for the whole workspace and never read back out over this API."}
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tables/columns",
+      "group": "Tables",
+      "label": "What each table shows, and every column it could show",
+      "scope": "any",
+      "channel": "monti:table-columns-request",
+      "mcp": "monti_table_columns",
+      "mcpDescription": "The columns the Profiles, Proxies and Cookies tables are showing, and every column they could show. Call this before monti_set_table_columns rather than guessing ids: the reply gives each column's id, label, one-line description, whether it is on, and whether it can be turned off.",
+      "fields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tables/columns",
+      "group": "Tables",
+      "label": "Show or hide columns on a table",
+      "scope": "any",
+      "channel": "monti:set-table-columns-request",
+      "mcp": "monti_set_table_columns",
+      "mcpDescription": "Show or hide columns on the Profiles, Proxies or Cookies table. Send `columns` for the exact set, or `show`/`hide` to change a few without restating the rest. Columns always render in the app's own order, so the order you send is ignored. The layout belongs to the signed-in user and follows them to every machine.",
+      "body": "{ \"table\": \"profiles\", \"show\": [\"email\", \"fpTimezone\"], \"hide\": [\"tags\"] }",
+      "fields": [
+        {"key": "table", "type": "string", "required": true,
+         "description": "profiles, proxies or cookies."},
+        {"key": "columns", "type": "strings",
+         "description": "The exact set of visible columns, by id. Locked columns are added back."},
+        {"key": "show", "type": "strings",
+         "description": "Columns to turn on, leaving every other column as it is."},
+        {"key": "hide", "type": "strings",
+         "description": "Columns to turn off. Refusing a locked column is a 400."},
+        {"key": "reset", "type": "boolean",
+         "description": "Put the table back to its default columns. Applied before show and hide."}
+      ]
+    }
+  ]
+}

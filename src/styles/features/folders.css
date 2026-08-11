@@ -1,0 +1,357 @@
+/* The folder row and its cards -- marks, flags, counts, the add tile -- and the
+ * Move profiles dialog.
+ *
+ * Was styles.css:4531-4851, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Folder row ─────────────────────────────────────────────────────────────
+ * The folders, above the table, the way a file manager shows them. auto-fill
+ * rather than a scroller: a workspace tends to have a handful of folders and
+ * wrapping to a second line reads better than hiding half of them off the
+ * right edge.
+ *
+ * A compact row, not a card grid. These used to be 48px tall on a 180px minimum
+ * column with a 26px glyph plate and the --radius-lg surface curve, which made
+ * the navigation the tallest and loudest band on a page whose job is the table
+ * under it. Every number below came down one step together -- the height, the
+ * column, the plate, the curve and the count -- because shrinking only some of
+ * them leaves a card with the old proportions at a smaller size. */
+/* 190px, not 160. A card is a 24px glyph, the name, and a count badge, and at
+   160 the two longest "All …" labels in the app -- All cookie-sets and All
+   automations -- both ellipsised to "All automati…", which is the one label on
+   the rail that must never be ambiguous. 190 is the width that fits them with
+   the count still on the same line. Only the MINIMUM moves: the columns are
+   1fr, so on any real window they stretch past this and the change costs a
+   column only below about 1000px. */
+.folder-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+/* Both shapes the card takes: a plain <button> for All profiles / Trash / New
+   folder, and a <div> wrapper for a real folder, whose name is a button and
+   whose pencil and trash are two more. */
+.folder-card {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  color: var(--ink);
+  display: flex;
+  font-size: 13px;
+  font-weight: 650;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 40px;
+  overflow: hidden;
+  padding: 0 10px;
+  position: relative;
+  text-align: left;
+}
+
+.folder-card:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: var(--shadow-xs);
+}
+
+.folder-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* The clickable body of a folder card. Stretches so the whole card opens the
+   folder, not just the words.
+   The negative margin is the exact inverse of .folder-card's padding, which is
+   what lets the button cover the card's full width rather than the inset it
+   would otherwise sit in. Retune one and you must retune the other. */
+.folder-card-main {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  display: flex;
+  flex: 1;
+  font-size: inherit;
+  font-weight: inherit;
+  gap: 8px;
+  margin: 0 -10px;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.folder-card-main:not(:disabled):hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A folder's mark, on a fixed plate so a coloured folder and an uncoloured one
+   line the names up at the same offset. Untinted it is just the glyph; a folder
+   with a colour gets that colour's fill, border and ink as an inline style,
+   which is also why nothing here may set `color` more specifically than this. */
+.folder-glyph {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+/* For the table cell and the move dialog, where the plate sits inside a line of
+   12px text rather than on a 48px card. */
+.folder-glyph.small {
+  border-radius: 5px;
+  height: 20px;
+  width: 20px;
+}
+
+/* A cookie-set's mark where the set is a value rather than the subject of its
+   row: the Profiles table's Cookie set cell, that cell's picker, the profile
+   dialog and the Select-cookies dialog.
+   Deliberately .folder-glyph.small's box, so a Folder cell and a Cookie set
+   cell in one row line their names up -- and deliberately round rather than
+   that rule's 5px, because round is the shape the set wears in its own table's
+   Name cell. Same mark, two sizes, one shape.
+   The colour arrives as an inline style from profileColorStyle, so an unmarked
+   set inherits this ink instead. */
+.cookie-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.cookie-glyph {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+/* A folder wearing a country flag. The plate keeps its size so flag folders and
+   glyph folders line their names up together, but it gains a hairline and a
+   paper fill: a flag is artwork rather than an icon in the ink colour, and
+   several of them (Japan, Switzerland, Poland) are mostly white and vanish into
+   the card without one. */
+.folder-glyph.flag {
+  background: var(--paper);
+  border-color: var(--border-soft);
+  overflow: hidden;
+}
+
+.folder-glyph.flag .flag-svg {
+  height: 14px;
+  width: 20px;
+}
+
+.folder-glyph.small.flag .flag-svg {
+  height: 12px;
+  width: 18px;
+}
+
+.folder-card.active .folder-glyph:not([style]) {
+  color: var(--ink);
+}
+
+/* The active card already tints its own glyph plate; a flag's plate must stay
+   paper or the fill bleeds through the flag's white stripes. */
+.folder-card.active .folder-glyph.flag {
+  color: var(--ink);
+}
+
+.folder-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many profiles are inside, as the quiet counter a file manager puts
+   there -- the folder's name is what is being read, not this. */
+.folder-card-count {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 20px;
+  padding: 1px 6px;
+  text-align: center;
+}
+
+/* Edit and delete, swapped in for the count on hover rather than added beside
+   it: at 160px a card has room for a name or for two buttons, not both. */
+.folder-card-actions {
+  align-items: center;
+  background: inherit;
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+
+.folder-card:hover .folder-card-actions,
+.folder-card:focus-within .folder-card-actions {
+  display: inline-flex;
+}
+
+.folder-card:hover .folder-card-count,
+.folder-card:focus-within .folder-card-count {
+  display: none;
+}
+
+.folder-card-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  color: var(--ink-soft);
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: 22px;
+}
+
+.folder-card-actions button:not(:disabled):hover {
+  background: var(--selected);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.folder-card-actions button.danger-icon:not(:disabled):hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* The trailing "make another one" card. Dashed and unfilled so it reads as an
+   invitation rather than as a folder that happens to be called New folder. */
+.folder-card-new {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  color: var(--ink-soft);
+}
+
+.folder-card-new:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* ── Move profiles dialog ───────────────────────────────────────────────── */
+.move-profiles-list {
+  display: grid;
+  gap: 2px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+
+.move-profiles-row {
+  align-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr) max-content max-content;
+  min-height: 40px;
+  padding: 0 8px;
+}
+
+/* One more column than the profiles version: a proxy leads with its flag,
+   because "us-resi-04" and "de-dc-04" are the same word at a glance and the
+   country is the thing being filed by. */
+.move-proxies-row {
+  grid-template-columns: 18px max-content minmax(0, 1fr) max-content max-content;
+}
+
+/* One fewer: an automation has no status chip, so the row is the selector, the
+   name and where it is filed now. The mark sits inside the name cell rather
+   than in a column of its own -- see MoveAutomationsModal. */
+.move-automations-row {
+  grid-template-columns: 18px minmax(0, 1fr) max-content;
+}
+
+.move-automations-row .move-profiles-name {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* text-overflow does nothing on the flex parent, so the truncation belongs on
+   the text itself -- the same split .run-profiles-row makes. */
+.move-automations-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed width so an unchecked proxy -- which renders "--" instead of a flag --
+   does not shunt the names out of line with the rest of the list. */
+.move-proxies-flag {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  width: 18px;
+}
+
+.move-proxies-flag .flag-svg {
+  height: 12px;
+  width: 18px;
+}
+
+.move-profiles-row:hover {
+  background: var(--hover);
+}
+
+/* The 18px square this used to set is now .selector's own size, so the rows in
+   these dialogs and the rows in the tables cannot drift apart. */
+
+.move-profiles-name {
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which folder the profile is leaving. Without it the list is a set of names
+   with no way to tell an accidental move from an intended one. */
+.move-profiles-from {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.move-profiles-empty {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 0;
+  padding: 28px 0;
+}
+

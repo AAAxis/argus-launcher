@@ -1,0 +1,69 @@
+/* Every rule that was in this file now lives under styles/, split by what it
+ * styles. This barrel is the whole of the stylesheet: Vite inlines each
+ * @import at build time, so the browser sees one sheet in exactly this order.
+ *
+ * THE ORDER OF THESE LINES IS THE CASCADE. It is the original line order of the
+ * 11,910-line styles.css these came out of, and several rules in here win only
+ * because of where they sit -- the comments in the parts say so by name. The
+ * folders group files by subject, which deliberately does NOT match this order:
+ * controls/fields.css imports between two features/ files because that is where
+ * its rules were. Do not sort this list, alphabetically or by folder. Doing so
+ * changes which rule wins, and the breakage is scattered and quiet.
+ *
+ * A new rule appended at the end of the sheet belongs at the end of the last
+ * import below (features/onboarding.css), not at the end of whichever file you
+ * happen to have open.
+ *
+ * styles/automations.css is not imported here. It loads after this file, from
+ * main.tsx, and documents why. */
+
+@import './styles/base/tokens.css';
+@import './styles/base/elements.css';
+@import './styles/auth/sign-in.css';
+@import './styles/controls/inputs.css';
+@import './styles/controls/status-chips.css';
+@import './styles/controls/platform-dropdown.css';
+@import './styles/auth/sign-in-form.css';
+@import './styles/base/typography.css';
+@import './styles/base/spinners.css';
+@import './styles/layout/sidebar.css';
+@import './styles/settings/updates.css';
+@import './styles/layout/sidebar-foot.css';
+@import './styles/settings/dialog.css';
+@import './styles/settings/plan.css';
+@import './styles/settings/paths-theme.css';
+@import './styles/layout/app-chrome.css';
+@import './styles/table/filters.css';
+@import './styles/table/cells.css';
+@import './styles/table/cell-editors.css';
+@import './styles/table/columns.css';
+@import './styles/table/proxy-columns.css';
+@import './styles/table/rows-and-cards.css';
+@import './styles/features/folders.css';
+@import './styles/features/bulk-dialogs.css';
+@import './styles/features/api-tab.css';
+@import './styles/features/integrations.css';
+@import './styles/features/integration-setup.css';
+@import './styles/features/extensions.css';
+@import './styles/layout/overlays.css';
+@import './styles/controls/switches.css';
+@import './styles/features/profile-editor.css';
+@import './styles/controls/fields.css';
+@import './styles/features/profile-editor-pickers.css';
+@import './styles/controls/form-groups.css';
+@import './styles/features/workspace-switcher.css';
+@import './styles/controls/choice-chips.css';
+@import './styles/features/start-page.css';
+@import './styles/features/session-card.css';
+@import './styles/features/tags.css';
+@import './styles/features/walkthrough.css';
+@import './styles/features/cookies.css';
+@import './styles/features/import-wizard.css';
+@import './styles/features/team.css';
+@import './styles/features/notifications.css';
+@import './styles/features/plans.css';
+@import './styles/features/onboarding.css';
+/* Last on purpose, and it must stay last: its rules tie with the ones
+ * features/profile-editor.css writes to `.profile-modal header`, so only source
+ * order decides which of the two draws the editors' sticky bar. */
+@import './styles/features/editor-head.css';

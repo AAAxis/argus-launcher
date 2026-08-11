@@ -1,0 +1,296 @@
+/* The Team tab: the member list, the invite dialog, sharing to a teammate, and
+ * the inbox.
+ *
+ * The base .team-tab rule is in features/bulk-dialogs.css, where it sat in
+ * styles.css.
+ *
+ * Was styles.css:10591-10876, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Team ─────────────────────────────────────────────────────────────────
+ *
+ * The roster shares the app's table rules; everything below is the parts a
+ * member row has that a profile row does not -- a two-line identity cell, an
+ * avatar that may be a photo, initials or an envelope, and the seat meter that
+ * sits in the toolbar rather than in a settings row.
+ *
+ * The tab's own box (width cap, column, 16px gap) is up with .api-panel, which
+ * it shares. Nothing here sets padding: .content owns the page's 24px, and
+ * adding more is the double-inset bug automations.css documents. */
+
+/* With no roster to sit above, the upsell belongs in the middle of the working
+   area. Not .tab-empty, which the other tabs' whole-tab empty states moved to:
+   this one is not the whole tab. The view chips and the seat meter are still
+   above it and still worth using, so there is a header here to be pinned under
+   and nothing for a fixed 56px to line up with. */
+.team-tab.is-empty {
+  align-content: center;
+  display: grid;
+  min-height: 60vh;
+}
+
+.team-member {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.team-member-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The name row also carries the "You" badge, so it is a flex line rather than
+   plain text -- and the badge must not stretch to the cell's height. */
+.team-member-text > strong {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.team-member-email {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-avatar {
+  border-radius: 999px;
+  flex: none;
+  height: 30px;
+  object-fit: cover;
+  width: 30px;
+}
+
+.team-avatar.is-initials,
+.team-avatar.is-invite {
+  align-items: center;
+  background: var(--hover);
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 11px;
+  font-weight: 750;
+  justify-content: center;
+}
+
+/* An invite is a person who is not here yet, and the mark says so: the same
+   circle, but a glyph and a dashed edge rather than a face or initials. */
+.team-avatar.is-invite {
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+.team-invite-row td {
+  /* Not a disabled row -- an admin acts on these. Just quieter than a member,
+     because a pending invite is a smaller fact than a colleague. */
+  color: var(--ink-soft);
+}
+
+.team-invited-by {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* Seats live in the toolbar, next to the button that spends them. The meter is
+   the same component the Plan & usage section uses, so the numbers a customer
+   sees in Settings and the ones they see here cannot drift. */
+.team-seats {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.team-seats .settings-meter {
+  min-width: 110px;
+}
+
+.team-seats-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* ── The invite dialog ── */
+
+.invite-link-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Monospace because it is a credential being read character by character, the
+   same treatment the proxy host cell and the automation JSON get. */
+.invite-link {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  min-width: 0;
+}
+
+
+/* ── Sharing to a teammate ───────────────────────────────────────
+ *
+ * Two surfaces: the share sheet (what am I handing over, and to whom) and the
+ * inbox (what has a colleague passed me, and will I take it). Both lean on the
+ * token families rather than any literal colour, so the dark theme stays a
+ * straight swap.
+ *
+ * Notably absent: any warning styling. An earlier cross-organization version of
+ * this feature needed one, because sending a cookie jar outside the company
+ * really did hand over live sessions. Between teammates there is nothing to
+ * warn about -- they can already open every one of these -- and a caution the
+ * reader knows is empty is worse than none. */
+
+/* ── The inbox ── */
+
+/* The bell takes .filter-trigger's silhouette -- flat at rest, a --hover plate
+ * at --radius-xs under the pointer and while the panel is open -- so it agrees
+ * with Refresh and Import instead of being the one bordered box left in the
+ * row. See the long note on .filter-trigger for why that shape won.
+ *
+ * What it overrides is only the geometry: .filter-trigger is a label-shaped
+ * control (content width, 6px/8px padding), and this is a 32px square holding
+ * a 16px glyph. Declared after it, so the equal-specificity padding wins.
+ *
+ * The count has to read at a glance without enlarging the button and shoving
+ * the row around, so it is absolute and outside the button's own box. */
+.inbox-button {
+  color: var(--ink-soft);
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  position: relative;
+  width: 32px;
+}
+
+.inbox-button:not(:disabled):hover,
+.inbox-button[aria-expanded='true'] {
+  color: var(--ink);
+}
+
+.inbox-count {
+  align-items: center;
+  background: var(--danger);
+  border-radius: 999px;
+  color: var(--paper);
+  display: flex;
+  font-size: 10px;
+  font-weight: 750;
+  height: 15px;
+  justify-content: center;
+  min-width: 15px;
+  padding: 0 3px;
+  pointer-events: none;
+  position: absolute;
+  right: 1px;
+  top: 1px;
+}
+
+.inbox-pop {
+  display: flex;
+  flex-direction: column;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.inbox-empty {
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding: 14px 12px;
+  text-align: center;
+}
+
+.inbox-item {
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 12px;
+}
+
+.inbox-item:last-child {
+  border-bottom: 0;
+}
+
+/* flex-start, not centre: the title wraps to two lines (see .inbox-item-name),
+ * and a glyph centred against a two-line block floats away from the word it
+ * belongs to. The 2px puts it on the first line's optical centre instead. */
+.inbox-item-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inbox-item-head svg {
+  color: var(--ink-faint);
+  flex: none;
+  margin-top: 2px;
+}
+
+/* Two lines, then an ellipsis. A 320px panel is narrow enough that a single
+ * clipped line cut most automation titles mid-word, and the title is the only
+ * thing saying which run this is about.
+ *
+ * min-width: 0 is what actually keeps the clear button round -- without it the
+ * title refuses to shrink below its content, and a long one squeezes the 22px
+ * circle beside it into an oval. */
+.inbox-item-name {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  font-size: 13px;
+  font-weight: 650;
+  line-clamp: 2;
+  /* Explicit, because the glyph, the unread dot and the clear button are all
+     nudged onto this line by hand and `normal` is a font's own business. */
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Handoff titles keep the old single line: that head row is a name plus a
+   glyph with nothing else competing for it, and the card below it already
+   spells out the kind and the sender. */
+.inbox-item:not(.is-notification) .inbox-item-name {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  white-space: nowrap;
+}
+
+.inbox-item-from {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* The sender's own words, so they are set apart from ours -- an unquoted note
+ * beside our copy reads as if the app wrote it. */
+.inbox-item-note {
+  border-left: 2px solid var(--border);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  padding-left: 8px;
+}
+
+.inbox-item-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inbox-item-actions button {
+  font-size: 12px;
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+

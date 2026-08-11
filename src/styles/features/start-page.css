@@ -1,0 +1,383 @@
+/* The Start page tab and its automation cards.
+ *
+ * Was styles.css:8503-8879, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Start page tab ─────────────────────────────────────────────────────────
+ * Deliberately a narrow centred column rather than the full-width .card-grid
+ * the other tabs use. Those are worklists you scan; this is a launchpad you
+ * aim at, and at 1600px an auto-fill grid spread eight bookmarks across the
+ * whole window with the search box floating above nothing. 640px is about as
+ * wide as a five-tile row wants to be, and it matches the cap the injected
+ * browser home page now uses, so the two surfaces read as the same page.
+ *
+ * The 56px on top is .tab-empty's, deliberately the same number: this tab and
+ * an empty Proxies/Profiles/Cookies tab are both a centred column under the
+ * topbar with a mark at the head of it, and at different offsets the mark
+ * jumped up the window as you moved between them. Both are the second flex
+ * child of .content, so matching the padding is all it takes to land the Monti
+ * mark and the empty state's glyph on the same line.
+ *
+ * This was 0 for a while, on the grounds that a tab whose first row sits lower
+ * than every other tab's reads as misaligned. That still holds against a
+ * *populated* table -- whose toolbar starts at the top -- and is the trade being
+ * made here: the pairing with the empty states is the one worth having, because
+ * those are the screens a new workspace actually moves between. The 26px gap
+ * below still carries the separation the old 44px was standing in for. */
+.start-page {
+  display: grid;
+  padding-top: 56px;
+  /* .content is a flex column, so the auto margins are what centre this; they
+   * beat the container's align-items: stretch. flex: 0 0 auto keeps a long
+   * bookmark list from being squashed instead of scrolling .content. */
+  flex: 0 0 auto;
+  gap: 26px;
+  margin: 0 auto;
+  max-width: 640px;
+  width: 100%;
+}
+
+/* The Monti mark over the search box, on this tab and on the generated browser
+ * home page (src/lib/homePage.ts emits the same thing in the same place). The
+ * two are deliberately one page in two places, so a brand that landed on only
+ * one of them would be the first thing to make them read as different screens.
+ *
+ * Centred, matching the generated page: the mark is the header of the search
+ * box below it rather than the first item of the left-aligned tile list, and it
+ * is the one element here that belongs to the app rather than to the content.
+ * Both surfaces centre it -- moving one alone is what makes the pair read as
+ * two different screens.
+ *
+ * The negative bottom margin works against .start-page's 26px gap: the mark
+ * belongs to the search box below it, and at the full gap it floated as a third
+ * item in the column rather than as that box's header. */
+.start-brand {
+  display: flex;
+  justify-content: center;
+  /* The negative top pulls the mark clear of the tab's own padding; the
+   * positive bottom works against .start-page's 26px gap rather than with it,
+   * so the mark keeps its air above the search pill instead of sitting on it. */
+  margin: -18px 0 4px;
+}
+
+/* Masked, not an <img>. The source art is black line work on transparent, so
+ * as an image it would be an invisible smudge on the dark theme -- the same
+ * reason the sidebar's .brand-mark and .extension-mark.is-monti are masks.
+ * Taller than either of those because here it is the page's own header rather
+ * than a glyph in a row. */
+.start-brand-mark {
+  background-color: var(--ink);
+  display: block;
+  height: 76px;
+  mask-image: var(--monti-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  /* The art is 269x346, so a square box would letterbox it. This is its
+   * aspect ratio at the height above, which keeps the mask tight to the ink.
+   * Recompute it whenever the height moves. */
+  width: 59px;
+}
+
+.start-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  gap: 8px;
+  height: 46px;
+  padding: 0 6px 0 15px;
+  transition: border-color 0.14s var(--ease), box-shadow 0.14s var(--ease);
+}
+
+.start-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.start-search-icon {
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+}
+
+/* The input carries no chrome of its own -- the pill around it is the control,
+ * so a second border and focus ring inside it would read as two nested fields.
+ * The pill takes the focus styling via :focus-within instead. */
+.start-search input {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  flex: 1;
+  font-size: 14px;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.start-engine {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 3px;
+  min-height: 32px;
+  padding: 0 9px 0 11px;
+}
+
+.start-engine:not(:disabled):hover {
+  background: var(--paper);
+  color: var(--accent);
+}
+
+.engine-menu {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+.engine-option {
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.engine-option:not(:disabled):hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.engine-option.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+
+.start-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+/* The automations block. Its own grid rather than more tiles in the bookmark
+ * one, matching the generated browser page: a shortcut takes you somewhere and
+ * a workflow does something, and a row of each under one heading would say they
+ * were the same kind of thing. */
+/* Bookmarks, Automations and Session: three labelled blocks, in that order, on
+ * this tab and on the generated browser page. The bookmark grid used to be the
+ * only one without a heading, which read as the page itself rather than as one
+ * of three things on it. */
+.start-section {
+  display: grid;
+  gap: 10px;
+}
+
+.start-section-label {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* The mark on the Automations heading is lucide's Workflow at 16px, the same
+ * icon the sidebar rail gives the Automations tab and the same one the
+ * generated page inlines as WORKFLOW_ICON. It is drawn by the component and
+ * takes the label's own colour, so there is no rule for it here -- the masked
+ * Monti helmet this replaced needed one. */
+
+/* The rounded (i) that carries a section's one explanatory sentence, and the
+ * bubble it opens on hover or keyboard focus.
+ *
+ * The Automations note used to be a standing paragraph here. It says a thing
+ * you learn once, so on a tab you aim at rather than read it was permanently in
+ * the way -- and the generated page had no room for it at all, so the two
+ * surfaces could not carry the same heading.
+ *
+ * The bubble is drawn here rather than left to title=. On the generated page
+ * the browser never drew that tooltip at all, and the two surfaces have to
+ * behave the same way; this one is also a rule a screenshot can prove. Kept in
+ * step with .label-info in lib/homePage.ts. */
+.start-label-info {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--ink-faint);
+  cursor: help;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: inherit;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  transition: color 0.12s var(--ease);
+  width: 18px;
+}
+
+.start-label-info:hover {
+  color: var(--ink);
+}
+
+/* Anchored to the (i)'s left edge rather than centred on it: these headings sit
+ * at the left edge of a 640px column, and a centred 260px bubble on the first
+ * of them hangs off the page. */
+.start-label-info::after {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: var(--ink);
+  content: attr(data-tip);
+  font-size: 12px;
+  font-weight: 400;
+  left: -7px;
+  letter-spacing: 0;
+  line-height: 1.4;
+  max-width: 260px;
+  opacity: 0;
+  padding: 7px 10px;
+  pointer-events: none;
+  position: absolute;
+  text-align: left;
+  text-transform: none;
+  top: calc(100% + 7px);
+  transition: opacity 0.12s var(--ease);
+  white-space: normal;
+  width: max-content;
+  z-index: 10;
+}
+
+.start-label-info:focus-visible::after,
+.start-label-info:hover::after {
+  opacity: 1;
+}
+
+/* ── Automation cards ───────────────────────────────────────────────────────
+ * Two to a row, roughly two bookmark tiles wide, matching the generated
+ * browser page. These were tiles the same size and shape as the bookmarks
+ * above them, which said a shortcut and a workflow were the same kind of thing
+ * and left no room to say which workflow this is or how long it is.
+ *
+ * A card here is a preview, not a control -- the run happens in the browser, in
+ * a profile's session. So it carries the browser card's shape and none of its
+ * controls: no Run (there is no session to run in) and no open-in-launcher
+ * (the launcher is what you are looking at). The X in the corner is the only
+ * thing on it you can press, and that one is a real button. */
+.start-card-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* Three slots -- mark, text, controls -- exactly like .auto-card on the
+ * generated browser page. The two used to differ by a whole row, which made one
+ * the taller cousin of the other rather than the same card in two places.
+ * minmax(0, 1fr) rather than 1fr so a long name ellipsises instead of pushing
+ * the controls out of the card. */
+.start-card {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 12px;
+  position: relative;
+}
+
+/* The third slot. Empty on this surface until the card is hovered: the browser
+ * card's Run and open-in-launcher have no meaning here (no session to run in,
+ * and the launcher is what you are looking at), so the only control is the
+ * unpin X. It reserves its width at all times so revealing it cannot reflow
+ * the row. */
+.start-card-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  min-height: 26px;
+}
+
+.start-card-unpin {
+  min-height: 26px;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+  width: 26px;
+}
+
+.start-card:hover .start-card-unpin,
+.start-card:focus-within .start-card-unpin {
+  opacity: 1;
+}
+
+.start-card-icon {
+  align-items: center;
+  background: var(--paper);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  display: flex;
+  flex: 0 0 auto;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+/* min-width: 0 because a grid item defaults to min-width: auto, and without it
+ * a long unbreakable name widens its own column and skews the row. */
+.start-card-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.start-card-text strong {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.start-card-text small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one card that is an action rather than a preview, marked the same way the
+ * Add bookmark tile is: dashed, unfilled, and pressable. */
+.start-card-add {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  color: var(--ink);
+  justify-content: flex-start;
+  min-height: 0;
+  text-align: left;
+  transition: background 0.14s var(--ease), border-color 0.14s var(--ease);
+}
+
+.start-card-add:not(:disabled):hover {
+  background: var(--paper);
+  border-color: var(--border);
+  color: var(--ink);
+}
+

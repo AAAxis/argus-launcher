@@ -1,0 +1,166 @@
+/* The workspace switcher panel and the create flow inside it.
+ *
+ * Ends with .info-hint-trigger, whose panel is in controls/form-groups.css.
+ * Both sat where they sit now.
+ *
+ * Was styles.css:8310-8466, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Workspace switcher panel ───────────────────────────────────────────────
+ * components/WorkspaceSwitcher.tsx.
+ *
+ * Deliberately the settings dialog's rail, not the table pickers' .filter-pop-*
+ * rows. Those pickers answer "which value goes in this cell"; this one answers
+ * "which workspace am I in, and what do I want to do with my account", which is
+ * the same question the settings rail asks one screen deeper. So it borrows that
+ * vocabulary wholesale -- uppercase group headings, 34px transparent rows at
+ * 13px/650, faint glyphs that go solid when selected, --nav-active-bg for the
+ * current one, never the accent.
+ *
+ * The one departure: a workspace row is two lines, because the role and the plan
+ * are what tell two workspaces apart when both are called "gmail.com team". */
+.workspace-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 10px 8px;
+}
+
+.workspace-pop-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* .settings-rail-group h4, to the pixel. */
+.workspace-pop-group h4 {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+/* Capped rather than unbounded: ten workspaces is the account limit, and ten
+ * rows would otherwise run past the top of the window from a trigger pinned to
+ * the bottom of the rail. Popover leaves a scroll inside its own panel alone,
+ * so this scrolls without dismissing itself on the first wheel tick. */
+.workspace-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 246px;
+  overflow-y: auto;
+}
+
+/* .settings-rail button, plus the tick track. */
+.workspace-pop-item {
+  align-items: center;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  font-weight: 650;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.workspace-pop-item svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+.workspace-pop-item:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.workspace-pop-item:not(:disabled):hover svg {
+  color: var(--ink);
+}
+
+.workspace-pop-item.active {
+  background: var(--nav-active-bg);
+  color: var(--ink);
+}
+
+.workspace-pop-item.active svg {
+  color: var(--ink);
+}
+
+/* Taller than a rail row because it carries two: the name, and what your
+ * relationship to it is. */
+.workspace-pop-list .workspace-pop-item {
+  min-height: 44px;
+  padding: 5px 10px;
+}
+
+.workspace-pop-lines {
+  display: grid;
+  flex: 1;
+  gap: 0;
+  min-width: 0;
+  text-align: left;
+}
+
+.workspace-pop-lines strong {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pop-lines small {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pop-tick {
+  flex: none;
+  margin-left: auto;
+}
+
+/* The tick is the one glyph that stays accented when its row is selected --
+ * it is the answer to "which one am I in", not decoration on a label. */
+.workspace-pop-item.active .workspace-pop-tick {
+  color: var(--accent);
+}
+
+/* Sized to the 12px label it sits in rather than to .icon-button's 32px, which
+   would set the height of every label row it appears on. */
+.info-hint-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: 18px;
+}
+
+.info-hint-trigger:not(:disabled):hover,
+.info-hint-trigger[aria-expanded='true'] {
+  box-shadow: none;
+  color: var(--ink);
+}
+

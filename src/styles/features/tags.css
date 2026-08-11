@@ -1,0 +1,410 @@
+/* Tag chips, the suggestions row, the picker panel, and how tags render inside
+ * a profiles-table cell. Ends with the folder suggestions, which borrow the
+ * same chip.
+ *
+ * Was styles.css:9267-9668, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Tag chips ──────────────────────────────────────────────────────────────
+ * Looks like the canonical text input from the outside -- same fill, border,
+ * radius and focus ring -- but it is a wrapper around a borderless input, so
+ * the chips sit inside the box with the caret rather than above it. */
+.tag-input {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: var(--control-h);
+  padding: 5px 8px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+.tag-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.tag-input input {
+  background: transparent;
+  border: 0;
+  flex: 1;
+  min-height: 24px;
+  min-width: 120px;
+  padding: 0 2px;
+}
+
+.tag-input input:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.tag-chip {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 4px 3px 6px;
+}
+
+/* A catalogued tag carries its brand's tone as an inline style -- one of the
+   six --profile-* triples, the same ones a profile avatar uses. Nothing is
+   named here; the rule only stops the neutral fill from winning. */
+.tag-chip-preset {
+  border-width: 1px;
+}
+
+.tag-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The brand mark, in the brand's own colours -- these are the full-colour cuts,
+   so they go through <img> like .integration-logo and the platform marks, not
+   through a mask (which would flatten Instagram's gradient and Google's four
+   colours to one silhouette). Height is set inline; the width follows the
+   artwork, because eBay and Amazon are wordmarks and YouTube is 256x180. */
+.tag-logo {
+  flex: none;
+  object-fit: contain;
+  width: auto;
+}
+
+/* Three marks are drawn for one background only and vanish on the other. Same
+   problem .integration-logo.invert-on-* solves for Codex and Cursor. */
+:root:not([data-theme="dark"]) .tag-logo.invert-on-light,
+:root[data-theme="dark"] .tag-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+/* And two are dark ink *plus* a brand colour -- TikTok's note beside its cyan
+   and red, Amazon's wordmark above its orange. A plain invert would lift the
+   ink but send cyan to red; the hue-rotate puts the hues back, leaving only
+   the lightness flipped.
+   relight-on-light is the same thing for a mark on an 'ink' chip, which is the
+   dark one in the *light* theme. */
+:root[data-theme="dark"] .tag-logo.relight-on-dark,
+:root:not([data-theme="dark"]) .tag-logo.relight-on-light {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* The 'ink' chip is --accent: the darkest fill the light theme draws and the
+   lightest the dark theme draws -- the one background in the app that runs
+   opposite to the page behind it. So a one-colour mark on it needs the opposite
+   flip to the one the rules above just applied, and both directions have to be
+   said, because the rule being undone is a filter rather than an absence of
+   one.
+
+   TikTok is what this is for: its note is drawn #fff for a dark background. On
+   the ink chip that is right in the light theme and wrong in the dark one --
+   the exact reverse of how it behaves in the tag picker, where the same mark
+   sits on the ordinary surface. Without this the chip is white-on-white in one
+   theme and black-on-black in the other. */
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.relight-on-light,
+:root[data-theme="dark"] .tag-on-ink .tag-logo.relight-on-dark,
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.invert-on-light,
+:root[data-theme="dark"] .tag-on-ink .tag-logo.invert-on-dark {
+  filter: none;
+}
+
+:root[data-theme="dark"] .tag-on-ink .tag-logo.relight-on-light,
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.relight-on-dark {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+:root[data-theme="dark"] .tag-on-ink .tag-logo.invert-on-light,
+:root:not([data-theme="dark"]) .tag-on-ink .tag-logo.invert-on-dark {
+  filter: invert(1);
+}
+
+.tag-chip svg {
+  flex: none;
+  opacity: 0.85;
+}
+
+/* How many profiles carry this tag. Sits inside the chip in the folder
+   suggestions, where the count is what makes the tag worth a folder. */
+.tag-chip-count {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+
+.tag-chip button {
+  align-items: center;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 0;
+  height: 16px;
+  padding: 0;
+  width: 16px;
+}
+
+/* On a tinted chip the remove button has to be the chip's own ink -- the faint
+   grey above disappears into a coloured fill. */
+.tag-chip-preset button {
+  color: currentColor;
+  opacity: 0.65;
+}
+
+.tag-chip button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--danger);
+}
+
+.tag-chip-preset button:not(:disabled):hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: currentColor;
+  opacity: 1;
+}
+
+/* "3 of 5", beside the caret. Only earns its place once the field has
+   something in it, and turns solid at the cap, where it is the explanation for
+   the input having gone dead. */
+.tag-count {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: auto;
+  padding: 0 2px;
+}
+
+.tag-count.full {
+  color: var(--ink-soft);
+}
+
+.tag-input input:disabled {
+  background: transparent;
+  min-width: 0;
+}
+
+/* ── Suggested tags ─────────────────────────────────────────────────────────
+ * Under the field, not inside it: these are not this profile's tags yet, and a
+ * chip sitting in the same box as the ones that are would say they were. One
+ * click each, and the + opens the rest of the catalog. */
+.tag-suggest {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.tag-suggest-label {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* A bare button around the chip -- the chip is the thing being pressed, and a
+   second border around it would read as a chip inside a box. */
+.tag-suggest-chip {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  min-height: 0;
+  opacity: 0.75;
+  padding: 2px;
+}
+
+.tag-suggest-chip:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* The + itself, sized to sit level with the chips beside it. */
+.tag-suggest-more {
+  align-items: center;
+  border: 1px dashed var(--border);
+  color: var(--ink-soft);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  opacity: 1;
+  padding: 0;
+  width: 26px;
+}
+
+.tag-suggest-more:not(:disabled):hover {
+  background: var(--hover);
+  border-style: solid;
+  color: var(--ink);
+}
+
+/* ── Tag picker ─────────────────────────────────────────────────────────────
+ * The catalog, hanging off the tag input. Same panel shape as .status-pop, so
+ * the two "pick one of these coloured things" controls behave alike. */
+/* The one scroll container, around both groups. Sized so a full catalog is
+   obviously cut off mid-row rather than ending flush with the panel, which is
+   what tells you there is more to scroll to. */
+.tag-pop-scroll {
+  max-height: 296px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Sticky, so you can still tell which group you are in halfway down the
+   catalog. Opaque for the same reason -- rows must not show through it. */
+.tag-pop-heading {
+  background: var(--raised);
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  padding: 4px;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  z-index: 1;
+}
+
+.tag-pop-list {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 6px;
+}
+
+/* An even row: mark in a fixed-width slot, name on a steady left edge, tick on
+   the right. The fixed slot is what keeps the names aligned when the marks
+   themselves are not all the same width -- eBay and Amazon are wordmarks. */
+.tag-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.tag-pop-mark {
+  align-items: center;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 16px;
+  justify-content: center;
+  width: 18px;
+}
+
+.tag-pop-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.tag-pop-option.active {
+  background: var(--selected);
+}
+
+.tag-pop-option:disabled {
+  opacity: 0.4;
+}
+
+.tag-pop-option > svg:last-child {
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+
+.tag-pop-note {
+  border-top: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 6px 0 0;
+  padding-top: 8px;
+}
+
+/* ── Tags in the profiles table ─────────────────────────────────────────────
+ * One tag keeps its word; several collapse to marks, because five full chips
+ * take more width than the profile's own name. */
+.tag-cell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* A tag with the word dropped. Square-ish rather than a circle so a wordmark
+   (eBay, Amazon) still has somewhere to sit, and sized to the row's line-height
+   so a cell of five does not make the row taller than its neighbours. */
+.tag-badge {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 5px;
+}
+
+.tag-badge b {
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Folder suggestions ─────────────────────────────────────────────────────
+ * The tags this workspace already runs on, offered as folders. Bare buttons
+ * around a chip: the chip is the thing being pressed, and a second border
+ * around it would read as a chip inside a box. */
+.folder-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.folder-suggestion {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  /* A button's default ink is --accent-ink (white on the accent fill it no
+     longer has), so it has to be reset here for anything that does not paint
+     its own -- see .country-suggestion. */
+  color: var(--ink);
+  min-height: 0;
+  padding: 2px;
+}
+
+.folder-suggestion:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+

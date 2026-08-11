@@ -1,0 +1,112 @@
+/* The sign-in form: the email step, the OTP step, the Google button, and the
+ * failure message.
+ *
+ * Was styles.css:812-916, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+.login-panel input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.login-panel button {
+  margin-top: 6px;
+}
+
+/* The panel itself is a grid, so the inputs need to keep that layout once
+   they are wrapped in a <form> (which they are, so Enter submits). */
+.login-form {
+  display: grid;
+  gap: 14px;
+}
+
+/* Buttons are inline-flex and left-packed by default, which is right in a
+ * toolbar and wrong here: stretched to the panel's width by the grid, the label
+ * sat against the left edge while the Google button above it was centred, so
+ * the two ways in read as different kinds of control. Centring the icon/label
+ * pair lines them up. */
+.login-form button {
+  justify-content: center;
+}
+
+.login-links {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.login-links .link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  margin-top: 0;
+  min-height: 0;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.login-links .link:hover {
+  color: var(--accent);
+}
+
+/* The resend button spends its first minute disabled by the OTP cooldown, and
+   an underlined accent-coloured control that ignores clicks reads as broken. */
+.login-links .link:disabled {
+  color: var(--ink-soft);
+  cursor: default;
+  text-decoration: none;
+}
+
+/* The one-line hint under the email step, rather than a link pair. */
+.login-links .hint {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Six digits are read back character by character, so give them room. */
+.login-panel input.otp-code {
+  font-size: 18px;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.google-button {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.google-button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.login-divider {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+}
+
+.login-divider span {
+  background: var(--border);
+  flex: 1;
+  height: 1px;
+}
+
+/* Sign-in failures persist until the next attempt, unlike the app toast. */
+.message.error {
+  color: var(--danger);
+}
+

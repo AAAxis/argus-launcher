@@ -1,0 +1,89 @@
+name: Mirror browser release to R2
+
+# The Monti Browser is a Chromium fork that takes ~5 hours to build, so it is
+# built by hand on a developer machine rather than in CI. `browser/publish-
+# browser.mjs` zips the finished build, hashes it, writes the manifest the
+# launcher polls, and attaches both to a `browser-v*` release on this repo.
+# This workflow is the last hop: it copies those two assets to R2, where
+# `ensureBrowserResource()` in electron/main.cjs looks for them.
+#
+# It lives on the launcher repo, next to the app that consumes the feed,
+# because this is where the working CLOUDFLARE_R2_* secrets are.
+
+on:
+  release:
+    types: [published]
+  # Re-run the mirror for a release that already exists. Needed whenever the
+  # release was published before this workflow reached the default branch (a
+  # release event cannot fire a workflow that was not there yet), and useful
+  # any time the R2 copy fails halfway.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to mirror, e.g. browser-v151.0.7906.0-mac-arm64'
+        required: true
+        type: string
+
+env:
+  R2_ENDPOINT: https://fdbfca2be2ba5fdd40b274450f22c6ad.r2.cloudflarestorage.com
+  R2_BUCKET: dima
+
+jobs:
+  mirror:
+    name: Copy assets to the browser feed
+    # Release events fire for launcher releases too; those are already handled
+    # by build-release.yml and must not be touched here.
+    if: >-
+      startsWith(github.event.release.tag_name, 'browser-v') ||
+      startsWith(inputs.tag, 'browser-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        env:
+          # Through env rather than interpolated into the script: a tag name is
+          # attacker-controlled text as far as this shell is concerned.
+          TAG_NAME: ${{ github.event.release.tag_name || inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" --dir assets
+          ls -la assets
+
+      - name: Check the assets are a matched pair
+        run: |
+          set -euo pipefail
+          manifest=$(ls assets/latest-*.json)
+          zip=$(ls assets/Monti-Browser-*.zip)
+          # The manifest names the archive it was hashed against. If the two
+          # disagree, clients would download one file and check it against
+          # another's checksum, and every install would fail verification.
+          expected=$(node -p "require('./${manifest}').url")
+          if [ "$(basename "${zip}")" != "${expected}" ]; then
+            echo "Manifest points at ${expected} but the release carries $(basename "${zip}")."
+            exit 1
+          fi
+          echo "${manifest} <-> ${expected}"
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          set -euo pipefail
+          # Archive first, manifest second, always. A manifest that names an
+          # object still uploading is a checksum failure on every client that
+          # happens to check in the gap -- and the archive is ~200 MB, so that
+          # gap is minutes, not milliseconds.
+          for file in assets/Monti-Browser-*.zip; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/resources/browser/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+          done
+          for file in assets/latest-*.json; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/resources/browser/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60" \
+              --content-type application/json
+          done

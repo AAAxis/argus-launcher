@@ -1,0 +1,173 @@
+/* The toolbar's filter dropdowns -- the trigger, its panel, and the tag rows
+ * inside it.
+ *
+ * Was styles.css:2538-2703, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Filter dropdowns ───────────────────────────────────────────────────────
+ * components/ui/TableFilters.tsx -- the status filter, the tag filter and the
+ * selection bar's assign-to-folder.
+ *
+ * These used to be drawn as the canonical <select>: bordered pill, --raised
+ * fill, 180px minimum, chevron at the far end. The reasoning was that the
+ * toolbar still holds two native selects and a row mixing two silhouettes reads
+ * as two kinds of control. What that missed is that a bordered box per filter
+ * is three boxes sitting above a table whose own headers -- the controls these
+ * are most like, since both narrow what the rows say -- carry no box at all.
+ * The toolbar read as heavier than the thing it filters.
+ *
+ * So a filter is now drawn as .th-sort, literally: nothing at rest, and under
+ * the pointer the same --hover plate at --radius-xs, bled 6px/8px past the
+ * label, with the label going from --ink-soft to --ink. One highlight in this
+ * view, not three. The chevron went with the box -- .cell-trigger's note
+ * (below) covers why a marker per control is noise, and it holds here.
+ *
+ * Padding rather than .th-sort's padding-plus-cancelling-negative-margin: the
+ * header has a <th>'s own 14px to eat into, and pulling 8px back here would
+ * close the toolbar's 10px flex gap to 2px between two adjacent filters.
+ *
+ * It has since outgrown the filters and become the app's quiet-control
+ * silhouette generally: Refresh and Columns take it in the toolbar, and Import
+ * takes it in the .topbar beside a solid Add profile. The reasoning carries
+ * over unchanged -- the last bordered box in the row was the one still claiming
+ * to matter more than the table under it -- and in the header it buys a second
+ * thing: with only one bordered button left up there, the border says which of
+ * the two actions is the primary one. */
+.filter-trigger {
+  align-items: center;
+  /* Not stretch. .table-toolbar is a flex row with no align-items, so a control
+     with no height of its own would grow to the 40px search box and paint a
+     plate half again as tall as the label it highlights. */
+  align-self: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 500;
+  gap: 7px;
+  /* Content-sized now that the 180px floor is gone, so it needs a ceiling
+     instead: a long tag used to ellipsize inside the fixed pill, and without
+     one it would grow the toolbar until the search box gave up its width. */
+  max-width: 240px;
+  min-height: 0;
+  padding: 6px 8px;
+}
+
+/* A chip inside the trigger has to be able to shrink. .tag-chip is flex: none
+   everywhere else -- in a table cell it must keep its full width -- but here it
+   is the whole of a capped control. */
+.filter-trigger .status-chip,
+.filter-trigger .tag-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.filter-trigger:not(:disabled):hover,
+.filter-trigger[aria-expanded='true'] {
+  background: var(--hover);
+  /* Buttons in this app do not lift. See the note on `button:hover`. */
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Open takes the same fill as hover: the panel is a click away from the pointer
+   leaving the trigger, and a filter that goes flat the moment you reach into
+   its list has stopped saying which control the list belongs to. Same rule
+   .cell-trigger follows. */
+.filter-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.filter-trigger-label {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The header's tell, and the whole reason the fill is worth having: quiet until
+   the pointer arrives, then the same ink as any other label being pressed. */
+.filter-trigger:not(:disabled):hover .filter-trigger-label,
+.filter-trigger[aria-expanded='true'] .filter-trigger-label {
+  color: var(--ink);
+}
+
+/* The panel. Same rows as the status, platform and column pickers -- left
+   aligned, 34px, 7px radius, tick at the far edge -- for the same reason those
+   three agree with each other. */
+.filter-pop-list {
+  display: grid;
+  gap: 2px;
+}
+
+.filter-pop-option {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 500;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.filter-pop-option:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.filter-pop-option.active {
+  background: var(--selected);
+}
+
+.filter-pop-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The unlabelled tag rows' stand-in for a brand mark, on the same plate a
+   TagBadge uses so a catalogued tag and a user's own word line their names up
+   at the same offset. */
+.filter-pop-mark {
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+}
+
+/* How many rows carry this tag. The quiet counter the folder cards already use,
+   not a second piece of content on the row. */
+.filter-pop-count {
+  color: var(--ink-faint);
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Pushed to the far edge so the names stay left-aligned to each other rather
+   than each being followed by its own mark -- the same rule .platform-pop-option
+   states for its own tick. */
+.filter-pop-tick {
+  flex: none;
+  margin-left: auto;
+}
+

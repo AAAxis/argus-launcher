@@ -1,0 +1,433 @@
+<!doctype html>
+<!-- data-theme starts at "system" and sidepanel.js replaces it with the
+     launcher's own setting once monti-session.json has been read. The default
+     is not cosmetic: a window that was never launched from the launcher has no
+     setting to adopt, and with no attribute at all neither themed :root block
+     matches, so the panel painted light on a dark desktop. -->
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <title>Monti Helper</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <!-- The one sticky row, and it is the navigation and nothing else. It used to
+       carry a shield mark on its left, on the grounds that it was the only
+       thing on screen naming the product -- but the window this panel is docked
+       into is already an Monti window, opened from the Monti toolbar button, so
+       the mark named something nobody was in doubt about while taking width off
+       three already-narrow tabs. The profile name below the strip is what this
+       surface actually has to say about itself. -->
+  <header class="panel-head">
+    <div class="tabs" role="tablist" aria-label="Monti Panel sections">
+      <!-- Cookies first and selected: it is the tab with the controls people
+           came for. Session and Automations are read, not driven, and a tab one
+           click away is not below the fold. -->
+      <button id="tab-cookies" class="tab" type="button" role="tab" data-tab="cookies"
+          aria-selected="true" aria-controls="cookies-section" tabindex="0">
+        <span class="tab-label">Cookies</span>
+      </button>
+      <button id="tab-session" class="tab" type="button" role="tab" data-tab="session"
+          aria-selected="false" aria-controls="session-section" tabindex="-1">
+        <span class="tab-label">Session</span>
+      </button>
+      <!-- Always on screen, and it used to be hidden unless the launch was handed
+           automations. That was the wrong reading of the same rule the empty
+           states below follow: a missing tab is not a quiet empty state, it is a
+           missing feature. Someone who has never pinned a workflow could not tell
+           the panel had an Automations tab at all, so they could not find out
+           what to do to get one -- and a run started from the launcher against
+           this profile had nowhere in this window to show its progress. The
+           panel now says which of those is the case. -->
+      <button id="tab-automations" class="tab" type="button" role="tab" data-tab="automations"
+          aria-selected="false" aria-controls="automations-section" tabindex="-1">
+        <span class="tab-label">Automations</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Not inside any one panel, and not sticky. Which profile this window is
+         belongs to every tab, and it is worth the first line of the scroll
+         rather than a permanent second row above three already-narrow tabs. -->
+    <h1 id="profile-name">Monti Helper</h1>
+
+    <!-- ── Cookies ───────────────────────────────────────────────────────────
+         No eyebrow heading on any panel below: the selected tab is the heading,
+         and each panel takes its accessible name from that tab. No tabindex
+         either -- every panel here contains focusable controls, so the APG's
+         escape hatch for empty panels would only add a dead tab stop. -->
+    <section id="cookies-section" class="section" role="tabpanel"
+        aria-labelledby="tab-cookies">
+
+      <!-- Sync state is the headline: every reachable/token/rate-limit/internal
+           state the engine can persist gets its own copy here, driven by
+           classifySync(), not just the toolbar badge's reduced glyph set. That
+           same tone now also drives this tab's dot, so a sync that dies while
+           you are reading another tab still says so.
+
+           Ungrouped, unlike everything under it, and that is the point: the
+           card is the tab's verdict and the groups below are the things you
+           can do about it. Wrapping it in a frame too would flatten that back
+           into one undifferentiated stack. -->
+      <div id="sync-card" class="card">
+        <div class="card-row">
+          <span id="sync-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="sync-title">Checking sync&hellip;</strong>
+            <span id="sync-detail"></span>
+          </div>
+          <label class="switch" title="Auto-sync to Launcher">
+            <input id="sync-toggle" type="checkbox" aria-label="Auto-sync to Launcher">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <button id="sync-now" class="ghost" type="button">
+          <span class="icon" data-icon="refresh"></span>
+          Save to Launcher now
+        </button>
+        <!-- Filled by renderSync() when sync is off, so a disabled control
+             always says why it is disabled and what would re-enable it. -->
+        <p id="sync-blocked" class="blocked-note" hidden></p>
+        <!-- Shown only while the push loop is suppressed: this window loaded a
+             set the profile is not assigned to, so nothing is being saved
+             anywhere. Three ways out, in the order they are likely to be
+             wanted, and each says where the cookies would land. -->
+        <div id="sync-suppressed" class="suppressed-actions" hidden>
+          <button id="save-to-loaded" class="ghost" type="button">
+            <span class="icon" data-icon="cookie"></span>
+            <span id="save-to-loaded-label">Save to this set</span>
+          </button>
+          <button id="resume-sync" class="ghost" type="button">
+            <span class="icon" data-icon="refresh"></span>
+            <span id="resume-sync-label">Resume syncing</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── This browser ────────────────────────────────────────────────────
+           What is in the jar right now, and where it came from. Everything in
+           this group is a statement about THIS window; the group below is
+           about the Launcher's library. Separating them is the whole point of
+           the grouping: the two used to interleave, so "64 cookies
+           auto-imported" sat directly above a button that writes to the
+           launcher and read as if it were describing it. -->
+      <div class="group">
+        <div class="group-head">
+          <h2>This browser</h2>
+        </div>
+        <div class="group-body">
+          <div class="stats">
+            <div class="stat">
+              <span id="site-count" class="stat-number">0</span>
+              <small id="site-label">This site</small>
+            </div>
+            <div class="stat">
+              <span id="total-count" class="stat-number">0</span>
+              <small>Total cookies</small>
+            </div>
+          </div>
+
+          <div id="seed-status" class="note-line">
+            <span id="seed-icon" class="mini-icon" aria-hidden="true"></span>
+            <span id="seed-text"></span>
+          </div>
+
+          <!-- The last manual file import, kept on screen rather than left to
+               the transient status bar. It names the file, because "Imported 7
+               of 7 cookies" on its own does not tell you *which* file landed --
+               the one question you have after picking one. -->
+          <div id="import-result" class="note-line" hidden>
+            <span id="import-result-icon" class="mini-icon" aria-hidden="true"></span>
+            <span id="import-result-text"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Cookie sets ─────────────────────────────────────────────────────
+           The launcher's library, and the three things you can do with it:
+           load one in, look at one first, write one back. All three were loose
+           buttons with loose hints between them, in an order nothing on screen
+           explained.
+
+           The picker replaced a single "Load from Launcher" button wired to
+           whichever set this profile is assigned. That button could only ever
+           apply one set, which made every other set in the team's library
+           invisible from inside the browser -- the thing this whole change
+           exists to fix. The select is keyed on set id and never on name: two
+           sets can legally share a name, and a name match would let one
+           profile's load reach a different profile's set. -->
+      <div class="group">
+        <div class="group-head">
+          <h2>Cookie sets</h2>
+          <p id="assigned-set-line" class="assigned-line"></p>
+        </div>
+        <div class="group-body">
+          <div class="picker-row">
+            <label class="sr-only" for="set-picker">Cookie set to load</label>
+            <select id="set-picker" disabled></select>
+            <button id="pull" type="button">
+              <span class="icon" data-icon="download"></span>
+              Load
+            </button>
+          </div>
+          <small class="action-hint" id="pull-hint">Replaces this browser's cookies with the set assigned to this profile.</small>
+
+          <!-- Look before you leap. The button above replaces the whole jar,
+               and until this existed the only way to find out what it would
+               replace it WITH was to press it. Now it follows the picker, so
+               the question it answers is about the set actually about to be
+               applied rather than always about the assigned one. Collapsed by
+               default: it is an answer to a question, not something to read
+               every time the panel opens. -->
+          <div class="disclosure">
+            <button id="launcher-list-toggle" type="button" aria-expanded="false"
+                aria-controls="launcher-list">
+              <span class="icon" data-icon="chevronRight"></span>
+              <span id="launcher-list-summary">What's in the selected set</span>
+            </button>
+            <div id="launcher-list" class="launcher-list" hidden></div>
+          </div>
+
+          <!-- A library save into the Cookies tab, distinct from the automatic
+               "(live)" sync above. window.prompt() is unreliable inside an
+               extension page, so this expands inline instead: the button hides
+               and a name field takes its place, prefilled and focused. -->
+          <div id="save-as-wrap" class="save-as-wrap">
+            <button id="save-as-toggle" type="button">
+              <span class="icon" data-icon="cookie"></span>
+              Save to Cookies tab&hellip;
+            </button>
+            <small id="save-as-hint" class="action-hint">Saves a named copy into the Launcher's Cookies library, kept until you delete it.</small>
+            <form id="save-as-form" class="save-as-form" hidden>
+              <label class="save-as-label" for="save-as-name">Name for this cookie set</label>
+              <input id="save-as-name" type="text" maxlength="80" autocomplete="off"
+                  placeholder="e.g. Sophia Bennett 2026-08-07">
+              <div class="save-as-actions">
+                <button id="save-as-cancel" class="ghost" type="button">Cancel</button>
+                <button id="save-as-confirm" class="primary" type="submit">Save to library</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- The explicit overwrite, and the only control in this panel that
+               can destroy a teammate's stored session. Last in the group, after
+               the two non-destructive things, because order is the cheapest
+               guard rail there is. Confirmation in place rather than a
+               window.confirm(), which is unreliable in an extension page. -->
+          <div id="overwrite-wrap" class="save-as-wrap" hidden>
+            <button id="overwrite-toggle" type="button">
+              <span class="icon" data-icon="upload"></span>
+              Overwrite a cookie set&hellip;
+            </button>
+            <small id="overwrite-hint" class="action-hint">Replaces a set in the Launcher's library with this browser's cookies.</small>
+            <div id="overwrite-form" class="save-as-form" hidden>
+              <p id="overwrite-warning" class="blocked-note"></p>
+              <div class="save-as-actions">
+                <button id="overwrite-cancel" class="ghost" type="button">Cancel</button>
+                <button id="overwrite-confirm" class="danger" type="button">Overwrite</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── This file ───────────────────────────────────────────────────────
+           Export, import and the full editor: the three that have nothing to
+           do with the launcher at all. They were the bottom of one long stack
+           and read as more launcher actions. -->
+      <div class="group">
+        <div class="group-head">
+          <h2>Files &amp; editing</h2>
+        </div>
+        <div class="group-body">
+          <div class="row">
+            <div class="menu-wrap">
+              <button id="export-menu-button" type="button" aria-haspopup="true" aria-expanded="false">
+                <span class="icon" data-icon="upload"></span>
+                Export
+              </button>
+              <div id="export-menu" class="menu" hidden role="menu">
+                <button data-scope="all" data-format="json" type="button" role="menuitem">All cookies &middot; JSON</button>
+                <button data-scope="all" data-format="netscape" type="button" role="menuitem">All cookies &middot; Netscape</button>
+                <button data-scope="site" data-format="json" type="button" role="menuitem">Current site &middot; JSON</button>
+                <button data-scope="all" data-format="clipboard" type="button" role="menuitem">Copy JSON to clipboard</button>
+              </div>
+            </div>
+            <label id="import-label" class="import-label" for="import-file">
+              <span class="icon" data-icon="upload-tray"></span>
+              Import
+              <input id="import-file" type="file" accept=".json,.txt,.cookies,application/json,text/plain">
+            </label>
+          </div>
+
+          <button id="open-editor" class="primary" type="button">
+            <span class="icon" data-icon="edit"></span>
+            Open cookie editor
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Session ──────────────────────────────────────────────────────────
+         The identity check: whether this window's exit, clock and claimed
+         hardware agree with each other is the question the whole product exists
+         to answer. It is one click away rather than first, and its tab carries a
+         dot when the answer is no. -->
+    <section id="session-section" class="section" role="tabpanel"
+        aria-labelledby="tab-session" hidden>
+      <!-- The eyebrow is gone but the row it shared with these two controls is
+           not: with no heading to sit beside, they right-align on their own. -->
+      <div class="section-head">
+        <div class="section-actions">
+          <button id="recheck" class="icon-button" type="button"
+              title="Re-check this proxy" aria-label="Re-check this proxy">
+            <span class="icon" data-icon="refresh"></span>
+          </button>
+          <a class="icon-button" href="https://ip.me/" target="_blank" rel="noreferrer"
+              title="Check this session on ip.me" aria-label="Check this session on ip.me">
+            <span class="icon" data-icon="externalLink"></span>
+          </a>
+        </div>
+      </div>
+
+      <div id="proxy-card" class="card">
+        <!-- Which profile this window IS, on the card that answers "who does
+             this session look like". This is the tab someone opens when they
+             are not sure which of six open windows they are in front of.
+
+             The NAME is already the page heading, so repeating it alone would
+             be decoration. The id is what this line adds: two profiles can
+             legally share a name (cookieSync.ts carries a warning about
+             exactly that), and the id is the one identifier that is never
+             ambiguous -- it is the profile's real directory name on disk and
+             what an MCP call or a support question names. Both come out of the
+             launch snapshot, which has carried profile.id and profile.name all
+             along with nothing painting either. -->
+        <p id="session-profile" class="assigned-line" hidden>
+          <span id="session-profile-id" class="mono-id"></span>
+        </p>
+        <div class="card-row">
+          <span id="proxy-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="proxy-title">Reading session&hellip;</strong>
+            <span id="proxy-detail"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Four labels, four values, read down the left edge and compared
+           across. Populated by renderProxyFields() from the same
+           homeProxyStatus() output the launcher composed at launch, and
+           rebuilt wholesale from a re-check's answer.
+
+           Framed, because these four rows ARE the identity check -- the
+           question the whole product exists to answer -- and on a flat
+           background they read as a caption under the card rather than as the
+           evidence the card's verdict was drawn from. The group's heading says
+           which four they are without a row having to. -->
+      <div id="proxy-fields-group" class="group" hidden>
+        <div class="group-head">
+          <h2>What this session looks like</h2>
+        </div>
+        <div class="group-body">
+          <dl id="proxy-fields" class="fields" hidden></dl>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Automations ───────────────────────────────────────────────────────
+         Two things at once, and they are independent: every workflow in this
+         window's WORKSPACE (the list -- painted from the launch snapshot first,
+         then replaced by the live one, with assigned and pinned rows badged and
+         sorted to the top), and whatever is RUNNING against this profile right
+         now, wherever it was started from. A profile with nothing pinned can
+         still have a live run to watch, which is why the card is not inside the
+         list and does not depend on it. -->
+    <section id="automations-section" class="section" role="tabpanel"
+        aria-labelledby="tab-automations" hidden>
+
+      <!-- The live run. Hidden until a poll finds one, and it is the first thing
+           in the panel when there is one: what is happening now outranks what
+           you could start. -->
+      <div id="run-card" class="card run-card" hidden>
+        <div class="card-row">
+          <span id="run-icon" class="status-icon" aria-hidden="true"></span>
+          <div class="card-text">
+            <strong id="run-title">&nbsp;</strong>
+            <span id="run-step"></span>
+          </div>
+        </div>
+        <!-- role="progressbar" rather than <progress>: the value is genuinely
+             unknown for a run whose loop has overshot its declared step count,
+             and an indeterminate <progress> cannot also carry the text below.
+             aria-valuenow is omitted in that case, which is how the ARIA spec
+             spells "indeterminate". -->
+        <div id="run-bar" class="run-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <span id="run-bar-fill" class="run-bar-fill"></span>
+        </div>
+        <div class="run-foot">
+          <span id="run-meta" class="run-meta"></span>
+          <!-- Starts hidden, and that is not merely tidiness: paintRunCard
+               returns early when there is no run at all, so this button is never
+               touched on a profile that has never run anything. Shown only for a
+               run that is actually live. -->
+          <button id="run-stop" class="ghost run-stop" type="button" hidden>
+            <span class="icon" data-icon="stopCircle"></span>
+            Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Framed for the same reason the cookie sets are: this is now the whole
+           workspace rather than the two things a launch was handed, so it is a
+           list you scan rather than a pair of buttons. The heading names what
+           the list is OF, which the rows cannot say for themselves once a
+           teammate's workflow is in it. -->
+      <div id="automation-group" class="group" hidden>
+        <div class="group-head">
+          <h2>Workspace automations</h2>
+          <p id="automation-count"></p>
+        </div>
+        <div class="group-body">
+          <div id="automation-list" class="automation-list"></div>
+        </div>
+      </div>
+
+      <!-- Shown when there is nothing to list at all. It used to say "pin a
+           workflow and it will appear here on the next launch", which was the
+           right advice while this list was the launch snapshot; the list is now
+           every workflow in the workspace, so reaching this state means the
+           workspace is genuinely empty -- or the launcher is closed and the
+           snapshot was empty too. Either way "go and make one" is the only
+           useful thing this screen can offer. -->
+      <div id="automations-empty" class="empty-state" hidden>
+        <p id="automations-empty-title" class="empty-title">No automations in this workspace</p>
+        <p id="automations-empty-detail" class="empty-detail">
+          Build a workflow in Monti Gate and it will show up here. Anything
+          your team creates appears in this list too &mdash; pinning one, or
+          setting it as this profile&rsquo;s own, just moves it to the top.
+        </p>
+        <button id="open-automations" class="primary" type="button">
+          <span class="icon" data-icon="externalLink"></span>
+          Open Automations in Launcher
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Pinned to the bottom of the panel rather than sitting after the last
+       section. A popup was short enough that a trailing line was always in
+       view; this panel scrolls, and an acknowledgement you have to scroll to
+       find is one you will not see. Global to all three tabs: it reports what
+       your last action did, and that is not a property of the tab you are on. -->
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <script src="cookie-format.js"></script>
+  <script src="sync-status.js"></script>
+  <script src="icons.js"></script>
+  <script src="tabs.js"></script>
+  <script src="run-view.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

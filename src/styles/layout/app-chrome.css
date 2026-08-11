@@ -1,0 +1,217 @@
+/* The frame every tab renders into: .content, the topbar, the panel, the table
+ * wrap and the table toolbar.
+ *
+ * Was styles.css:2416-2537, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.content > .topbar {
+  flex: 0 0 auto;
+}
+
+/* Spelled `overflow: auto` rather than `overflow-y: auto`, because a table can
+ * be wider than its column and needs the horizontal scrollbar. It always did:
+ * CSS computes an axis left at `visible` up to `auto` as soon as the other axis
+ * is not visible, so this pair was already scrolling both ways by accident.
+ * Saying it outright keeps .table-wrap's `overflow: hidden` from silently
+ * winning the x-axis and swallowing the overflowing columns. */
+.content > .table-wrap,
+.content > .card-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.topbar,
+.actions,
+.panel-title {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+/* One height on every tab, whether or not the page has action buttons.
+ *
+ * This row has no height of its own -- align-items: center over a flex row
+ * means it is as tall as its tallest child. Five tabs put buttons in .actions
+ * (Profiles, Proxies, Cookies, Start page, Automations) and three do not
+ * (Extensions, Integrations, API; see renderTopActions in App.tsx), so the row
+ * was 36px on the first group and collapsed to the h1's own line box on the
+ * second. The title moved ~6px and the content under it ~12px as you switched
+ * tabs, which read as each page having its own header. Reserving --control-h
+ * -- the button height that was setting it anyway -- pins all eight together. */
+.topbar {
+  justify-content: space-between;
+  min-height: var(--control-h);
+}
+
+/* --control-h-sm, the same height .launch takes in a table row, so Add profile
+   and the Launch button it sits above are one size of control rather than two.
+   At the full --control-h it was the largest thing on the page after the title,
+   which oversold a button you press once per profile.
+ *
+ * The row keeps its --control-h floor above, so shrinking these does not move
+ * the title or the content under it -- and the flat .filter-trigger actions
+ * (Refresh, Import) and the .icon-button bell are excluded: both already carry
+ * their own geometry, and this selector outranks theirs. */
+/* A child combinator, because a Popover renders its panel as a sibling of its
+   trigger -- so everything inside the bell's panel was a `.topbar .actions
+   button` too, and was silently taking this min-height. It went unnoticed while
+   the panel's own buttons all carried .icon-button or set their own height; the
+   moment the clear button stopped doing that, a 22px circle came out 32px tall
+   and oval. The rule only ever meant the header's own actions, and every one of
+   them is a direct child. */
+.topbar .actions > button:not(.filter-trigger):not(.icon-button) {
+  min-height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
+/* The main data surface -- the profiles, cookies and proxies tables, and every
+ * panel drawn to match them. Takes the largest radius in the scale: these are
+ * the biggest boxes on screen, and a corner that reads as generous on a 400px
+ * table would read as a lozenge on a 36px button. */
+.table-wrap,
+.panel {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+/* A table's rows are full-bleed: the last row's hover fill and a selected row's
+ * fill both run edge to edge, so at 14px they visibly square off the two bottom
+ * corners the border is rounding. A scroll container clips to the border box,
+ * which fixes that -- and .content > .table-wrap is already one (see above).
+ * This covers the tables that are not a direct child of .content.
+ *
+ * Scoped to .table-wrap and not .panel on purpose: a panel holds padded form
+ * controls, and clipping it would eat the 3px --focus-ring on anything sitting
+ * near its edge. A table has no focusable control against its border.
+ *
+ * Nothing that must escape the box is caught by this: row popovers are
+ * position: fixed (.popover-panel), so they are laid out against the viewport. */
+.table-wrap {
+  overflow: hidden;
+}
+
+/* ---- the framed table ----------------------------------------------------
+ *
+ * The same two objects an automation card is drawn as, at table scale: a frame
+ * carrying the chrome -- filters, the folder rail, the selection bar, the pager
+ * -- and the table inset in it as the content card. The actions live outside
+ * the rows they act on, which is the whole point of drawing it this way.
+ *
+ * --frame draws no border; the surface step is the frame. See tokens.css for
+ * why that pair is not --paper and --raised, and why it crosses over in dark. */
+.table-frame {
+  background: var(--frame);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Asymmetric, like the automation card's. The top opens far enough to seat
+     the toolbar; the other three are only an edge. 5px, because the inner
+     corner has to lose exactly the frame's width or the two arcs stop being
+     concentric -- 14 out, 5 thick, 9 in, which is --radius-sm on the wrap. */
+  padding: 10px 5px 5px;
+}
+
+/* `.content > .table-wrap` (above) is what made the TABLE the scroll container
+   rather than the page, and the frame now sits between them, so that rule no
+   longer matches and the whole tab would scroll as one -- with .table-wrap's
+   `overflow: hidden` clipping the rows that went past the bottom. The height
+   stops here and the scrolling is handed down. */
+.content > .table-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.table-frame > .table-wrap {
+  background: var(--frame-card);
+  /* --border-soft, not --border: the frame already separates the table from the
+     page, so the hairline is only drawing the inset and can be quieter than the
+     line that used to do both jobs. */
+  border-color: var(--border-soft);
+  border-radius: var(--radius-sm);
+  /* The frame casts the shadow now. Two would read as two stacked cards. */
+  box-shadow: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The chrome lines up with the table's own text rather than with the frame's
+   5px edge: 5 + 5 lands it at 10px, where the wrap's first column starts. */
+.table-frame > .table-toolbar,
+.table-frame > .folder-row,
+.table-frame > .selection-toolbar,
+.table-frame > .pagination-bar {
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+/* Everything on the frame that fills with --raised has to become --frame-card.
+ * In dark --frame *is* --raised's #222222, so a folder card or a search box
+ * left on --raised fills with its own background and loses its edge -- visible
+ * only by its border, which is not what any of them are drawn to rely on.
+ * --frame-card keeps each control on the opposite side of the frame from the
+ * frame, in both themes, which is the same thing the table does.
+ *
+ * The flat controls need nothing: .filter-trigger and .columns-trigger are
+ * `background: none` at rest and take a --hover plate, which is a step away
+ * from the frame either way round. */
+.table-frame .folder-card,
+.table-frame .table-toolbar input,
+.table-frame .table-toolbar select {
+  background-color: var(--frame-card);
+}
+
+/* The ghost buttons on the frame -- the whole selection bar, and Prev/Next --
+ * for the same reason, and it is the reason --raised-soft was invented: it is
+ * half a step under --raised so a control sitting on the *page* does not punch
+ * a white hole in it. On the frame the page is not what is behind them, and in
+ * dark --raised-soft is the frame's own #222222 exactly, so six of them in a
+ * row came out as six outlines with no button in any of them.
+ *
+ * Scoped to the frame's own children. A ghost button inside the table -- the
+ * Edit at the end of every row -- is already on --frame-card and would be
+ * filling itself with its own background. */
+.table-frame > .selection-toolbar button.ghost,
+.table-frame > .pagination-bar button.ghost {
+  background-color: var(--frame-card);
+}
+
+.table-toolbar {
+  display: flex;
+  gap: 10px;
+}
+
+/* Look comes from the canonical input; the toolbar only makes it taller, wider
+ * and capped, so a search box reads as the toolbar's primary control. */
+.table-toolbar input {
+  min-height: 40px;
+  max-width: 320px;
+  padding: 0 14px;
+  width: 100%;
+}
+
+/* Only the width. The fill, border, height and pill all come from the canonical
+ * `select` -- this block used to restate them, and in restating the radius as
+ * var(--radius) it squared off the only controls in a toolbar of rounded ones.
+ * The two selects still here (Cookies' In use / Unused, Proxies' Used by a
+ * profile) are the ones with no colour to show; the three that had one are now
+ * .filter-trigger below. */
+.table-toolbar select {
+  min-width: 180px;
+}
+

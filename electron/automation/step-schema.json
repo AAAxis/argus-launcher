@@ -1,0 +1,278 @@
+{
+  "goto": {
+    "label": "Go to",
+    "icon": "globe",
+    "summary": "Go to {url}",
+    "cdp": ["Page"],
+    "fields": [
+      {"key": "url", "kind": "text", "label": "URL", "required": true, "interpolate": true,
+       "placeholder": "https://example.com",
+       "hint": "Supports {{profile.login_url}}, so one workflow can sign each profile in at its own address."},
+      {"key": "waitUntil", "kind": "select", "label": "Wait until", "default": "load",
+       "options": ["load", "domcontentloaded"]}
+    ]
+  },
+  "waitFor": {
+    "label": "Wait for",
+    "icon": "hourglass",
+    "summary": "Wait for {for}",
+    "cdp": ["Runtime", "Page"],
+    "fields": [
+      {"key": "for", "kind": "select", "label": "Condition", "required": true, "default": "selector",
+       "options": ["selector", "selectorGone", "url", "text"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"for": ["selector", "selectorGone"]}, "check": "selector"},
+      {"key": "url", "kind": "text", "label": "URL contains", "interpolate": true,
+       "showWhen": {"for": "url"}},
+      {"key": "text", "kind": "text", "label": "Page contains text", "interpolate": true,
+       "showWhen": {"for": "text"}}
+    ]
+  },
+  "click": {
+    "label": "Click",
+    "icon": "mouse-pointer-click",
+    "summary": "Click {selector}",
+    "cdp": ["Runtime", "Input"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
+       "interpolate": true, "check": "selector"},
+      {"key": "nth", "kind": "number", "label": "Match index", "min": 0,
+       "hint": "Zero-based. Leave empty for the first match."}
+    ]
+  },
+  "type": {
+    "label": "Type",
+    "icon": "keyboard",
+    "summary": "Type into {selector}",
+    "cdp": ["Runtime", "Input"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
+       "interpolate": true, "check": "selector"},
+      {"key": "text", "kind": "text", "label": "Text", "required": true, "interpolate": true,
+       "hint": "Supports {{profile.email}}, {{profile.password}} and {{profile.login_url}}."},
+      {"key": "clear", "kind": "boolean", "label": "Clear the field first", "default": true},
+      {"key": "delayMs", "kind": "number", "label": "Per-key delay (ms)", "min": 0, "max": 1000,
+       "hint": "Set this to send real key events instead of one paste-shaped insert."},
+      {"key": "pressEnter", "kind": "boolean", "label": "Press Enter afterwards"}
+    ]
+  },
+  "scroll": {
+    "label": "Scroll",
+    "icon": "mouse",
+    "summary": "Scroll to {to}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "to", "kind": "select", "label": "Scroll to", "required": true, "default": "bottom",
+       "options": ["bottom", "top", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"to": "selector"}, "check": "selector"}
+    ]
+  },
+  "extract": {
+    "label": "Extract",
+    "icon": "clipboard-list",
+    "summary": "Read {selector} into {into}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "required": true,
+       "interpolate": true, "check": "selector"},
+      {"key": "what", "kind": "select", "label": "Read", "default": "text",
+       "options": ["text", "html", "attr", "value"]},
+      {"key": "attr", "kind": "text", "label": "Attribute", "interpolate": true,
+       "showWhen": {"what": "attr"}, "placeholder": "href"},
+      {"key": "all", "kind": "boolean", "label": "All matches (stores an array)"},
+      {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true,
+       "hint": "Readable afterwards as {{vars.<name>}}."}
+    ]
+  },
+  "evaluate": {
+    "label": "Run script",
+    "icon": "code",
+    "summary": "Run script",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "script", "kind": "textarea", "label": "JavaScript", "required": true,
+       "interpolate": false,
+       "hint": "Runs in the page. Values come in as `vars`, NOT as {{...}} -- templates are never substituted into code."},
+      {"key": "args", "kind": "keyvalue", "label": "Values passed in as `vars`",
+       "interpolate": true},
+      {"key": "into", "kind": "text", "label": "Store result in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true}
+    ]
+  },
+  "screenshot": {
+    "label": "Screenshot",
+    "icon": "camera",
+    "summary": "Screenshot",
+    "cdp": ["Page", "DOM"],
+    "fields": [
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "hint": "Leave empty to capture the viewport.", "check": "selector"},
+      {"key": "fullPage", "kind": "boolean", "label": "Full page"}
+    ]
+  },
+  "wait": {
+    "label": "Wait",
+    "icon": "timer",
+    "summary": "Wait",
+    "cdp": [],
+    "fields": [
+      {"key": "ms", "kind": "number", "label": "Fixed wait (ms)", "min": 0, "max": 300000},
+      {"key": "minMs", "kind": "number", "label": "Random wait, minimum (ms)", "min": 0,
+       "max": 300000},
+      {"key": "maxMs", "kind": "number", "label": "Random wait, maximum (ms)", "min": 0,
+       "max": 300000, "hint": "Set min and max instead of a fixed wait to look less mechanical."}
+    ]
+  },
+  "setVar": {
+    "label": "Set variable",
+    "icon": "variable",
+    "summary": "Set {name}",
+    "cdp": [],
+    "fields": [
+      {"key": "name", "kind": "text", "label": "Name", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true},
+      {"key": "value", "kind": "text", "label": "Value", "required": true, "interpolate": true}
+    ]
+  },
+  "httpRequest": {
+    "label": "HTTP request",
+    "icon": "webhook",
+    "summary": "{method} {url}",
+    "cdp": [],
+    "fields": [
+      {"key": "method", "kind": "select", "label": "Method", "default": "GET",
+       "options": ["GET", "POST"]},
+      {"key": "url", "kind": "text", "label": "URL", "required": true, "interpolate": true},
+      {"key": "headers", "kind": "keyvalue", "label": "Headers", "interpolate": true},
+      {"key": "body", "kind": "textarea", "label": "Body", "interpolate": true,
+       "showWhen": {"method": "POST"}},
+      {"key": "into", "kind": "text", "label": "Store response in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
+  },
+  "aiPrompt": {
+    "label": "Ask AI",
+    "icon": "sparkles",
+    "summary": "Ask AI into {into}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "provider", "kind": "connector", "category": "ai", "label": "Provider",
+       "hint": "Leave as the workspace default unless this step needs a specific model."},
+      {"key": "prompt", "kind": "textarea", "label": "Prompt", "required": true,
+       "interpolate": true,
+       "placeholder": "Summarise this page in one sentence.",
+       "hint": "Supports {{vars.x}} and {{profile.email}}."},
+      {"key": "context", "kind": "select", "label": "Show the model", "default": "none",
+       "options": ["none", "pageText", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"context": "selector"}, "check": "selector"},
+      {"key": "format", "kind": "select", "label": "Answer as", "default": "text",
+       "options": ["text", "json"]},
+      {"key": "maxTokens", "kind": "number", "label": "Answer length cap (tokens)", "min": 1,
+       "max": 4096, "default": 512},
+      {"key": "into", "kind": "text", "label": "Store in variable", "required": true,
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true,
+       "hint": "Readable afterwards as {{vars.<name>}}."}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies. Page text is truncated before it is sent."
+  },
+  "aiCheck": {
+    "label": "AI check",
+    "icon": "scan-eye",
+    "summary": "AI check: {question}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "provider", "kind": "connector", "category": "ai", "label": "Provider"},
+      {"key": "question", "kind": "textarea", "label": "Yes/no question", "required": true,
+       "interpolate": true,
+       "placeholder": "Is this a captcha or bot-check page?"},
+      {"key": "context", "kind": "select", "label": "Show the model", "default": "pageText",
+       "options": ["none", "pageText", "selector"]},
+      {"key": "selector", "kind": "text", "label": "CSS selector", "interpolate": true,
+       "showWhen": {"context": "selector"}, "check": "selector"},
+      {"key": "into", "kind": "text", "label": "Store the answer in variable",
+       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "writesVar": true,
+       "hint": "Stores \"yes\" or \"no\". Branch on it with an If step: {{vars.<name>}} equals yes."},
+      {"key": "onFalse", "kind": "select", "label": "If the answer is no", "default": "continue",
+       "options": ["continue", "fail"],
+       "hint": "\"fail\" makes this an assertion: the step fails and On failure decides the rest."}
+    ],
+    "note": "The model is asked for one word and nothing else. Anything it says that is not yes or no fails the step rather than being guessed at."
+  },
+  "notify": {
+    "label": "Send message",
+    "icon": "send",
+    "summary": "Send message",
+    "cdp": [],
+    "fields": [
+      {"key": "connector", "kind": "connector", "category": "message", "label": "Send via",
+       "hint": "Leave as the workspace default message connector."},
+      {"key": "message", "kind": "textarea", "label": "Message", "required": true,
+       "interpolate": true,
+       "placeholder": "Done: {{vars.summary}}",
+       "hint": "Supports {{vars.x}} and {{profile.name}} -- this is how an AI step's answer gets sent."},
+      {"key": "subject", "kind": "text", "label": "Subject", "interpolate": true,
+       "hint": "Used by email connectors; chat connectors ignore it."}
+    ],
+    "note": "Sent from the launcher, not from the page -- it does not use the profile's proxy or cookies."
+  },
+  "saveCookies": {
+    "label": "Save cookies",
+    "icon": "cookie",
+    "summary": "Save cookies to the Launcher {domain}",
+    "cdp": ["Storage"],
+    "fields": [
+      {
+        "key": "domain",
+        "kind": "text",
+        "label": "Domain filter",
+        "interpolate": true,
+        "hint": "Leave empty to save every cookie in the profile. Matches a bare domain (example.com) or the leading-dot form (.example.com), case-insensitively, plus its subdomains."
+      }
+    ],
+    "note": "With a filter set, the live cookie set is REPLACED by exactly this filtered subset -- running this step again with a narrower filter after a full sync discards every other domain's cookies from that set."
+  },
+  "if": {
+    "label": "If",
+    "icon": "git-branch",
+    "summary": "If {condition.left} {condition.op}",
+    "cdp": ["Runtime"],
+    "fields": [
+      {"key": "condition", "kind": "condition", "label": "Condition", "required": true},
+      {"key": "then", "kind": "steps", "label": "Yes"},
+      {"key": "else", "kind": "steps", "label": "No"}
+    ]
+  },
+  "loop": {
+    "label": "Loop",
+    "icon": "repeat",
+    "summary": "Loop {mode}",
+    "cdp": [],
+    "fields": [
+      {"key": "mode", "kind": "select", "label": "Mode", "required": true, "default": "times",
+       "options": ["times", "forEach"]},
+      {"key": "times", "kind": "number", "label": "Repeat count", "min": 1, "max": 1000,
+       "showWhen": {"mode": "times"}},
+      {"key": "items", "kind": "text", "label": "List", "interpolate": true,
+       "showWhen": {"mode": "forEach"}, "placeholder": "{{vars.rows}}",
+       "hint": "A whole-field template resolving to an array. Each item is {{loop.item}}."},
+      {"key": "maxIterations", "kind": "number", "label": "Safety cap", "min": 1, "max": 1000,
+       "default": 100},
+      {"key": "body", "kind": "steps", "label": "Each time"}
+    ]
+  },
+  "callAutomation": {
+    "label": "Run automation",
+    "icon": "workflow",
+    "summary": "Run automation {automationId}",
+    "cdp": [],
+    "fields": [
+      {"key": "automationId", "kind": "automation", "label": "Automation", "required": true,
+       "pattern": "^[A-Za-z0-9._-]{1,64}$",
+       "hint": "Runs that automation's steps here, on this run's browser and variables. onError: retry re-runs the whole callee."}
+    ]
+  }
+}

@@ -1,0 +1,305 @@
+/* The platform picker and the folder icon picker, including the country flags
+ * proxy folders can wear.
+ *
+ * Ends with .select-action, a field-and-button pair used outside the editor
+ * too. It sat here in styles.css and did not move.
+ *
+ * Was styles.css:7949-8158, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Platform picker ────────────────────────────────────────────────────────
+ * Six cards instead of the dropdown this replaces. auto-fit rather than a fixed
+ * six columns: the same control renders in the 1380px profile dialog and in the
+ * 920px fingerprint one, and it wraps to two rows in the narrow case instead of
+ * squeezing six labels to nothing. */
+.platform-choices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.platform-choice {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  gap: 7px;
+  min-height: 0;
+  padding: 12px 8px;
+  position: relative;
+}
+
+.platform-choice:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.platform-choice.active {
+  background: var(--raised);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+.platform-choice-label {
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* Tucked into the corner rather than added to the column: a fourth stacked
+ * element would make the selected card taller than its neighbours. */
+.platform-choice-check {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+
+/* The brand marks are raw <svg> rather than lucide components, so they need the
+ * inline-flex box lucide gives its icons for free -- without it they sit on the
+ * text baseline and drag the card's centre line down. */
+.platform-mark {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+/* ── Folder icon picker ─────────────────────────────────────────────────────
+ * Square cells rather than the platform picker's labelled cards: twelve glyphs
+ * with twelve captions under them would out-weigh the name field they sit
+ * beside. The caption lives in the tooltip and the accessible name. */
+.icon-choices {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(38px, 1fr));
+}
+
+.icon-choice {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 0;
+  height: 38px;
+  padding: 0;
+}
+
+.icon-choice:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+.icon-choice.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--ink);
+}
+
+/* The country flags, under the glyphs, for proxy folders only. A search box
+ * rather than a grid of all 250: the twenty-odd shown first are the countries
+ * this workspace's proxies actually checked into, which for most users is the
+ * whole list they will ever want. */
+.flag-choices {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.flag-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  display: flex;
+  gap: 7px;
+  padding: 0 9px;
+}
+
+.flag-search input {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+}
+
+.flag-search input:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+.icon-choice.flag {
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.icon-choice.flag .flag-svg {
+  height: 16px;
+  width: 24px;
+}
+
+.flag-choices-note {
+  color: var(--ink-softer);
+  font-size: 11px;
+  margin: 0;
+}
+
+/* A country offered as a folder, in the same slot the tag chips use. Not a
+ * TagChip: a tag is a word with a mark, a country is a flag with a name, and
+ * borrowing the chip would have meant a tone lookup for something that has
+ * no tone -- a country is not a brand, so it gets the neutral fill and reading
+ * ink rather than Instagram's gradient.
+ *
+ * The colour is stated rather than inherited: the wrapping .folder-suggestion
+ * is a <button>, and a button's ink is --accent-ink, which is white. The tag
+ * chips never showed it because they set their own; this read as an empty pill
+ * on light paper. */
+.country-suggestion {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 7px;
+  padding: 3px 9px 3px 7px;
+}
+
+.country-suggestion-count {
+  color: var(--ink-softer);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.proxy-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-action {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* .inline-action's field-and-button, stacked. Side by side inside the profile
+ * form's half-width column, the connection-string input had room for about
+ * fifteen characters before "Create new proxy" took the rest. */
+.stacked-action {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.stacked-action > input {
+  width: 100%;
+}
+
+.select-action {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.select-action button {
+  min-height: var(--control-h);
+}
+
+/* ── The form's own dropdown ─────────────────────────────────────────────────
+ * components/ui/FieldPicker.tsx -- the cell picker's list behind a trigger
+ * shaped like the <select> it replaces, so a field that picks a teammate, a
+ * folder or an automation can show that thing's mark instead of its name.
+ *
+ * Everything here is written against the canonical `select` rule in
+ * controls/inputs.css and has to keep matching it: this control sits in the
+ * same column as the plain selects and inputs that are still native, and the
+ * one thing it must never look like is a different kind of field.
+ *
+ * A <button>, so the base `button` rule has already filled it with --accent and
+ * given it 700 weight and a hover shadow. All of that is undone below; the
+ * hover rule needs :not(:disabled) to outrank `button:not(:disabled):hover`. */
+.field-picker {
+  /* --raised, the same fill the canonical `select` and every text input take.
+     The temptation is --frame-card, on the grounds that --raised and --frame are
+     the same colour in dark -- but this control sits INSIDE the card, on
+     --frame-card, not on the frame. A --raised control there is a step lighter
+     than the surface behind it, which is exactly what the inputs beside it do;
+     filling it with --frame-card would paint it its own card's colour and leave
+     a bare outline where every neighbour has a filled box. */
+  background-color: var(--raised);
+  background-image: var(--chevron);
+  background-position: right 13px center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink);
+  display: flex;
+  font-weight: 500;
+  justify-content: flex-start;
+  min-height: var(--control-h);
+  /* The select's numbers, less one pixel each side for the border this draws
+     and the native control does not count in the same place. */
+  padding: 0 37px 0 12px;
+  transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+  width: 100%;
+}
+
+/* No lift, no fill change -- a form control is not a button, and the only thing
+   hover should say is that this one can be opened. */
+.field-picker:not(:disabled):hover {
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+/* The select's focus, not the button's outline: base/elements.css gives every
+   button a squared-off 2px outline, which around a 999px pill draws a rectangle
+   through the corners. */
+.field-picker:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.field-picker[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+/* A mark and a name on one line, for the picker rows and triggers that have no
+   chip component of their own -- an automation's. The folder and the assignee
+   bring .folder-label and .assignee, which already do this. */
+.picker-mark-row {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* min-width: 0 so a long name ellipsizes inside the pill rather than pushing
+   the chevron out of it. */
+.field-picker-value {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

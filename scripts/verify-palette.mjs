@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+// Asserts the browser start page and the launcher paint the same colours.
+//
+// src/styles/base/tokens.css is the source of truth -- it was src/tokens.css
+// until that file was split into 46 sheets and became a barrel of @imports,
+// which left this script parsing a file with no :root block in it and failing
+// its first two checks. src/lib/palette.ts is the copy that
+// travels inside the generated home.html, which is a file:// document with no
+// stylesheet to link to -- so the values necessarily exist twice. They had
+// already drifted once, and badly: the start page was still on the warm paper
+// palette (#fbfaf8 / #1d1c18 / #e4ddd1) the launcher replaced with an
+// achromatic ramp, so the two halves of one product did not look related.
+//
+//   node scripts/verify-palette.mjs
+//
+// No Electron, no Supabase, no running launcher -- it reads two files. Exits
+// non-zero on the first failure so it can sit in the verification checklist
+// beside verify-api-routes.
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, '..');
+
+const cssSource = readFileSync(join(root, 'src/styles/base/tokens.css'), 'utf8');
+const paletteSource = readFileSync(join(root, 'src/lib/palette.ts'), 'utf8');
+// The third copy: the browser side panel's stylesheet. Same problem as
+// palette.ts, one step further out -- it loads in its own extension page, never
+// shares a cascade with the app, and is copied verbatim into every profile
+// directory with no build step that could resolve a var() for it. The popup it
+// replaced carried a light-only copy that had already drifted off a palette the
+// launcher abandoned months earlier, which is the drift this arm catches.
+const panelSource = readFileSync(
+    join(root, 'extensions/cookie-manager/sidepanel.css'), 'utf8');
+
+let failures = 0;
+
+function check(ok, message) {
+  if (ok) {
+    return;
+  }
+  failures += 1;
+  console.error(`FAIL  ${message}`);
+}
+
+let reported = 0;
+
+function pass(message) {
+  if (failures > reported) {
+    console.log(`FAIL  ${message}`);
+    reported = failures;
+    return;
+  }
+  console.log(`ok    ${message}`);
+}
+
+// ── Parsing ──────────────────────────────────────────────────────────────────
+// Both parsers are deliberately dumb line scanners rather than a CSS or TS
+// parser. A dependency for this would be worse than the drift it catches, and
+// both files are hand-written in one house style: one declaration per line.
+
+// Everything between `selector {` and the first line that is a bare `}`.
+function cssBlock(source, selector) {
+  const start = source.indexOf(`${selector} {`);
+  if (start === -1) {
+    return null;
+  }
+  const end = source.indexOf('\n}', start);
+  return source.slice(start, end === -1 ? undefined : end);
+}
+
+function cssTokens(source, selector) {
+  const block = cssBlock(source, selector);
+  if (block === null) {
+    return null;
+  }
+  const tokens = new Map();
+  for (const match of block.matchAll(/^\s*(--[a-z0-9-]+):\s*(.+?);\s*$/gm)) {
+    tokens.set(match[1], match[2].trim());
+  }
+  return tokens;
+}
+
+// `'--name': 'value',` out of one exported record.
+function tsTokens(name) {
+  const start = paletteSource.indexOf(`export const ${name}: PaletteTokens = {`);
+  if (start === -1) {
+    return null;
+  }
+  const end = paletteSource.indexOf('\n};', start);
+  const block = paletteSource.slice(start, end === -1 ? undefined : end);
+  const tokens = new Map();
+  for (const match of block.matchAll(/^\s*'(--[a-z0-9-]+)':\s*'(.*?)',\s*$/gm)) {
+    tokens.set(match[1], match[2]);
+  }
+  return tokens;
+}
+
+function tsList(name) {
+  const start = paletteSource.indexOf(`export const ${name} = [`);
+  if (start === -1) {
+    return [];
+  }
+  const block = paletteSource.slice(start, paletteSource.indexOf('\n];', start));
+  return [...block.matchAll(/'(--[a-z0-9-]+)'/g)].map((match) => match[1]);
+}
+
+const cssLight = cssTokens(cssSource, ':root');
+const cssDark = cssTokens(cssSource, ':root[data-theme="dark"]');
+const tsLight = tsTokens('LIGHT_TOKENS');
+const tsDark = tsTokens('DARK_TOKENS');
+const themeless = new Set(tsList('THEMELESS_TOKENS'));
+
+check(cssLight && cssLight.size > 0, 'tokens.css has a :root token block');
+check(cssDark && cssDark.size > 0, 'tokens.css has a :root[data-theme="dark"] token block');
+check(tsLight && tsLight.size > 0, 'palette.ts exports LIGHT_TOKENS');
+check(tsDark && tsDark.size > 0, 'palette.ts exports DARK_TOKENS');
+if (failures > 0) {
+  console.error('\nCould not parse both files -- nothing else can be checked.');
+  process.exit(1);
+}
+pass(`parsed ${cssLight.size} light and ${cssDark.size} dark tokens from tokens.css`);
+
+// ── 1. Light ─────────────────────────────────────────────────────────────────
+for (const [name, value] of tsLight) {
+  const css = cssLight.get(name);
+  check(css !== undefined, `${name} is in palette.ts but not in tokens.css :root`);
+  check(css === undefined || css === value,
+      `${name} is ${value} in palette.ts and ${css} in tokens.css :root`);
+}
+pass(`${tsLight.size} light tokens match tokens.css`);
+
+// ── 2. Dark ──────────────────────────────────────────────────────────────────
+// A themeless token (the radius scale) is declared once, in :root, and never
+// overridden -- so the dark record's copy of it is checked against the light
+// block. Anything else must appear in the dark block or the start page would be
+// painting a value the app does not have.
+for (const [name, value] of tsDark) {
+  const source = themeless.has(name) ? cssLight : cssDark;
+  const where = themeless.has(name) ? ':root' : ':root[data-theme="dark"]';
+  const css = source.get(name);
+  check(css !== undefined, `${name} is in palette.ts but not in tokens.css ${where}`);
+  check(css === undefined || css === value,
+      `${name} is ${value} in palette.ts and ${css} in tokens.css ${where}`);
+}
+pass(`${tsDark.size} dark tokens match tokens.css`);
+
+// ── 3. The two records describe the same theme ───────────────────────────────
+// A token in one and not the other means one theme paints something the other
+// leaves at the browser default, which is the kind of bug that only shows up
+// for whichever theme the person reviewing it was not using.
+for (const name of tsLight.keys()) {
+  check(tsDark.has(name), `${name} is in LIGHT_TOKENS but not in DARK_TOKENS`);
+}
+for (const name of tsDark.keys()) {
+  check(tsLight.has(name), `${name} is in DARK_TOKENS but not in LIGHT_TOKENS`);
+}
+pass('both palette.ts records declare the same token set');
+
+// ── 4. The start page paints with tokens and nothing else ────────────────────
+// The failure being guarded against is not a wrong hex -- it is a hex at all.
+// Every colour in the generated document has to resolve through a var(), or the
+// theme it is under stops applying to that one rule and only that one rule.
+const homeSource = readFileSync(join(root, 'src/lib/homePage.ts'), 'utf8');
+// The palette import itself is where the literals legitimately live; the style
+// block in homePage.ts must contain none.
+// The lookbehind rejects HTML numeric entities (&#9654;), which are glyphs
+// rather than colours and would otherwise read as a four-digit hex.
+const literals = [...homeSource.matchAll(/(?<!&)#[0-9a-fA-F]{3,8}\b/g)]
+    .map((match) => match[0]);
+check(literals.length === 0,
+    `homePage.ts still hardcodes ${literals.length} colour(s): ${[...new Set(literals)].join(', ')}`);
+pass('homePage.ts paints only through var() tokens');
+
+// ── 5. The side panel's stylesheet ───────────────────────────────────────────
+// Same check as arms 1 and 2, against a third file. Its dark block declares
+// only what it overrides, so anything not in it is compared against :root --
+// which is also how the radius scale (declared once, never themed) is covered.
+const panelLight = cssTokens(panelSource, ':root');
+const panelDark = cssTokens(panelSource, ':root[data-theme="dark"]');
+check(panelLight && panelLight.size > 0, 'sidepanel.css has a :root token block');
+check(panelDark && panelDark.size > 0, 'sidepanel.css has a :root[data-theme="dark"] token block');
+if (panelLight && panelDark) {
+  for (const [name, value] of panelLight) {
+    const css = cssLight.get(name);
+    check(css !== undefined, `${name} is in sidepanel.css :root but not in tokens.css :root`);
+    check(css === undefined || css === value,
+        `${name} is ${value} in sidepanel.css :root and ${css} in tokens.css :root`);
+  }
+  for (const [name, value] of panelDark) {
+    const css = cssDark.get(name);
+    check(css !== undefined,
+        `${name} is in sidepanel.css dark block but not in tokens.css :root[data-theme="dark"]`);
+    check(css === undefined || css === value,
+        `${name} is ${value} in sidepanel.css dark and ${css} in tokens.css dark`);
+  }
+  pass(`${panelLight.size} light and ${panelDark.size} dark tokens in sidepanel.css match tokens.css`);
+}
+
+// The panel repeats its dark record under @media (prefers-color-scheme: dark)
+// for the launcher setting that defers to the OS. Two selectors, one set of
+// values -- and only the first is checked above, so a value edited in one copy
+// and not the other would make 'dark' and 'system' paint differently on the
+// same machine.
+const systemBlock = cssBlock(panelSource, ':root[data-theme="system"]');
+check(systemBlock !== null, 'sidepanel.css has a :root[data-theme="system"] block');
+if (systemBlock !== null && panelDark) {
+  const systemTokens = new Map();
+  for (const match of systemBlock.matchAll(/^\s*(--[a-z0-9-]+):\s*(.+?);\s*$/gm)) {
+    systemTokens.set(match[1], match[2].trim());
+  }
+  for (const [name, value] of panelDark) {
+    check(systemTokens.get(name) === value,
+        `${name} is ${value} in sidepanel.css [data-theme=dark] and ` +
+        `${systemTokens.get(name)} in its prefers-color-scheme copy`);
+  }
+  for (const name of systemTokens.keys()) {
+    check(panelDark.has(name),
+        `${name} is in sidepanel.css's prefers-color-scheme copy but not its [data-theme=dark] block`);
+  }
+  pass("sidepanel.css's two dark blocks are identical");
+}
+
+// ── 6. The panel paints with tokens and nothing else ─────────────────────────
+// Same failure as arm 4, in the file that is now most likely to grow a literal:
+// it is plain CSS with no build step, and its three :root blocks are the one
+// place a hex legitimately appears.
+const panelBody = panelSource.slice(panelSource.indexOf('\n* { box-sizing'));
+const panelLiterals = [...panelBody.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((match) => match[0]);
+check(panelLiterals.length === 0,
+    `sidepanel.css hardcodes ${panelLiterals.length} colour(s) outside its token blocks: ` +
+    `${[...new Set(panelLiterals)].join(', ')}`);
+pass('sidepanel.css paints only through var() tokens');
+
+if (failures > 0) {
+  console.error(`\n${failures} failure(s).`);
+  process.exit(1);
+}
+console.log('\nStart page palette matches tokens.css.');

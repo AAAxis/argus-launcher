@@ -1,0 +1,250 @@
+/* The app shell's grid and the sidebar rail: the brand mark, the collapse
+ * toggle, the nav buttons, and the per-tab count of rows that arrived since
+ * this machine last looked.
+ *
+ * Was styles.css:978-1219, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 236px 1fr;
+  height: 100vh;
+  transition: grid-template-columns 0.16s var(--ease);
+}
+
+/* Nine tab labels are worth reading on the first day and worth nothing on the
+ * hundredth, but the open rail charges 236px for them forever. Collapsed it is
+ * the same 12px padding either side of a 40px button -- see .rail-toggle. The
+ * single class on the shell is what the four rules below key off: one flag, set
+ * in one place. */
+.app-shell.rail-collapsed {
+  grid-template-columns: 64px 1fr;
+}
+
+.sidebar {
+  background: var(--paper);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 20px 12px 16px;
+}
+
+/* Nothing in a 40px track has room to overflow sideways, and the rail is a
+ * scroll container, so without this a collapsed rail can still be nudged
+ * horizontally by a stray wide child. */
+.rail-collapsed .sidebar {
+  overflow-x: hidden;
+}
+
+/* Horizontal padding matches `nav button` below so the mark's left edge lines
+ * up with the tab labels. The rule underneath gives it its own band instead of
+ * sitting 6px off the first tab. */
+.brand {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  margin: 0 0 14px;
+  padding: 0 12px 14px;
+}
+
+/* The 12px that lines the mark up with the tab labels is 12px the collapsed
+ * rail does not have -- the whole track is 40px wide. */
+.rail-collapsed .brand {
+  justify-content: center;
+  padding: 0 0 14px;
+}
+
+/* ── Rail toggle ────────────────────────────────────────────────────────────
+ * components/Shell.tsx.
+ *
+ * Open, it is a plain glyph button on the trailing edge of the brand row, which
+ * is where every editor and issue tracker puts it. `margin-left: auto` rather
+ * than a spacer element: the row has exactly two children.
+ *
+ * Transparent and shadowless like `nav button`, and for the same reason -- a
+ * raised control in a flat rail reads as pasted on top of it. */
+.rail-toggle {
+  align-items: center;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0;
+  width: 28px;
+}
+
+.rail-toggle:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* Collapsed, the mark and the toggle are one button. The two children are
+ * stacked in the same grid cell rather than swapped in JS: a CSS crossfade
+ * cannot get out of step with :hover, and it keeps Shell.tsx from having to
+ * hold hover state for a decoration.
+ *
+ * :focus-visible alongside :hover, not hover alone -- otherwise the only way to
+ * find out the mark is a button is to own a mouse. */
+.rail-toggle.is-brand {
+  display: grid;
+  height: 40px;
+  margin: 0;
+  place-items: center;
+  width: 40px;
+}
+
+.rail-toggle.is-brand > * {
+  grid-area: 1 / 1;
+  transition: opacity 0.12s var(--ease);
+}
+
+.rail-toggle.is-brand .rail-toggle-glyph,
+.rail-toggle.is-brand:hover .brand-mark,
+.rail-toggle.is-brand:focus-visible .brand-mark {
+  opacity: 0;
+}
+
+.rail-toggle.is-brand:hover .rail-toggle-glyph,
+.rail-toggle.is-brand:focus-visible .rail-toggle-glyph {
+  opacity: 1;
+}
+
+/* The source art is black-on-white with no alpha, so it is used as a mask and
+ * filled with the ink token -- that way it inverts with the theme instead of
+ * stamping a white plate into a dark sidebar. */
+.brand-mark {
+  background-color: var(--ink);
+  display: block;
+  height: 28px;
+  mask-image: var(--monti-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 28px;
+}
+
+nav {
+  display: grid;
+  gap: 2px;
+}
+
+nav button {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-weight: 650;
+  gap: 10px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  position: relative;
+  transition: background-color 0.12s var(--ease), color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+
+nav button svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  transition: color 0.12s var(--ease);
+}
+
+/* Needs :not(:disabled) to outrank the global `button:not(:disabled):hover`,
+ * which would otherwise drop its shadow onto a flat nav rail. */
+nav button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+nav button:hover svg {
+  color: var(--ink-soft);
+}
+
+/* The rule sits on the trailing edge, echoing the coloured line the landing
+/* Selection is carried by fill alone: a deeper grey than the rail, so the tab
+ * reads as pressed into the sidebar rather than pasted on top of it. */
+nav button.active {
+  background: var(--nav-active-bg);
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+nav button.active svg {
+  color: var(--ink);
+}
+
+/* display: none rather than a width transition: a label caught mid-collapse is
+ * a clipped word, which is worse than no word. It also takes the label out of
+ * the accessibility tree, which is why Shell.tsx puts an unconditional
+ * aria-label on the button. */
+.rail-collapsed .nav-label {
+  display: none;
+}
+
+/* The 12px that held the label off the icon has nothing to hold off. */
+.rail-collapsed nav button {
+  justify-content: center;
+  padding: 0;
+}
+
+/* How many rows on this tab arrived since this machine last looked -- see
+ * useNewArrivals. Built from .inbox-count's measurements (10px/750, 15px tall,
+ * a 999px pill) so the two badges in the chrome read as one idea.
+ *
+ * Neutral, not the --success green it used to take. The green was arguing that
+ * new rows are a good outcome, tying itself to the tint the tab is about to
+ * show -- but the sidebar is the app's quietest surface, drawn in nothing but
+ * greys, and a saturated dot on it was the loudest thing on screen for news as
+ * ordinary as a teammate adding a proxy. --ink-faint keeps the badge legible
+ * against the rail, the --hover of a hovered tab and the --nav-active-bg of
+ * the open one, without claiming a verdict it does not have. The bell keeps
+ * its --danger, which is the one badge in the chrome that does.
+ *
+ * pointer-events: none so the badge cannot swallow a click meant for the tab
+ * it is sitting on. */
+.nav-count {
+  align-items: center;
+  background: var(--ink-faint);
+  border-radius: 999px;
+  color: var(--paper);
+  display: flex;
+  flex: none;
+  font-size: 10px;
+  font-weight: 750;
+  height: 15px;
+  justify-content: center;
+  margin-left: auto;
+  min-width: 15px;
+  padding: 0 4px;
+  pointer-events: none;
+}
+
+/* Collapsed, the number goes and a dot stays. There is no room for one beside a
+ * centred 16px icon in a 40px button, and pinning the pill to the corner anyway
+ * puts "9+" squarely on top of the glyph the rail has left to identify the tab
+ * with -- which is a worse trade than dropping the count, because the count is
+ * one click away and the icon is the only thing naming the tab.
+ *
+ * font-size: 0 rather than removing the digits: they stay in the DOM, and more
+ * to the point they stay in the button's aria-label, which is where the number
+ * is actually read out either way. nav button is already position: relative. */
+.rail-collapsed .nav-count {
+  font-size: 0;
+  height: 8px;
+  margin-left: 0;
+  min-width: 0;
+  padding: 0;
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 8px;
+}
+

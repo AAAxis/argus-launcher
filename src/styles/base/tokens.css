@@ -1,0 +1,372 @@
+/* The design tokens: the light block, then the dark override. Every colour in
+ * the app resolves through one of these, and nothing anywhere may hardcode one.
+ *
+ * Was styles.css:1-334, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* Design tokens. Neutral grey in light, neutral charcoal in dark. The accent is
+ * ink rather than a hue, so it inverts with the theme (see --accent below). The
+ * surface ladder is paper (sunken: sidebar, code blocks) < surface (the app
+ * background and modals) < raised (cards, inputs, tables).
+ *
+ * These share a token vocabulary with the landing site (landing/app/globals.css)
+ * but no longer share values: the landing site is still on the warm paper and
+ * the cyan accent both of these started from. Porting it across is a separate
+ * job -- do not assume a change here is already reflected there.
+ *
+ * Every neutral here is achromatic -- R, G and B are equal in each one. The
+ * ramp used to be warm (a beige paper over a warm charcoal), which tinted the
+ * whole chrome and made the status pills and profile colours read as if they
+ * were sitting on stained paper. Greys leave the hue budget entirely to the
+ * things that use hue to mean something: status, HTTP verb, profile colour and
+ * danger. Do not reintroduce a tint here -- if a neutral needs to shift, shift
+ * its lightness and keep the three channels equal.
+ *
+ * Nothing below this block may hardcode a colour: the dark theme is a straight
+ * token swap, so any literal that escapes stays light and looks broken. */
+:root {
+  color-scheme: light;
+
+  --paper: #f2f2f2;
+  --surface: #f7f7f7;
+  --raised: #ffffff;
+  --hover: #ededed;
+  --selected: #e9e9e9;
+
+  /* The framed-card pair: a shell carrying the chrome, with the content card inset
+   * in it. An automation card is drawn this way, and so is the profiles table --
+   * the actions live on the shell, so reaching for one means reaching outside the
+   * thing it acts on.
+   *
+   * Deliberately NOT --paper and --raised, even though those are the values here:
+   * the two swap places in dark, and any rule written against the ladder would have
+   * to branch on the theme to say the one thing this pattern means -- the card
+   * inside is the *other* surface from the frame around it, whichever way round
+   * that falls. Naming the pair is what keeps the branch out of the rules.
+   *
+   * Light reads as a sunken tray holding a white card. Dark reads as a raised tray
+   * holding a well: the frame lifts off the #1b1b1b page and the card sinks below
+   * it. The step is the same size both ways -- 13 points light, 12 dark -- so the
+   * pattern carries the same weight in either theme.
+   *
+   * A frame draws no border. The surface step is the whole of it; a hairline on top
+   * of it reads as a third object between the two. */
+  --frame: #f2f2f2;
+  --frame-card: #ffffff;
+
+  /* Half a step under --raised, for a control that sits directly on the page
+   * rather than inside a card. A ghost button filled with --raised is pure white
+   * on a #f7f7f7 page -- the hardest edge in the chrome, on the quietest control
+   * in it, and eight of them in a selection bar read as eight cut-outs. This
+   * lands between the two, so a toolbar button lifts off the page without
+   * punching a hole in it.
+   *
+   * Only the ghost buttons take it. Cards, inputs, tables and popovers are
+   * genuinely raised surfaces and stay on --raised.
+   *
+   * The dark theme's value is --raised's own: #222 is already only seven points
+   * above the #1b1b1b page, and anything softer stops reading as a button at
+   * all. The token exists in both themes so no rule has to branch on the theme
+   * -- see the note at the top of this file. */
+  --raised-soft: #fbfbfb;
+
+  --ink: #1f1f1f;
+  --ink-soft: #676767;
+  --ink-faint: #8c8c8c;
+
+  --border: #e0e0e0;
+  --border-soft: #ebebeb;
+
+  /* The accent is ink, not a hue: near-black in light, near-white in dark. It
+   * fills every primary control, so it inverts with the theme rather than
+   * staying one colour across both. --accent-strong is the pressed/hover step
+   * (further from the surface, not a different hue); --accent-ink is whatever
+   * has to stay legible on top of a filled accent surface. */
+  --accent: #1a1a1a;
+  --accent-strong: #000000;
+  --accent-ink: #ffffff;
+
+  /* The sidebar selection is a deeper grey than the rail, so it reads as
+   * pressed in rather than floating. The sidebar ramp runs paper > hover >
+   * active, each step a shade deeper. It deliberately does not take the accent:
+   * a solid ink chip in the rail would out-shout the content area. */
+  --nav-active-bg: #e9e9e9;
+
+  /* The one hue allowed into the chrome, and the single exception to the rule
+   * above -- these are the landing site's --accent and --accent-strong verbatim
+   * (landing/app/globals.css), light and dark.
+   *
+   * Why an exception at all: buying a plan is one journey across two products.
+   * It starts on a plan card in here, moves to a checkout page and a receipt in
+   * the browser, and comes back to a welcome screen in here. Drawn in the
+   * launcher's ink accent, the two halves would look like two companies; drawn
+   * in the site's cyan, the whole path is recognisably one.
+   *
+   * Scope is the price of it, and it is not negotiable: ONLY the Plans tab, the
+   * plan welcome modal, Settings > Plan & usage and the sign-in mark may use
+   * these. The sidebar, tables, buttons, links and focus rings stay ink. If a
+   * fifth surface ever wants them, that is a decision to take deliberately, not
+   * by reaching for the token because it is there.
+   *
+   * The sign-in mark was added as the fourth on exactly that basis. It is the
+   * same argument as the other three, one seam earlier: the account is created
+   * on the site, in cyan, and the panel it lands on is the first thing the app
+   * shows. One mark, not the whole panel -- see .login-mark. */
+  --plan-accent: #0e8aa6;
+  --plan-accent-strong: #0a6f87;
+  --plan-accent-ink: #ffffff;
+
+  --success: #2e9e5b;
+  --danger: #c5453c;
+  --danger-strong: #a5322a;
+  --danger-bg: #fdf2f1;
+  /* Whatever stays legible on a filled --danger surface, the same way
+   * --accent-ink does for the accent. A destructive primary button is the only
+   * thing that fills with danger, and it needs an ink that inverts with the
+   * theme: the light red is dark enough to carry white, the dark theme's is
+   * light enough to need near-black back. */
+  --danger-ink: #ffffff;
+
+  /* Profile status pills. Each needs its own fill/border/ink triple because the
+   * light tints are far too pale to survive on a charcoal background. */
+  --status-active-bg: #eefaf1;
+  --status-active-border: #37a862;
+  --status-active-ink: #1e7a45;
+  --status-warmup-bg: #fff7e6;
+  --status-warmup-border: #d9932a;
+  --status-warmup-ink: #92600f;
+  --status-ban-bg: var(--danger-bg);
+  --status-ban-border: var(--danger);
+  --status-ban-ink: var(--danger);
+  --status-review-bg: #f0edfc;
+  --status-review-border: #7c5cd6;
+  --status-review-ink: #5c3fb0;
+  /* Ready, and every user-created status: no hue, because "no particular
+     state" should not compete with the four that mean something. */
+  --status-neutral-bg: var(--paper);
+  --status-neutral-border: var(--border);
+  --status-neutral-ink: var(--ink-soft);
+  /* The one tone here that is not a profile status: <Badge tone="info">, for a
+     fact the app went and checked rather than a state anything is in. Blue
+     because the four above are already spoken for -- green is Connected on the
+     Integrations tab, and colouring "Found on this machine" green would read as
+     a second Connected. Same blue the GET chip and a blue profile are drawn in,
+     written out rather than aliased onto either: they agree today, and retuning
+     one scale should not silently recolour the others. */
+  --status-info-bg: #eef2fb;
+  --status-info-border: #4a7fd6;
+  --status-info-ink: #2f5bb7;
+
+  /* HTTP verb chips on the API tab. Conventional hues, so they are their own
+   * scale rather than being forced through the brand palette -- but muted, and
+   * tinted rather than filled: four saturated blocks in a column of endpoints
+   * out-shout the paths they are labelling, which are the part being read.
+   * Each verb needs a fill/border/ink triple because a tint light enough to sit
+   * under dark text is invisible on a charcoal surface. */
+  --method-get-bg: #eef2fb;
+  --method-get-border: #cbd8f0;
+  --method-get-ink: #2f5bb7;
+  --method-post-bg: #edf6f0;
+  --method-post-border: #c6e2d2;
+  --method-post-ink: #2c7a52;
+  --method-patch-bg: #fbf3e6;
+  --method-patch-border: #ecdcbd;
+  --method-patch-ink: #8a6318;
+  --method-delete-bg: #fbeeed;
+  --method-delete-border: #f0cfcc;
+  --method-delete-ink: #a8443d;
+
+  /* The six colours a profile can be tagged with (see lib/profileColors.ts).
+   * Same construction as the verb chips above and for the same reason: a
+   * profile's colour is drawn as a filled avatar with its initials on top, so it
+   * needs an ink that survives the fill, and a fill pale enough not to out-shout
+   * the name beside it. The old palette was six saturated literals shared by
+   * both themes -- fine in neither. Written out rather than aliased onto the
+   * verb chips they are drawn from: the two scales happen to agree today, and
+   * retuning GET should not silently recolour every blue profile. */
+  /* Slate is the no-hue member of the six and is drawn off the neutral ramp,
+     so it neutralised with everything else. The other five are signal. */
+  --profile-slate-bg: #ededed;
+  --profile-slate-border: #dcdcdc;
+  --profile-slate-ink: #565656;
+  --profile-blue-bg: #eef2fb;
+  --profile-blue-border: #cbd8f0;
+  --profile-blue-ink: #2f5bb7;
+  --profile-green-bg: #edf6f0;
+  --profile-green-border: #c6e2d2;
+  --profile-green-ink: #2c7a52;
+  --profile-violet-bg: #f0edfc;
+  --profile-violet-border: #d5cbf3;
+  --profile-violet-ink: #5c3fb0;
+  --profile-red-bg: #fbeeed;
+  --profile-red-border: #f0cfcc;
+  --profile-red-ink: #a8443d;
+  --profile-amber-bg: #fbf3e6;
+  --profile-amber-border: #ecdcbd;
+  --profile-amber-ink: #8a6318;
+
+  --switch-thumb: #ffffff;
+  --scrim: rgba(18, 18, 18, 0.4);
+
+  /* Four steps, and small elements take smaller ones so every corner reads as
+   * the same curve at the size it is drawn. --radius-sm is controls you press
+   * (buttons, row actions), --radius is controls you type into and the minor
+   * boxes inside a form, --radius-lg is the surface family -- tables, panels,
+   * cards, modals, toasts. Anything genuinely tiny (inline code, a 16px glyph)
+   * takes --radius-xs; a pill takes 999px and is not part of this scale. */
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --shadow-xs: 0 1px 2px rgba(24, 24, 24, 0.05);
+  --shadow-sm: 0 2px 8px rgba(24, 24, 24, 0.06), 0 1px 2px rgba(24, 24, 24, 0.04);
+  --shadow-md: 0 8px 24px rgba(24, 24, 24, 0.10), 0 2px 6px rgba(24, 24, 24, 0.05);
+  --shadow-lg: 0 24px 60px rgba(18, 18, 18, 0.22), 0 4px 12px rgba(18, 18, 18, 0.08);
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+
+  /* Two control heights for the whole app: the default, and a compact one for
+   * pagination. Everything else was drifting between 36/40/42px. */
+  --control-h: 36px;
+  --control-h-sm: 32px;
+
+  /* A data: URI cannot resolve currentColor, so the select chevron is a token
+   * with one stroke baked per theme. Geometry matches lucide's ChevronDown so
+   * it sits consistently next to the lucide icons used everywhere else. */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23676767' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  /* The selection control's tick. One definition for both themes, unlike
+   * --chevron above: this one is used as a *mask*, so only the stroke's alpha
+   * is read and the colour comes from the pseudo-element's background. The path
+   * is lucide's Check verbatim, which is the tick drawn everywhere else in the
+   * app. See .selector:checked::after. */
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+
+  /* Bundled by Vite. Used as a mask rather than an image -- see .brand-mark.
+   * The path is relative to THIS file, not to src/: it read ./assets/ while
+   * these rules lived in src/styles.css. Vite does not warn when it cannot
+   * resolve a url() -- it emits the string unchanged, so the only sign of a
+   * wrong path here is a 404 and a missing mark at runtime. */
+  --monti-mark: url("../../assets/monti-mark.png");
+
+  color: var(--ink);
+  background: var(--surface);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Neutral charcoal rather than pure black: the ladder still needs four
+ * distinguishable steps above the window, and #000 leaves nowhere to put the
+ * sunken one. Stamped onto <html> by src/theme.tsx (and by the pre-paint script
+ * in index.html, so the window never flashes light before React boots).
+ *
+ * Achromatic, exactly like the light ramp above -- same rule, same reason. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #161616;
+  --surface: #1b1b1b;
+  --raised: #222222;
+  /* Deliberately identical to --raised here. See the light block for why. */
+  --raised-soft: #222222;
+  --hover: #1f1f1f;
+  --selected: #0f0f0f;
+
+  /* Crossed over against the light block -- --frame takes --raised's value and
+     --frame-card takes --paper's -- which is the whole reason these two are not
+     just those tokens. See the note there. */
+  --frame: #222222;
+  --frame-card: #161616;
+
+  --ink: #e9e9e9;
+  --ink-soft: #9e9e9e;
+  --ink-faint: #858585;
+
+  --border: #313131;
+  --border-soft: #282828;
+
+  --accent: #f0f0f0;
+  --accent-strong: #ffffff;
+  --accent-ink: #171717;
+
+  --nav-active-bg: #0f0f0f;
+
+  /* Lifted a step, like every other hue here: the light cyan is too dark to read
+   * on charcoal. Same two values the landing site's .dark block uses. */
+  --plan-accent: #1fa6c2;
+  --plan-accent-strong: #3cbad6;
+  --plan-accent-ink: #0b1417;
+
+  --success: #46c47c;
+  --danger: #e2706a;
+  --danger-strong: #f0908a;
+  --danger-bg: #2a1a18;
+  --danger-ink: #171717;
+
+  --status-active-bg: #16281d;
+  --status-active-border: #3d8f5e;
+  --status-active-ink: #6cd396;
+  --status-warmup-bg: #2b2214;
+  --status-warmup-border: #a37a2c;
+  --status-warmup-ink: #e0b062;
+  --status-ban-bg: var(--danger-bg);
+  --status-ban-border: #a8524c;
+  --status-ban-ink: #f0908a;
+  --status-review-bg: #221c33;
+  --status-review-border: #6b57a8;
+  --status-review-ink: #b9a6e8;
+  --status-info-bg: #172436;
+  --status-info-border: #3f6bad;
+  --status-info-ink: #8fb0e8;
+
+  --method-get-bg: #1b2436;
+  --method-get-border: #2c3d5c;
+  --method-get-ink: #8fb0e8;
+  --method-post-bg: #17281f;
+  --method-post-border: #2a4536;
+  --method-post-ink: #7cc39a;
+  --method-patch-bg: #2a2214;
+  --method-patch-border: #45381f;
+  --method-patch-ink: #d3a768;
+  --method-delete-bg: #2c1c1b;
+  --method-delete-border: #4a2f2d;
+  --method-delete-ink: #e0908b;
+
+  --profile-slate-bg: #292929;
+  --profile-slate-border: #3d3d3d;
+  --profile-slate-ink: #b3b3b3;
+  --profile-blue-bg: #1b2436;
+  --profile-blue-border: #2c3d5c;
+  --profile-blue-ink: #8fb0e8;
+  --profile-green-bg: #17281f;
+  --profile-green-border: #2a4536;
+  --profile-green-ink: #7cc39a;
+  --profile-violet-bg: #221c33;
+  --profile-violet-border: #3b3057;
+  --profile-violet-ink: #b9a6e8;
+  --profile-red-bg: #2c1c1b;
+  --profile-red-border: #4a2f2d;
+  --profile-red-ink: #e0908b;
+  --profile-amber-bg: #2a2214;
+  --profile-amber-border: #45381f;
+  --profile-amber-ink: #d3a768;
+
+  --switch-thumb: #d4d4d4;
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50), 0 2px 6px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.66), 0 4px 12px rgba(0, 0, 0, 0.44);
+
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239e9e9e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+* {
+  box-sizing: border-box;
+}
+

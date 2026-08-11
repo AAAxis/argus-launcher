@@ -1,0 +1,231 @@
+/* Design tokens, copied from the launcher's own palette (src/styles.css) as
+ * literal values -- this stylesheet loads in its own extension page and never
+ * shares a cascade with the app, so `var(--paper)` here has to resolve locally.
+ * Names match the launcher's so the mapping stays legible without cross-
+ * referencing the source file.
+ *
+ * This used to be a warm cream/beige palette (#fbfaf8 bg, #ded6c8 borders)
+ * lifted from this extension's own older stylesheet, which predates the
+ * launcher's current neutral-grey one and read as a different product sitting
+ * next to it. Achromatic now, matching the launcher: R, G and B equal in every
+ * neutral below. */
+:root {
+  --paper: #f2f2f2;
+  --surface: #f7f7f7;
+  --raised: #ffffff;
+  --hover: #ededed;
+
+  --ink: #1f1f1f;
+  --ink-soft: #676767;
+
+  --border: #e0e0e0;
+  --border-soft: #ebebeb;
+
+  /* The primary/filled control. Ink rather than a hue -- see styles.css's own
+   * note on --accent -- and distinct from --ink itself, the way the launcher
+   * keeps them, even though the two are close. */
+  --accent: #1a1a1a;
+  --accent-strong: #000000;
+  --accent-ink: #ffffff;
+
+  --danger: #c5453c;
+  --danger-bg: #fdf2f1;
+
+  /* Flag pills borrow the launcher's profile-status pair rather than a bare
+   * green/amber, so a future retune of "success" or "warning" moves both
+   * surfaces together. */
+  --status-active-bg: #eefaf1;
+  --status-active-ink: #1e7a45;
+  --status-warmup-bg: #fff7e6;
+  --status-warmup-ink: #92600f;
+
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0 auto;
+  max-width: 1080px;
+  padding: 20px 24px 60px;
+}
+
+header { align-items: center; display: flex; gap: 10px; margin-bottom: 16px; }
+header .app-icon { display: block; flex: none; }
+h1 { font-size: 20px; font-weight: 700; margin: 0; }
+.chip {
+  background: var(--surface); border-radius: 999px; color: var(--ink-soft);
+  font-size: 12px; font-weight: 600; padding: 4px 12px;
+}
+.summary { color: var(--ink-soft); font-size: 13px; margin-left: auto; white-space: nowrap; }
+
+.toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.toolbar input[type="search"] { flex: 1; min-width: 200px; }
+
+input, select, textarea {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible,
+.import-label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
+textarea { resize: vertical; }
+
+button, .import-label {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 6px;
+  padding: 8px 12px;
+  transition: background .12s ease, border-color .12s ease;
+}
+button:hover, .import-label:hover { background: var(--hover); }
+button:disabled { cursor: default; opacity: .45; }
+button:disabled:hover { background: var(--raised); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover { background: var(--accent-strong); }
+button.ghost { background: transparent; border-color: transparent; color: var(--ink-soft); }
+button.ghost:hover { background: var(--hover); color: var(--ink); }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button.danger:hover { background: var(--danger-bg); }
+.import-label input { display: none; }
+
+.menu-wrap { position: relative; }
+/* display is scoped to :not([hidden]) on purpose -- an unconditional
+ * `.menu { display: grid }` is an author style and beats the UA stylesheet's
+ * `[hidden] { display: none }`, so the menu would stay visible (and eat
+ * clicks on whatever is behind it) despite the hidden attribute. */
+.menu:not([hidden]) {
+  background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(31 31 31 / .12); display: grid; min-width: 170px; padding: 4px;
+  position: absolute; right: 0; top: calc(100% + 4px); white-space: nowrap; z-index: 5;
+}
+.menu button { border: 0; font-weight: 500; justify-content: flex-start; }
+.danger-wrap .menu button { color: var(--danger); }
+.danger-wrap .menu button:hover { background: var(--danger-bg); }
+
+.table-wrap { border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border-bottom: 1px solid var(--border-soft); font-size: 12.5px; padding: 8px; text-align: left; }
+thead th {
+  background: var(--surface); color: var(--ink-soft); font-size: 11px; font-weight: 700;
+  letter-spacing: .03em; position: sticky; text-transform: uppercase; top: 0;
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: rgb(31 31 31 / .025); }
+th.check, td.check { padding-left: 12px; width: 32px; }
+th.actions, td.actions { text-align: right; width: 76px; }
+
+td.value {
+  color: var(--ink-soft); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+td.name { font-weight: 600; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.domain, td.path { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Expired rows need to read as "attention" without shouting -- a left
+ * accent bar plus tinted text, not a full red row. */
+tr.expired { background: var(--danger-bg); }
+tr.expired td { color: var(--danger); }
+tr.expired td.name { box-shadow: inset 3px 0 0 var(--danger); }
+
+.flag {
+  border-radius: 5px; display: inline-block; font-size: 10px; font-weight: 700;
+  letter-spacing: .02em; margin-right: 3px; padding: 2px 6px; text-transform: uppercase;
+}
+.flag-secure { background: var(--status-active-bg); color: var(--status-active-ink); }
+.flag-httponly { background: var(--surface); color: var(--ink-soft); }
+.flag-samesite { background: var(--surface); color: var(--ink-soft); }
+.flag-samesite-none { background: var(--status-warmup-bg); color: var(--status-warmup-ink); }
+
+/* Row actions were two inline-block buttons in a 64px cell -- narrower than
+ * their combined width, so they wrapped onto separate lines instead of
+ * sitting side by side. Now an explicit flex row, vertically centered, and
+ * dimmed until the row is hovered/focused -- opacity (not visibility/display)
+ * so the buttons stay in tab order and a keyboard user tabbing into the row
+ * still lands on and reveals them via :focus-within. */
+.row-actions {
+  align-items: center; display: flex; gap: 2px; justify-content: flex-end;
+  opacity: 0; transition: opacity .12s ease;
+}
+tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .row-actions { transition: none; } }
+td.actions button {
+  align-items: center; background: transparent; border: 0; border-radius: 6px;
+  color: var(--ink-soft); display: inline-flex; justify-content: center; padding: 6px;
+}
+td.actions button:hover { background: var(--hover); color: var(--ink); }
+td.actions button.remove:hover { background: var(--danger-bg); color: var(--danger); }
+
+footer { align-items: center; display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+#page-info { color: var(--ink-soft); font-size: 12px; margin-right: auto; }
+
+dialog {
+  border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 20px 60px rgb(31 31 31 / .2);
+  max-width: 460px; padding: 20px; width: 90%;
+}
+dialog::backdrop { background: rgb(31 31 31 / .35); }
+#edit-form { display: grid; gap: 10px; }
+#edit-title { font-size: 16px; margin: 0 0 4px; }
+#edit-form label { display: grid; font-size: 12px; font-weight: 600; gap: 4px; }
+#edit-form label small { color: var(--ink-soft); font-weight: 400; }
+#edit-form textarea { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.flags { display: flex; gap: 14px; }
+.flags label { align-items: center; display: flex; flex-direction: row; font-weight: 500; gap: 6px; }
+
+/* The scope picker in #save-as-dialog. A bordered group (not just three bare
+ * radios) so it reads as one decision, matching the visual weight of the
+ * name field above it. */
+#save-as-scope {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+}
+#save-as-scope legend {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  padding: 0 3px;
+  text-transform: uppercase;
+}
+#save-as-scope label {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  font-weight: 500;
+  gap: 7px;
+}
+/* A scope with nothing in it (e.g. no rows selected) is disabled rather than
+ * hidden -- the counts in its label are still informative context for why
+ * it's not pickable right now. */
+#save-as-scope label:has(input:disabled) { color: var(--ink-soft); opacity: .5; }
+
+.dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+.empty { color: var(--ink-soft); padding: 40px 0; text-align: center; }
+.status {
+  bottom: 16px; color: var(--ink-soft); font-size: 13px; left: 24px; margin: 0; position: fixed;
+  transition: color .15s ease;
+}
+.status.error { color: var(--danger); font-weight: 600; }
+.status:empty { display: none; }

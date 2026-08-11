@@ -1,0 +1,302 @@
+name: Build Electron releases
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  R2_ENDPOINT: https://fdbfca2be2ba5fdd40b274450f22c6ad.r2.cloudflarestorage.com
+  R2_BUCKET: dima
+  UPDATE_FEED_URL: ${{ vars.R2_PUBLIC_URL || 'https://pub-ab898453f3794cc8b9d0117b4111a778.r2.dev' }}
+  # Public client-side values, deliberately hardcoded: the repo secrets went
+  # stale after the Supabase project migration and nobody with push access can
+  # edit them (admin-only). See docs/env.md.
+  VITE_SUPABASE_URL: https://jpsmdjtxuxlkyuotwxfg.supabase.co
+  VITE_SUPABASE_ANON_KEY: sb_publishable_jhFZBfL9XyxaiRX-dA_KXA_5gNZeNKD
+
+jobs:
+  build-mac:
+    name: Build macOS DMG
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure update feed
+        shell: bash
+        run: |
+          if [ -z "${UPDATE_FEED_URL}" ]; then
+            echo "Missing repository variable: R2_PUBLIC_URL"
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+
+      - name: Configure notarization
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # notarytool rejects Apple ID + app-specific-password auth without an
+        # explicit teamId (see @electron/notarize's validate-args.js), so it
+        # has to be injected here rather than left as `notarize: true`.
+        # (Guarded with a shell `if`, not a step-level `if:`, because the
+        # `secrets` context isn't allowed in step conditionals.)
+        run: |
+          if [ -n "$APPLE_TEAM_ID" ]; then
+            node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.mac.notarize={teamId:process.env.APPLE_TEAM_ID}; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+          fi
+
+      - name: Write release notes
+        shell: bash
+        # electron-builder picks up build/release-notes.md automatically and
+        # writes it into latest.yml's releaseNotes field, which the app's
+        # update toast displays. Falls back to the commit subject if this
+        # release's commit has no body.
+        run: |
+          mkdir -p build
+          git log -1 --format=%b > build/release-notes.md
+          if [ ! -s build/release-notes.md ]; then
+            git log -1 --format=%s > build/release-notes.md
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build DMG
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # GitHub Actions passes secrets that were never set as empty strings,
+        # not as unset vars. electron-builder treats an empty-but-present
+        # CSC_LINK as "sign with this" rather than "skip signing", which
+        # crashes the build. Until the signing secrets exist, unset them
+        # entirely so this produces an unsigned (but successful) build.
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "CSC_LINK not set; building unsigned."
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npx electron-builder --mac dmg zip --arm64 --publish never
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monti-anty-macos
+          path: |
+            release/*.dmg
+            release/*.dmg.blockmap
+            release/*.zip
+            release/*.zip.blockmap
+            release/latest-mac.yml
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure update feed
+        shell: bash
+        run: |
+          if [ -z "${UPDATE_FEED_URL}" ]; then
+            echo "Missing repository variable: R2_PUBLIC_URL"
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.build.publish=[{provider:'generic',url:process.env.UPDATE_FEED_URL.replace(/\\/$/,'')}]; fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');"
+
+      - name: Write release notes
+        shell: bash
+        # electron-builder picks up build/release-notes.md automatically and
+        # writes it into latest.yml's releaseNotes field, which the app's
+        # update toast displays. Falls back to the commit subject if this
+        # release's commit has no body.
+        run: |
+          mkdir -p build
+          git log -1 --format=%b > build/release-notes.md
+          if [ ! -s build/release-notes.md ]; then
+            git log -1 --format=%s > build/release-notes.md
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build EXE
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Upload Windows updater files to R2
+        # Tags only. This used to include workflow_dispatch, which meant a
+        # manual run could overwrite the live feed with an untagged build --
+        # the same class of mistake as publishing on every push (see the
+        # publish job below).
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          set -euo pipefail
+          aws s3 cp release/latest.yml "s3://${R2_BUCKET}/latest.yml" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=60"
+          for file in release/Monti-Anty-*-win-x64.exe*; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+          done
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monti-anty-windows
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+          if-no-files-found: error
+
+  publish:
+    name: Publish tagged release
+    needs:
+      - build-mac
+      - build-windows
+    # Tags only, and this guard is the whole point of the job's name.
+    #
+    # Without it this ran on every push to main and republished
+    # v<package.json version> -- overwriting latest.yml/latest-mac.yml with a
+    # new build under a version number clients already had. Six commits landed
+    # on top of 1.0.57 that way, and every 1.0.57 install reported "up to date"
+    # forever while running months-old code. Re-downloading the DMG by hand was
+    # the only way out.
+    #
+    # Releasing is now deliberate: bump package.json, commit, tag vX.Y.Z, push
+    # the tag. A plain push still builds and typechecks; it just cannot publish.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # The other half of the guard above. Tagging v1.0.58 while package.json
+      # still says 1.0.57 would build 1.0.57 artifacts, publish them under a
+      # 1.0.58 tag, and write a feed nobody can act on -- so fail loudly here
+      # instead. The tag name goes through env rather than being interpolated
+      # into the script.
+      - name: Check the tag matches package.json
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          PKG_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${TAG_NAME}" != "v${PKG_VERSION}" ]; then
+            echo "Tag ${TAG_NAME} does not match package.json version ${PKG_VERSION}."
+            echo "Bump package.json and re-tag; do not publish a mismatched pair."
+            exit 1
+          fi
+          echo "Publishing ${TAG_NAME} from package.json ${PKG_VERSION}."
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      # Same notes the build jobs write into latest.yml, regenerated here.
+      # Without this the release body is empty: action-gh-release was never
+      # given one, so every release on the repo is a bare tag and a date. The
+      # app's changelog reads these bodies, so an empty one is a blank page.
+      - name: Write release notes
+        shell: bash
+        run: |
+          mkdir -p build
+          git log -1 --format=%b > build/release-notes.md
+          if [ ! -s build/release-notes.md ]; then
+            git log -1 --format=%s > build/release-notes.md
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          body_path: build/release-notes.md
+          files: release-artifacts/*
+          fail_on_unmatched_files: true
+
+      - name: Upload updater files to R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: true
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: |
+          set -euo pipefail
+          aws s3 cp release-artifacts/latest.yml "s3://${R2_BUCKET}/latest.yml" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=60"
+          for file in release-artifacts/Monti-Anty-*-win-x64.exe*; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+          done
+          # Fatal, not a warning. An unsigned mac build genuinely must not reach
+          # the feed -- ShipIt refuses to install one -- but this step used to
+          # skip with an echo, which produced a green "release" that shipped
+          # Windows only and left every mac user silently on the old version.
+          # A tagged release that cannot publish mac is a failed release.
+          if [ -z "${CSC_LINK}" ]; then
+            echo "CSC_LINK is not set, so the mac build is unsigned and cannot be published."
+            echo "Set the signing secrets, or delete this tag if you meant to ship Windows only."
+            exit 1
+          fi
+          aws s3 cp release-artifacts/latest-mac.yml "s3://${R2_BUCKET}/latest-mac.yml" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=60"
+          for file in release-artifacts/Monti-Anty-*-mac-arm64.*; do
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --cache-control "public, max-age=60"
+          done

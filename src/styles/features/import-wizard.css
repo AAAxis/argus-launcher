@@ -1,0 +1,948 @@
+/* The profile CSV importer, end to end: the wide review panel, the credential
+ * banner, the review table and its per-row states, the proxy picker, the
+ * destination cards, folder mapping, and the done screen.
+ *
+ * Was styles.css:9888-10590, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ---------------------------------------------------------------------------
+   Profile CSV import: the review table and the destination step.
+
+   The dialog this replaces was a paragraph and a row count, so it fit the
+   shared .import-panel width. A table with ten editable columns does not --
+   .import-review-panel is the one dialog in the app allowed to go wide, because
+   the alternative is horizontal scrolling over data the user is being asked to
+   check.
+   --------------------------------------------------------------------------- */
+
+/* Two classes, because .profile-modal.import-panel above pins the importer to
+   720px and would otherwise win on specificity. */
+.profile-modal.import-review-panel {
+  max-width: min(1240px, calc(100vw - 56px));
+  width: min(1240px, calc(100vw - 56px));
+}
+
+/* ── The editor language ────────────────────────────────────────────────────
+ * All three importers are `editor-modal` dialogs now: the same sticky header
+ * the profile and automation editors wear, and framed FormGroup cards in the
+ * body. Everything in this block exists to seat those two things.
+ *
+ * They used to be a title, a subtitle, a body and a footer -- which is a fine
+ * arrangement and a different one from the rest of the app. What made it worth
+ * changing is that the three of them were three DIFFERENT fine arrangements: a
+ * three-step wizard with footer dots, a one-screen preview with the confirm
+ * under a list, and for cookies no dialog at all. A confirm that moves between
+ * dialogs is one the eye has to re-find.
+ *
+ * The rules that make `editor-modal` work -- the sticky bar, the negative
+ * margins that let it reach the panel's edges, the repositioned close X -- are
+ * all in features/editor-head.css and are inherited untouched. */
+
+/* Back to the panel's own grid. .import-panel makes the panel a flex column
+   with a 16px gap, which was right when a dialog was a header, a paragraph and
+   a footer -- but .editor-modal > header cancels the gap below itself with
+   `margin-bottom: -14px`, and 14 is the number .profile-modal's grid uses. Left
+   flexed at 16, the bar under-cancels by 2px and the body's first card scrolls
+   through a two-pixel strip under the header's border, in full view. */
+.editor-modal.import-panel {
+  display: grid;
+  gap: 14px;
+}
+
+/* The body's side of the header's cancelled gap, exactly as
+   .editor-modal .profile-editor-layout pays it back in the editors. Without
+   it the first card sits flush against the bar's rule.
+
+   The gap is the FormGroup gap: an importer's body is a stack of framed
+   sections and, on the review steps, a table under them. */
+.import-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding-top: 18px;
+}
+
+/* The dialog's glyph, in the box .editor-mark-static reserves for a profile's
+   avatar or an automation's mark. An importer has no object to show -- there is
+   nothing yet -- so it shows what KIND of import this is, which is the one
+   thing distinguishing three dialogs that are otherwise the same shape. */
+.import-mark {
+  align-items: center;
+  background: var(--frame-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+/* The two facts the header carries beside the step rail. The file name is
+   monospace because it is a name from the filesystem, not prose; the count is
+   the number the footer used to hold. */
+.import-head-file {
+  color: var(--ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-head-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+/* Separators between the meta line's phrases, drawn rather than typed so the
+   markup stays a list of spans. Not before the step rail, which is a mark
+   rather than a phrase. */
+.editor-head-meta > span + span::before {
+  color: var(--ink-faint);
+  content: '·';
+  margin-right: 8px;
+}
+
+.import-lead {
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+
+/* The proxy importer's format reference. Stacked rather than two-column: the
+   term is a connection string, not a column name, and at thirty monospace
+   characters it does not fit .import-columns' 182px gutter -- it overflowed it
+   and printed straight through the description beside it. */
+.import-formats > div {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.import-formats dt {
+  min-width: 0;
+}
+
+.import-formats dt code {
+  overflow-wrap: anywhere;
+}
+
+/* The last thing in a card's full-width slot has nothing under it, so the
+   lead's trailing margin would show as the card being bottom-heavy. */
+.form-group-full > .import-lead:last-child {
+  margin-bottom: 0;
+}
+
+/* The step rail, same shape as the intro dialog's. Ornamental, so it is hidden
+   from assistive tech -- the meta line beside it says which step this is in
+   words. It rode the footer with `margin-right: auto` pushing everything else
+   right; on the header's meta line it is just the first item. */
+.import-dots {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.import-dots i {
+  background: var(--border);
+  border-radius: 999px;
+  height: 6px;
+  transition: background 140ms var(--ease), width 140ms var(--ease);
+  width: 6px;
+}
+
+.import-dots i.on {
+  background: var(--accent);
+  width: 18px;
+}
+
+/* ── The credential banner ──────────────────────────────────────────────────
+ * One login for every credential-less proxy in the file. See CredentialBanner in
+ * modals/ImportProfilesModal.tsx.
+ *
+ * A warning tone rather than a danger one: nothing is wrong with the file, and
+ * the import will still run -- the proxies just will not connect. It sits above
+ * the filter chips because it is about the whole file, and below the summary
+ * tiles because those are what the eye lands on first.
+ *
+ * The two inputs are sized rather than flexed: a username and a password are
+ * short, and letting them take the row's slack pushed the button off the end at
+ * dialog widths. */
+.import-credential-banner {
+  align-items: center;
+  background: var(--status-warmup-bg);
+  border: 1px solid var(--status-warmup-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.import-credential-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* Takes the slack so the controls stay grouped at the end of the row. */
+  flex: 1 1 240px;
+}
+
+.import-credential-copy strong {
+  color: var(--status-warmup-ink);
+  font-size: 13px;
+}
+
+.import-credential-copy span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.import-credential-banner input {
+  flex: 0 1 150px;
+  min-width: 110px;
+}
+
+/* No vertical margin any more: .import-body is a grid with a 14px gap, so a
+   margin here would stack on top of it. */
+.import-review-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* A sentence in the toolbar rather than a control -- the proxy importer's
+   "3 lines could not be read". Amber, because it is a thing to look at and not
+   a thing that has gone wrong: the import still runs. */
+.import-toolbar-note {
+  align-items: center;
+  color: var(--status-warmup-ink);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* The proxy importer's file-wide Type selector. Same inline shape the label
+   takes in .import-actions -- see the note on that rule -- because it is the
+   same control doing the same job on a different row. */
+.import-review-toolbar .inline-field {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin: 0;
+}
+
+.import-review-toolbar .inline-field select {
+  height: var(--control-h-sm);
+  width: auto;
+}
+
+/* The same note with room to breathe, for the cookie importer's expiry
+   warning: it is one answer to the whole file rather than a toolbar aside, so
+   it takes the banner's tinted plate. */
+.import-warning-note {
+  align-items: center;
+  background: var(--status-warmup-bg);
+  border-radius: var(--radius-xs);
+  color: var(--status-warmup-ink);
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.import-warning-note > svg {
+  flex: none;
+}
+
+.filter-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.filter-chips .chip {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  height: var(--control-h-sm);
+  padding: 0 12px;
+}
+
+.filter-chips .chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Every cell is an input, so the table's own row padding would double up with
+   the control's. The controls carry the height instead.
+
+   Two insets, and the gap between them was the alignment problem here. --cell-x
+   is the distance from the column edge to the cell's box; --value-inset is the
+   further distance to the first pixel of text *inside* a control, which is that
+   control's own border plus its own padding. A value in this table therefore
+   starts at the sum of the two, and a header that stops at --cell-x is not over
+   its column -- at ten columns wide that reads as a table where nothing sits
+   under its label.
+
+   Worse, the header cells were not even at --cell-x: `.import-review-table td`
+   below narrowed the data cells to 8px and the headers went on inheriting the
+   global 14px, so the labels were 6px right of their own cells and 7px left of
+   their own values at the same time. Everything below lines both up. */
+.import-review-table {
+  --cell-x: 8px;
+  --value-inset: 9px;
+
+  max-height: min(52vh, 560px);
+  overflow: auto;
+}
+
+.import-review-table table {
+  min-width: 1020px;
+}
+
+.import-review-table td {
+  padding: 4px var(--cell-x);
+  vertical-align: middle;
+}
+
+/* The cell's own control, and only that.
+   - `>` rather than a descendant, because the proxy popover renders inside the
+     cell it belongs to (it is position: fixed, not portalled), and its
+     connection-string and search fields are not table cells -- full-width and
+     32px tall is right for a column and wrong inside a panel.
+   - :not(checkbox), because the row's checkbox was being caught too and drawn
+     as a 32px box the full width of its cell, which does not read as a checkbox
+     at all. */
+.import-review-table td > input:not([type='checkbox']),
+.import-review-table td > select {
+  height: var(--control-h-sm);
+  min-width: 0;
+  width: 100%;
+}
+
+/* Tightened from the canonical 12px so a name still fits a cell this narrow,
+   and so --value-inset above stays true: 1px of border plus 8px of padding. */
+.import-review-table td > input:not([type='checkbox']) {
+  padding: 0 8px;
+}
+
+/* The chevron scales with the control: the canonical select carries a 16px mark
+   inset 12px, which in a 32px row leaves the value nowhere to go. */
+.import-review-table td > select {
+  background-position: right 8px center;
+  background-size: 14px;
+  padding: 0 26px 0 8px;
+}
+
+/* A sticky header over a `border-collapse: collapse` table does not carry its
+   own bottom border -- the collapsed edge belongs to the table, not the cell,
+   and scrolls away underneath it. The inset shadow is that hairline, drawn by
+   something that travels with the header. */
+.import-review-table thead th {
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--border);
+  padding: 8px var(--cell-x);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* A column whose value is drawn inside a control, so the label steps in to meet
+   it. The two columns that are plain text rather than a control take the same
+   step, below, so all eight agree. */
+.import-review-table thead th.th-value {
+  padding-left: calc(var(--cell-x) + var(--value-inset));
+}
+
+/* A row that cannot be written, and one the user chose to leave out. Different
+   things: the first is a problem, the second is a decision, so only the first
+   is tinted. */
+.import-review-table tr.row-blocked > td {
+  background: var(--status-ban-bg);
+}
+
+.import-review-table tr.row-skipped > td {
+  opacity: 0.5;
+}
+
+.import-state-cell {
+  width: 22px;
+}
+
+/* The details chevron closes the row, so its column is only as wide as the
+   control and the button sits at the end of it rather than floating in a column
+   that took whatever width was left over. */
+.import-toggle-cell {
+  text-align: right;
+  width: 48px;
+}
+
+/* .icon-button is 32px square with the row's own control height, so the chevron
+   sits on the same line as the inputs beside it instead of on the 36px the base
+   button rule would have given it. */
+.import-detail-toggle {
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  width: var(--control-h-sm);
+}
+
+.import-dot {
+  border-radius: 999px;
+  display: block;
+  height: 8px;
+  width: 8px;
+}
+
+.import-dot.ok {
+  background: var(--status-active-border);
+}
+
+.import-dot.warned {
+  background: var(--status-warmup-border);
+}
+
+.import-dot.blocked {
+  background: var(--status-ban-border);
+}
+
+.import-dot.skipped {
+  background: var(--border);
+}
+
+/* Inputs carrying a problem. `warned` is deliberately a border-only change:
+   the value is still going to be imported, just not as the file wrote it. */
+.import-review-table td input.invalid {
+  border-color: var(--status-ban-border);
+}
+
+.import-review-table td input.warned {
+  border-color: var(--status-warmup-border);
+}
+
+/* The two columns whose value is bare text rather than a control. They take the
+   control's inset by hand so they sit under their own header alongside the six
+   that get it from the control -- written as td.<class> to beat the padding on
+   `.import-review-table td` above, which is the same specificity. */
+.import-review-table td.import-folder-cell,
+.import-review-table td.import-check-cell {
+  padding-left: calc(var(--cell-x) + var(--value-inset));
+}
+
+.import-folder-cell {
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.import-check-cell {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* The four flat text states this column used to have (.import-unchecked,
+   .import-checking, .import-check-ok, .import-check-fail) are gone: the cell
+   renders the shared .proxy-check chip now, so a result looks the same here as
+   it does in the Proxies and Profiles tables. Only the em-dash for a row with
+   nothing to check is still local. */
+.import-check-cell > i {
+  color: var(--ink-faint);
+  font-style: normal;
+}
+
+/* The proxy cell is a button that looks like a value, because clicking the
+   value is how you change it -- a separate pencil in a ten-column table is a
+   target nobody finds. */
+.import-proxy-trigger {
+  align-items: center;
+  background: none;
+  /* Buttons in this app default to the filled accent treatment, so a
+     background-only reset leaves the label the accent's ink -- white on white. */
+  color: var(--ink);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  display: flex;
+  gap: 6px;
+  height: var(--control-h-sm);
+  justify-content: flex-start;
+  /* 8px against a 1px transparent border is the same 9px the inputs in this
+     table sit their text at, so the proxy reads on the column's line. */
+  padding: 0 8px;
+  width: 100%;
+}
+
+.import-proxy-trigger:hover {
+  background: var(--hover);
+  border-color: var(--border-soft);
+}
+
+.import-proxy-host {
+  font-size: 12px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-proxy-picker .field {
+  margin-bottom: 8px;
+}
+
+/* Type and Address on one line: they are two halves of one endpoint, and stacked
+   they pushed the credentials -- the fields this panel exists for -- below the
+   fold of a popover that is already competing with the row it is anchored to.
+   The fixed first column is sized to "SOCKS5" plus its chevron. */
+.import-proxy-endpoint {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 110px 1fr;
+}
+
+/* The hint under Address would otherwise stretch the Type cell's control to
+   match, leaving a select taller than the input beside it. */
+.import-proxy-endpoint .field {
+  align-self: start;
+  min-width: 0;
+}
+
+.import-proxy-modes {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.import-proxy-options {
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow: auto;
+  padding-top: 6px;
+}
+
+.import-proxy-option {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.import-proxy-option:hover {
+  background: var(--hover);
+}
+
+.import-proxy-empty {
+  color: var(--ink-faint);
+  font-size: 12px;
+  padding: 8px;
+}
+
+/* The duplicate notice is its own row rather than a cell, so the sentence
+   explaining what "already exists" means has somewhere to go.
+
+   The flex lives on an inner div, not on the td: `display: flex` on a table
+   cell takes it out of table layout, which silently kills the colspan and
+   collapses the whole notice into the width of column one. */
+.import-duplicate-row > td {
+  background: var(--status-warmup-bg);
+  padding: 6px var(--cell-x);
+}
+
+.import-duplicate-note {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+}
+
+/* A control sitting in a sentence rather than filling a column: it takes its
+   own width and the row's control height, and sits at the end of the note. */
+.import-review-table .import-duplicate-note select {
+  height: var(--control-h-sm);
+  margin-left: auto;
+  width: auto;
+}
+
+.import-detail-row > td {
+  background: var(--paper);
+  padding: 0 var(--cell-x);
+}
+
+/* align-items: start is the fix for the thing that made this panel look broken:
+   a .field is a grid of label / control / optional hint, and a grid item
+   stretches to its row by default. Half these fields carry a hint and half do
+   not, so the ones without were being stretched to the tall neighbour's height
+   and their control floated to the middle of the extra space -- Profile id and
+   User agent sat on one line, Start URL and Language on another. Hugging the
+   top puts every label on one line and every input on the next.
+
+   The left padding matches the review table's own value inset, so the detail
+   fields open directly under the columns they belong to. */
+.import-detail-grid {
+  align-items: start;
+  display: grid;
+  gap: 12px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  padding: 14px var(--value-inset);
+}
+
+/* The hint is the reason the rows were uneven; it also has to stay readable at
+   two lines without pushing the grid around, which align-items: start now
+   guarantees. */
+.import-detail-grid .field-hint {
+  line-height: 1.4;
+}
+
+.import-issue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--value-inset) 12px;
+}
+
+.import-issue-list li {
+  color: var(--status-warmup-ink);
+  font-size: 12px;
+}
+
+.import-issue-list li.blocking {
+  color: var(--status-ban-ink);
+}
+
+/* ── The proxy and cookie review tables ─────────────────────────────────────
+ * Both take .import-review-table's cell metrics -- every cell is a control,
+ * the header steps in to meet the value -- and only differ in how wide they
+ * need to be. Sharing that rather than restating it is the point: three review
+ * tables that measure their cells differently is exactly the drift this whole
+ * change is about.
+ */
+
+/* Nine columns, four of them credentials-width. Narrower than the profile
+   importer's 1020 because none of these columns holds a name a user chose. */
+.proxy-review-table table {
+  min-width: 940px;
+}
+
+/* The column the whole table is about, and the one that was losing. Every cell
+   here is an input at width: 100%, so a column with no stated width collapses
+   to whatever the header text needs -- "ADDRESS" is six characters and
+   "gate.example-proxies.test:7000" is thirty. */
+.proxy-review-table td:nth-child(5) {
+  min-width: 240px;
+}
+
+/* Six columns and no editable credentials, so it fits the 720px panel the
+   cookie importer keeps -- there is no reason to widen a dialog for a file
+   name, a count and two domains. Full width rather than min-width, so the two
+   text columns share the panel instead of shrink-wrapping in the middle of it. */
+.cookie-review-table table {
+  min-width: 0;
+  width: 100%;
+}
+
+/* Same reasoning as the proxy table's address column: the name is an input, and
+   an input takes the width its column is given rather than asking for one. */
+.cookie-review-table td.cookie-name-cell {
+  min-width: 220px;
+  width: 40%;
+}
+
+/* The domain list is `white-space: nowrap` from the inspector's own rule, which
+   is right in a table that scrolls and wrong in one that must not: a set for
+   two long domains pushed the Expired column and the remove button off the end
+   of a 720px dialog. Capped and ellipsised -- the full list is the cell's
+   title, and the count beside it is what the column is actually for. */
+.cookie-review-table td.cookie-domain-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 60%;
+}
+
+/* The file's own line number. Right-aligned tabular figures so a hundred rows
+   read as a column rather than as a ragged edge. */
+.import-line-cell {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 52px;
+}
+
+/* A count, on the same figures. Padded to the value inset by hand for the same
+   reason .import-folder-cell is: it is text where its neighbours are controls,
+   and without it the number sits 9px left of its own header. */
+.import-review-table td.import-count-cell {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding-left: calc(var(--cell-x) + var(--value-inset));
+  white-space: nowrap;
+}
+
+.import-count-cell > i {
+  color: var(--ink-faint);
+  font-style: normal;
+}
+
+/* Destination step. Cards rather than radios because the choice is between
+   several different shapes of outcome, and each needs a line of explanation
+   that a radio label cannot carry.
+
+   No bottom margin: these sit in a FormGroup's full-width slot now, and the
+   card's own 14px grid gap is what separates them from the field below. */
+.destination-cards {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+/* --frame, not --raised. These sit inside a FormGroup's card now, and --raised
+   IS --frame-card in light -- a white card on a white card, distinguished only
+   by its hairline. --frame is the one token guaranteed to be a step away from
+   --frame-card in both themes, because tokens.css swaps the pair rather than
+   sliding it: see the note there. */
+.destination-card {
+  align-items: flex-start;
+  background: var(--frame);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: auto;
+  padding: 12px;
+  text-align: left;
+}
+
+.destination-card strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.destination-card span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.destination-card.on {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.destination-card:disabled {
+  opacity: 0.5;
+}
+
+.folder-mapping {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.folder-mapping-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.folder-mapping-source {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.folder-mapping-source i {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.folder-mapping-row input {
+  flex: 1;
+}
+
+/* The finished screen.
+ *
+ * Deliberately its own classes rather than the shared .import-summary /
+ * .summary-item grid: those are also the API tab's and the proxy-list
+ * importer's, and this is the one place that wants a hero, a glyph per stat and
+ * a dimmed zero. Restyling the shared pair would have carried all three into
+ * screens that never asked for them. */
+.import-done {
+  display: grid;
+  gap: 14px;
+}
+
+.import-done-hero {
+  align-items: center;
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.import-done-mark {
+  align-items: center;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  border-radius: 999px;
+  color: var(--success);
+  display: flex;
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.import-done-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.import-done-copy strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.import-done-copy i {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-style: normal;
+}
+
+/* A partial write is not a success and must not be dressed as one. */
+.import-done-hero.partial {
+  background: var(--status-warmup-bg);
+  border-color: color-mix(in srgb, var(--status-warmup-ink) 30%, transparent);
+}
+
+.import-done-hero.partial .import-done-mark {
+  background: color-mix(in srgb, var(--status-warmup-ink) 15%, transparent);
+  color: var(--status-warmup-ink);
+}
+
+.import-done-note {
+  color: var(--status-warmup-ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.import-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* Glyph in its own column spanning both rows, so the label and the number stack
+   beside it and every tile's number starts at the same x. */
+/* --frame and --frame-card below, for the reason .destination-card is: these
+   tiles now appear both inside a FormGroup's card and, on the finished screen,
+   directly on the panel. --frame is a step away from BOTH surfaces in both
+   themes; --raised is identical to --frame-card in light. */
+.import-stat {
+  align-items: center;
+  background: var(--frame);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-xs);
+  column-gap: 10px;
+  display: grid;
+  grid-template-areas: 'mark label' 'mark value';
+  grid-template-columns: auto 1fr;
+  min-width: 0;
+  padding: 11px 13px;
+  row-gap: 2px;
+}
+
+.import-stat-mark {
+  align-items: center;
+  background: var(--frame-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  display: flex;
+  grid-area: mark;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.import-stat-label {
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 900;
+  grid-area: label;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.import-stat-value {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 750;
+  grid-area: value;
+  line-height: 1.1;
+}
+
+/* Nothing happened for this one. Kept rather than hidden -- "0 skipped" is worth
+   confirming -- but it should not compete with the counts that did move. */
+.import-stat.zero {
+  opacity: 0.55;
+}
+
+.import-stat.zero .import-stat-value {
+  font-weight: 650;
+}
+
+.import-skipped {
+  background: var(--status-warmup-bg);
+  border-radius: var(--radius-xs);
+  display: grid;
+  font-size: 12.5px;
+  gap: 7px;
+  padding: 11px 13px;
+}
+
+.import-skipped-head {
+  align-items: center;
+  color: var(--status-warmup-ink);
+  display: flex;
+  font-size: 11px;
+  font-weight: 900;
+  gap: 6px;
+  text-transform: uppercase;
+}
+

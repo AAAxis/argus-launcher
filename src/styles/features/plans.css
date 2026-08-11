@@ -1,0 +1,295 @@
+/* The Plans tab: the plan cards and the comparison under them.
+ *
+ * Was styles.css:11333-11621, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Plan surfaces ──────────────────────────────────────────────────────────
+ *
+ * The Plans tab, the plan welcome dialog and the plan half of Settings. These
+ * are the only three places allowed to draw with --plan-accent; see the token's
+ * comment at the top of this file for why the hue exists at all and why its
+ * scope is the price of it.
+ *
+ * Everything else here is the app's ordinary vocabulary: --raised cards on the
+ * --surface canvas, --radius-lg corners, --border hairlines, 999px pills. */
+
+.plans-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-inline: auto;
+  max-width: 1080px;
+  min-width: 0;
+  padding-bottom: 8px;
+  width: 100%;
+}
+
+.plans-head {
+  max-width: 620px;
+}
+
+.plans-head h2 {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+.plans-head p {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* What the workspace has already spent, not a fourth plan card. The argument
+ * for upgrading is "3 of 5", and a Free card next to three paid ones would
+ * instead invite a comparison the reader has already made. */
+.plans-current {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding: 14px 18px;
+}
+
+.plans-current-tag {
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+/* A grid rather than a wrapping flex row, so the three tracks are the same
+ * length and start at the same x. Three meters of content-width lengths side by
+ * side invite a comparison between the bars themselves, which is meaningless --
+ * the denominators are different -- and equal columns take that reading away.
+ *
+ * Each meter is two rows, name-and-count over track: they carry their own names
+ * now (Meter's `label`) instead of getting a heading stacked on top, which is
+ * what made this strip three rows tall and put "Profiles" and "0 of 5" on
+ * separate lines. */
+.plans-current-meters {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 12px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  min-width: 0;
+}
+
+/* The meter is the shared control from components/ui/Meter.tsx, so it arrives
+ * drawn in --accent. On this surface it belongs to the plan, not to the chrome. */
+.plans-current .settings-meter-track span,
+.plan-welcome .settings-meter-track span {
+  background: var(--plan-accent);
+}
+
+.plans-current .settings-meter-track span.full,
+.plan-welcome .settings-meter-track span.full {
+  background: var(--danger);
+}
+
+/* Stretch, so the three cards end level and the three buttons land on one line.
+ * The cards have unequal feature lists, and with `align-items: start` each one
+ * stopped wherever its list ran out -- three ragged bottoms, and the button you
+ * are being asked to press sitting at a different height on every card. The
+ * card is already a column with the list at `flex: 1`, so the slack falls above
+ * the button and nothing else moves. */
+.plans-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Ribbon over card. The slot is what keeps the three card tops on one line: the
+ * ribbon strip is rendered for every plan and filled for the two that carry one
+ * ("Most popular" on Team, "Most valuable" on Enterprise), because dropping the
+ * element for Base would stand it taller than the plans being recommended --
+ * the opposite of what a recommendation should look like. */
+.plan-slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.plan-ribbon {
+  align-items: center;
+  border-radius: 999px 999px 0 0;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.06em;
+  min-height: 26px;
+  text-transform: uppercase;
+}
+
+.plan-ribbon.is-shown {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.plan-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 20px;
+}
+
+/* A recommended card carries the ribbon's colour down its own edge and squares
+ * the two top corners into it, so the pair reads as one object rather than a
+ * label resting on a box.
+ *
+ * The wash is the plan welcome dialog's hero: this is the tier that dialog will
+ * congratulate the buyer on, and the two screens are the same promise thirty
+ * seconds apart. It pours from the ribbon's edge downward and is gone by the
+ * price, so the name and the number sit in it and the feature list below stays
+ * on plain --raised where it is easiest to read.
+ *
+ * Held higher and lighter than the dialog's, though, and both numbers are the
+ * card's height rather than the dialog's: the hero's 150% radius is most of a
+ * short modal but all of a 400px card, which tinted the whole thing instead of
+ * its top. 62% ends the fade just past the price rule. Layered over --raised
+ * rather than replacing it -- a gradient to `transparent` alone would leave the
+ * bottom of the card showing the canvas through. */
+.plan-card.is-highlighted {
+  background:
+    radial-gradient(130% 62% at 50% 0%,
+      color-mix(in srgb, var(--plan-accent) 14%, transparent) 0%,
+      transparent 74%),
+    var(--raised);
+  border-color: var(--plan-accent);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  box-shadow: 0 10px 30px -14px color-mix(in srgb, var(--plan-accent) 55%, transparent);
+}
+
+.plan-card h3 {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.plan-tagline {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin: 0;
+}
+
+.plan-price {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 4px;
+  margin: 14px 0 0;
+  padding-bottom: 16px;
+}
+
+.plan-price strong {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.plan-price span {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.plan-features {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 9px;
+  list-style: none;
+  margin: 16px 0 20px;
+  padding: 0;
+}
+
+.plan-features li {
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.plan-features svg {
+  color: var(--plan-accent);
+  flex: none;
+  margin-top: 1px;
+}
+
+/* The first bullet is the entitlement the tier is actually bought for, so it is
+ * the one line that gets the ink and the weight. Anything below it is detail. */
+.plan-features li.is-lead {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* A heading for the list rather than a member of it: no tick, no indent. */
+.plan-features li.plan-carried {
+  color: var(--ink);
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+
+.plan-cta {
+  justify-content: center;
+  width: 100%;
+}
+
+/* Filled on the two recommended cards. Base uses .ghost, which is already the
+ * app's quiet primary -- three identical fills would leave nothing pointing
+ * anywhere. */
+.plan-cta:not(.ghost) {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.plan-cta:not(.ghost):not(:disabled):hover {
+  background: var(--plan-accent-strong);
+}
+
+.plan-cta:focus-visible {
+  outline-color: var(--plan-accent);
+}
+
+.plans-foot {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  justify-content: space-between;
+  padding-top: 16px;
+}
+
+.plans-foot p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 620px;
+}
+
+/* Three cards need ~880px to stay readable. Below that they stack rather than
+ * shrink: a 200px-wide price column is worse than a scroll. */
+@media (max-width: 940px) {
+  .plans-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+

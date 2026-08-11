@@ -1,0 +1,242 @@
+/* The Extensions tab: the Installed and Discover grids, the card states, and
+ * the add tile at the end of the grid.
+ *
+ * Was styles.css:6975-7209, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Extensions tab ─────────────────────────────────────────────────────────
+ * Cards, on the .integration-card vocabulary next door -- same raised surface,
+ * same 1px border, same hairline shadow. The two tabs are adjacent in the rail
+ * and describe the same kind of object (a thing you switch on and a thing that
+ * has a logo), so they should not have looked like two different products.
+ *
+ * This replaces .extension-row, which was a bordered grid of name + grey
+ * caption + control. That row had nowhere to put a 34px mark, and a list of
+ * five identically-shaped rows gave the eye nothing to aim at. */
+/* No .panel wrapper: the cards sit straight on the app surface. A raised sheet
+ * around a grid of raised cards is a surface on a surface, and it turned the
+ * page into one object that happens to contain extensions rather than into the
+ * extensions themselves. */
+/* .extensions-tab's own box is up with .api-panel, which it now shares; the head
+ * row is .integration-bar and the admin note is .api-note, both borrowed whole
+ * from the Integrations tab so the two card tabs are laid out the same way. */
+
+.extensions-category {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Category labels in Discover. Caption weight: the chips above already say
+ * which view this is, so these should sort the cards, not announce them. */
+.extensions-group {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Same track as .integration-grid, and for the same reason: a card head is a
+ * mark, a name and a chip, which does not fit in 260px. */
+.extension-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.extension-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+
+/* Switched off is a real state and has to be visible at a glance across a grid,
+ * but it is not an error -- so it reads as recessed rather than as marked:
+ * the card drops to the sunken surface and the mark loses its colour.
+ *
+ * --paper, not --surface: the cards sit *on* --surface now, so tinting an off
+ * card with it erased the card's edge entirely instead of pushing it back. */
+.extension-card.is-off {
+  background: var(--paper);
+  box-shadow: none;
+}
+
+.extension-card.is-off .extension-mark {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+/* Wraps, like .integration-card-head: the provenance chip sits with the name
+ * now, and a long name plus "Shared folder" does not fit a third of the capped
+ * panel on one line. */
+.extension-card-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.extension-card h3 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+  /* Store names run long ("Buster: Captcha Solver for Humans"). Wrapping is
+   * fine; the card grows. Truncating would hide which of two similarly-named
+   * extensions this is, which is the one thing the name is here for. */
+  min-width: 0;
+}
+
+/* The remove button keeps the trailing edge. The h3 used to hold it there with
+ * flex: 1, which now would push the chip out there with it -- the chip belongs
+ * against the name. */
+.extension-card-head .extension-remove {
+  margin-left: auto;
+}
+
+.extension-card p {
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* The caveat under FoxyWall. Smaller and lighter than the tagline because it
+ * is the exception to what the tagline just said, not a second description. */
+.extension-card-note {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+/* Controls only, now that the provenance chip has moved up to the head: one
+ * switch on an installed card, one Install button on a catalog card. Both sit
+ * on the trailing edge, where the Integrations cards keep theirs. */
+.extension-card-foot {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* What is happening right now on a card that has to fetch itself before it can
+ * be on -- a download's progress, or why one failed. Sits at the leading edge
+ * against the foot's flex-end so it reads as a status line for the card rather
+ * than as a label for the switch it would otherwise be pressed against. */
+.extension-card-status {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+}
+
+.extension-card-error {
+  color: var(--danger);
+}
+
+.extension-card-foot > button {
+  flex: 1;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+}
+
+.extension-card-foot > button:not(.ghost):hover {
+  background: var(--accent-strong);
+}
+
+.extension-remove {
+  flex: 0 0 auto;
+  min-height: 28px;
+  width: 28px;
+}
+
+.extension-remove:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.extension-mark {
+  flex: 0 0 auto;
+  height: 34px;
+  object-fit: contain;
+  width: 34px;
+}
+
+/* The Monti mark, drawn as a mask in the current ink colour. It is black line
+ * art, so as an <img> it would vanish against the dark theme's raised
+ * surface -- same reason the sidebar's .brand-mark is a mask. */
+.extension-mark.is-monti {
+  background-color: var(--ink);
+  display: block;
+  mask-image: var(--monti-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.extension-mark.is-fallback {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 8px;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: center;
+}
+
+/* The last tile in the Installed grid. Card-shaped so it holds its place in
+ * the row, but drawn as an outline rather than a surface -- it is the slot the
+ * next extension goes in, not an extension. Same idea as .start-tile-add. */
+.extension-add-tile {
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  color: var(--ink-soft);
+  justify-content: center;
+  gap: 6px;
+  min-height: 150px;
+  text-align: center;
+  transition: background 0.14s var(--ease), border-color 0.14s var(--ease);
+}
+
+.extension-add-tile:not(:disabled):hover {
+  background: var(--raised);
+  border-color: var(--ink-faint);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.extension-add-icon {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.extension-add-label {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+/* Explicit weight because the base <button> rule sets 700 and this is a
+ * caption under the label, not a second label. */
+.extension-add-hint {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 500;
+}
+

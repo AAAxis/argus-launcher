@@ -1,0 +1,299 @@
+/* The welcome dialog and workspace setup.
+ *
+ * Ends with three .settings-plan-* overrides that sat at the very end of
+ * styles.css and did not move -- the rest of that section is in
+ * settings/plan.css.
+ *
+ * Was styles.css:11622-11910, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── The welcome dialog ─────────────────────────────────────────────────────*/
+
+/* Replaces the shared header's row layout: this one is a centred block with the
+ * close button floated over it, not a title beside a control.
+ *
+ * The negative margin is what makes the wash reach the panel edges. .profile-modal
+ * pads itself by 18px on all four sides, so a plain child leaves a white gutter
+ * around the tint and it reads as a coloured box sitting inside the dialog
+ * rather than as the top of it. Cancelling that padding on this one element is
+ * the whole trick; the panel's own border-radius and overflow clip the two top
+ * corners, so the hero needs no radius of its own. Keep the two numbers equal to
+ * .profile-modal's padding if that ever changes. */
+.plan-welcome header {
+  display: block;
+  margin: -18px -18px 0;
+  position: relative;
+}
+
+/* Inset rather than flush now that it sits on the tint -- a glyph in the exact
+ * corner of a rounded panel looks clipped even when it is not. */
+.plan-welcome header > .icon-button {
+  margin-top: 0;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+}
+
+.plan-welcome-hero {
+  background:
+    radial-gradient(130% 150% at 50% 0%,
+      color-mix(in srgb, var(--plan-accent) 20%, transparent) 0%,
+      transparent 72%);
+  padding: 30px 26px 24px;
+  text-align: center;
+}
+
+/* The mark alone, no plate behind it. It is already a solid silhouette, so a
+ * filled circle around it was one container too many -- and it sits on the
+ * hero's tint, which is doing that job. */
+.plan-welcome-mark {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+/* The same alpha-masked PNG as the sidebar's .brand-mark, filled with the plan
+ * accent so it carries the tint rather than sitting on it. */
+.plan-welcome-glyph {
+  background-color: var(--plan-accent);
+  display: block;
+  height: 40px;
+  mask-image: var(--monti-mark);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 40px;
+}
+
+.plan-welcome-hero h2 {
+  font-size: 22px;
+  letter-spacing: -0.015em;
+}
+
+.plan-welcome-hero p {
+  line-height: 1.5;
+  margin-inline: auto;
+  max-width: 380px;
+}
+
+.plan-welcome-grid {
+  display: grid;
+  margin: 0;
+}
+
+/* Plain rows on the panel, not tiles. Three boxed cards under a tinted hero was
+ * two container styles arguing: the hero is the object, and what follows it is
+ * a list. A hairline is all the separation a three-item list needs. */
+.plan-welcome-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 11px 2px;
+}
+
+.plan-welcome-row:last-child {
+  border-bottom: 0;
+}
+
+.plan-welcome-row dt {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 13px;
+  font-weight: 550;
+  gap: 9px;
+  min-width: 0;
+}
+
+.plan-welcome-icon {
+  align-items: center;
+  color: var(--plan-accent);
+  display: inline-flex;
+}
+
+.plan-welcome-row dd {
+  align-items: baseline;
+  display: flex;
+  gap: 7px;
+  margin: 0;
+}
+
+/* The number they had, struck through in the sense that it is over -- quiet,
+ * smaller, and the only thing on the row that is not the news. */
+.plan-welcome-from {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
+.plan-welcome-arrow {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+/* The new number, in the plan's colour. Sized to sit level with the label
+ * rather than tower over it -- without a card around each row there is no box
+ * for a 19px figure to fill, and the tint alone is enough to say which of the
+ * two numbers on the row is the one that matters. */
+.plan-welcome-row dd strong {
+  color: var(--plan-accent);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.plan-welcome-note {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── Workspace setup ──────────────────────────────────────────────────────
+ * "Who is this workspace for?" -- the first-run question.
+ *
+ * Sibling of the plan welcome above, deliberately quieter. That dialog is an
+ * announcement and earns its tinted hero; this one asks a question, and a
+ * celebration frame around a question reads as a sales screen. So: no hero, no
+ * accent fills, and the only weight in the whole thing is on the two cards --
+ * because choosing between them IS the screen, and everything after it is
+ * optional. */
+.setup-choices {
+  display: grid;
+  gap: 10px;
+  /* Two up where there is room, stacked below. Not a fixed 1fr 1fr: at the
+   * dialog's narrow width two columns put the supporting line on four lines
+   * each, which makes the shorter option look like the lesser one. */
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+/* A real target, not a radio with a label beside it. The whole card is the
+ * control -- 90px of it -- because this is a two-way fork on a first run and a
+ * 13px radio is a small thing to ask someone to find. */
+.setup-choice {
+  align-content: start;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  padding: 16px;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+/* Border rather than a fill or a shadow. The dialog already sits on --raised
+ * over a dimmed page, so a second elevation would be a third surface arguing
+ * with the two above it -- the same reasoning .plan-welcome-row records for
+ * dropping its tiles. */
+.setup-choice:hover:not(:disabled),
+.setup-choice:focus-visible {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.setup-choice:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.setup-choice > svg {
+  color: var(--ink-soft);
+  margin-bottom: 5px;
+}
+
+.setup-choice strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.setup-choice span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.setup-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.setup-logo-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+/* Square and contain, not cover: a logo is usually wider than it is tall and
+ * cropping one to fill a square is how you cut the name off a wordmark. */
+.setup-logo-preview {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  height: 44px;
+  object-fit: contain;
+  width: 44px;
+}
+
+.setup-logo-preview.is-empty {
+  border-style: dashed;
+}
+
+.setup-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+
+/* One button, so it sits at the end rather than being pushed apart from
+ * nothing by the shared footer's space-between. */
+.plan-welcome .modal-actions {
+  justify-content: flex-end;
+}
+
+.plan-welcome .modal-actions button {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.plan-welcome .modal-actions button:not(:disabled):hover {
+  background: var(--plan-accent-strong);
+}
+
+.plan-welcome .modal-actions button:focus-visible {
+  outline-color: var(--plan-accent);
+}
+
+/* Meters inside the plan section belong to the plan, not to the chrome. Scoped
+ * to this group rather than to .settings-meter, because the same control also
+ * draws the seat count in the Team tab's toolbar, which is chrome and stays
+ * ink. */
+.settings-plan-usage .settings-meter-track span {
+  background: var(--plan-accent);
+}
+
+.settings-plan-usage .settings-meter-track span.full {
+  background: var(--danger);
+}
+
+/* The one primary in the section -- "See plans" / "Upgrade plan". Manage
+ * billing sits beside it as a .ghost and is untouched. */
+.settings-plan-actions button:not(.ghost) {
+  background: var(--plan-accent);
+  color: var(--plan-accent-ink);
+}
+
+.settings-plan-actions button:not(.ghost):not(:disabled):hover {
+  background: var(--plan-accent-strong);
+}
+
+.settings-plan-actions button:not(.ghost):focus-visible {
+  outline-color: var(--plan-accent);
+}

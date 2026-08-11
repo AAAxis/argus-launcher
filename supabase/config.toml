@@ -1,0 +1,62 @@
+# Supabase CLI configuration.
+#
+# The launcher owns the schema -- it is what reads and writes every table -- so
+# the migrations live here rather than in landing/ or in the umbrella repo.
+# landing/ talks to the same project and is a consumer of this schema.
+#
+# `project_id` names the local Docker stack, not the hosted project. The hosted
+# ref is recorded in supabase/.temp/project-ref by `supabase link` and is
+# untracked; see secrets/README.md in the umbrella repo.
+
+project_id = "monti"
+
+[db]
+# Match the hosted project, so a local stack reproduces its behaviour.
+port = 54322
+major_version = 17
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[api]
+enabled = true
+port = 54321
+# `prelaunch` is deliberately absent: it is the parked pre-launch schema kept
+# for reference by migration 0000a and must not be reachable over PostgREST.
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000", "monti://auth/callback"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+# Google sign-in is what forced PKCE in the launcher client -- the callback
+# returns through an monti:// deep link, so the implicit flow's URL fragment is
+# unusable. Secrets come from the environment, never from this file.
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_GOOGLE_SECRET)"
+
+[storage]
+enabled = true
+# One public bucket, `global`, created in 20260805000001_storage.sql.
+file_size_limit = "50MiB"
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324

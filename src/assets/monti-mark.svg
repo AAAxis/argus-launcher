@@ -1,0 +1,13 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="512" cy="512" r="512" fill="#25335A"/>
+  <!-- back-left ridge -->
+  <path d="M96 760 L328 470 L430 596 L360 690 Z" fill="#F2F4FA"/>
+  <!-- back-right ridge -->
+  <path d="M928 760 L700 476 L604 600 L672 690 Z" fill="#F2F4FA"/>
+  <!-- main snow cap -->
+  <path d="M512 330 L642 512 L560 560 L512 500 L464 560 L382 512 Z" fill="#FFFFFF"/>
+  <!-- main mountain body -->
+  <path d="M512 330 L860 862 H164 Z" fill="#111B36"/>
+  <!-- left face shading -->
+  <path d="M512 330 L512 862 H164 Z" fill="#1B2749"/>
+</svg>

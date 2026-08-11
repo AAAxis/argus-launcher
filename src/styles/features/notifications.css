@@ -1,0 +1,463 @@
+/* Run notifications in the bell, the Shared view in the Team tab, and the
+ * Assigned column.
+ *
+ * Was styles.css:10877-11332, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Run notifications in the bell ──
+ * The second kind. A notification row is quieter than a handoff -- it reports
+ * a decision rather than demanding one -- so it carries no action buttons,
+ * only the title-as-link, a clear, and the unread dot. */
+
+.inbox-divider {
+  background: var(--border);
+  height: 1px;
+  margin: 2px 0;
+}
+
+/* The quote bar comes off. .inbox-item-note is set as a quotation because on a
+   handoff it IS one -- a teammate's own words, which must not read as ours.
+   A run notification's body is the app reporting, so quoting it attributes our
+   sentence to somebody. The 22px is the glyph plus the head's gap: with the
+   bar gone the body and the byline hang under the title rather than out to its
+   left, and the card has one text edge instead of two. */
+.inbox-item.is-notification .inbox-item-note,
+.inbox-item.is-notification .inbox-item-from {
+  border-left: 0;
+  margin-left: 22px;
+  padding-left: 0;
+}
+
+/* Tone from the run's own status tokens, reported off the record -- the bell
+ * never recomputes a verdict, it only colours the one it was given. */
+.inbox-status.is-active {
+  color: var(--status-active-ink);
+}
+
+.inbox-status.is-warmup {
+  color: var(--status-warmup-ink);
+}
+
+.inbox-status.is-ban {
+  color: var(--danger);
+}
+
+.inbox-status.is-neutral {
+  color: var(--ink-faint);
+}
+
+/* ── The card as the target ──
+ * The whole notification opens the run history it reports on. The title used
+ * to be the only live thing in the card -- underlined on hover, ~140px of a
+ * 320px row -- which made the reader aim at a word when every other list in
+ * the app hands over the whole row.
+ *
+ * The hit area is a stretched overlay rather than a wrapping <button>: the
+ * card also holds the clear, and a button cannot nest in a button. z-index 0
+ * against the clear's 1 settles which one a click on the corner belongs to. */
+/* A rounded plate, so the shade reads as one card lifting out of the list
+ * rather than as a band across the panel. --radius-sm, a notch under the
+ * panel's own --radius: the plate is inset 10px inside it, and matching the
+ * outer corner exactly is what makes a nested box look like it is bulging out
+ * of its container.
+ *
+ * The card's own border-bottom had to go with it -- border-radius rounds the
+ * border box, which would have bent every separator in the list into a pair of
+ * arcs. The hairline is drawn by ::after below instead, where the rounding
+ * cannot reach it. */
+.inbox-item.is-notification {
+  border-bottom: 0;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.inbox-item.is-card {
+  cursor: pointer;
+}
+
+/* 3px between plates, so two lit cards never meet corner to corner -- touching
+   rounded boxes pinch, and the notch it leaves reads as a rendering fault
+   rather than as two cards. */
+.inbox-item.is-notification + .inbox-item.is-notification {
+  margin-top: 3px;
+}
+
+/* Between two notifications, never above the first -- the divider or the
+   handoff above it already ends that group. Inset 10px so it stops short of
+   where the plates' corners curve, and pulled into the middle of that 3px. */
+.inbox-item.is-notification + .inbox-item.is-notification::after {
+  background: var(--border-soft);
+  content: '';
+  height: 1px;
+  left: 10px;
+  position: absolute;
+  right: 10px;
+  top: -2px;
+}
+
+/* A hairline running into the top edge of a rounded plate is the one thing
+   that gives the trick away. Whenever a card carries a plate -- hovered, or
+   unread and holding --surface -- it drops the line above it and the line the
+   card below would draw against it. Between two plates the fills separate them
+   on their own. */
+.inbox-item.is-notification:hover::after,
+.inbox-item.is-notification.is-unread::after,
+.inbox-item.is-notification:hover + .inbox-item.is-notification::after,
+.inbox-item.is-notification.is-unread + .inbox-item.is-notification::after {
+  opacity: 0;
+}
+
+.inbox-item-hit {
+  background: none;
+  border: 0;
+  /* The card's, so the focus ring below traces the same corners as the hover
+     plate it sits inside. */
+  border-radius: inherit;
+  box-shadow: none;
+  inset: 0;
+  padding: 0;
+  position: absolute;
+  z-index: 0;
+}
+
+/* No fill of its own; it is the card underneath that lights up. Shadowless for
+   the same reason every other control here is -- see `button:hover`. */
+.inbox-item-hit:not(:disabled):hover {
+  background: none;
+  box-shadow: none;
+}
+
+/* Inset, because a stretched overlay's outer ring would be clipped by the
+   panel's own overflow on the first and last card. */
+.inbox-item-hit:focus-visible {
+  box-shadow: inset var(--focus-ring);
+  outline: none;
+}
+
+/* The same --hover plate the nav rail and the filter triggers take, so a
+   pressable card in the panel and a pressable row in the chrome answer the
+   pointer identically. Three classes deep to outrank .is-unread's fill below,
+   which is a state and not a hover. */
+.inbox-item.is-notification.is-card:hover {
+  background: var(--hover);
+}
+
+/* Above the hit overlay: these two are read, not pressed, and the unread dot
+   in particular must not eat the card's own click. */
+.inbox-unread-dot {
+  background: var(--accent);
+  border-radius: 999px;
+  flex: none;
+  height: 7px;
+  margin-top: 5px;
+  pointer-events: none;
+  position: relative;
+  width: 7px;
+  z-index: 1;
+}
+
+/* A circle, not a lozenge. It carries its own geometry rather than borrowing
+   .icon-button's 32px square and then undoing it, and the explicit flex: none
+   is half of what keeps it round (see .inbox-item-name for the other half).
+   The -2px lifts the 22px box onto the centre of the title's first 17.5px
+   line, the same arithmetic the glyph's +2px and the dot's +5px come from. */
+.inbox-item-clear {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--ink-faint);
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  margin-left: auto;
+  margin-top: -2px;
+  min-height: 22px;
+  padding: 0;
+  position: relative;
+  width: 22px;
+  z-index: 1;
+}
+
+/* A tinted plate, not just red ink: on a card that is itself shaded under the
+   pointer, a colour change alone did not read as "this is a second, different
+   target". */
+.inbox-item-clear:not(:disabled):hover {
+  background: var(--danger-bg);
+  box-shadow: none;
+  color: var(--danger);
+}
+
+.inbox-item.is-unread {
+  background: var(--surface);
+}
+
+.inbox-foot {
+  border-top: 1px solid var(--border-soft);
+  padding: 8px;
+}
+
+.inbox-foot button {
+  justify-content: center;
+  width: 100%;
+}
+
+/* ── The Shared view in the Team tab ── */
+
+.shared-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.shared-group-title {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  letter-spacing: 0.4px;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+/* The kind, as a word rather than only an icon. A list mixing profiles, proxies
+ * and cookie sets is unreadable if the only thing distinguishing them is a
+ * 14px glyph. */
+.shared-kind {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* The item picker inside the share sheet.
+ *
+ * The dialog carries its own list because Share used to be reachable only by
+ * ticking a table row first -- which made the feature invisible on every tab
+ * until you happened to select something, and absent entirely from the Team
+ * tab. A list here costs one scroll box and buys a cold entry point. */
+.share-search {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink-faint);
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+/* The input keeps the canonical text-input rules for type and colour but gives
+ * up its own box: the wrapper above draws the border, so two nested frames do
+ * not appear around one control. */
+.share-search input {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  flex: 1;
+  min-width: 0;
+  padding-left: 0;
+}
+
+.share-search input:focus {
+  box-shadow: none;
+  outline: none;
+}
+
+.share-picker {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  /* Capped rather than unbounded: an org with 300 profiles would otherwise push
+     the address field and the Send button off the bottom of the dialog. */
+  max-height: 190px;
+  overflow: auto;
+}
+
+.share-pick {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.share-pick:last-child {
+  border-bottom: 0;
+}
+
+.share-pick:hover {
+  background: var(--hover);
+}
+
+.share-pick-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushed right and allowed to shrink away first: the name is what identifies
+   the row, the detail is only there to disambiguate two of the same name. */
+.share-pick-detail {
+  color: var(--ink-faint);
+  font-size: 12px;
+  margin-left: auto;
+  overflow: hidden;
+  padding-left: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-picker-empty {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin: 0;
+  padding: 14px 10px;
+  text-align: center;
+}
+
+/* The teammate picker. A list of real people rather than a text field: a
+ * hand-off only means something to somebody already in this workspace, so
+ * anything you could type would either be a person already on this list or a
+ * mistake. */
+.share-people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow: auto;
+}
+
+/* `color` is not optional here. The base `button` rule is a filled dark control
+ * -- background: var(--accent); color: var(--accent-ink) -- so overriding only
+ * the background leaves white text on a white surface, and the teammate's name
+ * disappears while their email (which sets its own --ink-soft) stays visible.
+ * Every other button variant in this file takes the colour back the same way. */
+.share-person {
+  align-items: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.share-person:hover {
+  background: var(--hover);
+}
+
+/* The selected teammate takes the accent surface the primary button uses, which
+ * is ink rather than a hue -- so "chosen" reads the same way it does everywhere
+ * else in the app and still inverts cleanly in dark mode. */
+.share-person.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.share-person.active small {
+  color: var(--accent-ink);
+  opacity: 0.75;
+}
+
+.share-person-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.share-person-text strong {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-person-text small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── The Assigned column ── */
+
+/* A face and a name, or a dash. Sized to sit in a table row without changing
+ * its height -- the roster's 30px avatar would. */
+.assignee {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.assignee-avatar {
+  align-items: center;
+  background: var(--paper);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: none;
+  font-size: 9px;
+  font-weight: 750;
+  height: 20px;
+  justify-content: center;
+  overflow: hidden;
+  width: 20px;
+}
+
+.assignee-avatar img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.assignee-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Yours, marked. In a column of eight names the one that matters is your own,
+ * and scanning for it by reading is slower than seeing it. */
+.assignee.is-me .assignee-name {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* The sender's note, under the item name in the hand-off list. Quiet and
+ * indented, so a row without one does not look like it is missing something. */
+.shared-note {
+  color: var(--ink-soft);
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

@@ -1,0 +1,205 @@
+/* Form groups -- a headed block of fields inside a dialog -- and the popover
+ * panel.
+ *
+ * Ends with .info-pop, the InfoHint's panel. Its trigger is in
+ * features/workspace-switcher.css, where it sat in styles.css.
+ *
+ * Was styles.css:8159-8309, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Form groups ────────────────────────────────────────────────────────────
+ * components/ui/FormGroup.tsx -- one titled block of a form. The fingerprint
+ * dialog's three, and the profile editor's seven.
+ *
+ * The frame carries the heading, with the field grid inset in it on all four
+ * sides -- the automations grid's card (.automation-card-framed /
+ * .automation-card-body) at form scale. The heading is what the app says ABOUT
+ * the block and rides the frame; the fields are the block and sit in the card.
+ *
+ * It was a single --raised box with a hairline and a rule under the heading.
+ * Seven of those stacked in one dialog read as one undifferentiated run: the
+ * only thing separating a section from the next was 14px of gap, so finding
+ * "where do I change the proxy" still meant reading every heading top to
+ * bottom. The surface step does in one move what the rule under the heading
+ * was failing to do.
+ *
+ * --frame and --frame-card, NOT --paper and --raised: the two swap places
+ * between light and dark, and a rule written against the ladder would have to
+ * branch on the theme to say the one thing this means -- the card inside is the
+ * *other* surface from the frame around it, whichever way round that falls.
+ * tokens.css owns that inversion; see the note there.
+ *
+ * A frame draws no border. The surface step is the whole of it; a hairline on
+ * top of it reads as a third object between the two.
+ *
+ * This replaced .form-section, which was the same card one level louder (an
+ * h3 at 15px) and is now gone. Two card styles in one dialog is what the
+ * profile editor had, and it read as two kinds of thing rather than as sections
+ * of one form. */
+.form-group {
+  background: var(--frame);
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  /* Spans the host .profile-form grid so groups stack rather than pairing up. */
+  grid-column: 1 / -1;
+  /* Asymmetric, and the same 3px .automation-card-framed uses. The top opens
+     far enough to seat the heading -- that edge is a place, and it holds two
+     lines of text. The other three are only an edge: thin enough to read as a
+     surface behind the card rather than as a slightly thick border. The top's
+     own spacing lives in .form-group-head, which is why this is 0 up there. */
+  padding: 0 3px 3px;
+}
+
+/* On the frame, outside the card. The horizontal padding puts the heading on
+   the card's own text rules: 3 + 13 lands the first glyph at 16px, where the
+   fields' labels start. */
+.form-group-head {
+  display: grid;
+  gap: 4px;
+  padding: 9px 13px 10px;
+}
+
+/* The card proper. --radius-sm because the frame is 14px on the outside and
+   3px thick: an inner corner has to lose the frame's width or the two arcs
+   stop being concentric and the gap pinches at the corners. */
+.form-group-body {
+  background: var(--frame-card);
+  /* The only line left, now that the frame draws none -- and what makes the
+     inset read as inset rather than as a patch of a second colour. */
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 16px;
+}
+
+/* 13px/800, not the 15px an h3 would be: these head a block inside a dialog
+ * that already carries a title, so they are a level down from it rather than
+ * a peer. That is the whole difference between this and the .form-section it
+ * replaced. */
+/* inline-flex so the optional InfoHint sits on the title's line rather than on
+   its baseline, the same arrangement `.field > span` uses for a field's own. */
+.form-group-head h4 {
+  align-items: center;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+/* The section's glyph, at the ink level `.field > span > svg` gives a field's
+   own -- a step quieter than the words beside it, so a column of seven marks
+   down the left of the form reads as a spine rather than as seven icons. */
+.form-group-head h4 > svg {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+.form-group-head p {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* The two checkboxes at the end of Privacy & noise. Without this they sit on
+ * the grid's baseline while the selects beside them are 36px tall, so a row
+ * that mixes the two reads as misaligned. */
+.form-group .check-field {
+  min-height: var(--control-h);
+}
+
+/* A summary on the left and the button that acts on it on the right -- the
+   Fingerprint section's whole body. This is what .fingerprint-card used to do
+   with a grid-template override on the card itself; as a row inside the group
+   it needs no override, because the group's own two-column grid is not what is
+   laying it out. */
+.form-group-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+}
+
+.form-group-value {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* For a section whose body is one wide thing rather than a field grid -- the
+   note thread. Without it the panel takes one of the group's two columns and
+   reads at half width beside a column of nothing. */
+.form-group-full {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* ── Popovers ───────────────────────────────────────────────────────────────
+ * The app's only floating layer, shared by InfoHint and the status picker.
+ * z-index 90 clears the nested modal backdrop at 70, which is the deepest
+ * thing one of these can open on top of. Positioned in JS (see ui/Popover.tsx)
+ * because every dialog it opens inside is an overflow: auto box that would
+ * otherwise clip it. */
+.popover-panel {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 10px;
+  position: fixed;
+  /* A panel is laid out against the viewport but it is still a DOM child of
+     whatever opened it, so it inherits that ancestor's text layout. Several
+     table cells set `white-space: nowrap` to keep a chip on one line -- and a
+     panel opened from one of those inherited it, which turned every paragraph
+     inside into a single line running off the right edge. The proxy-failure
+     panel was doing exactly that from td.profile-proxy-status-cell. Nothing
+     that floats should take its wrapping from its anchor. */
+  white-space: normal;
+  z-index: 90;
+  animation: modal-in 0.12s var(--ease);
+}
+
+/* Explicit weight and case: the trigger lives inside a .field label, whose
+   span sets 650 and would otherwise make three paragraphs of explanation
+   render as bold. */
+.info-pop {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.5;
+  padding: 12px 14px;
+  text-transform: none;
+}
+
+.info-pop strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.info-pop p {
+  margin: 0 0 8px;
+}
+
+.info-pop p:last-child {
+  margin-bottom: 0;
+}
+
+.info-pop code {
+  background: var(--paper);
+  border-radius: 4px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+}
+

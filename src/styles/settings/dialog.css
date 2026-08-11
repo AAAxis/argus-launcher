@@ -1,0 +1,313 @@
+/* The settings dialog: its own rail, the header, the row/label/control grid its
+ * sections are built from, and the account identity block.
+ *
+ * Was styles.css:1748-2053, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* ── Settings dialog ────────────────────────────────────────────────────────
+ * Two panes: a category rail on sunken paper, and one section at a time on the
+ * modal surface. Sized to fit the window's own 980x620 minimum (see
+ * electron/main.cjs) so the rail never has to collapse.
+ *
+ * It does not reuse .profile-modal: that one is a single scrolling column with
+ * uniform padding, and here the rail must not scroll with the panel. */
+.settings-dialog {
+  animation: modal-in 0.16s var(--ease);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  height: min(620px, calc(100vh - 56px));
+  overflow: hidden;
+  width: min(880px, calc(100vw - 56px));
+}
+
+.settings-rail {
+  background: var(--paper);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 18px 10px;
+}
+
+.settings-rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-rail-group h4 {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+/* Same rail vocabulary as the main sidebar -- transparent until hovered, a
+ * deeper grey when selected, never the accent. A solid ink chip in a 208px
+ * column would out-shout the section it is labelling. */
+.settings-rail button {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.settings-rail button svg {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+.settings-rail button:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.settings-rail button.active {
+  background: var(--nav-active-bg);
+  color: var(--ink);
+}
+
+.settings-rail button.active svg {
+  color: var(--ink);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Sticky-by-structure rather than by position: the header is a flex sibling of
+ * the scrolling body, so the section title and the close button stay put while
+ * the rows move under them. */
+.settings-panel-header {
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 18px 14px 22px;
+}
+
+.settings-panel-header h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.settings-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px 24px;
+}
+
+.settings-panel:focus-visible {
+  outline: none;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-group h3 {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+/* A row, not a stacked block: label and explanation on the left, the control on
+ * the right, hairline between. Inherited from the settings modal this dialog
+ * replaces -- the shape was right, it was the container that was wrong. */
+.settings-row {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px 0;
+}
+
+.settings-group h3 + .settings-row,
+.settings-group > .settings-row:first-child {
+  border-top: 0;
+}
+
+/* For a control too big for the right-hand track -- the theme cards, the update
+ * panel, a full-width path. The label stacks above it. */
+.settings-row.wide {
+  align-items: stretch;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-row-label h4 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 2px;
+}
+
+/* Only rendered when a row passes one, so a group with no icons keeps its old
+ * flush-left label. The glyph is the plan accent because the only group using
+ * icons today is the usage list, which is a plan surface. */
+.settings-row-label h4:has(.settings-row-icon) {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.settings-row-icon {
+  align-items: center;
+  color: var(--plan-accent);
+  display: inline-flex;
+}
+
+/* The description lines up under the label rather than under the glyph: the
+ * icon labels the row, and a sentence indented past it reads as belonging to
+ * the icon instead. */
+.settings-row-label h4:has(.settings-row-icon) + p {
+  padding-left: 24px;
+}
+
+.settings-row-label p,
+.settings-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.settings-hint {
+  margin-top: 6px;
+}
+
+.settings-row-control {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/* Stacked, not inline: a wide row's control is followed by hints and panels
+ * that belong under it rather than beside it. */
+.settings-row.wide .settings-row-control {
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* The inline rename fields (display name, workspace name). They take the
+ * canonical input's shape and swap the fill for the sunken tone: these sit
+ * loose on the panel with no field label or form chrome around them, so on a
+ * near-white surface a --raised control has nothing to read against. */
+.settings-row-control input[type="text"] {
+  background: var(--paper);
+  min-width: 200px;
+}
+
+.settings-value {
+  color: var(--ink-soft);
+  font-size: 13px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-error {
+  border-top: 1px solid var(--border-soft);
+  color: var(--danger);
+  font-size: 12px;
+  margin: 0;
+  padding: 10px 22px;
+}
+
+/* ── Account identity block ── */
+.settings-identity {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  padding-bottom: 16px;
+}
+
+.settings-identity-avatar {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: var(--accent-ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 20px;
+  font-weight: 800;
+  height: 56px;
+  justify-content: center;
+  object-fit: cover;
+  width: 56px;
+}
+
+img.settings-identity-avatar {
+  background: var(--paper);
+}
+
+.settings-identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-identity-text strong {
+  font-size: 15px;
+}
+
+.settings-identity-text span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-identity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+/* The file input behind "Change picture". Not display:none -- a hidden input
+ * cannot be clicked programmatically in every engine, and it must stay
+ * focusable for keyboard users. */
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+

@@ -1,0 +1,258 @@
+/* The foot of the rail: the account row, the workspace switcher trigger, and
+ * the avatar and initials plates both of them use.
+ *
+ * Was styles.css:1497-1747, before that file became the barrel that imports this
+ * one. Its import order there is the cascade; this file does not set it.
+ */
+
+/* Pinned to the bottom of the rail. A hairline is all it needs -- the row below
+ * reads as one more nav item, so giving it a deep padded band of its own was
+ * what made it look bolted on. */
+.account {
+  border-top: 1px solid var(--border);
+  display: grid;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+/* Three tracks: the workspace mark, the two lines of label, and the chevron.
+ *
+ * The chevron is deliberately not a nested button -- the whole row opens the
+ * menu, and a button inside a button is invalid anyway. Unlike the gear it
+ * replaced it is always visible, because it is the only thing saying this row
+ * is a menu rather than a link. */
+.account-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr) 15px;
+}
+
+.account-trigger {
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  justify-content: stretch;
+  min-height: var(--control-h);
+  padding: 0 12px;
+  text-align: left;
+}
+
+/* :not(:disabled) to outrank the global button hover, exactly as `nav button`
+ * does -- a row in a flat rail takes no shadow. */
+.account-trigger:not(:disabled):hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+
+/* ── Workspace switcher trigger ─────────────────────────────────────────────
+ * components/WorkspaceSwitcher.tsx.
+ *
+ * Same three tracks as .account-row -- mark, label, glyph -- but the middle one
+ * carries two lines now: the workspace on top, the person underneath. So this
+ * row is taller than the 32px nav buttons the account row was shaped to match,
+ * and deliberately: it is no longer one more item in the rail, it is the thing
+ * that says which company you are looking at. */
+.workspace-trigger {
+  min-height: 46px;
+  padding: 5px 10px;
+}
+
+/* One track, not three: collapsed, the trigger is the mark and nothing else.
+ * Squared back to the 40px the nav buttons use, because the two lines that made
+ * it taller than them are the two lines that are gone. */
+.workspace-trigger.is-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  min-height: 40px;
+  padding: 0;
+}
+
+.workspace-lines {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  text-align: left;
+}
+
+/* .account strong already carries the weight and the ellipsis; only the second
+ * line needs describing. */
+.workspace-lines small {
+  color: var(--ink-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A rounded square, not the circle the account avatar used: this is a company
+ * mark, and a logo cropped to a circle loses its corners. Geometry only -- the
+ * two places it appears fill it differently, below. */
+.account .workspace-mark,
+.workspace-pop .workspace-mark {
+  align-items: center;
+  border-radius: 6px;
+  display: inline-flex;
+  flex: none;
+  font-size: 11px;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+/* The three rules below are scoped to `span` on purpose. An initials chip is
+ * drawn by us and can take any fill we like; a logo is drawn by the customer,
+ * usually with transparency, and the plate behind it is not decoration -- it is
+ * the surface showing through, so it has to BE that surface. Unscoped, the
+ * `.active` rule below outranked the img rule on specificity (0,3,0 against
+ * 0,2,1) and stamped a white plate behind the logo of the workspace you were in
+ * while every other logo got a dark one: one image, two plates, decided by
+ * selection. */
+
+/* Solid on the trigger. It is the one mark on screen at rest, at the foot of
+ * the rail, and it is what answers "whose data am I looking at" from across the
+ * room. */
+.account-trigger span.workspace-mark {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Quiet in the list, and solid only for the workspace you are in -- the same
+ * rule the settings rail applies to its glyphs, and for the same reason its
+ * comment gives: three solid ink chips stacked in a 252px panel out-shout the
+ * names they belong to, which are the thing being chosen between. */
+.workspace-pop-list span.workspace-mark {
+  background: var(--raised-soft);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+}
+
+.workspace-pop-item.active span.workspace-mark {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+
+/* `contain`, not `cover`. A wordmark cropped to fill is unreadable, where the
+ * face the account avatar held is not.
+ *
+ * Two plates rather than one, because these are two different surfaces and the
+ * plate's whole job is to match the one it is on. The trigger sits on the rail,
+ * which is --paper; the popover is a --raised card, and painting --paper there
+ * -- as a single shared rule used to -- cut a #161616 hole in a #222222 panel
+ * in dark mode. The hairline is what gives the artwork an edge once the plate
+ * stops being visible on its own. */
+.account-trigger img.workspace-mark {
+  background: var(--paper);
+  border: 1px solid var(--border-soft);
+  object-fit: contain;
+}
+
+.workspace-pop img.workspace-mark {
+  background: var(--raised-soft);
+  border: 1px solid var(--border-soft);
+  object-fit: contain;
+}
+
+.workspace-chevron {
+  color: var(--ink-faint);
+  flex: none;
+}
+
+/* The name field the create flow adds above the two choice cards. Only spacing
+ * -- .field already carries the label weight and the 36px control. */
+.setup-name {
+  margin-bottom: 14px;
+}
+
+/* `.account span` used to be here too, for the sidebar's initials circle. It
+ * had to go: the workspace switcher replaced that circle, and its popover panel
+ * is a DOM child of .account -- so a selector matching every span under .account
+ * was painting a 24px accent disc behind every label, hint and workspace name in
+ * the menu. The plates that are left name themselves (.workspace-mark,
+ * .filter-pop-mark). */
+.avatar {
+  align-items: center;
+  border-radius: 999px;
+  color: var(--accent-ink);
+  display: inline-flex;
+  font-weight: 800;
+  justify-content: center;
+}
+
+/* Two scales, so they can no longer be one rule: 38px is the profiles table's,
+ * 24px is the sidebar's -- sized against the 16px lucide glyphs in the nav rows
+ * directly above it rather than against the table. */
+.avatar {
+  height: 32px;
+  width: 32px;
+}
+
+/* A third: the proxies table's Assigned to column, where up to four of these
+ * sit in one cell beside a host and a folder. The 32px plate is the subject of
+ * its row in the profiles table; here a profile is a footnote on a proxy. */
+.avatar.avatar-sm {
+  flex: none;
+  font-size: 10px;
+  height: 22px;
+  width: 22px;
+}
+
+/* The two things a profile can carry instead of its initials. Both keep the
+ * circle and both keep .avatar's box, so a table of forty rows has one column
+ * of plates whatever each one is filled with -- a photo row that was 2px taller
+ * than its neighbours would undo the whole point of the column. */
+
+/* A picture, cropped rather than letterboxed: these are account photos, and a
+ * face centred in the circle reads better than the whole frame shrunk into it
+ * with bars either side. */
+.avatar.avatar-photo {
+  background: var(--paper);
+  flex: none;
+  object-fit: cover;
+}
+
+/* A brand mark keeps its own colours (see assets/brands/README.md), so it sits
+ * on the neutral surface rather than on one of the six profile tints -- a
+ * full-colour logo on a coloured plate is two palettes arguing inside 32px. The
+ * hairline is what stops a white-ish mark from dissolving into a light card. */
+.avatar.avatar-brand {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  flex: none;
+  overflow: hidden;
+}
+
+/* The editor's Avatar row: the plate the table will draw, then the ways to
+ * change it. Wraps, because the Remove button is a fourth control that only
+ * exists once something is set and a narrow dialog should grow a line rather
+ * than squeeze all four. */
+.avatar-picker {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.avatar-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* .account-avatar and .account-gear lived here for the sidebar row that opened
+ * Settings. That row is the workspace switcher now: the picture became
+ * .workspace-mark (a square -- it is a company, not a face) and the gear became
+ * a chevron, because the row opens a menu rather than one screen. Both classes
+ * were unreferenced after that and are not kept as decoration. */
+
+.account strong {
+  font-size: 13px;
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
