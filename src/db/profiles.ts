@@ -21,7 +21,7 @@ export async function list(orgId: string): Promise<MontiProfile[]> {
     return [];
   }
   const {data, error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .select(COLUMNS)
       .eq('org_id', orgId)
       .order('created_at', {ascending: true});
@@ -43,7 +43,7 @@ export async function list(orgId: string): Promise<MontiProfile[]> {
 // browser data.
 export async function create(orgId: string, profile: MontiProfile): Promise<void> {
   const client = requireClient();
-  const {error} = await client.from('profiles').insert(profileToRow(orgId, profile));
+  const {error} = await client.from('browser_profiles').insert(profileToRow(orgId, profile));
   raise(error, 'profiles.create');
 }
 
@@ -53,7 +53,7 @@ export async function replace(orgId: string, profile: MontiProfile): Promise<voi
   const client = requireClient();
   const {id: _id, org_id: _orgId, ...row} = profileToRow(orgId, profile);
   const {error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .update(row)
       .eq('org_id', orgId)
       .eq('id', profile.id);
@@ -73,7 +73,7 @@ export async function update(
     orgId: string, id: string, patch: Partial<MontiProfile>): Promise<void> {
   const client = requireClient();
   const {error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .update(profilePatchToRow(patch))
       .eq('org_id', orgId)
       .eq('id', id);
@@ -87,7 +87,7 @@ export async function softDelete(orgId: string, ids: string[]): Promise<void> {
   const client = requireClient();
   const now = new Date().toISOString();
   const {error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .update({deleted_at: now, updated_at: now})
       .eq('org_id', orgId)
       .in('id', ids);
@@ -102,7 +102,7 @@ export async function restore(orgId: string, ids: string[]): Promise<void> {
   }
   const client = requireClient();
   const {error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .update({deleted_at: null, updated_at: new Date().toISOString()})
       .eq('org_id', orgId)
       .in('id', ids);
@@ -115,7 +115,7 @@ export async function purge(orgId: string, ids: string[]): Promise<void> {
   }
   const client = requireClient();
   const {error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .delete()
       .eq('org_id', orgId)
       .in('id', ids);
@@ -164,7 +164,7 @@ export async function purgeAll(orgId: string): Promise<string[]> {
     return [];
   }
   const {data, error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .delete()
       .eq('org_id', orgId)
       .not('deleted_at', 'is', null)
@@ -181,7 +181,7 @@ export async function purgeExpired(orgId: string, cutoffIso: string): Promise<st
     return [];
   }
   const {data, error} = await client
-      .from('profiles')
+      .from('browser_profiles')
       .delete()
       .eq('org_id', orgId)
       .not('deleted_at', 'is', null)
