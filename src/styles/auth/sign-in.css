@@ -35,17 +35,17 @@
  * the site and the app -- the account was made on monti.bot, in cyan, and the
  * first launcher screen it leads to should not look like a different company.
  *
- * The art is 874x1124, so the box carries that ratio rather than a square that
+ * The art is 832x532, so the box carries that ratio rather than a square that
  * would leave the mask floating in dead space. */
 .login-mark {
   background-color: var(--plan-accent);
   display: block;
-  height: 44px;
+  height: 28px;
   justify-self: center;
   mask-image: var(--monti-mark);
   mask-position: center;
   mask-repeat: no-repeat;
   mask-size: contain;
-  width: 34px;
+  width: 44px;
 }
 
