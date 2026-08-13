@@ -90,8 +90,9 @@ function launcherSvg(themeKey) {
   const theme = THEMES[themeKey];
   // A mountain-range silhouette: a solid mark that stays legible at 16px, the
   // same reason the previous mark was a single silhouette rather than a ring.
+  // No tile behind it -- the launcher icon sits on a transparent background,
+  // so only the mountain shows.
   return wrap(`
-  ${tileRect(theme.neutralTile)}
   <path d="M200 704 L392 470 L458 552 L512 398 L566 552 L632 470 L824 704 Z" fill="${theme.neutralInk}"/>
 `);
 }
