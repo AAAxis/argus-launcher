@@ -504,14 +504,6 @@ export function UpdatesSection({
       <ComponentCard view={launcher} />
       <ComponentCard view={browser} />
 
-      {resourceState?.browserPath && (
-        <SettingsRow label="Browser location" wide>
-          <div className="settings-path">
-            <code title={resourceState.browserPath}>{resourceState.browserPath}</code>
-          </div>
-        </SettingsRow>
-      )}
-
       <SettingsRow
         label="Changelog"
         description="Every release of both programs, newest first."
