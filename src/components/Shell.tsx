@@ -2,9 +2,8 @@
 import {PanelLeftClose, PanelLeftOpen, X} from 'lucide-react';
 import {InboxBell} from './InboxBell';
 import {WorkspaceSwitcher} from './WorkspaceSwitcher';
-import {tabs, visibleTabs} from '../data/tabs';
+import {tabs} from '../data/tabs';
 import {native} from '../native';
-import {useOrg} from '../org';
 import type {ReactNode} from 'react';
 import type {TabId} from '../data/tabs';
 import type {ResourceState, UpdateState} from '../native';
@@ -29,12 +28,7 @@ export function Sidebar({activeTab, onTab, onSettings, onSignOut, onCreateWorksp
   // in anyway.
   newCounts?: Partial<Record<TabId, number>>;
 }) {
-  const org = useOrg();
-  // `org.ready ? … : undefined` rather than `org.org?.plan` alone: an unresolved
-  // org has no plan either way, and passing undefined is what stops the Plans
-  // tab appearing for a frame on every cold start -- in front of paying
-  // customers, who are exactly the people it has nothing to say to.
-  const rail = visibleTabs(org.ready ? org.org?.plan : undefined);
+  const rail = tabs;
   return (
     <aside className="sidebar">
       {/* The mark alone -- the window title already says "Monti Launcher", so

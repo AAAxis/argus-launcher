@@ -16,7 +16,7 @@
 import {useEffect, useState} from 'react';
 import type {ReactNode} from 'react';
 import {
-  AppWindow, Check, ChevronDown, Download, FileText, FolderOpen, Globe, RefreshCw, RotateCcw,
+  AppWindow, Check, ChevronDown, Download, FileText, Globe, RefreshCw, RotateCcw,
 } from 'lucide-react';
 import type {ReleaseEntry, ResourceState, UpdateState} from '../../native';
 import {native} from '../../native';
@@ -223,11 +223,6 @@ function browserView(
     availableVersion: '',
     notes,
   };
-  const reveal = state?.browserPath ? [{
-    label: 'Show in Finder',
-    icon: <FolderOpen size={15} />,
-    onClick: () => void native?.revealPath?.(state.browserPath),
-  }] : [];
   // Not the primary action any more, and no longer called "Re-download".
   // Fetching a ~200 MB archive you already have is a repair for a corrupted
   // install, not the ordinary way to stay current.
@@ -273,7 +268,6 @@ function browserView(
             icon: <Download size={15} />,
             onClick: onInstall,
           },
-          secondary: reveal,
         };
       }
       // An error on an otherwise-ready browser means the *check* failed, not
@@ -290,7 +284,6 @@ function browserView(
           error: state.error,
           note: 'The installed browser still works. Only the check for a newer one failed.',
           primary: {label: 'Try again', icon: <RefreshCw size={15} />, onClick: onCheck},
-          secondary: reveal,
         };
       }
       return {
@@ -298,7 +291,7 @@ function browserView(
         status: 'Up to date',
         tone: 'ok',
         percent: null,
-        secondary: [reinstall, ...reveal],
+        secondary: [reinstall],
       };
     case 'error':
       return {

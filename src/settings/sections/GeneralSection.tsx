@@ -1,7 +1,7 @@
 // General: the handful of things that belong to this computer rather than to
 // the account or the workspace.
 import {useEffect, useState} from 'react';
-import {BookOpen, Copy, FolderOpen} from 'lucide-react';
+import {BookOpen, Copy} from 'lucide-react';
 import {profilesRoot} from '../../lib/homePage';
 import {native} from '../../native';
 import type {LoginItemState} from '../../native';
@@ -56,13 +56,6 @@ export function GeneralSection({onMessage, onOpenIntro}: Props) {
     }
   }
 
-  async function reveal() {
-    const result = await native?.revealPath?.(dataPath?.path || '');
-    if (result && !result.ok) {
-      onMessage(result.error || 'Could not open that folder.');
-    }
-  }
-
   async function copyDiagnostics() {
     const lines = [
       `Platform: ${navigator.platform}`,
@@ -108,9 +101,6 @@ export function GeneralSection({onMessage, onOpenIntro}: Props) {
         >
           <div className="settings-path">
             <code title={dataPath?.path || ''}>{dataPath?.path || root}</code>
-            <button className="ghost" disabled={!dataPath?.exists} onClick={() => void reveal()} type="button">
-              <FolderOpen size={15} /> Show in Finder
-            </button>
           </div>
           {dataPath && !dataPath.exists && (
             <p className="settings-hint">This folder appears when you first launch a profile.</p>

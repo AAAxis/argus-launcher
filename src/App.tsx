@@ -14,7 +14,6 @@ import {StartPageTab} from './components/tabs/StartPageTab';
 import {AutomationsTab} from './components/tabs/AutomationsTab';
 import {ExtensionsTab} from './components/tabs/ExtensionsTab';
 import {IntegrationsTab} from './components/tabs/IntegrationsTab';
-import {PlansTab} from './components/tabs/PlansTab';
 import {TeamTab} from './components/tabs/TeamTab';
 import type {TeamView} from './components/tabs/TeamTab';
 import {AssignCookieSetModal} from './components/modals/AssignCookieSetModal';
@@ -369,17 +368,6 @@ export function App() {
     });
   }, [data.state.automations]);
 
-  // The Plans tab sells the first paid plan, so it goes away when one is bought
-  // -- which can happen while the user is standing on it, on the focus refresh
-  // that follows a purchase. Without this the sidebar entry vanishes and the
-  // content area keeps rendering a tab nothing can navigate back to.
-  const planPickerVisible = org.ready && showsPlanPicker(currentPlan);
-  useEffect(() => {
-    if (!planPickerVisible) {
-      setActiveTab((tab) => (tab === 'plans' ? 'profiles' : tab));
-    }
-  }, [planPickerVisible]);
-
   if (startup.blocked) {
     return (
       <main className="login-shell">
@@ -493,10 +481,9 @@ export function App() {
             setSettingsOpen(false);
             setIntroOpen(true);
           }}
-          onOpenPlans={() => {
-            setSettingsOpen(false);
-            setActiveTab('plans');
-          }}
+          // Plans have no tab of their own any more: the picker, pricing and
+          // checkout live on the website.
+          onOpenPlans={() => openAccountPage(SITE_LINKS.pricing)}
           onOpenSite={openAccountPage}
           onSectionChange={setSettingsSection}
           onSignOut={() => void signOut()}
@@ -1022,19 +1009,6 @@ export function App() {
       // same reasons: Trash does not count against the profile limit until a
       // profile is restored, and automations are hard-deleted so every row in
       // state is a live one.
-      case 'plans':
-        return (
-          <PlansTab
-            profileCount={data.state.profiles.filter((profile) => !profile.deleted_at).length}
-            // Trashed ones do not count -- enforce_automation_limit skips them
-            // too, so a meter that included them would say the plan was full
-            // while the app happily made another.
-            automationCount={
-              data.state.automations.filter((automation) => !automation.deleted_at).length}
-            memberCount={data.state.members.length}
-            onOpenSite={openAccountPage}
-          />
-        );
       case 'profiles':
       default:
         return (
