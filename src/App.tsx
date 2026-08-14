@@ -7,7 +7,6 @@ import {BookOpen, CircleAlert, CircleCheck, Plus, Upload, UserPlus} from 'lucide
 import {CopyButton} from './components/ui/CopyButton';
 import {SignIn} from './components/SignIn';
 import {Sidebar, Topbar, UpdateToast} from './components/Shell';
-import {ApiTab} from './components/tabs/ApiTab';
 import {ProfilesTab} from './components/tabs/ProfilesTab';
 import {ProxiesTab} from './components/tabs/ProxiesTab';
 import {CookiesTab} from './components/tabs/CookiesTab';
@@ -45,7 +44,7 @@ import {ProfileModal} from './components/modals/ProfileModal';
 import {ShareModal} from './components/modals/ShareModal';
 import type {ShareRequest} from './components/modals/ShareModal';
 import {
-  ChangelogModal, OAuthApprovalModal, RevealedKeyModal,
+  ChangelogModal, OAuthApprovalModal,
 } from './components/modals/SettingsModal';
 import {SettingsDialog} from './settings/SettingsDialog';
 import type {SettingsSectionId} from './settings/SettingsDialog';
@@ -158,7 +157,6 @@ export function App() {
   // Automations tab because the editor's own Run button raises the same dialog,
   // and that dialog must not be a second copy living inside the editor.
   const [runningAutomation, setRunningAutomation] = useState<MontiAutomation | null>(null);
-  const [revealedKey, setRevealedKey] = useState<{name: string; token: string} | null>(null);
   // What is about to be shared out of the workspace. Held here rather than in
   // each tab because four tabs raise it and the dialog is one -- the same reason
   // the delete confirmations live in useEditors.
@@ -642,13 +640,6 @@ export function App() {
           onRespond={(approved) => void oauth.respond(approved)}
         />
       )}
-      {revealedKey && (
-        <RevealedKeyModal
-          name={revealedKey.name}
-          token={revealedKey.token}
-          onClose={() => setRevealedKey(null)}
-        />
-      )}
       {openIntegration && (
         <IntegrationModal
           integration={openIntegration}
@@ -1013,6 +1004,7 @@ export function App() {
             apiKeys={apiKeys}
             integrations={integrations}
             onOpen={integrations.open}
+            onOpenApiPage={() => openAccountPage(SITE_LINKS.api)}
           />
         );
       // No renderTopActions() case, like Automations and Extensions: the Invite
@@ -1024,16 +1016,6 @@ export function App() {
             onView={setTeamView}
             onShare={setSharing}
             onOpenSite={openAccountPage}
-          />
-        );
-      case 'api':
-        return (
-          <ApiTab
-            apiKeys={apiKeys}
-            signedInEmail={org.email}
-            onOpenDocs={() => openAccountPage(SITE_LINKS.docs)}
-            onOpenIntegrations={() => setActiveTab('integrations')}
-            onKeyCreated={setRevealedKey}
           />
         );
       // Counted the way settings/SettingsDialog.tsx counts them, and for the

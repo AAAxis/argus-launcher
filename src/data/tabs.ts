@@ -1,11 +1,11 @@
 import {
-  Bot, Cookie, LayoutGrid, Monitor, Plug, Sparkles, SquareTerminal, Users, Waypoints, Workflow,
+  Bot, Cookie, LayoutGrid, Monitor, Plug, Sparkles, Users, Waypoints, Workflow,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import {showsPlanPicker} from '../plans';
 
 export type TabId = 'profiles' | 'proxies' | 'cookies' | 'startPage' | 'automations' |
-  'extensions' | 'integrations' | 'api' | 'team' | 'plans';
+  'extensions' | 'integrations' | 'team' | 'plans';
 
 export const tabs: Array<{id: TabId; label: string; icon: LucideIcon}> = [
   {id: 'profiles', label: 'Profiles', icon: Monitor},
@@ -14,8 +14,9 @@ export const tabs: Array<{id: TabId; label: string; icon: LucideIcon}> = [
   {id: 'startPage', label: 'Start page', icon: LayoutGrid},
   {id: 'automations', label: 'Automations', icon: Workflow},
   {id: 'extensions', label: 'Extensions', icon: Plug},
+  // No API tab: the API reference and key management live on the website, and
+  // the Integrations tab carries the link (SITE_LINKS.api).
   {id: 'integrations', label: 'Integrations', icon: Bot},
-  {id: 'api', label: 'API', icon: SquareTerminal},
   // Shown to everyone rather than hidden behind the plan: a single-seat org gets
   // the upsell hero instead of a roster, which is how someone on Base finds out
   // that a team is what the next tier buys. A tab that only appears once you

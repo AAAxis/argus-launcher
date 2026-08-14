@@ -15,6 +15,10 @@ export const SITE_LINKS = {
   docs: '/how-it-works',
   pricing: '/#pricing',
   support: '/support',
+  // The API reference on the website. The launcher used to carry its own API
+  // tab; that surface (endpoints, curl examples, key management) now lives on
+  // the site, and the Integrations tab links here instead.
+  api: '/api-reference',
   // The buy button on a plan card. Lands on a page that names the plan, the
   // price and the account about to be charged, then posts to /api/checkout --
   // which is where the amount is derived server-side, so the launcher never

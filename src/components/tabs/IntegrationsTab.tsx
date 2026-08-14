@@ -18,7 +18,7 @@
 // identity, and the disclosure below the bar answers the second half once for
 // all ten of them rather than ten times over.
 import {useEffect, useMemo, useState} from 'react';
-import {Clock, KeyRound, MonitorCheck, MonitorX, Plug, Search, TriangleAlert, Unplug} from 'lucide-react';
+import {Clock, ExternalLink, KeyRound, MonitorCheck, MonitorX, Plug, Search, SquareTerminal, TriangleAlert, Unplug} from 'lucide-react';
 import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {EmptyState} from '../ui/EmptyState';
@@ -226,10 +226,14 @@ function IntegrationCard({integration, apiKeys, integrations, onOpen}: {
   );
 }
 
-export function IntegrationsTab({apiKeys, integrations, onOpen}: {
+export function IntegrationsTab({apiKeys, integrations, onOpen, onOpenApiPage}: {
   apiKeys: ApiKeys;
   integrations: IntegrationsState;
   onOpen: (integration: Integration) => void;
+  // Opens the website's API reference. The launcher used to carry an API tab
+  // of its own; that surface lives on the site now, and this tab is where a
+  // user goes looking for it.
+  onOpenApiPage: () => void;
 }) {
   const [query, setQuery] = useState('');
   const {refreshAll} = integrations;
@@ -283,6 +287,11 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
           <span className="integration-bar-count">
             <strong>{connectedCount}</strong> of {INTEGRATIONS.length} connected
           </span>
+          <button type="button" className="ghost" onClick={onOpenApiPage}>
+            <SquareTerminal size={15} />
+            API
+            <ExternalLink size={13} />
+          </button>
           <label className="integration-search">
             <Search size={15} />
             <input
@@ -355,7 +364,11 @@ export function IntegrationsTab({apiKeys, integrations, onOpen}: {
           </p>
           <p className="integration-guide-more">
             Every endpoint with a curl example, plus keys you can make by hand
-            for those scripts, are on the <strong>API</strong> tab.
+            for those scripts, are on the{' '}
+            <button type="button" className="link-button" onClick={onOpenApiPage}>
+              API page
+            </button>{' '}
+            on the website.
           </p>
         </div>
       </details>

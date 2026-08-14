@@ -322,8 +322,8 @@ export function IntegrationModal({integration, integrations, apiKeys, apiState}:
             That URL is loopback — it answers here and nowhere else. Agents call
             the MCP tools by name rather than using it; plain HTTP is for the
             things that are not MCP clients, like your own scripts. Every
-            endpoint and a curl example for each are on the <strong>API</strong>{' '}
-            tab.
+            endpoint and a curl example for each are on the API page on the
+            website — the Integrations tab links to it.
           </p>
         </section>
       )}
