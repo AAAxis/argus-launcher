@@ -223,15 +223,6 @@ function browserView(
     availableVersion: '',
     notes,
   };
-  // Not the primary action any more, and no longer called "Re-download".
-  // Fetching a ~200 MB archive you already have is a repair for a corrupted
-  // install, not the ordinary way to stay current.
-  const reinstall = {
-    label: 'Reinstall',
-    icon: <Download size={15} />,
-    onClick: onInstall,
-  };
-
   switch (state?.browserStatus) {
     case 'checking':
       return {...base, status: 'Checking…', tone: 'busy', percent: null};
@@ -291,7 +282,6 @@ function browserView(
         status: 'Up to date',
         tone: 'ok',
         percent: null,
-        secondary: [reinstall],
       };
     case 'error':
       return {
