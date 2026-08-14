@@ -1,89 +1,31 @@
-// Plan & usage: what the workspace is entitled to, and how much of it is gone.
+// Plan: what the workspace is on and what that includes.
 //
 // Read-only by design. Every column shown here (plan, the limits, billing
 // status) is service-role only -- 0002 re-granted UPDATE on organizations for
 // (name, built_in_extensions) and nothing else -- so a client cannot change any
-// of it, and the buttons go to the website's checkout rather than pretending
-// otherwise.
-//
-// This is also the only plan screen a PAYING workspace has: the Plans tab exists
-// to sell the first paid plan and disappears once one is bought (see
-// showsPlanPicker in src/plans.ts). So "what you are on" and "what that
-// includes" both have to be answerable here, not only "how much is left".
-import {useEffect, useState} from 'react';
+// of it, and the buttons go to the website's pricing and dashboard rather than
+// pretending otherwise. This is the app's only plan surface; the picker and
+// checkout live on the site.
 import {
   Cloud, ExternalLink, Monitor, Receipt, ShieldCheck, SquareTerminal, Users, Workflow,
 } from 'lucide-react';
 import type {ReactNode} from 'react';
-import * as db from '../../db';
 import {Badge} from '../../components/ui/Badge';
 import type {BadgeTone} from '../../components/ui/Badge';
-import {Meter} from '../../components/ui/Meter';
 import {formatDate} from '../../lib/text';
 import {useOrg} from '../../org';
 import {hasUpgrade, isPlanKey, PLANS, planLabel, planPrice, showsPlanPicker} from '../../plans';
-import {seatCap} from '../../team/limit';
 import type {MontiOrg} from '../../types';
-import {SettingsGroup, SettingsRow, SettingsValue} from '../rows';
+import {SettingsGroup, SettingsRow} from '../rows';
 
 type Props = {
-  profileCount: number;
-  automationCount: number;
   onOpenSite: (pathname: string) => void;
-  // Closes Settings and lands on the Plans tab. Only offered while that tab
-  // exists -- a free workspace. A paying one is sent to the website, which is
-  // where an existing subscription is changed or cancelled.
+  // Opens the website's pricing section, where the plan cards and checkout are.
   onOpenPlans: () => void;
 };
 
-export function PlanUsageSection({profileCount, automationCount, onOpenSite, onOpenPlans}: Props) {
+export function PlanUsageSection({onOpenSite, onOpenPlans}: Props) {
   const org = useOrg();
-  // Members AND the invites already sent, because those are what the seat limit
-  // is compared against.
-  //
-  // This used to be countMembers() alone, which made Settings and the Team tab
-  // disagree about the same workspace -- "1 of 5" here beside "4 of 5" there.
-  // create_org_invite reserves a seat the moment an invite is minted, so the
-  // Team tab was the correct one; this now computes the same pair through the
-  // same seatCap() helper so there is one answer rather than two.
-  const [seatUse, setSeatUse] = useState<{members: number; invites: number} | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const orgId = org.orgId;
-    if (!orgId) {
-      setSeatUse(null);
-      return;
-    }
-    // Both counts together: a meter that showed members before invites arrived
-    // would tick upward on load, which reads as the number being unreliable.
-    //
-    // countLiveInvites returns 0 for a member rather than failing -- every
-    // policy on org_invites is is_org_owner -- so a member sees their own
-    // membership count and no invites, which is everything they are allowed to
-    // know. The row's description says so.
-    void Promise.all([db.orgs.countMembers(orgId), db.team.countLiveInvites(orgId)])
-        .then(([members, invites]) => {
-          if (!cancelled) {
-            setSeatUse({members, invites});
-          }
-        })
-        // The meter is the only thing that needs these; a failure shows "—"
-        // rather than taking the whole section down with it.
-        .catch(() => {
-          if (!cancelled) {
-            setSeatUse(null);
-          }
-        });
-    return () => {
-      cancelled = true;
-    };
-  }, [org.orgId]);
-
-  // null until both counts land, so the meter shows "—" rather than a number
-  // that is about to change.
-  const cap = seatUse ? seatCap(org.org, seatUse.members, seatUse.invites) : null;
-
   const plan = org.org?.plan;
   const price = planPrice(plan);
   const status = org.org?.billing_status || '';
@@ -103,14 +45,9 @@ export function PlanUsageSection({profileCount, automationCount, onOpenSite, onO
               <span className="settings-plan-name">{planLabel(plan)}</span>
               {status && <Badge tone={billingTone(status)}>{status}</Badge>}
             </div>
-            {/* Always "ends", never "renews". A purchase is a one-time Revolut
-                order (landing/lib/revolut.ts) with no mandate behind it, so
-                current_period_end is the date the plan stops -- not the date the
-                card is charged again. `ending` still distinguishes a cancelled
-                workspace, which is a different sentence. */}
             <p>
-              {price === null || price === 0 ? 'No charge' : `$${price} for 30 days`}
-              {periodEnd ? ` · ${ending ? 'cancelled, ends' : 'ends'} ${periodEnd}` : ''}
+              {price === null || price === 0 ? 'No charge' : `$${price}/month`}
+              {periodEnd ? ` · ${ending ? 'cancelled, ends' : 'renews'} ${periodEnd}` : ''}
             </p>
           </div>
           <div className="settings-plan-actions">
@@ -129,43 +66,13 @@ export function PlanUsageSection({profileCount, automationCount, onOpenSite, onO
         </div>
       </SettingsGroup>
 
-      <SettingsGroup className="settings-plan-usage" title="Usage">
-        <SettingsRow
-          label="Profiles"
-          icon={<Monitor size={16} strokeWidth={1.75} />}
-          description="Profiles in Trash don't count against the limit until you restore them."
-        >
-          <Meter used={profileCount} limit={org.org?.profile_limit ?? null} />
-        </SettingsRow>
-
-        <SettingsRow
-          label="Automations"
-          icon={<Workflow size={16} strokeWidth={1.75} />}
-          description="Saved workflows. Runs are unlimited; this is how many you can keep."
-        >
-          <Meter used={automationCount} limit={org.org?.automation_limit ?? null} />
-        </SettingsRow>
-
-        <SettingsRow
-          label="Members"
-          icon={<Users size={16} strokeWidth={1.75} />}
-          description={org.isOwner ?
-            'People here plus invites you have sent — an unaccepted invite still holds its seat. Manage them on the Team tab.' :
-            'People who can sign in to this workspace. See them on the Team tab.'}
-        >
-          {cap === null ?
-            <SettingsValue>—</SettingsValue> :
-            <Meter used={cap.used} limit={cap.limit} />}
-        </SettingsRow>
-      </SettingsGroup>
-
       <IncludedGroup org={org.org} plan={plan} />
 
       <SettingsGroup title="Billing">
         <SettingsRow
           label="Invoices and payment method"
           icon={<Receipt size={16} strokeWidth={1.75} />}
-          description="Plans are bought through Revolut on the website, 30 days at a time. Nothing renews automatically."
+          description="Invoices and your payment method live in the web dashboard."
         >
           <button className="ghost" onClick={() => onOpenSite('/dashboard')} type="button">
             <ExternalLink size={15} /> Open dashboard
