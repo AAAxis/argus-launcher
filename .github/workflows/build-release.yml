@@ -167,6 +167,11 @@ jobs:
         # manual run could overwrite the live feed with an untagged build --
         # the same class of mistake as publishing on every push (see the
         # publish job below).
+        #
+        # Non-fatal: this repo's R2 secrets are stale (Unauthorized) and a
+        # failed feed upload was blocking the GitHub release itself. The feed
+        # is mirrored from the release by hand until the secrets are replaced.
+        continue-on-error: true
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
@@ -268,6 +273,9 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: Upload updater files to R2
+        # Non-fatal for the same reason as the Windows one: stale secrets must
+        # not hold the release hostage.
+        continue-on-error: true
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
