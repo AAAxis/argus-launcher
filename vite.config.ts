@@ -38,5 +38,14 @@ export default defineConfig(({mode}) => ({
   // component test would need jsdom adding to this block first.
   test: {
     include: ['src/**/*.test.ts'],
+    // Tests must not read the developer's .env: with real Supabase values
+    // present, src/supabase.ts builds a live client at import time, and
+    // supabase-js's realtime half throws on Node < 22 (no native WebSocket).
+    // Env-less, the client is null and every suite behaves the same on every
+    // machine -- which is what these tests were written against.
+    env: {
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_ANON_KEY: '',
+    },
   },
 }));
