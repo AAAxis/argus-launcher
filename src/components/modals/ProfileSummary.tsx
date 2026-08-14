@@ -1,13 +1,9 @@
 import {
-  Activity, AtSign, Blend, Boxes, Camera, Clock, Cookie, Cpu, Fingerprint, Folder, Gauge,
-  Globe, Hash, Languages, MapPin, Mic, Monitor, Network, Pencil, Radio, ShieldOff, Signpost,
-  Tag, UserCheck, UserRound, Wifi,
+  Blend, Boxes, Camera, Clock, Cookie, Cpu, Fingerprint, Gauge,
+  Globe, Languages, MapPin, Mic, Monitor, Network, Pencil, Radio, ShieldOff, Signpost,
+  Wifi,
 } from 'lucide-react';
-import {Assignee} from '../ui/Assignee';
 import {RotateButton} from '../ui/RotateButton';
-import {StatusChip} from '../ui/StatusChip';
-import {TagChip} from '../ui/TagChip';
-import {tagsFromDraft} from '../../drafts';
 import {userAgentForFingerprint} from '../../lib/fingerprint';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ReactNode} from 'react';
@@ -15,7 +11,7 @@ import type {ProfileDraft} from '../../drafts';
 
 // Which editor a Summary group's Edit button leads to. The panel knows what it
 // is showing; the dialog knows where that lives.
-export type SummaryTarget = 'profile' | 'proxy' | 'cookies' | 'fingerprint';
+export type SummaryTarget = 'proxy' | 'cookies' | 'fingerprint';
 
 // A row is its glyph, its name and its value. The glyph is the one the field
 // that SETS this value wears in the form -- a summary row and its control are
@@ -40,30 +36,6 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
 }) {
   const {data} = useWorkspace();
   const proxy = data.state.proxies.find((item) => item.id === draft.proxy_id) || null;
-  const folder = data.state.folders.find((item) => item.id === draft.folder_id) || null;
-
-  const profileRows: Row[] = [
-    // Real from the moment the dialog opens: the id is minted with the draft,
-    // and it is the name of the directory this profile will get on disk.
-    {icon: <Hash size={14} />, label: 'ID', value: draft.id},
-    {icon: <UserRound size={14} />, label: 'Name', value: draft.name || '-'},
-    {icon: <Activity size={14} />, label: 'Status',
-      value: <StatusChip status={draft.status || 'Ready'} />},
-    {icon: <Folder size={14} />, label: 'Folder', value: folder?.name || 'All profiles'},
-    {icon: <Tag size={14} />, label: 'Tags', value: tagsFromDraft(draft.tags)},
-    // Only on a team. Same gate the form's own field carries, and the same one
-    // that makes the Assigned column teamOnly: on a one-person workspace this
-    // row can only ever say "You".
-    ...(data.state.members.length > 1 ? [{
-      icon: <UserCheck size={14} />,
-      label: 'Assigned',
-      value: <Assignee userId={draft.assigned_to || null} />,
-    }] : []),
-    // The login, so the panel accounts for the Credentials card. The email
-    // only: a password belongs in the field that can hide it, never in a
-    // read-only column somebody might be screen-sharing.
-    {icon: <AtSign size={14} />, label: 'Account', value: draft.email || '-'},
-  ];
 
   const proxyRows: Row[] = [
     {icon: <Blend size={14} />, label: 'Mode',
@@ -131,12 +103,9 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
         <h3>Summary</h3>
         <RotateButton onRotate={onRotate}>New fingerprint</RotateButton>
       </div>
-      <SummaryGroup
-        icon={<UserRound size={14} />}
-        title="Profile"
-        rows={profileRows}
-        onEdit={() => onEdit('profile')}
-      />
+      {/* No Profile group: name, folder, tags and account sit right beside
+          this panel in the form itself, so a summary of them was the same
+          screen saying everything twice. */}
       <SummaryGroup
         icon={<Network size={14} />}
         title="Proxy"
@@ -189,11 +158,7 @@ function SummaryGroup({icon, title, rows, onEdit}: {
           <div className="summary-row" key={label}>
             <i className="summary-row-icon" aria-hidden="true">{rowIcon}</i>
             <strong>{label}</strong>
-            {Array.isArray(value) && label === 'Tags' ? (
-              <span className="summary-tags">
-                {value.length ? value.map((tag) => <TagChip key={tag} tag={tag} />) : '-'}
-              </span>
-            ) : Array.isArray(value) ? (
+            {Array.isArray(value) ? (
               <span className="summary-lines">
                 {value.map((line) => <i key={line}>{line}</i>)}
               </span>

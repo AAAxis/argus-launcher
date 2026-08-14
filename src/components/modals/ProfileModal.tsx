@@ -305,25 +305,16 @@ export function ProfileModal({
     );
   }
 
-  // Where a Summary group's Edit button lands. Fingerprint, proxy and cookies
-  // each open the nested dialog that owns those values; the profile group
-  // scrolls to the Account card, because what it summarizes is spread across
-  // that card and the header above it rather than sitting in one control.
+  // Where a Summary group's Edit button lands: each opens the nested dialog
+  // that owns those values.
   function editSummaryGroup(target: SummaryTarget) {
     if (target === 'fingerprint') {
       setFingerprintOpen(true);
-      return;
-    }
-    if (target === 'proxy') {
+    } else if (target === 'proxy') {
       setProxyOpen(true);
-      return;
-    }
-    if (target === 'cookies') {
+    } else if (target === 'cookies') {
       setCookiesOpen(true);
-      return;
     }
-    document.getElementById(ACCOUNT_GROUP_ID)
-        ?.scrollIntoView({block: 'start', behavior: 'smooth'});
   }
 
   async function save() {

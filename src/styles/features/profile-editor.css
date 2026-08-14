@@ -77,40 +77,20 @@
 
 /* No border and no shadow of its own: each group inside is a framed card now,
    and a bordered box full of bordered boxes reads as a container nobody asked
-   for. What separates this column from the form is the gap between them and the
-   fact that it does not scroll with it. */
+   for.
+
+   Not sticky and not viewport-capped any more. That treatment assumed a long
+   form beside a short panel; with Proxy, Cookies and Fingerprint editing in
+   dialogs of their own the panel is the tall column, and pinning it to the
+   viewport gave it a scrollbar-inside-a-scrollbar while the short form sat
+   still. It flows with the modal's own scroll instead. */
 .profile-summary {
   display: grid;
   gap: 18px;
-  max-height: calc(100vh - 230px);
-  overflow: auto;
   /* No padding. Each group inside is a framed card with its own inset, so the
      panel's own 24px was a second margin stacked on the first -- it pushed the
-     summary a full 48px clear of the form beside it. Only the right side keeps
-     any, for the scrollbar this box grows when the fingerprint group is open. */
-  padding: 0 2px 0 0;
-  position: sticky;
-  top: 0;
-}
-
-/* Below the sticky header, not under it.
- *
- * Both this panel and the editor's header stick inside the same scroll box
- * (.profile-modal). The header wins -- it is painted at z-index 2 -- so at
- * top: 0 the panel's own heading and its first group's spent the whole scroll
- * hidden behind the bar. --editor-head-h is the bar's measured height, written
- * onto the panel by EditorHead; the fallback is a two-row bar, for the frame
- * before the observer first fires.
- *
- * Only `top` -- the panel's resting position is already right, because the
- * layout's 18px padding puts it level with the form's first card, and it parks
- * that same 18px below the bar once stuck.
- *
- * The max-height above is relative to the viewport and does not know about the
- * bar either, which is why it loses the same number again. */
-.editor-modal .profile-summary {
-  max-height: calc(100vh - 230px - var(--editor-head-h, 134px));
-  top: var(--editor-head-h, 134px);
+     summary a full 48px clear of the form beside it. */
+  padding: 0;
 }
 
 .summary-heading {

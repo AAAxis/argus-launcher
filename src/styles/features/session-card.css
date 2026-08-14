@@ -355,11 +355,6 @@
   .profile-editor-layout {
     grid-template-columns: 1fr;
   }
-
-  .profile-summary {
-    max-height: none;
-    position: static;
-  }
 }
 
 .color-row {
