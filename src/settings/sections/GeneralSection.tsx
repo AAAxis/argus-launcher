@@ -10,9 +10,13 @@ import {SettingsGroup, SettingsRow} from '../rows';
 type Props = {
   onMessage: (text: string) => void;
   onOpenIntro: () => void;
+  // Where the managed Monti Browser build is installed -- shown beside the
+  // profile data folder because both answer "where does this app keep its
+  // things on this machine". Empty until a build has been installed.
+  browserPath: string;
 };
 
-export function GeneralSection({onMessage, onOpenIntro}: Props) {
+export function GeneralSection({onMessage, onOpenIntro, browserPath}: Props) {
   // The root as the renderer states it; the main process turns it into the
   // absolute path a launch actually uses.
   const root = profilesRoot();
@@ -105,6 +109,15 @@ export function GeneralSection({onMessage, onOpenIntro}: Props) {
           {dataPath && !dataPath.exists && (
             <p className="settings-hint">This folder appears when you first launch a profile.</p>
           )}
+        </SettingsRow>
+        <SettingsRow
+          label="Browser location"
+          description="The managed Monti Browser build that profiles launch into."
+          wide
+        >
+          <div className="settings-path">
+            <code title={browserPath}>{browserPath || 'Not installed yet'}</code>
+          </div>
         </SettingsRow>
       </SettingsGroup>
 

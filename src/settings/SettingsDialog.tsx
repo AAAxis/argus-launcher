@@ -210,7 +210,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
             )}
             {active === 'appearance' && <AppearanceSection />}
             {active === 'general' && (
-              <GeneralSection onMessage={toast.setMessage} onOpenIntro={props.onOpenIntro} />
+              <GeneralSection
+                onMessage={toast.setMessage}
+                onOpenIntro={props.onOpenIntro}
+                browserPath={props.resourceState?.browserPath || ''}
+              />
             )}
             {active === 'updates' && (
               <UpdatesSection
