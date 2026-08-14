@@ -114,13 +114,13 @@ export function PlanUsageSection({profileCount, automationCount, onOpenSite, onO
             </p>
           </div>
           <div className="settings-plan-actions">
+            {/* Straight to the site's pricing section (onOpenPlans), not the
+                dashboard -- Manage billing already covers the dashboard, and
+                an upgrade starts at the plan cards. */}
             {hasUpgrade(plan) && (
-              onFreePlan ?
-                // The picker is one click away inside the app, so sending
-                // someone to a browser to read the same three cards would be
-                // the long way round to the same screen.
-                <button onClick={onOpenPlans} type="button">See plans</button> :
-                <button onClick={() => onOpenSite('/dashboard')} type="button">Upgrade plan</button>
+              <button onClick={onOpenPlans} type="button">
+                {onFreePlan ? 'See plans' : 'Upgrade plan'}
+              </button>
             )}
             <button className="ghost" onClick={() => onOpenSite('/dashboard')} type="button">
               <ExternalLink size={15} /> Manage billing
