@@ -183,7 +183,7 @@ jobs:
           aws s3 cp release/latest.yml "s3://${R2_BUCKET}/latest.yml" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "public, max-age=60"
-          for file in release/Monti-Anty-*-win-x64.exe*; do
+          for file in release/Monti-Gate-*-win-x64.exe*; do
             aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
               --endpoint-url "${R2_ENDPOINT}" \
               --cache-control "public, max-age=60"
@@ -287,7 +287,7 @@ jobs:
           aws s3 cp release-artifacts/latest.yml "s3://${R2_BUCKET}/latest.yml" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "public, max-age=60"
-          for file in release-artifacts/Monti-Anty-*-win-x64.exe*; do
+          for file in release-artifacts/Monti-Gate-*-win-x64.exe*; do
             aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
               --endpoint-url "${R2_ENDPOINT}" \
               --cache-control "public, max-age=60"
@@ -305,7 +305,7 @@ jobs:
           aws s3 cp release-artifacts/latest-mac.yml "s3://${R2_BUCKET}/latest-mac.yml" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "public, max-age=60"
-          for file in release-artifacts/Monti-Anty-*-mac-arm64.*; do
+          for file in release-artifacts/Monti-Gate-*-mac-arm64.*; do
             aws s3 cp "${file}" "s3://${R2_BUCKET}/$(basename "${file}")" \
               --endpoint-url "${R2_ENDPOINT}" \
               --cache-control "public, max-age=60"
