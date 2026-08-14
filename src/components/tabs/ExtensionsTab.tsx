@@ -21,7 +21,7 @@
 // and the grid ends in an Add tile, so the same information is there as an
 // invitation instead of an absence.
 import {useEffect, useState} from 'react';
-import {BadgeCheck, Check, Download, Link2, Plus, ShieldCheck, Trash2} from 'lucide-react';
+import {BadgeCheck, Check, Download, FolderUp, Link2, Plus, ShieldCheck, Trash2} from 'lucide-react';
 import {Badge} from '../ui/Badge';
 import {ExtensionMark} from '../ui/icons';
 import {
@@ -38,7 +38,7 @@ import type {SharedExtension} from '../../types';
 type View = 'installed' | 'discover';
 
 export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
-  const {data} = useWorkspace();
+  const {data, library} = useWorkspace();
   const [view, setView] = useState<View>('installed');
   // Bundled plus shared, which is what "Installed" means on the chip above and
   // in the grid below. Off ones are still installed, so this is not a count of
@@ -75,7 +75,12 @@ export function ExtensionsTab({onAddExtension}: {onAddExtension: () => void}) {
             <strong>{installedCount}</strong> installed
           </span>
           <button className="ghost" onClick={onAddExtension}>
-            <Link2 size={16} /> Add from link or folder
+            <Link2 size={16} /> Add from link
+          </button>
+          {/* Straight to the OS folder picker -- there is nothing to type
+              first, so a dialog before it would be an empty stop. */}
+          <button className="ghost" onClick={() => void library.addExtensionFromFolder()}>
+            <FolderUp size={16} /> Add from folder
           </button>
         </div>
       </section>

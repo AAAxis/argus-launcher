@@ -137,8 +137,8 @@ export function ExtensionAddModal({onClose}: {onClose: () => void}) {
     <Modal
       className="small-modal extension-add-modal"
       onClose={onClose}
-      title="Add extension"
-      subtitle="Share a Chrome Web Store extension or upload an unpacked folder."
+      title="Add from link"
+      subtitle="Share a Chrome Web Store extension with the workspace."
     >
       <section className="extension-add-section">
         <label className="field wide">
@@ -162,15 +162,11 @@ export function ExtensionAddModal({onClose}: {onClose: () => void}) {
             onKeyDown={submitOnEnter}
           />
         </label>
+        {/* Link only -- "Add from folder" is its own button on the tab now,
+            going straight to the OS picker with no dialog in between. */}
         <div className="extension-add-actions">
           <button disabled={!link.trim()} onClick={() => void addFromLink()}>
             Add from link
-          </button>
-          <button
-            className="ghost"
-            onClick={() => void library.addExtensionFromFolder().then((ok) => ok && onClose())}
-          >
-            Add from folder
           </button>
         </div>
       </section>
