@@ -166,6 +166,12 @@ export function findIntegration(id: string | null | undefined): Integration | un
 // connecting is visible before you do it, and kept in step with
 // electron/mcp/tools.cjs by hand -- nothing compiles electron/, so they cannot
 // share a module.
+// A first message to paste into the connected agent. It exists because the gap
+// after connecting is blank-page shaped: the tools are wired but nothing tells
+// the agent to reach for them. One paragraph, tool-accurate, and cautious about
+// destructive actions by instruction rather than by hoping.
+export const AGENT_STARTER_PROMPT = `You are connected to Monti Gate over MCP (server name: monti). It manages anti-detect browser profiles. Using the monti tools, list my profiles and tell me what you found. When I give you a task: pick or launch the right profile, drive the session with the navigate / read page text / screenshot tools, and close the session when you are done. Ask me before creating or trashing profiles, or changing a profile's proxy or fingerprint.`;
+
 export const MCP_TOOL_SUMMARY = [
   'Create, read, update and trash profiles',
   'Set a profile\'s proxy mode and fingerprint',

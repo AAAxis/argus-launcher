@@ -315,6 +315,16 @@
   padding-left: 18px;
 }
 
+/* The note carries the tab's one outbound action -- the website's API page --
+ * pushed to the far edge the same way the automations note does its button. */
+.integration-api-note {
+  flex-wrap: wrap;
+}
+
+.integration-api-note > button {
+  margin-left: auto;
+}
+
 .integration-card {
   background: var(--raised);
   border: 1px solid var(--border);

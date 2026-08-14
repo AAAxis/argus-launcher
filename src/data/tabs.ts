@@ -14,8 +14,10 @@ export const tabs: Array<{id: TabId; label: string; icon: LucideIcon}> = [
   {id: 'automations', label: 'Automations', icon: Workflow},
   {id: 'extensions', label: 'Extensions', icon: Plug},
   // No API tab: the API reference and key management live on the website, and
-  // the Integrations tab carries the link (SITE_LINKS.api).
-  {id: 'integrations', label: 'Integrations', icon: Bot},
+  // this tab carries the link (SITE_LINKS.api). The id stays 'integrations'
+  // though the label moved on -- persisted active-tab state and the deep links
+  // into this tab are all keyed by id.
+  {id: 'integrations', label: 'MCP & Agents', icon: Bot},
   // Shown to everyone rather than hidden behind the plan: a single-seat org gets
   // the upsell hero instead of a roster, which is how someone on Base finds out
   // that a team is what the next tier buys. A tab that only appears once you

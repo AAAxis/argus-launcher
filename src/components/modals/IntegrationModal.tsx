@@ -10,7 +10,7 @@ import {Check, Copy, KeyRound, TriangleAlert, X} from 'lucide-react';
 import {Modal} from '../ui/Modal';
 import {BusyButton} from '../ui/BusyButton';
 import {IntegrationMark} from '../ui/icons';
-import {MCP_TOOL_SUMMARY} from '../../data/integrations';
+import {AGENT_STARTER_PROMPT, MCP_TOOL_SUMMARY} from '../../data/integrations';
 import {API_BASE_URL} from '../../data/apiDocs';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {Integration} from '../../data/integrations';
@@ -323,7 +323,7 @@ export function IntegrationModal({integration, integrations, apiKeys, apiState}:
             the MCP tools by name rather than using it; plain HTTP is for the
             things that are not MCP clients, like your own scripts. Every
             endpoint and a curl example for each are on the API page on the
-            website — the Integrations tab links to it.
+            website — the MCP &amp; Agents tab links to it.
           </p>
         </section>
       )}
@@ -342,6 +342,7 @@ export function IntegrationModal({integration, integrations, apiKeys, apiState}:
             <ul className="integration-tools">
               {MCP_TOOL_SUMMARY.map((line) => <li key={line}>{line}</li>)}
             </ul>
+            <CopyPromptButton />
           </div>
         </details>
       ) : (
@@ -350,6 +351,7 @@ export function IntegrationModal({integration, integrations, apiKeys, apiState}:
           <ul className="integration-tools">
             {MCP_TOOL_SUMMARY.map((line) => <li key={line}>{line}</li>)}
           </ul>
+          <CopyPromptButton />
         </section>
       )}
 
@@ -450,6 +452,22 @@ export function IntegrationModal({integration, integrations, apiKeys, apiState}:
 // it draws one accent ring, once, so the value does not arrive as another slab
 // of monospace in a dialog that already has two. The ring is suppressed under
 // prefers-reduced-motion, where it becomes a static border of the same colour.
+// A ready-made first message for the connected agent, one click to the
+// clipboard. Same fire-and-forget copy as CopyableSecret: the value is not a
+// secret and the paste target is another app, so there is nothing to confirm.
+function CopyPromptButton() {
+  return (
+    <button
+      className="ghost"
+      onClick={() => { void navigator.clipboard.writeText(AGENT_STARTER_PROMPT); }}
+      title="Copy a starter prompt to paste into the agent"
+      type="button"
+    >
+      <Copy size={14} /> Copy prompt
+    </button>
+  );
+}
+
 export function CopyableSecret({value, fresh}: {value: string; fresh?: boolean}) {
   return (
     <div className={fresh ? 'snippet-block is-fresh' : 'snippet-block'}>

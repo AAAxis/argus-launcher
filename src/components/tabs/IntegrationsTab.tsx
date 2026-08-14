@@ -1,4 +1,5 @@
-// The Integrations tab: which agent tools can drive this account's profiles.
+// The MCP & Agents tab (id 'integrations'): which agent tools can drive this
+// account's profiles.
 //
 // Moved out of SimpleTabs.tsx, which was down to this one occupant and whose
 // header comment already recorded that the other tabs left as they grew. This
@@ -287,11 +288,6 @@ export function IntegrationsTab({apiKeys, integrations, onOpen, onOpenApiPage}: 
           <span className="integration-bar-count">
             <strong>{connectedCount}</strong> of {INTEGRATIONS.length} connected
           </span>
-          <button type="button" className="ghost" onClick={onOpenApiPage}>
-            <SquareTerminal size={15} />
-            API
-            <ExternalLink size={13} />
-          </button>
           <label className="integration-search">
             <Search size={15} />
             <input
@@ -316,7 +312,7 @@ export function IntegrationsTab({apiKeys, integrations, onOpen, onOpenApiPage}: 
         </p>
       )}
 
-      <section className="api-note">
+      <section className="api-note integration-api-note">
         <Plug size={18} />
         <span>
           Connecting mints an API key scoped to the folders you choose and writes
@@ -324,6 +320,11 @@ export function IntegrationsTab({apiKeys, integrations, onOpen, onOpenApiPage}: 
           and screenshot your profiles. The MCP server ships inside this app —
           there is nothing to install.
         </span>
+        <button type="button" className="ghost" onClick={onOpenApiPage}>
+          <SquareTerminal size={15} />
+          API
+          <ExternalLink size={13} />
+        </button>
       </section>
 
       {/* Folded away by default and open in one click. The answer to "what do I
