@@ -326,6 +326,17 @@
   padding: 14px;
 }
 
+/* The description, clamped to two lines so every card in a row stays the same
+ * height; the connect dialog carries the full sentence. */
+.integration-card > p {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  line-clamp: 2;
+  margin: 0;
+  overflow: hidden;
+}
+
 /* Wraps, because this row now carries up to two chips beside the name and a
  * card is a third of a capped panel wide. Without it "Waiting for Gemini CLI"
  * pushed the row past the card's edge instead of dropping under the name. The

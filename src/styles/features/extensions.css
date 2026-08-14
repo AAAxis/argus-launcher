@@ -101,12 +101,20 @@
   margin-left: auto;
 }
 
+/* Clamped to two lines: store taglines run from a sentence fragment to a
+ * paragraph, and an uncapped one stretches its whole row of cards. The full
+ * text is still in the dialog the card opens. */
 .extension-card p {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--ink-soft);
+  display: -webkit-box;
   flex: 1;
   font-size: 13px;
+  line-clamp: 2;
   line-height: 1.4;
   margin: 0;
+  overflow: hidden;
 }
 
 /* The caveat under FoxyWall. Smaller and lighter than the tagline because it
