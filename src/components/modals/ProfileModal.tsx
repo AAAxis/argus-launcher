@@ -89,6 +89,11 @@ export function ProfileModal({
   // An initialiser, not an effect: the dialog is unmounted between opens, so
   // there is never a mounted instance whose prop changes under it.
   const [fingerprintOpen, setFingerprintOpen] = useState(openFingerprint);
+  // Proxy and Cookies edit in nested dialogs of their own, the way the
+  // fingerprint does: the Summary panel is where their values live, and its
+  // pencil is the way in.
+  const [proxyOpen, setProxyOpen] = useState(false);
+  const [cookiesOpen, setCookiesOpen] = useState(false);
   // While the proxy combobox has focus it shows what the user is typing; when
   // it does not, it shows the assigned proxy's label.
   const [proxyPickerFocused, setProxyPickerFocused] = useState(false);
@@ -300,20 +305,21 @@ export function ProfileModal({
     );
   }
 
-  // Where a Summary group's Edit button lands. The fingerprint group opens the
-  // dialog that owns those values; the proxy group puts the caret in the first
-  // field of the block it summarizes; the profile group scrolls to the Account
-  // card, because what it summarizes is now spread across that card and the
-  // header above it rather than sitting in one control.
+  // Where a Summary group's Edit button lands. Fingerprint, proxy and cookies
+  // each open the nested dialog that owns those values; the profile group
+  // scrolls to the Account card, because what it summarizes is spread across
+  // that card and the header above it rather than sitting in one control.
   function editSummaryGroup(target: SummaryTarget) {
     if (target === 'fingerprint') {
       setFingerprintOpen(true);
       return;
     }
     if (target === 'proxy') {
-      const field = document.getElementById(PROXY_FIELD_ID);
-      field?.scrollIntoView({block: 'center', behavior: 'smooth'});
-      field?.focus();
+      setProxyOpen(true);
+      return;
+    }
+    if (target === 'cookies') {
+      setCookiesOpen(true);
       return;
     }
     document.getElementById(ACCOUNT_GROUP_ID)
@@ -616,238 +622,6 @@ export function ProfileModal({
             </FormGroup>
 
             <FormGroup
-              hint="How this profile reaches the internet. Everything it opens goes out this way."
-              icon={<Network size={14} />}
-              title="Proxy"
-            >
-              {/* The three modes each needed a sentence of explanation. They used
-                * to be two conditional .field-hint paragraphs that appeared and
-                * disappeared under the control, moving the rest of the form. */}
-              <Field
-                label="Proxy mode"
-                icon={<Network size={14} />}
-                info={
-                  <InfoHint label="Proxy mode">
-                    <p>
-                      <strong>Assigned proxy</strong> routes this profile through one proxy from
-                      your library. Saving or launching needs one picked.
-                    </p>
-                    <p>
-                      <strong>Direct</strong> sends traffic straight out with no proxy and no
-                      fallback extension — your own IP.
-                    </p>
-                    <p>
-                      <strong>Free Proxy</strong> loads the bundled FoxyWall Proxy extension
-                      instead of assigning one, and connects through it.
-                    </p>
-                  </InfoHint>
-                }
-                wide
-                group
-              >
-                <div className="choice-chips" role="radiogroup" aria-label="Proxy mode">
-                  {(['assigned', 'direct', 'free_proxy'] as const).map((mode) => (
-                    <button
-                      aria-checked={draft.proxy_mode === mode}
-                      className={draft.proxy_mode === mode ? 'choice-chip active' : 'choice-chip'}
-                      key={mode}
-                      onClick={() => set({proxy_mode: mode})}
-                      role="radio"
-                      type="button"
-                    >
-                      {mode === 'assigned' ? 'Assigned proxy' : mode === 'direct' ? 'Direct' : 'Free Proxy'}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-              {/* One field per row rather than the two-up grid these used to share:
-                * the search box and the connection-string box looked like one
-                * control split in half, and Create new proxy was wedged in beside
-                * the second of them. */}
-              {draft.proxy_mode === 'assigned' && (
-                <>
-                  <Field label="Proxy" icon={<Network size={14} />} wide>
-                    <input
-                      type="text"
-                      id={PROXY_FIELD_ID}
-                      list="profile-proxy-options"
-                      placeholder="Search and select proxy"
-                      value={proxyFieldValue()}
-                      onFocus={() => {
-                        setProxyPickerFocused(true);
-                        set({proxy_search: ''});
-                      }}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (!value.trim() || value === 'Direct connection') {
-                          set({proxy_search: ''});
-                          return;
-                        }
-                        set({proxy_id: matchProxy(value)?.id || '', proxy_search: value});
-                      }}
-                      onBlur={() => {
-                        setProxyPickerFocused(false);
-                        const value = draft.proxy_search.trim();
-                        if (!value || value === 'Direct connection') {
-                          set({proxy_search: ''});
-                          return;
-                        }
-                        const matched = matchProxy(value);
-                        if (matched) {
-                          set({proxy_id: matched.id, proxy_search: ''});
-                        }
-                      }}
-                    />
-                    <datalist id="profile-proxy-options">
-                      {filteredProxies().map((proxy) => (
-                        <option value={proxyOptionLabel(proxy)} key={proxy.id} />
-                      ))}
-                    </datalist>
-                  </Field>
-                  <Field
-                    label="Or add a new proxy"
-                    icon={<Link2 size={14} />}
-                    info={
-                      <InfoHint label="Adding a proxy">
-                        <p>
-                          Paste a connection string to create the proxy and assign it to this
-                          profile in one step. It joins your proxy library, so other profiles can
-                          pick it afterwards.
-                        </p>
-                        <p>
-                          Both shapes are accepted: <code>socks5://user:pass@host:port</code> and
-                          the vendor form <code>socks5://host:port:user:pass</code>.
-                        </p>
-                      </InfoHint>
-                    }
-                    wide
-                  >
-                    <div className="stacked-action">
-                      <input
-                        type="text"
-                        placeholder="http://user:pass@host:port or socks5://host:port:user:pass"
-                        value={draft.proxy_link}
-                        onChange={(event) => set({proxy_link: event.target.value})}
-                      />
-                      <button className="ghost" type="button" onClick={createProxyFromLink}>
-                        Create new proxy
-                      </button>
-                    </div>
-                  </Field>
-                </>
-              )}
-            </FormGroup>
-
-            {/* Kept directly after Proxy, and above Cookies. This card is the
-              * only way into the fingerprint editor, so the platform it names
-              * has to stay visible near the top of the form. See AGENTS.md. */}
-            <FormGroup
-              hint="The identity this profile presents to the sites it opens."
-              icon={<Fingerprint size={14} />}
-              title="Fingerprint"
-            >
-              <div className="form-group-row">
-                <p className="form-group-value">
-                  {draft.fingerprint_os} · {draft.fingerprint_browser_version} ·{' '}
-                  {draft.fingerprint_timezone} · {draft.fingerprint_webrtc}
-                </p>
-                <button className="ghost" type="button" onClick={() => setFingerprintOpen(true)}>
-                  Edit fingerprint
-                </button>
-              </div>
-            </FormGroup>
-
-            <FormGroup
-              hint="Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches."
-              icon={<Cookie size={14} />}
-              info={
-                <InfoHint label="Cookie import">
-                  <p>
-                    Takes a JSON export or a Netscape <code>cookies.txt</code>. Both are what
-                    the usual browser cookie-export extensions produce.
-                  </p>
-                  <p>
-                    The file is uploaded to cloud sync, so every machine in the organization
-                    launches this profile with the same cookies.
-                  </p>
-                  <p>
-                    They are seeded at launch through a temporary generated extension in the
-                    profile directory, not written into the cookie database directly.
-                  </p>
-                </InfoHint>
-              }
-              title="Cookies"
-            >
-              {/* The library as a dropdown, like the other three things this
-                  form picks -- and for the same reason: a cookie-set has a
-                  colour, so choosing one should show the mark it will be
-                  recognised by afterwards rather than a filename. Uploading a
-                  new file is not one of the options, so it rides the footer and
-                  still opens the library dialog, which owns that path. */}
-              <Field label="Cookie set" icon={<Cookie size={14} />} wide group>
-                <FieldPicker
-                  label="Choose the cookies this profile launches with"
-                  noneLabel="No cookies"
-                  empty="No cookie-sets saved yet"
-                  onPick={(cookie_id) => set({
-                    cookie_mode: cookie_id ? 'saved' : 'paste',
-                    cookie_id,
-                    // Clearing the set clears the imported file with it. All
-                    // five fields go together -- see AGENTS.md on cookie
-                    // clearing -- or the card shows a set and a file at once.
-                    ...(cookie_id ? {} : {
-                      cookie_import_path: '',
-                      cookie_import_url: '',
-                      cookie_import_name: '',
-                      cookie_import_count: 0,
-                    }),
-                  })}
-                  options={cookieOptions()}
-                  searchPlaceholder="Search cookie-sets…"
-                  trigger={cookieTrigger()}
-                  value={draft.cookie_mode === 'saved' ? draft.cookie_id : ''}
-                  footer={(close) => (
-                    <button
-                      className="ghost"
-                      type="button"
-                      onClick={() => {
-                        close();
-                        onPickCookies();
-                      }}
-                    >Upload new…</button>
-                  )}
-                />
-              </Field>
-              {/* A file imported straight into this profile rather than picked
-                  from the library -- what the importer and the older upload
-                  path produce. It is not one of the picker's options, because
-                  it is not in the library to be offered, so it keeps a row of
-                  its own and its own way of being cleared. */}
-              {draft.cookie_mode !== 'saved' &&
-                (draft.cookie_import_path || draft.cookie_import_url) && (
-                <div className="file-row wide">
-                  <span>
-                    {draft.cookie_import_count || 0} cookies · {draft.cookie_import_name ||
-                      (draft.cookie_import_url ? 'Cloud cookie file' : draft.cookie_import_path)}
-                  </span>
-                  <button
-                    className="icon-button danger-icon"
-                    type="button"
-                    aria-label="Clear cookie import"
-                    onClick={() => set({
-                      cookie_import_path: '',
-                      cookie_import_url: '',
-                      cookie_import_name: '',
-                      cookie_import_count: 0,
-                    })}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              )}
-            </FormGroup>
-
-            <FormGroup
               hint="What happens when you press Launch."
               icon={<Rocket size={14} />}
               title="Launch"
@@ -974,6 +748,245 @@ export function ProfileModal({
               requestTimezone={requestTimezone}
               timezoneWarning={timezoneMismatch(draft.fingerprint_timezone, assignedProxy())}
             />
+          </div>
+        </Modal>
+      )}
+
+      {proxyOpen && (
+        <Modal
+          nested
+          className="fingerprint-modal"
+          onClose={() => setProxyOpen(false)}
+          title="Edit proxy"
+          subtitle="How this profile reaches the internet. Everything it opens goes out this way."
+          footer={<button onClick={() => setProxyOpen(false)}>Done</button>}
+        >
+          <div className="profile-form">
+            <FormGroup
+              hint="How this profile reaches the internet. Everything it opens goes out this way."
+              icon={<Network size={14} />}
+              title="Proxy"
+            >
+              {/* The three modes each needed a sentence of explanation. They used
+                * to be two conditional .field-hint paragraphs that appeared and
+                * disappeared under the control, moving the rest of the form. */}
+              <Field
+                label="Proxy mode"
+                icon={<Network size={14} />}
+                info={
+                  <InfoHint label="Proxy mode">
+                    <p>
+                      <strong>Assigned proxy</strong> routes this profile through one proxy from
+                      your library. Saving or launching needs one picked.
+                    </p>
+                    <p>
+                      <strong>Direct</strong> sends traffic straight out with no proxy and no
+                      fallback extension — your own IP.
+                    </p>
+                    <p>
+                      <strong>Free Proxy</strong> loads the bundled FoxyWall Proxy extension
+                      instead of assigning one, and connects through it.
+                    </p>
+                  </InfoHint>
+                }
+                wide
+                group
+              >
+                <div className="choice-chips" role="radiogroup" aria-label="Proxy mode">
+                  {(['assigned', 'direct', 'free_proxy'] as const).map((mode) => (
+                    <button
+                      aria-checked={draft.proxy_mode === mode}
+                      className={draft.proxy_mode === mode ? 'choice-chip active' : 'choice-chip'}
+                      key={mode}
+                      onClick={() => set({proxy_mode: mode})}
+                      role="radio"
+                      type="button"
+                    >
+                      {mode === 'assigned' ? 'Assigned proxy' : mode === 'direct' ? 'Direct' : 'Free Proxy'}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              {/* One field per row rather than the two-up grid these used to share:
+                * the search box and the connection-string box looked like one
+                * control split in half, and Create new proxy was wedged in beside
+                * the second of them. */}
+              {draft.proxy_mode === 'assigned' && (
+                <>
+                  <Field label="Proxy" icon={<Network size={14} />} wide>
+                    <input
+                      type="text"
+                      id={PROXY_FIELD_ID}
+                      list="profile-proxy-options"
+                      placeholder="Search and select proxy"
+                      value={proxyFieldValue()}
+                      onFocus={() => {
+                        setProxyPickerFocused(true);
+                        set({proxy_search: ''});
+                      }}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (!value.trim() || value === 'Direct connection') {
+                          set({proxy_search: ''});
+                          return;
+                        }
+                        set({proxy_id: matchProxy(value)?.id || '', proxy_search: value});
+                      }}
+                      onBlur={() => {
+                        setProxyPickerFocused(false);
+                        const value = draft.proxy_search.trim();
+                        if (!value || value === 'Direct connection') {
+                          set({proxy_search: ''});
+                          return;
+                        }
+                        const matched = matchProxy(value);
+                        if (matched) {
+                          set({proxy_id: matched.id, proxy_search: ''});
+                        }
+                      }}
+                    />
+                    <datalist id="profile-proxy-options">
+                      {filteredProxies().map((proxy) => (
+                        <option value={proxyOptionLabel(proxy)} key={proxy.id} />
+                      ))}
+                    </datalist>
+                  </Field>
+                  <Field
+                    label="Or add a new proxy"
+                    icon={<Link2 size={14} />}
+                    info={
+                      <InfoHint label="Adding a proxy">
+                        <p>
+                          Paste a connection string to create the proxy and assign it to this
+                          profile in one step. It joins your proxy library, so other profiles can
+                          pick it afterwards.
+                        </p>
+                        <p>
+                          Both shapes are accepted: <code>socks5://user:pass@host:port</code> and
+                          the vendor form <code>socks5://host:port:user:pass</code>.
+                        </p>
+                      </InfoHint>
+                    }
+                    wide
+                  >
+                    <div className="stacked-action">
+                      <input
+                        type="text"
+                        placeholder="http://user:pass@host:port or socks5://host:port:user:pass"
+                        value={draft.proxy_link}
+                        onChange={(event) => set({proxy_link: event.target.value})}
+                      />
+                      <button className="ghost" type="button" onClick={createProxyFromLink}>
+                        Create new proxy
+                      </button>
+                    </div>
+                  </Field>
+                </>
+              )}
+            </FormGroup>
+          </div>
+        </Modal>
+      )}
+
+      {cookiesOpen && (
+        <Modal
+          nested
+          className="fingerprint-modal"
+          onClose={() => setCookiesOpen(false)}
+          title="Edit cookies"
+          subtitle="What this profile launches with. Files are cloud-synced to the whole workspace."
+          footer={<button onClick={() => setCookiesOpen(false)}>Done</button>}
+        >
+          <div className="profile-form">
+            <FormGroup
+              hint="Upload a JSON or Netscape cookies.txt file to cloud sync and import it when this profile launches."
+              icon={<Cookie size={14} />}
+              info={
+                <InfoHint label="Cookie import">
+                  <p>
+                    Takes a JSON export or a Netscape <code>cookies.txt</code>. Both are what
+                    the usual browser cookie-export extensions produce.
+                  </p>
+                  <p>
+                    The file is uploaded to cloud sync, so every machine in the organization
+                    launches this profile with the same cookies.
+                  </p>
+                  <p>
+                    They are seeded at launch through a temporary generated extension in the
+                    profile directory, not written into the cookie database directly.
+                  </p>
+                </InfoHint>
+              }
+              title="Cookies"
+            >
+              {/* The library as a dropdown, like the other three things this
+                  form picks -- and for the same reason: a cookie-set has a
+                  colour, so choosing one should show the mark it will be
+                  recognised by afterwards rather than a filename. Uploading a
+                  new file is not one of the options, so it rides the footer and
+                  still opens the library dialog, which owns that path. */}
+              <Field label="Cookie set" icon={<Cookie size={14} />} wide group>
+                <FieldPicker
+                  label="Choose the cookies this profile launches with"
+                  noneLabel="No cookies"
+                  empty="No cookie-sets saved yet"
+                  onPick={(cookie_id) => set({
+                    cookie_mode: cookie_id ? 'saved' : 'paste',
+                    cookie_id,
+                    // Clearing the set clears the imported file with it. All
+                    // five fields go together -- see AGENTS.md on cookie
+                    // clearing -- or the card shows a set and a file at once.
+                    ...(cookie_id ? {} : {
+                      cookie_import_path: '',
+                      cookie_import_url: '',
+                      cookie_import_name: '',
+                      cookie_import_count: 0,
+                    }),
+                  })}
+                  options={cookieOptions()}
+                  searchPlaceholder="Search cookie-sets…"
+                  trigger={cookieTrigger()}
+                  value={draft.cookie_mode === 'saved' ? draft.cookie_id : ''}
+                  footer={(close) => (
+                    <button
+                      className="ghost"
+                      type="button"
+                      onClick={() => {
+                        close();
+                        onPickCookies();
+                      }}
+                    >Upload new…</button>
+                  )}
+                />
+              </Field>
+              {/* A file imported straight into this profile rather than picked
+                  from the library -- what the importer and the older upload
+                  path produce. It is not one of the picker's options, because
+                  it is not in the library to be offered, so it keeps a row of
+                  its own and its own way of being cleared. */}
+              {draft.cookie_mode !== 'saved' &&
+                (draft.cookie_import_path || draft.cookie_import_url) && (
+                <div className="file-row wide">
+                  <span>
+                    {draft.cookie_import_count || 0} cookies · {draft.cookie_import_name ||
+                      (draft.cookie_import_url ? 'Cloud cookie file' : draft.cookie_import_path)}
+                  </span>
+                  <button
+                    className="icon-button danger-icon"
+                    type="button"
+                    aria-label="Clear cookie import"
+                    onClick={() => set({
+                      cookie_import_path: '',
+                      cookie_import_url: '',
+                      cookie_import_name: '',
+                      cookie_import_count: 0,
+                    })}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              )}
+            </FormGroup>
           </div>
         </Modal>
       )}

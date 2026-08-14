@@ -1,6 +1,6 @@
 import {
-  Activity, AtSign, Blend, Boxes, Camera, Clock, Cpu, Fingerprint, Folder, Gauge, Globe,
-  Hash, Languages, MapPin, Mic, Monitor, Network, Pencil, Radio, ShieldOff, Signpost,
+  Activity, AtSign, Blend, Boxes, Camera, Clock, Cookie, Cpu, Fingerprint, Folder, Gauge,
+  Globe, Hash, Languages, MapPin, Mic, Monitor, Network, Pencil, Radio, ShieldOff, Signpost,
   Tag, UserCheck, UserRound, Wifi,
 } from 'lucide-react';
 import {Assignee} from '../ui/Assignee';
@@ -13,9 +13,9 @@ import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {ReactNode} from 'react';
 import type {ProfileDraft} from '../../drafts';
 
-// Which block of the form a Summary group's Edit button leads back to. The
-// panel knows what it is showing; the dialog knows where that lives.
-export type SummaryTarget = 'profile' | 'proxy' | 'fingerprint';
+// Which editor a Summary group's Edit button leads to. The panel knows what it
+// is showing; the dialog knows where that lives.
+export type SummaryTarget = 'profile' | 'proxy' | 'cookies' | 'fingerprint';
 
 // A row is its glyph, its name and its value. The glyph is the one the field
 // that SETS this value wears in the form -- a summary row and its control are
@@ -81,6 +81,19 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
           (item) => item.id === draft.automation_id)?.name || 'Nothing'},
   ];
 
+  // What the profile launches with. One row: a set from the library, an
+  // imported file, or nothing -- the same three states the Cookies editor has.
+  const cookieSet = draft.cookie_mode === 'saved' ?
+    data.state.cookies.find((item) => item.id === draft.cookie_id) || null : null;
+  const cookieRows: Row[] = [
+    {icon: <Cookie size={14} />, label: 'Cookies',
+      value: cookieSet ?
+        (cookieSet.count ? `${cookieSet.name} (${cookieSet.count} cookies)` : cookieSet.name) :
+        (draft.cookie_import_path || draft.cookie_import_url) ?
+          `${draft.cookie_import_count || 0} cookies · ${draft.cookie_import_name || 'Imported file'}` :
+          'None'},
+  ];
+
   const fingerprintRows: Row[] = [
     {icon: <Monitor size={14} />, label: 'Platform', value: draft.fingerprint_os},
     {icon: <Globe size={14} />, label: 'UserAgent',
@@ -129,6 +142,12 @@ export function ProfileSummary({draft, onRotate, onEdit}: {
         title="Proxy"
         rows={proxyRows}
         onEdit={() => onEdit('proxy')}
+      />
+      <SummaryGroup
+        icon={<Cookie size={14} />}
+        title="Cookies"
+        rows={cookieRows}
+        onEdit={() => onEdit('cookies')}
       />
       <SummaryGroup
         icon={<Fingerprint size={14} />}
