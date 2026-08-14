@@ -15,11 +15,13 @@ env:
   R2_ENDPOINT: https://fdbfca2be2ba5fdd40b274450f22c6ad.r2.cloudflarestorage.com
   R2_BUCKET: dima
   UPDATE_FEED_URL: ${{ vars.R2_PUBLIC_URL || 'https://pub-ab898453f3794cc8b9d0117b4111a778.r2.dev' }}
-  # Public client-side values, deliberately hardcoded: the repo secrets went
-  # stale after the Supabase project migration and nobody with push access can
-  # edit them (admin-only). See docs/env.md.
-  VITE_SUPABASE_URL: https://jpsmdjtxuxlkyuotwxfg.supabase.co
-  VITE_SUPABASE_ANON_KEY: sb_publishable_jhFZBfL9XyxaiRX-dA_KXA_5gNZeNKD
+  # Public client-side values, deliberately hardcoded (they are baked into the
+  # shipped bundle either way). MUST be the same Supabase project as montigate
+  # .com (monti-web): sign-in bounces through the site's /auth/desktop, so a
+  # launcher built against any other project cannot exchange the code it gets
+  # back.
+  VITE_SUPABASE_URL: https://vnuxmsqezlyxthvdcdxz.supabase.co
+  VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZudXhtc3Flemx5eHRodmRjZHh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTUzMTEsImV4cCI6MjA5NDUzMTMxMX0.IixlgTvOQNRaTiqrX6q1tlJlS5Ays57gTubVjlOsv98
 
 jobs:
   build-mac:
