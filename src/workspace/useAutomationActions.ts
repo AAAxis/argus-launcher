@@ -4,7 +4,14 @@
 // goes through withDb, so a failure toasts once and the caller bails without a
 // false success message.
 import {useRef} from 'react';
-import {composeFinishTelegram, shouldNotify} from '../../electron/automation/notify.cjs';
+// Through the namespace, not named imports: vite's dev server hands this CJS
+// file to the renderer as an ESM module whose only export is default
+// (module.exports), while the production build's commonjs interop offers named
+// exports too. Named imports therefore whitescreen dev at load time and work
+// in the packaged app; the namespace + default fallback resolves in both.
+import * as notifyCjs from '../../electron/automation/notify.cjs';
+const {composeFinishTelegram, shouldNotify} =
+  (notifyCjs as unknown as {default?: typeof notifyCjs}).default ?? notifyCjs;
 import {useAutomationRuns} from '../hooks/useAutomationRuns';
 import * as db from '../db';
 import {buildLaunchPayload} from '../lib/launch';
