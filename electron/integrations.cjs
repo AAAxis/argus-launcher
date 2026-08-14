@@ -44,13 +44,6 @@ function vscodeUserDir(home, platform) {
   return path.join(home, '.config', 'Code', 'User');
 }
 
-function zedConfigDir(home, platform) {
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Zed');
-  }
-  return path.join(home, '.config', 'zed');
-}
-
 // ── Looking for the tool itself ──────────────────────────────────────────────
 // The pieces the `detect` blocks below are written in terms of. They only ever
 // answer "does this exact thing exist on disk", never "did we once write here".
@@ -296,19 +289,6 @@ const TOOLS = {
       bins: ['code'],
       apps: (home, platform) =>
         appBundles(home, platform, 'Visual Studio Code', ['Microsoft VS Code', 'Code.exe']),
-    },
-  },
-  zed: {
-    name: 'Zed',
-    format: 'json',
-    configPath: (home, platform) => path.join(zedConfigDir(home, platform), 'settings.json'),
-    container: ['context_servers'],
-    entryShape: 'plain',
-    // ~/.config/zed holds settings.json, which is the file we write -- so the
-    // directory would report itself as Zed the moment anyone connected.
-    detect: {
-      bins: ['zed'],
-      apps: (home, platform) => appBundles(home, platform, 'Zed', ['Zed', 'Zed.exe']),
     },
   },
 };

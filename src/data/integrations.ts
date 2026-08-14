@@ -7,7 +7,6 @@ import mcpLogo from '../assets/mcp.svg';
 import openclawLogo from '../assets/openclaw.svg';
 import vscodeLogo from '../assets/vscode.svg';
 import windsurfLogo from '../assets/windsurf.svg';
-import zedLogo from '../assets/zed.svg';
 
 export type IntegrationId =
   | 'claude-code'
@@ -17,12 +16,11 @@ export type IntegrationId =
   | 'gemini-cli'
   | 'windsurf'
   | 'vscode'
-  | 'zed'
   | 'other';
 
-// Sections on the tab. 'manual' is not a lesser category -- it is the honest
-// one: those two have no config file this app can write, so connecting them
-// means handing over a snippet rather than pretending to wire them up.
+// Not sections -- the tab shows one flat list. The category drives behaviour:
+// 'manual' has no config file this app can write, so connecting it means
+// handing over a snippet rather than pretending to wire it up.
 export type IntegrationCategory = 'agent' | 'automation' | 'manual';
 
 export type Integration = {
@@ -35,7 +33,7 @@ export type Integration = {
   // Which theme the mark has to be inverted in. A single-colour mark only reads
   // on the background it was drawn for: Codex's is near-black (#111) so it
   // disappears on a dark surface, while Cursor's (#edecec) and the white-only
-  // cuts of Zed, Windsurf and the MCP mark disappear on a light one. They
+  // cuts of Windsurf and the MCP mark disappear on a light one. They
   // therefore invert in opposite themes, which one boolean could not express.
   // Marks that carry their own colours -- Claude Code, Gemini CLI, VS Code,
   // OpenClaw -- name neither and are left alone.
@@ -133,18 +131,6 @@ export const INTEGRATIONS: Integration[] = [
     confirmLabel: 'Then switch Chat to Agent mode and open the tools picker — the monti tools should be listed.',
   },
   {
-    id: 'zed',
-    name: 'Zed',
-    description: "Zed's agent panel, through its context server settings.",
-    category: 'agent',
-    icon: Code,
-    logo: zedLogo,
-    invertOn: 'light',
-    configLabel: '~/.config/zed/settings.json',
-    restartLabel: 'Restart Zed',
-    confirmLabel: 'Then check the agent panel’s settings: monti should appear under context servers.',
-  },
-  {
     id: 'openclaw',
     name: 'OpenClaw',
     description: 'Personal assistant gateway across chat channels.',
@@ -171,14 +157,6 @@ export const INTEGRATIONS: Integration[] = [
     manualFormat: 'mcp',
   },
 ];
-
-export const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
-  agent: 'Coding agents',
-  automation: 'Automation',
-  manual: 'Set up by hand',
-};
-
-export const CATEGORY_ORDER: IntegrationCategory[] = ['agent', 'automation', 'manual'];
 
 export function findIntegration(id: string | null | undefined): Integration | undefined {
   return INTEGRATIONS.find((item) => item.id === id);

@@ -23,7 +23,7 @@ import {Badge} from '../ui/Badge';
 import {BusyButton} from '../ui/BusyButton';
 import {EmptyState} from '../ui/EmptyState';
 import {IntegrationMark} from '../ui/icons';
-import {CATEGORY_LABELS, CATEGORY_ORDER, INTEGRATIONS} from '../../data/integrations';
+import {INTEGRATIONS} from '../../data/integrations';
 import {API_BASE_URL} from '../../data/apiDocs';
 import {useWorkspace} from '../../workspace/WorkspaceProvider';
 import type {Integration, IntegrationId} from '../../data/integrations';
@@ -373,28 +373,21 @@ export function IntegrationsTab({apiKeys, integrations, onOpen, onOpenApiPage}: 
         </div>
       </details>
 
-      {CATEGORY_ORDER.map((category) => {
-        const inCategory = matched.filter((integration) => integration.category === category);
-        if (!inCategory.length) {
-          return null;
-        }
-        return (
-          <section className="integration-section" key={category}>
-            <h3>{CATEGORY_LABELS[category]}</h3>
-            <div className="integration-grid">
-              {inCategory.map((integration) => (
-                <IntegrationCard
-                  key={integration.id}
-                  integration={integration}
-                  apiKeys={apiKeys}
-                  integrations={integrations}
-                  onOpen={onOpen}
-                />
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      {matched.length > 0 && (
+        <section className="integration-section">
+          <div className="integration-grid">
+            {matched.map((integration) => (
+              <IntegrationCard
+                key={integration.id}
+                integration={integration}
+                apiKeys={apiKeys}
+                integrations={integrations}
+                onOpen={onOpen}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* The search can only ever empty this tab, never the install itself --
           so the way out is the way back, and the block says so rather than
