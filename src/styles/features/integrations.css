@@ -5,28 +5,31 @@
  * one. Its import order there is the cascade; this file does not set it.
  */
 
+/* Three per row, fixed: the cards are a small known set with clamped
+ * descriptions, so an even 3-across read beats auto-fill's window-width
+ * roulette. Down to two, then one, as the panel narrows. */
 .integration-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* The tab groups by what a tool is (coding agent, automation runtime, set up by
- * hand) rather than listing ten cards flat. The third group is not a lesser
- * tier -- it is the honest one: those have no config file this app can write,
- * so they hand over a snippet instead of pretending to wire themselves up. */
+@media (max-width: 1100px) {
+  .integration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .integration-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* One flat list of cards -- the category groupings and their headings are gone. */
 .integration-section {
   display: grid;
   gap: 10px;
-}
-
-.integration-section h3 {
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  margin: 0;
-  text-transform: uppercase;
 }
 
 /* Status of the thing every integration depends on, stated once at the top
